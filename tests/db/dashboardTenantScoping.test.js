@@ -147,6 +147,42 @@ describeDb("the dashboard can read its own tenant under RLS", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("filters calls by direction, and never shows another tenant's outbound call", async () => {
+    // Each tenant gets one outbound call on top of its inbound one from beforeEach.
+    for (const id of [TENANT_A, TENANT_B]) {
+      await admin.query(
+        `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, direction, outcome_code, answers)
+         VALUES ($1, $2, '+15551239876', 'completed', 'outbound', 'held_for_review', '{"q1":"yes"}'::jsonb)`,
+        [id, `CA-dash-out-${id.slice(0, 8)}`]
+      );
+    }
+    const all = await request(app).get("/api/calls");
+    expect(all.status).toBe(200);
+    expect(all.body.calls).toHaveLength(2);
+
+    const out = await request(app).get("/api/calls").query({ direction: "outbound" });
+    expect(out.status).toBe(200);
+    expect(out.body.total).toBe(1);
+    expect(out.body.calls).toHaveLength(1);
+    expect(out.body.calls[0].direction).toBe("outbound");
+    expect(out.body.calls[0].twilio_call_sid).toBe(`CA-dash-out-${TENANT_A.slice(0, 8)}`);
+    expect(out.body.calls[0].outcome_code).toBe("held_for_review");
+    expect(out.body.calls[0].answers).toEqual({ q1: "yes" });
+
+    const inb = await request(app).get("/api/calls").query({ direction: "inbound" });
+    expect(inb.status).toBe(200);
+    expect(inb.body.total).toBe(1);
+    expect(inb.body.calls.every((c) => c.direction === "inbound")).toBe(true);
+
+    // a client-supplied business_id must not widen the scope
+    const spoof = await request(app).get("/api/calls").query({ direction: "outbound", business_id: TENANT_B });
+    expect(spoof.body.calls).toHaveLength(1);
+    expect(spoof.body.calls[0].business_id).toBe(TENANT_A);
+
+    const bad = await request(app).get("/api/calls").query({ direction: "x" });
+    expect(bad.status).toBe(400);
+  });
+
   it("lists the tenant's appointments", async () => {
     const res = await request(app).get("/api/appointments").query({ range: "upcoming" });
     expect(res.status).toBe(200);
