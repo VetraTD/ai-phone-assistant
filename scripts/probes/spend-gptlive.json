@@ -1,6 +1,6 @@
 {
   "cap_usd": 25,
-  "spent_usd": 24.011467,
+  "spent_usd": 24.3208,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -6097,11 +6097,107 @@
       "probe": "P1-LIVE-R2PRE",
       "usd": 0.144328,
       "note": "stage-3 phone check 2026-09-30: 3 outbound calls (S1b hello, S03 silent, S10 gatekeeper) + 9 clip renders, priced from live_call_summary/outbound_render_usage (gemini-3.8-live); reserve 0.30"
+    },
+    {
+      "at": "2026-09-30T21:47:38.059Z",
+      "callSid": "CAharness1a0f44903b36ce08263",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.0246285,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:48:42.625Z",
+      "callSid": "CAharness1a0f449ef3025a83a22",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.0317425,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:49:24.737Z",
+      "callSid": "CAharness1a0f44a989f153eea14",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.031218999999999997,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:50:48.292Z",
+      "callSid": "CAharness1a0f44bf658c1cb0e57",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.0202875,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:51:23.921Z",
+      "callSid": "CAharness1a0f44c83ec61c834f0",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.030331500000000004,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:52:04.035Z",
+      "callSid": "CAharness1a0f44d0e799751a244",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.030292000000000003,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:54:49.707Z",
+      "callSid": "CAharness1a0f44f9cb6d04863c3",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.026353,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:55:20.929Z",
+      "callSid": "CAharness1a0f45032289df28704",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.019742500000000003,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:56:00.570Z",
+      "callSid": "CAharness1a0f450ac3733c62f4e",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.026636000000000003,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:57:55.646Z",
+      "callSid": "CAharness1a0f45256c9710448fb",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.031289,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:58:47.765Z",
+      "callSid": "CAharness1a0f453095529f54a68",
+      "mode": "outbound_silent",
+      "probe": "P1-SIM-S5",
+      "usd": 0.017407,
+      "basis": "priced"
+    },
+    {
+      "at": "2026-09-30T21:59:18.507Z",
+      "callSid": "CAharness1a0f453d5aa777f11c0",
+      "mode": "outbound_speaks_first",
+      "probe": "P1-SIM-S5",
+      "usd": 0.019404,
+      "basis": "priced"
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-09-30T20:00:02.270Z",
+  "updated_at": "2026-09-30T21:59:18.507Z",
   "cap_history": [
     {
       "cap": 5,

@@ -16967,3 +16967,21 @@ owner decision the same day. The outbound-own prompt (2026-09-30 session) change
 what that turn is told to say (the reason before the first question), so the
 repeat must be re-checked on the next real outbound calls before any fix: read
 `live_repeat_cut` chars against what the caller heard.
+
+## LVX165 — outbound: a garbled gatekeeper reply can be taken as "yes, it's me" [owner: ship prompt-only, watch]
+
+2026-09-30 paid sims (P1-SIM-S5, `.superpowers/sdd/2026-09-30-outbound-own-prompt/sims-report.md`):
+Live transcribed the gatekeeper's "He's out. Try tomorrow at ten." as "hüpft Try
+tomorrow at 10." (the real 09-30 call lost "He's out" the same way). Right after
+the opener asked "is that Sam?", the model sometimes took that as a yes:
+`confirm_identity(true)` from a HEARD generation (not the D-R2-3 stale path),
+then the reason for the call and a slot check -- to a gatekeeper. 2 of 5
+garbled-gatekeeper runs, one before and one after the prompt now names what is
+NOT a confirmation (b4d462d).
+
+Proposed and DECLINED by the owner (2026-09-30): a code check refusing the FIRST
+confirmation when the caller's transcribed words since the opener hold words
+but no yes (cost: a garbled real "yes, speaking" hears "am I speaking with Sam?"
+once). Decision: ship prompt-only, watch the Part B Gatekeeper call and the
+pilot -- count `outbound_identity_confirmed{confirmed:true}` on calls whose
+outcome is callback_requested / wrong_person, and `outbound_topic_to_unverified`.
