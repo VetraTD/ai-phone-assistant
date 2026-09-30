@@ -509,7 +509,7 @@ Gate at the final code head `b4d462d` (2026-09-30): root 282 files / 6602 passed
 (run with `NODE_EXTRA_CA_CERTS=.superpowers/sdd/2026-09-29-outbound-stage4/norton-roots.pem` -- without it
 the real-local-TLS tests fail on Norton's loopback re-signing on THIS machine only); test:db 43 files /
 617 passed; census 63/63; dashboard backend 150 (only the generated schema line changed; frontend
-untouched since `8ff4239`); inbound prompt snapshots unchanged; full corpus:sabotage at `b4d462d`:
+untouched since `8ff4239`); inbound prompt snapshots unchanged; full corpus:sabotage at `b4d462d`: 60 v + exactly the 3 baseline x;
 see `.superpowers/sdd/2026-09-30-outbound-own-prompt/progress.md`.
 Earlier gate at `2d02d11`: root 280+1 files / 6457 passed / 5 skipped / 1 todo; test:db 43 / 617;
 dashboard frontend 63, eslint 25 pre-existing, build OK. Paid sim S4-2
