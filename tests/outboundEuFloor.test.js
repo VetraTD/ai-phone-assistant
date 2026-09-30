@@ -12,6 +12,8 @@ import { zonedComponentsToUtcMs } from "../lib/capabilities/datetime.js";
 import { log } from "../lib/logger.js";
 import { validateCallbackTime } from "../capabilities/callback.js";
 
+/** legalFloor.js's default search bound (nextLegalOpening's maxDays). */
+const DEFAULT_SEARCH_DAYS = 14;
 const HOLIDAYS = JSON.parse(readFileSync(new URL("../lib/outbound/euHolidays.json", import.meta.url), "utf8"));
 
 /** [ISO code, calling code, principal IANA zone] for all 27 member states. */
@@ -255,17 +257,49 @@ describe("EU floor: nextLegalOpening", () => {
     const o = nextLegalOpening(at("2026-12-24", "20:30", "Europe/Berlin"), de(), monFri, "Europe/Berlin");
     expect(o.toISOString()).toBe(at("2026-12-28", "10:00", "Europe/Berlin").toISOString());
   });
-  it("every country, every day of 2026-2029 21:00 local: an opening exists inside the default 8-day bound (Easter/Christmas/New Year runs)", () => {
-    for (const [cc, code, tz] of EU) {
-      const f = floorFor(phoneFor(code), null);
-      const days = HOLIDAYS.holidays[cc].filter((d) => d >= "2026-01-01" && d < "2030-01-01");
-      // The day before every holiday is where the longest runs start.
-      for (const d of days) {
-        const prev = new Date(new Date(`${d}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
-        const o = nextLegalOpening(at(prev, "20:30", tz), f, { mon_fri: "08:00-21:00", sat: null, sun: null }, tz);
-        expect(o, `${cc} ${prev}`).not.toBeNull();
+  // FINAL FIX WAVE N3: EVERY year in the table (it used to stop at 2029, and the
+  // longest gap was in 2030), and an EVENING campaign window as well as the wide
+  // one (the review measured 7.958 days for BG 2030 at mon_fri 19:00-21:00).
+  // The bound is also asserted to keep real slack: the worst gap must leave at
+  // least a day of headroom under the default, so a regenerated table with a
+  // longer run fails HERE instead of closing outreaches with no_legal_floor.
+  for (const [label, win] of [
+    ["wide 08:00-21:00", { mon_fri: "08:00-21:00", sat: null, sun: null }],
+    ["evening 19:00-21:00", { mon_fri: "19:00-21:00", sat: null, sun: null }],
+  ]) {
+    it(`every country, every holiday in the table (all years), ${label}: an opening exists with >= 1 day of headroom under the default bound`, () => {
+      let worstDays = 0;
+      for (const [cc, code, tz] of EU) {
+        const f = floorFor(phoneFor(code), null);
+        // The day before every holiday is where the longest runs start.
+        // Up to mid-December of the last year: past that the search runs off the
+        // end of the table (the documented 2031 cliff, which the tripwire below guards).
+        for (const d of HOLIDAYS.holidays[cc].filter((h) => h < `${HOLIDAYS.years[HOLIDAYS.years.length - 1]}-12-15`)) {
+          const prev = new Date(new Date(`${d}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+          const from = at(prev, "20:30", tz);
+          const o = nextLegalOpening(from, f, win, tz);
+          expect(o, `${cc} ${prev}`).not.toBeNull();
+          worstDays = Math.max(worstDays, (o.getTime() - from.getTime()) / 86_400_000);
+        }
       }
-    }
+      expect(worstDays).toBeLessThan(DEFAULT_SEARCH_DAYS - 1);
+    });
+  }
+
+  // FINAL FIX WAVE e2. The table ends with its last year. From the day after it,
+  // every EU outreach that reaches the floor check would be closed for good
+  // (no_legal_floor) within minutes -- and the stale-table alert fires on the
+  // same tick, too late to prevent it. This fails a year ahead instead.
+  it("tripwire: the holiday table still covers at least the next 365 days", () => {
+    const lastYear = HOLIDAYS.years[HOLIDAYS.years.length - 1];
+    const coveredUntil = Date.UTC(lastYear, 11, 31);
+    const horizon = Date.now() + 365 * 86_400_000;
+    expect(
+      horizon,
+      `lib/outbound/euHolidays.json ends in ${lastYear}; less than 365 days of coverage remain. Regenerate it: ` +
+        "npm i date-holidays@3.37.0 --prefix <scratch>/dh && " +
+        `node scripts/outbound/gen-eu-holidays.mjs <scratch>/dh 2026 ${lastYear + 5}`
+    ).toBeLessThanOrEqual(coveredUntil);
   });
   it("perf: a 14-day worst-case search with holiday lookups stays under 20 ms (warm)", () => {
     const f = floorFor("+34655512345", null); // two zones
