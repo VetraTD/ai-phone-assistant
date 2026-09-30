@@ -9,33 +9,15 @@ import "./Dashboard.css";
 import Login from "./Login";
 import Onboarding from "./Onboarding";
 import SettingsPage from "./settings/SettingsPage";
+import CallOutcomeAnswers from "./components/CallOutcomeAnswers";
+import { humanise } from "./callOutcome";
+import { buildCallsCsv } from "./callsCsv";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function escapeCsvCell(s) {
-  const str = s == null ? "" : String(s);
-  if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
-  return str;
-}
-
-function buildCallsCsv(calls) {
-  if (!calls?.length) return null;
-  const headers = ["Date", "Caller", "Status", "Duration (s)", "Sentiment", "Summary"];
-  const rows = calls.map((c) => [
-    c.started_at ? new Date(c.started_at).toISOString() : "",
-    c.caller_name_guess || c.caller_number || "",
-    c.inferred_transferred ? "Transferred" : (c.status || ""),
-    c.duration_seconds ?? "",
-    c.sentiment ?? "",
-    (c.summary || "").slice(0, 500),
-  ]);
-  const line = (arr) => arr.map(escapeCsvCell).join(",");
-  return [line(headers), ...rows.map(line)].join("\r\n");
 }
 
 function downloadCsv(csvContent, filename) {
@@ -463,6 +445,7 @@ function App() {
   const [hasAppointments, setHasAppointments] = useState(false);
   const [sentiment, setSentiment] = useState("all");
   const [hasSummary, setHasSummary] = useState("all");
+  const [direction, setDirection] = useState("all");
   const [needsFollowUp, setNeedsFollowUp] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -579,8 +562,9 @@ function App() {
     if (sentiment !== "all") params.sentiment = sentiment;
     if (hasSummary !== "all") params.has_summary = hasSummary;
     if (needsFollowUp) params.needs_followup = "true";
+    if (direction !== "all") params.direction = direction;
     return params;
-  }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp]);
+  }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp, direction]);
 
   const hasActiveCallFilters = useMemo(() => {
     const caller = callerSearch.trim();
@@ -591,9 +575,10 @@ function App() {
       sentiment !== "all" ||
       hasSummary !== "all" ||
       needsFollowUp ||
+      direction !== "all" ||
       !!caller
     );
-  }, [status, datePreset, hasAppointments, sentiment, hasSummary, needsFollowUp, callerSearch]);
+  }, [status, datePreset, hasAppointments, sentiment, hasSummary, needsFollowUp, direction, callerSearch]);
 
   const fetchAnalytics = useCallback(() => {
     if (!businessId) return;
@@ -739,7 +724,7 @@ function App() {
     const d = new Date(); const from = new Date();
     from.setDate(d.getDate() - 7);
     setFromDate(formatDateYYYYMMDD(from)); setToDate(formatDateYYYYMMDD(d));
-    setHasAppointments(false); setSentiment("all"); setHasSummary("all"); setNeedsFollowUp(false);
+    setHasAppointments(false); setSentiment("all"); setHasSummary("all"); setNeedsFollowUp(false); setDirection("all");
   };
 
   if (checkingSession)
@@ -1027,6 +1012,15 @@ function App() {
                     </div>
 
                     <div className="filter-field">
+                      <label>{t.filterDirection}</label>
+                      <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+                        <option value="all">{t.filterAll}</option>
+                        <option value="inbound">{t.filterInbound}</option>
+                        <option value="outbound">{t.filterOutbound}</option>
+                      </select>
+                    </div>
+
+                    <div className="filter-field">
                       <label>{t.filterCallerSearch}</label>
                       <input value={callerSearch} onChange={(e) => setCallerSearch(e.target.value)} placeholder={t.filterCallerPlaceholder} />
                     </div>
@@ -1096,6 +1090,8 @@ function App() {
                             <span style={getStatusPillStyle(call.inferred_transferred ? "transferred" : call.status)}>
                               {call.inferred_transferred ? "Transferred" : (call.status || "")}
                             </span>
+                            {call.direction === "outbound" ? <span className="call-pill">{t.directionOutbound}</span> : null}
+                            {call.outcome_code ? <span className="call-pill">{humanise(call.outcome_code)}</span> : null}
                             <span className="call-pill">{call.duration_seconds ?? "-"}s</span>
                             <span style={getSentimentPillStyle(call.sentiment)}>{call.sentiment ?? t.filterUnknown}</span>
                             <span className="call-pill">{call.summary ? t.summaryCheck : t.noSummaryShort}</span>
@@ -1136,6 +1132,8 @@ function App() {
                         <div className="info-grid">
                           <div className="info-label">{t.infoStatus}</div>
                           <div className="info-value">{callDetails.call.inferred_transferred ? "Transferred" : (callDetails.call.status || "")}</div>
+                          <div className="info-label">{t.infoDirection}</div>
+                          <div className="info-value">{callDetails.call.direction === "outbound" ? t.directionOutbound : t.directionInbound}</div>
                           <div className="info-label">{t.infoDuration}</div>
                           <div className="info-value">{callDetails.call.duration_seconds ?? "-"} {t.sec}</div>
                           <div className="info-label">{t.infoStarted}</div>
@@ -1149,6 +1147,8 @@ function App() {
                           <div className="info-value">{callDetails.call.sentiment ?? t.unknownSentiment}</div>
                         </div>
                       </div>
+
+                      <CallOutcomeAnswers call={callDetails.call} t={t} />
 
                       <div className="detail-card">
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
