@@ -51,6 +51,16 @@ router.get("/api/calls", authenticate, withTenantHandler(async (req, res) => {
       where.push(`caller_number ILIKE ${addParam(`%${callerSearch}%`)}`);
     }
 
+    // direction filter (?direction=inbound|outbound). Allow-list, parameterised;
+    // "all"/absent = no filter. Anything else (incl. repeated params) is a 400.
+    const { direction } = req.query;
+    if (direction !== undefined && direction !== "" && direction !== "all") {
+      if (direction !== "inbound" && direction !== "outbound") {
+        return res.status(400).json({ error: "Invalid direction (use inbound or outbound)" });
+      }
+      where.push(`direction = ${addParam(direction)}`);
+    }
+
     const { sentiment, has_summary, outcome } = req.query;
 
 // sentiment filter
