@@ -440,8 +440,9 @@ traffic are unused by the old revision and harmless.
 **Status: DRAFT, nothing here has been run.** Every command needs its own explicit YES. Stage 4
 deploys ONLY after the 2026-09-30 phone check (window 08:00+ CDT) has been done and passed.
 Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOUND_ENABLED=false`).
-`SHA` = `<STAGE4_SHA>` (the controller fills this at the end: final code head of
-`feat/outbound-stage4`, base `e451d91`; later commits are docs/spend JSON only).
+`SHA` = `2d02d11` (final code head of `feat/outbound-stage4`, base `e451d91`; later commits are
+docs/spend JSON only — `git log --oneline 2d02d11..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json'`
+must print nothing; if the branch HEAD is a later docs commit, build from HEAD, it carries the same code).
 
 **What stage 4 changes for a caller.**
 - A lead we tried to reach who rings us back within 14 days is recognised on the inbound call: the
@@ -472,16 +473,18 @@ Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOU
 **Inputs checked for this section (2026-09-30).** No new env var or secret this stage: `.env.example`
 is byte-identical to `e451d91`, and no reviewed diff adds a `process.env`/`env.*` read outside tests
 and scripts. `DEEPGRAM_API_KEY` is already mounted. One new migration: `051_outbound_held_for_review`.
-Gate at the last reviewed head `8280f13`: root 280+1 files / 6440 passed / 5 skipped / 1 todo;
-test:db 43 files / 614 passed; census 63/63; dashboard backend 150, frontend 63; inbound prompt
-snapshots unchanged. Paid sim S4-2 `outbound_stop_midclip_hangup`: PASS 11/11 via the Deepgram
-fallback (P1-SIM-S4, $0.05). <STAGE4_SHA> may be later than `8280f13`; re-confirm with the controller.
+Gate at the final code head `2d02d11`: root 280+1 files / 6457 passed / 5 skipped / 1 todo;
+test:db 43 files / 617 passed; census 63/63; dashboard backend 150, frontend 63, eslint unchanged
+(25 pre-existing), build OK (dashboard code unchanged since `8ff4239`); inbound prompt snapshots
+unchanged; full corpus:sabotage result in the stage-4 morning report. Paid sim S4-2
+`outbound_stop_midclip_hangup`: PASS 11/11 via the Deepgram fallback at `fe18b76` (P1-SIM-S4, $0.05);
+the later fix wave hardened the same path (hang-up before Live opens, read-back) without changing it.
 
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
 # This machine (Norton) also needs the Windows-roots CA bundle for gcloud:
-export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=<path to the Windows-roots CA bundle>
-P=vetra-uk-edc8ca; R=europe-west2; SHA=<STAGE4_SHA>
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem   # or win-roots.pem, whichever the stage-3 deploy used
+P=vetra-uk-edc8ca; R=europe-west2; SHA=2d02d11
 SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
 BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
 IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
@@ -575,7 +578,7 @@ call's `live_call_summary` says `direction:"inbound"`; no `outbound_callback_rec
 `outbound_callback_lookup_failed` lines for an ordinary caller. **STOP and roll back (D10) on any
 ERROR from the new revision.**
 
-**D7. Alerting: add the three new events to the ONE log-match policy.** The policy is
+**D7. Alerting: add the six new events to the ONE log-match policy.** The policy is
 `alertPolicies/15114942414748467079` "Outbound: alertable error logged" (email channel
 `notificationChannels/6677425848858041560`), filter on `jsonPayload.event`, currently the 10 events
 in C7. Add, all logged with `log.error`:
@@ -583,19 +586,25 @@ in C7. Add, all logged with `log.error`:
 `outbound_optout_unverified_marker_failed` (`lib/voice/live/index.js`, `postCall.js`; the marker could
 not be written, the lead may be re-dialled), `outbound_holiday_table_stale`
 (`lib/outbound/legalFloor.js`; the EU holiday table is out of range for a country/year, calls to it
-are refused; the table covers 2026-2030, a hard cliff at 2031-01-01).
-Not added (warn only): `outbound_callback_close_skipped`, `outbound_callback_lookup_failed`,
-`outbound_clip_hold_stt` (info).
+are refused; the table covers 2026-2030, a hard cliff at 2031-01-01), and from the final fix wave:
+`outbound_optout_unverified_hint_dropped` (`lib/voice/live/index.js`; the in-process hold hint could
+not reach post-call and the marker retry ran), `dsr_export_failed` (`server.js`; an Art. 15 export
+failed — cause class only, e.g. a missing SUPPRESSION_HASH_KEY), `qualification_answer_no_callsid`
+(`capabilities/qualification.js`; logged via `log.error` with a warn severity field — it matches the
+policy by name and should stay at zero).
+Not added (warn/info only): `outbound_callback_close_skipped`, `outbound_callback_lookup_failed`,
+`outbound_clip_hold_stt` (info), `outbound_clip_hold_drain_row_unverified` (info),
+`outbound_clip_hold_voiced_dropped`.
 
 First prove the new filter matches (read; it should print zero or historical rows, not an error):
 ```bash
-gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND jsonPayload.event=("outbound_optout_unverified_hold" OR "outbound_optout_unverified_marker_failed" OR "outbound_holiday_table_stale")' \
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND jsonPayload.event=("outbound_optout_unverified_hold" OR "outbound_optout_unverified_marker_failed" OR "outbound_holiday_table_stale" OR "outbound_optout_unverified_hint_dropped" OR "dsr_export_failed" OR "qualification_answer_no_callsid")' \
   --project=$P --freshness=30d --limit=5
 gcloud alpha monitoring policies describe alertPolicies/15114942414748467079 --project=$P --format=json > /tmp/policy-before.json
 ```
 Edit `/tmp/policy-before.json` into `/tmp/policy-after.json`: in
 `conditions[0].conditionMatchedLog.filter` extend the `jsonPayload.event=(...)` OR-list with the
-three names; keep `labelExtractors`, `alertStrategy` and `notificationChannels` exactly as they are
+six names; keep `labelExtractors`, `alertStrategy` and `notificationChannels` exactly as they are
 (drop only the read-only `name`/`creationRecord`/`mutationRecord` fields if the API rejects them).
 Then, with the owner's YES:
 ```bash
@@ -603,7 +612,7 @@ gcloud alpha monitoring policies update alertPolicies/15114942414748467079 --pro
   --policy-from-file=/tmp/policy-after.json
 gcloud alpha monitoring policies describe alertPolicies/15114942414748467079 --project=$P --format='value(conditions[0].conditionMatchedLog.filter)'
 ```
-Check: the describe output lists 13 events and the same channel. **STOP if `update` reports the
+Check: the describe output lists 16 events and the same channel. **STOP if `update` reports the
 policy replaced with a different channel or condition count.** (Same caveat as C7: read the flags
 against `gcloud alpha monitoring policies update --help` first; only `--policy-from-file` has been
 used against this policy so far.)
