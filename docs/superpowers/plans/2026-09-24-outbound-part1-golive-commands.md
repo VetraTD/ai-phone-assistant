@@ -453,12 +453,30 @@ direction, inbound byte-identical) and fix D-R2-3, gate, then run this section O
 (`.superpowers/sdd/2026-09-29-outbound-stage4/next-session-prompt-fixes-then-deploy.md`). Owner pre-answers for that run: keep the Italian eve rule; D8 deploy backend + frontend,
 read-first; D9 owner confirms no tenant tool webhook exists; D6 from the owner's handset, expect the
 callback line (the handset has `waiting` outreach from the phone check).
+**2026-09-30 (later): the fixes are BUILT and gated; this section now deploys `b4d462d`.** Outbound has
+its own prompt (shared company rules in `services/gemini.js` + the outbound job prompt in
+`lib/outbound/prompt.js`; `buildSystemInstruction` switches by direction; all 110 inbound prompt
+snapshots byte-identical, and the Opus review compared old vs new inbound output over 87,780 inputs:
+0 differences). D-R2-3 fixed (an unheard generation's `confirm_identity` is refused). Paid sims
+P1-SIM-S5 ($0.31): reason before the first question 4/4, silent PASS, stop PASS, gatekeeper: a
+GARBLED gatekeeper reply was still taken as "yes, it's me" in 2 of 5 runs -- owner decision: ship
+prompt-only and WATCH it in the Gatekeeper call below (backlog LVX165). Ledger:
+`.superpowers/sdd/2026-09-30-outbound-own-prompt/`. Re-test campaigns: NEW R2-Hello (S20) and
+R2-Gatekeeper (S21), config from `r1-config.mjs 20|21` (call_reason "You filled in our enquiry
+form about growing your clinic, so I'm following up on that."); S1b/S03/S10 stay paused.
 Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOUND_ENABLED=false`).
-`SHA` = `2d02d11` (final code head of `feat/outbound-stage4`, base `e451d91`; later commits are
-docs/spend JSON only — `git log --oneline 2d02d11..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json'`
+`SHA` = `b4d462d` (final code head of `feat/outbound-stage4`, base `e451d91`; later commits are
+docs/spend JSON only — `git log --oneline b4d462d..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'`
 must print nothing; if the branch HEAD is a later docs commit, build from HEAD, it carries the same code).
 
 **What stage 4 changes for a caller.**
+- (Outbound test calls only while `OUTBOUND_ENABLED=false`.) The assistant now follows an outbound
+  call plan: confirm the person, say why it is calling in one sentence BEFORE any question, ask the
+  campaign's questions, offer the next step, close without "anything else". It never asks for a
+  phone number, never tells a gatekeeper the reason, and a polite "no thanks" ends the call. The
+  reason is the campaign's new `call_reason` (optional; a neutral fallback otherwise). The tenant's
+  inbound custom rules and capability notes no longer reach outbound calls (campaign `notes` do).
+  Inbound calls are unchanged.
 - A lead we tried to reach who rings us back within 14 days is recognised on the inbound call: the
   assistant knows why we rang, asks whatever qualification questions are still unanswered, and the
   waiting outreach is closed as `called_back` so no retry dials them mid-conversation. A normal
@@ -487,10 +505,14 @@ must print nothing; if the branch HEAD is a later docs commit, build from HEAD, 
 **Inputs checked for this section (2026-09-30).** No new env var or secret this stage: `.env.example`
 is byte-identical to `e451d91`, and no reviewed diff adds a `process.env`/`env.*` read outside tests
 and scripts. `DEEPGRAM_API_KEY` is already mounted. One new migration: `051_outbound_held_for_review`.
-Gate at the final code head `2d02d11`: root 280+1 files / 6457 passed / 5 skipped / 1 todo;
-test:db 43 files / 617 passed; census 63/63; dashboard backend 150, frontend 63, eslint unchanged
-(25 pre-existing), build OK (dashboard code unchanged since `8ff4239`); inbound prompt snapshots
-unchanged; full corpus:sabotage result in the stage-4 morning report. Paid sim S4-2
+Gate at the final code head `b4d462d` (2026-09-30): root 282 files / 6602 passed / 3 skipped / 1 todo
+(run with `NODE_EXTRA_CA_CERTS=.superpowers/sdd/2026-09-29-outbound-stage4/norton-roots.pem` -- without it
+the real-local-TLS tests fail on Norton's loopback re-signing on THIS machine only); test:db 43 files /
+617 passed; census 63/63; dashboard backend 150 (only the generated schema line changed; frontend
+untouched since `8ff4239`); inbound prompt snapshots unchanged; full corpus:sabotage at `b4d462d`:
+see `.superpowers/sdd/2026-09-30-outbound-own-prompt/progress.md`.
+Earlier gate at `2d02d11`: root 280+1 files / 6457 passed / 5 skipped / 1 todo; test:db 43 / 617;
+dashboard frontend 63, eslint 25 pre-existing, build OK. Paid sim S4-2
 `outbound_stop_midclip_hangup`: PASS 11/11 via the Deepgram fallback at `fe18b76` (P1-SIM-S4, $0.05);
 the later fix wave hardened the same path (hang-up before Live opens, read-back) without changing it.
 
@@ -498,7 +520,7 @@ the later fix wave hardened the same path (hang-up before Live opens, read-back)
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
 # This machine (Norton) also needs the Windows-roots CA bundle for gcloud:
 export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem   # or win-roots.pem, whichever the stage-3 deploy used
-P=vetra-uk-edc8ca; R=europe-west2; SHA=2d02d11
+P=vetra-uk-edc8ca; R=europe-west2; SHA=b4d462d
 SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
 BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
 IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
@@ -632,6 +654,10 @@ against `gcloud alpha monitoring policies update --help` first; only `--policy-f
 used against this policy so far.)
 
 **D8. Dashboard (call log, S4-4). DRAFT: CONFIRM THE TARGET WITH THE OWNER BEFORE ANY COMMAND.**
+*2026-09-30 note (read-first rule "STOP if more than S4-4"):* since `2d02d11` the dashboard tree gains
+exactly ONE line beyond S4-4 -- `AI-phone-dashboard/backend/src/generated/campaignSchema.json`
+`"call_reason": 200` (the generated schema copy, drift-tested; no dashboard code reads it yet). Show
+the owner this before D8 and let them decide; it is inert data, not a feature.
 The call log change spans the dashboard backend (`AI-phone-dashboard/backend/src/routes/calls.js`,
 the `direction` filter) and the frontend. The voice image does not contain them. Deploy routes found
 in the repo (none verified on attempt 2 for this stage; the cutover doc says the 2026-08-31 deploy
