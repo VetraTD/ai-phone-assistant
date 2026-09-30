@@ -174,7 +174,12 @@ Tenant `+18176011171` ("Digile Media", America/Chicago).
 
 ## Section C: Stage 3 additions (deploy 2, DRAFT, YES-gated)
 
-**Status: no command below has been run against a real GCP project.** Started by the S3-11
+**Status: C0–C9 EXECUTED 2026-09-29 (CDT).** Production = `voice-uk-prod-00095-nhs`, image
+`voice:e451d91` (`sha256:e2acdeef04f9…`, Cloud Build `c9356532`), 100% traffic, `OUTBOUND_ENABLED=false`,
+allow-list `+14699338887`; migrations 046–050 applied (125 ms total); both secrets mounted; one
+log-match alert policy → nithinjd06@gmail.com; inbound smoke call OK; R1 S1b/S03/S10 on config v2.
+Four corrections found while running it are marked **[AS RUN]** below. Previous revision for C10:
+`voice-uk-prod-00094-87t`. Started by the S3-11
 implementer (the original C1/C2 secret + alert draft), consolidated here into the full ordered
 list for the whole stage-3 branch. Every command needs its own explicit YES; this is a draft for
 the controller/owner to review and refine, not a rehearsed sequence like Sections A/B.
@@ -244,11 +249,16 @@ these final numbers; `migration-seq-proof.log` proves this exact order applies c
 production-equivalent 45-migration baseline, with a schema fold that matches a fresh `schema.sql`
 build byte-for-byte at `580ceca`.)
 
-**Warning:** run migrations ONLY through this migrate-job image. The local checkout's
-`database/001`–`045` are CRLF in the working tree (`git ls-files --eol` shows `i/lf w/crlf`); the
-image and the gate worktree are LF. Running `scripts/migrate.js` from this checkout reports 042–045
-as "drifted" against the LF-recorded checksums — a false alarm from the checkout, not a real schema
-problem; don't "fix" it by running from there.
+**Warning:** run migrations ONLY through this migrate-job image.
+
+**[AS RUN] Build the image from the MAIN checkout, not a fresh/gate worktree.** Production recorded
+the checksums of the main checkout's CRLF working copies of `database/002`–`012` (11 files,
+`git ls-files --eol` → `i/lf w/crlf`; e.g. 002 applied `6c748514d207` = main checkout, LF =
+`b8581abc4e39`). An image built from an LF worktree makes `migrate.js --status` exit 1 with "An
+already-applied migration has been EDITED" for 002–012 (read-only, nothing written). The first C1
+build (`61171415`, from the gate worktree) hit exactly this; the rebuild from the main checkout
+(`c9356532`) passed. The Dockerfile COPYs named directories only, so untracked files in the main
+checkout never enter the image. The earlier version of this warning had the direction backwards.
 
 **C4. Migrate, then re-check.** Every one of 046–050 is additive or loosening, confirmed by reading
 all five files: 046 adds a nullable `bytea` column; 047 and 048 widen an existing CHECK to accept
@@ -356,7 +366,17 @@ for m in outbound_stuck_dialing outbound_webhook_writeoutbox_failed outbound_web
     --aggregation-alignment-period=300s --aggregation-per-series-aligner=ALIGN_COUNT
 done
 ```
-**STOP and ask the owner:** the `policies create` flags above are a DRAFT, never run against a real
+**[AS RUN] The loop above was NOT run: its `--condition-threshold-*` / `--aggregation-*` flags do not
+exist** in `gcloud alpha monitoring policies create` (checked against `--help`). Owner chose ONE
+log-match policy instead (no log-based metrics): channel `notificationChannels/6677425848858041560`
+(email nithinjd06@gmail.com), policy `alertPolicies/15114942414748467079` "Outbound: alertable error
+logged", created with `--policy-from-file` = `{combiner: OR, conditions: [{conditionMatchedLog:
+{filter: resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND
+jsonPayload.event=(<the 10 events above, OR-ed>), labelExtractors: {event:
+"EXTRACT(jsonPayload.event)"}}}], alertStrategy: {notificationRateLimit: {period: 300s}, autoClose:
+1800s}, notificationChannels: [<channel>]}`. The filter was proven with `gcloud logging read` first.
+
+**(Original note)** STOP and ask the owner: the `policies create` flags above are a DRAFT, never run against a real
 Cloud Monitoring API in this session — read them back against `gcloud alpha monitoring policies
 create --help` before running, and confirm firing on ANY occurrence in a 5-minute window is the
 sensitivity wanted (every one of these counters is expected near zero in production).
@@ -394,6 +414,13 @@ gcloud run jobs execute vetra-migrate-uk-prod --project=$P --region=$R --wait \
 gcloud run jobs execute vetra-migrate-uk-prod --project=$P --region=$R --wait \
   --args=scripts/outbound-admin.js,campaign,--phone,+18176011171,--config,<B64>,--campaign-id,<ID>,--confirm
 ```
+**[AS RUN] The commands above are refused as written** — `campaign` validates `--name`,
+`--template-key`, `--compliance-class` and `--audience` even on an update (the three immutable ones
+are validated, then not written, M8a; `name` IS written). Run with, e.g. for S10:
+`--args=scripts/outbound-admin.js,campaign,--phone,+18176011171,--name,R1-S10,--template-key,speed_to_lead,--compliance-class,solicited,--audience,business,--config,<B64>,--campaign-id,<ID>[,--confirm]`.
+`<B64>` is the SECOND line `r1-config.mjs` prints (the first is the scenario label). All three went
+to version 2 on 2026-09-29.
+
 This writes a new `campaign_versions` row (version+1) on the existing campaign; it does not resume
 or fire it. Resuming (`status --status active --confirm`) and firing are the phone-check session's
 job — see `.superpowers/sdd/2026-09-27-outbound-stage3/next-session-prompt-stage3-deploy-and-phone-check.md`.
