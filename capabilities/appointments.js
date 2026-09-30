@@ -1475,7 +1475,12 @@ export default {
                 OUTBOUND_BOOKING_GUARDRAIL,
                 ...outboundRequirementPromptLines(capabilityConfig(config, "appointments"), ctx.outboundCall).map((l) => `${l}\n`),
               ]
-            : [declineGuardrail("book, check, cancel, or reschedule appointments")],
+            : // Review M2: the inbound decline offers "a message or a transfer";
+              // on a call Ava placed the platform's own move is a callback.
+              [
+                `- You cannot book, check, cancel, or reschedule appointments on this call. If they ask, say so ` +
+                  `briefly and offer a day and time to call them back instead, booked with schedule_callback.\n`,
+              ],
           capabilityNotes: [],
         },
         dynamic: {},

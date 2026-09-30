@@ -1,7 +1,7 @@
 [
   {
     "name": "set_call_intent",
-    "description": "Call this as soon as you understand the reason for this call. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
+    "description": "Bookkeeping only: record what this call turned out to be about, once it is clear. Never mention it, and never let it change what you say next.",
     "parameters": {
       "type": "object",
       "properties": {

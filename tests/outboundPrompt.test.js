@@ -128,7 +128,7 @@ describe("S3-1 — the number rule (D3)", () => {
   });
 });
 
-describe("S3-1 — the SITUATIONS section: one line per situation (14 rows)", () => {
+describe("S3-1 — the SITUATIONS section: one line per situation (15 rows)", () => {
   const text = renderBlock(WITH_FIRST_NAME);
   const lines = text.split("\n");
 
@@ -155,6 +155,7 @@ describe("S3-1 — the SITUATIONS section: one line per situation (14 rows)", ()
     ["a bad line or an unusable reply", /A bad line or an unusable reply/i, /ask once/i],
     ["call screening", /Call screening/i, /returning .*enquiry, once/i],
     ["a voicemail greeting that got past AMD (2026-09-30)", /A voicemail greeting/i, /leave no message/i],
+    ["not interested (review I1, 2026-09-30)", /"Not interested"/i, /not_interested, then end the call/i],
   ];
 
   for (const [label, whoRe, moveRe] of rows) {
@@ -164,11 +165,11 @@ describe("S3-1 — the SITUATIONS section: one line per situation (14 rows)", ()
     });
   }
 
-  it("is exactly 14 situation rows (lines starting with '- ')", () => {
+  it("is exactly 15 situation rows (lines starting with '- ')", () => {
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     expect(situationsIdx).toBeGreaterThanOrEqual(0);
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(14);
+    expect(situationRows.length).toBe(15);
   });
 
   // S3-3 supersedes this item's old assertion. Before S3-3, none of these
@@ -264,7 +265,7 @@ describe("S3-1 — the SITUATIONS section: one line per situation (14 rows)", ()
     expect(line).toMatch(/never invent a source/i);
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(14);
+    expect(situationRows.length).toBe(15);
   });
 });
 

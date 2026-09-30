@@ -407,8 +407,14 @@ export async function executeToolCall(fc, ctx) {
     // them with their enquiry" -- receptionist framing, handed back at the
     // exact moment the Hello call skipped straight to its first question. It
     // now points at the outbound CALL PLAN's next step (lib/outbound/prompt.js).
+    // Review M4: only the FIRST confirmation points at the reason -- a second
+    // one (after an O-12 refusal mid-call) must not make the model say it
+    // again (CALL PLAN step 2: "Do not repeat it later in the call").
+    const alreadyVerified = ctx?.party?.verified === true;
     const message = nameConfirmed
-      ? "Identity confirmed. Next step of the call plan: tell them why you are calling, in one short sentence, before you ask them anything."
+      ? alreadyVerified
+        ? "Identity confirmed. Carry on from where the call is."
+        : "Identity confirmed. Next step of the call plan: tell them why you are calling, in one short sentence, before you ask them anything."
       : "This is not the confirmed contact. Share nothing about the enquiry, look nothing up, " +
         "and do not offer to book or change anything for them. Offer to have someone call back, " +
         "or end the call politely if that is declined.";

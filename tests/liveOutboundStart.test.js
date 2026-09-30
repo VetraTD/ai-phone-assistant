@@ -2613,6 +2613,28 @@ describe("D-R2-3 (2026-09-30 phone check): confirm_identity from a generation no
     await call.hangUp();
   });
 
+  it("row 4b (review M1): after the abandon, the person SPEAKS; the reply's confirmation runs even before its first audio chunk", async () => {
+    allowErrors("outbound_stale_discard_timeout");
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    for (let t = 0; t < 300; t += 100) {
+      await call.feed(100);
+      call.live.push(modelAudioMsg(100));
+    }
+    await call.settle();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(2100); // abandoned by the idle bound
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    await call.feed(400, { voiced: true }); // "Yes, this is Sam." -- after the abandon
+    await call.feed(200);
+    await call.callTool("confirm_identity", { name_confirmed: true }); // tool-first, no audio played yet
+    expect(identityResponse(call)).toMatchObject({ success: true });
+    expect(confirmedRuns()).toEqual([expect.objectContaining({ confirmed: true })]);
+    expect(events("outbound_unheard_tool_refused")).toHaveLength(0);
+    await call.hangUp();
+  });
+
   it("row 5: a real 'yes, speaking' held during the clip and answered after it -> RUNS, and the step moves to gather_details once", async () => {
     const call = await bootOutbound();
     await call.feed(400, { voiced: true }); // "Hello?"

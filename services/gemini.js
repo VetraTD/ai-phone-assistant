@@ -650,9 +650,12 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
     declarations.push({
       name: "set_call_intent",
       description: outbound
-        ? "Call this as soon as you understand the reason for this call. " +
-          "Do NOT wait — identify the intent and call this immediately, " +
-          "then continue helping in the same response."
+        ? // 2026-09-30 (review M3): bookkeeping only on outbound -- the step no
+          // longer depends on it (the engine advances it on confirm_identity),
+          // and "identify the intent... continue helping" is the receptionist's
+          // job, not a call Ava placed.
+          "Bookkeeping only: record what this call turned out to be about, once it is clear. " +
+          "Never mention it, and never let it change what you say next."
         : "Call this as soon as you understand why the caller is calling. " +
           "Do NOT wait — identify the intent and call this immediately, " +
           "then continue helping in the same response.",
@@ -1496,7 +1499,7 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   // a SITUATIONS row. Kept on outbound: do not end early, and the goodbye in
   // the same response (mechanical -- nothing after end_call is heard).
   toolContract += outbound
-    ? `- Do not call end_call before the call has reached its end: the last step of the CALL PLAN, or a SITUATIONS row that ends the call. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for their time and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`
+    ? `- Do not call end_call before the call has reached its end: the last step of the CALL PLAN, a SITUATIONS row that ends the call, or the person making clear they do not want to go on -- never keep them on the line after that. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for their time and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`
     : `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
@@ -1567,7 +1570,7 @@ export function guardrailsSection(config, extras, direction, { appointmentsEnabl
   // for a call WE placed. Only the parenthetical example is reworded; the rule
   // itself is unchanged. Inbound is byte-identical.
   guardrails += outbound
-    ? `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — what would you like to do next?").\n`
+    ? `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or the next step of the call.\n`
     : `- Every response must either ask the caller a question, confirm an action, or explain what you are doing next. A bare acknowledgment like "I understand" or "I see" on its own is never a complete response — always follow it immediately with a question or next step (e.g. "I understand — how can I help you today?").\n`;
   // Disfluency and correction rules: the messy reality of live phone speech —
   // filler words, false starts, self-corrections. Without them the model may try
@@ -2282,6 +2285,8 @@ export function buildOutboundSystemInstruction(config, extras = {}) {
           enabled: !!config.recordingDisclosureEnabled,
           text: config.recordingDisclosureText || null,
         },
+        // Review M2: the job prompt offers a booking only when one can happen.
+        canBook: appointmentsEnabled,
       },
       config.businessName
     ),

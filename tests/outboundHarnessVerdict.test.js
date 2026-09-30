@@ -904,11 +904,13 @@ describe("S3-5: outbound situation scripts", () => {
     noAsk = 0,
     attemptResultCount = 1,
     identityConfirmed = [],
+    toolsRun = [],
   } = {}) {
     return {
       firstAudio: { path: firstAudioPath, from_answer_ms: 2000, from_speech_ms: 900, measured: "playout" },
       assistantTurns,
       identityConfirmed,
+      toolsRun,
       debugTranscriptOn: true,
       attemptResultCount,
       askedContactNumberCount,
@@ -991,17 +993,58 @@ describe("S3-5: outbound situation scripts", () => {
       },
       { text: "I will call back tomorrow at 10 AM. Thank you for your time and have a great day.", user_text: "He's out. Try tomorrow at ten." },
     ];
-    const gatekeeper = (assistantTurns, identityConfirmed) =>
+    const gatekeeper = (assistantTurns, identityConfirmed, toolsRun = []) =>
       verdictFor("outbound_gatekeeper_later", {
         callReason: REASON,
-        server: serverFor({ assistantTurns, identityConfirmed }),
+        server: serverFor({ assistantTurns, identityConfirmed, toolsRun }),
         db: dbFor({ outcome_code: "callback_requested" }),
       }).criteria;
 
     it("gatekeeper: no_identity_confirmed and no_offer_to_gatekeeper both FAIL on call 3's real shape", () => {
-      const c = gatekeeper(CALL3_TURNS, [{ confirmed: true }]);
+      const c = gatekeeper(CALL3_TURNS, [{ confirmed: true }], ["confirm_identity", "check_appointment_availability"]);
       expect(c.no_identity_confirmed.result).toBe("FAIL");
       expect(c.no_offer_to_gatekeeper.result).toBe("FAIL");
+      expect(c.no_offer_to_gatekeeper.booking_tools).toEqual(["check_appointment_availability"]);
+    });
+
+    it("gatekeeper: the availability tool alone is enough to FAIL (the primary evidence)", () => {
+      const quiet = [{ text: "One moment.", user_text: "Hello, reception?" }];
+      expect(gatekeeper(quiet, [], ["check_appointment_availability"]).no_offer_to_gatekeeper.result).toBe("FAIL");
+    });
+
+    // Review I3's probe cases.
+    it.each([
+      ["Shall I book that in for ten tomorrow?", "PASS"], // the callback row's own move
+      ["I'll book that in for ten tomorrow.", "PASS"],
+      ["It's not about an appointment -- I'm returning Sam's enquiry.", "PASS"],
+      ["It's Ava from Discovery Dental, returning Sam's enquiry.", "PASS"],
+      ["We have a slot at ten, want me to put him down for it?", "FAIL"], // a real offer, no tool
+      ["Ten tomorrow is free -- would you like to book?", "FAIL"],
+    ])("gatekeeper text %j -> %s", (text, want) => {
+      expect(gatekeeper([{ text, user_text: "He's out. Try tomorrow at ten." }], []).no_offer_to_gatekeeper.result).toBe(want);
+    });
+
+    it.each([
+      ["Thanks Sam. Can you tell me a bit about your enquiry?", "FAIL"], // names the enquiry, gives no reason
+      ["Great. Is now a good time to chat about your request?", "FAIL"],
+    ])("reason: %j -> %s", (text, want) => {
+      expect(reasonFirst([{ text, user_text: "Yes, this is Sam." }]).reason_before_first_question.result).toBe(want);
+    });
+
+    it("reason: a 'follow up' only at the close does not pass a call that skipped it", () => {
+      const c = reasonFirst([
+        { text: "Thanks Sam. What's the clinic called", user_text: "Yes, this is Sam." }, // question, "?" lost
+        { text: "Got it.", user_text: "Okay, sure." },
+        { text: "Someone will follow up with you soon. Goodbye.", user_text: "Harbour Dental." },
+      ]);
+      expect(c.reason_before_first_question.result).toBe("FAIL");
+    });
+
+    it("reason: the name misheard ('Sam' -> 'some') still finds the reply; a line never matched is UNKNOWN, not FAIL", () => {
+      const heardAsSome = reasonFirst([{ text: "Great. I'm following up on your enquiry. What can we help with?", user_text: "Yes, this is some." }]);
+      expect(heardAsSome.reason_before_first_question.result).toBe("PASS");
+      const lost = reasonFirst([{ text: "Great. What can we help with?", user_text: "???" }]);
+      expect(lost.reason_before_first_question.result).toBe("UNKNOWN");
     });
 
     it("gatekeeper: both PASS on a correct call (the vague line, a callback, nothing offered)", () => {
