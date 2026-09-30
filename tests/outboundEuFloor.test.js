@@ -269,19 +269,27 @@ describe("EU floor: nextLegalOpening", () => {
       let worstDays = 0;
       for (const [cc, code, tz] of EU) {
         const f = floorFor(phoneFor(code), null);
-        // The day before every holiday is where the longest runs start.
+        // The longest gaps start 1-5 days BEFORE a holiday cluster (the review's
+        // 7.958-day case, BG 2030, starts two days before Good Friday), so every
+        // holiday is probed from each of the five preceding days and the day
+        // itself, at 20:00 local -- inside the evening window, so the search
+        // must jump the whole run. From 1 Jan of the first covered year (before
+        // that the table is stale by design).
         // Up to mid-December of the last year: past that the search runs off the
         // end of the table (the documented 2031 cliff, which the tripwire below guards).
         for (const d of HOLIDAYS.holidays[cc].filter((h) => h < `${HOLIDAYS.years[HOLIDAYS.years.length - 1]}-12-15`)) {
-          const prev = new Date(new Date(`${d}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
-          const from = at(prev, "20:30", tz);
-          const o = nextLegalOpening(from, f, win, tz);
-          expect(o, `${cc} ${prev}`).not.toBeNull();
-          worstDays = Math.max(worstDays, (o.getTime() - from.getTime()) / 86_400_000);
+          for (let k = -5; k <= 0; k++) {
+            const day = new Date(new Date(`${d}T12:00:00Z`).getTime() + k * 86_400_000).toISOString().slice(0, 10);
+            if (day < `${HOLIDAYS.years[0]}-01-01`) continue;
+            const from = at(day, "20:00", tz);
+            const o = nextLegalOpening(from, f, win, tz);
+            expect(o, `${cc} ${day}`).not.toBeNull();
+            worstDays = Math.max(worstDays, (o.getTime() - from.getTime()) / 86_400_000);
+          }
         }
       }
       expect(worstDays).toBeLessThan(DEFAULT_SEARCH_DAYS - 1);
-    });
+    }, 60_000);
   }
 
   // FINAL FIX WAVE e2. The table ends with its last year. From the day after it,
