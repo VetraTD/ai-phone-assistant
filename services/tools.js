@@ -403,11 +403,18 @@ export async function executeToolCall(fc, ctx) {
     // deferred capability effects that run after this turn (Ruling: the
     // effect handlers in capabilities/*.js are gated the same way).
     const nameConfirmed = fc.args?.name_confirmed === true;
+    // 2026-09-30 (D-R2-1): the success text used to read "Continue helping
+    // them with their enquiry" -- receptionist framing, handed back at the
+    // exact moment the Hello call skipped straight to its first question. It
+    // now points at the outbound CALL PLAN's next step (lib/outbound/prompt.js).
     const message = nameConfirmed
-      ? "Identity confirmed. Continue helping them with their enquiry."
+      ? "Identity confirmed. Next step of the call plan: tell them why you are calling, in one short sentence, before you ask them anything."
       : "This is not the confirmed contact. Share nothing about the enquiry, look nothing up, " +
         "and do not offer to book or change anything for them. Offer to have someone call back, " +
         "or end the call politely if that is declined.";
+    // Live logs no event for this tool's execution on its own; the outbound
+    // sims read this (gatekeeper: never true; hello: true). No caller data.
+    log.info("outbound_identity_confirmed", { callSid: ctx?.callSid ?? null, confirmed: nameConfirmed });
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {

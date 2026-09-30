@@ -396,12 +396,14 @@ describe("outbound: context by CallSid", () => {
 // proving the flag still shrinks the prompt on INBOUND, unchanged.
 // ---------------------------------------------------------------------------
 describe("outbound: LIVE_PROMPT=minimal is ignored (spec §13.2, mechanical ruling)", () => {
-  it("still connects with the full instruction, including the OUTBOUND CALL block, and logs that the flag was ignored", async () => {
+  it("still connects with the full instruction, the outbound job prompt (THIS CALL + CALL PLAN), and logs that the flag was ignored", async () => {
     const database = outboundDb();
     const { out: call, events: logEvents } = await logsDuring(() => bootOutbound({ database, env: { LIVE_PROMPT: "minimal" } }));
     const { systemInstruction } = call.live.connect.mock.calls[0][0].config;
     const text = systemInstruction.parts[0].text;
-    expect(text).toContain("=== OUTBOUND CALL ===");
+    expect(text).toContain("=== THIS CALL ===");
+    expect(text).toContain("=== CALL PLAN ===");
+    expect(text).not.toMatch(/You are a warm, professional receptionist/);
     expect(text.length).toBeGreaterThan(2000);
     expect(logEvents("live_outbound_minimal_prompt_ignored")).toHaveLength(1);
     expect(logEvents("live_bisect_arm")).toHaveLength(0);
@@ -2535,6 +2537,150 @@ describe("W1 A19: tool calls from a generation the caller never heard", () => {
     expect(insertSuppression.mock.calls[0][0]).toMatchObject({ phone: CONTACT, reason: "opted_out" });
     await vi.waitFor(() => expect(call.responsesFor("end_call")).toHaveLength(1));
     expect(call.responsesFor("end_call")[0].response).toMatchObject({ success: false });
+  });
+});
+
+describe("D-R2-3 (2026-09-30 phone check): confirm_identity from a generation nobody heard is refused", () => {
+  // Call ..cf41ed: the stale reply to the pre-clip "Hello?" called
+  // confirm_identity 3.0 s into the clip -- the party read verified before
+  // anyone said who they were, and the gatekeeper was offered the booking.
+  // One test per row of the state table (plan A4). A refusal is visible as
+  // the tool's own response AND as the absence of outbound_identity_confirmed
+  // (services/tools.js logs it only when the tool actually runs).
+  const identityResponse = (call) => call.responsesFor("confirm_identity").at(-1)?.response;
+  const confirmedRuns = () => events("outbound_identity_confirmed");
+  const stepAdvances = () => events("live_step_transition").filter((e) => e.trigger === "confirm_identity");
+
+  it("row 1: clip mode, before the backstop has even been decided -> refused", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // "Hello?" -- still speaking, no clip yet
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(identityResponse(call)).toMatchObject({ success: false });
+    expect(identityResponse(call).message).toMatch(/identity is NOT confirmed/);
+    expect(confirmedRuns()).toHaveLength(0);
+    expect(events("outbound_unheard_tool_refused").map((l) => l.tool)).toEqual(["confirm_identity"]);
+    await call.hangUp();
+  });
+
+  it("row 2: while the clip plays (the 09-30 shape: 3.0 s into the clip) -> refused, and the step does not move", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues and plays
+    call.live.push(modelAudioMsg()); // the stale reply to "Hello?" opens: discarded
+    await call.settle();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(identityResponse(call)).toMatchObject({ success: false });
+    expect(confirmedRuns()).toHaveLength(0);
+    expect(stepAdvances()).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("row 3: the clip has ended but the stale generation is still open -> refused", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    call.live.push(modelAudioMsg()); // stale, discarded
+    await call.settle();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // clip done; the stale generation has NOT closed
+    await call.feed(20);
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(identityResponse(call)).toMatchObject({ success: false });
+    expect(confirmedRuns()).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("row 4: a stale generation the idle bound ABANDONED (its close never came) -> its late call is still refused", async () => {
+    allowErrors("outbound_stale_discard_timeout");
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    // The stale generation streams (audio discarded) and never closes.
+    for (let t = 0; t < 300; t += 100) {
+      await call.feed(100);
+      call.live.push(modelAudioMsg(100));
+    }
+    await call.settle();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(2100); // abandoned by the idle bound: discardingNow() reads false from here
+    expect(events("outbound_stale_discard_timeout")).toHaveLength(1);
+    await call.callTool("confirm_identity", { name_confirmed: true }); // nothing has played since
+    expect(identityResponse(call)).toMatchObject({ success: false });
+    expect(confirmedRuns()).toHaveLength(0);
+    // The wider test is identity-only: the W1 list keeps its own rule.
+    expect(events("outbound_unheard_tool_refused")).toEqual([
+      expect.objectContaining({ tool: "confirm_identity", discarding: false }),
+    ]);
+    await call.hangUp();
+  });
+
+  it("row 5: a real 'yes, speaking' held during the clip and answered after it -> RUNS, and the step moves to gather_details once", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true }); // "Hello?"
+    await call.feed(400); // the clip queues
+    call.live.push(modelAudioMsg()); // the stale reply: discarded
+    await call.settle();
+    await call.feed(300, { voiced: true }); // "Yes, speaking." -- said over the clip, held
+    await call.feed(100);
+    await call.turnEnds(); // the stale generation closes
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } }); // clip done; held speech released
+    await call.feed(20);
+    call.live.push(modelAudioMsg()); // the reply to "yes, speaking": plays
+    await call.settle();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(identityResponse(call)).toMatchObject({ success: true });
+    expect(identityResponse(call).message).toMatch(/tell them why you are calling/);
+    expect(confirmedRuns()).toEqual([expect.objectContaining({ confirmed: true })]);
+    expect(events("outbound_unheard_tool_refused")).toHaveLength(0);
+    expect(stepAdvances()).toEqual([expect.objectContaining({ toStep: "gather_details" })]);
+    // Once only: a second confirmation does not advance again.
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(stepAdvances()).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("row 5 control: name_confirmed false runs (a gatekeeper) but never advances the step", async () => {
+    const call = await bootOutbound();
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    await call.turnEnds();
+    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
+    await call.feed(20);
+    call.live.push(modelAudioMsg()); // heard
+    await call.settle();
+    await call.callTool("confirm_identity", { name_confirmed: false });
+    expect(identityResponse(call)).toMatchObject({ success: true });
+    expect(confirmedRuns()).toEqual([expect.objectContaining({ confirmed: false })]);
+    expect(stepAdvances()).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("row 6: in the hang-up drain -> refused, while opt_out still writes the suppression", async () => {
+    const call = await bootOutbound();
+    const insertSuppression = vi.fn(async () => true);
+    call.deps.insertSuppression = insertSuppression;
+    await call.feed(400, { voiced: true });
+    await call.feed(400); // the clip queues
+    transcribeOnReceipt(call, "It's me. Stop calling me.", {
+      then: () => {
+        call.live.push({
+          toolCall: {
+            functionCalls: [
+              { id: "i1", name: "confirm_identity", args: { name_confirmed: true } },
+              { id: "i2", name: "opt_out", args: {} },
+            ],
+          },
+        });
+      },
+    });
+    for (let i = 0; i < 3; i++) {
+      await call.feed(160, { voiced: true });
+      await call.feed(40);
+    }
+    await call.hangUp(); // the drain: Live hears the held words
+    await vi.waitFor(() => expect(insertSuppression).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(call.responsesFor("confirm_identity")).toHaveLength(1));
+    expect(identityResponse(call)).toMatchObject({ success: false });
+    expect(confirmedRuns()).toHaveLength(0);
   });
 });
 
