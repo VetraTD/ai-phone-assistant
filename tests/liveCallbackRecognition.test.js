@@ -59,7 +59,8 @@ function dbWith(over = {}) {
     ...base,
     createCall: vi.fn(async () => "call-1"),
     openOutreachForPhone: vi.fn(async () => null),
-    closeOutreachCalledBack: vi.fn(async () => {}),
+    closeOutreachCalledBack: vi.fn(async () => true),
+    linkCallToOutreach: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -80,13 +81,15 @@ describe("Live start: inbound callback recognition", () => {
     const database = dbWith({ openOutreachForPhone: vi.fn(async () => HIT) });
     const { call, prompt, conn } = await boot(database);
 
-    expect(database.openOutreachForPhone).toHaveBeenCalledWith(CALLER);
+    expect(database.openOutreachForPhone).toHaveBeenCalledWith(CALLER, expect.objectContaining({ isCancelled: expect.any(Function) }));
     expect(database.closeOutreachCalledBack).toHaveBeenCalledWith("out-9");
     expect(database.createCall).toHaveBeenCalledTimes(1);
-    expect(database.createCall.mock.calls[0]).toEqual([BIZ, "CAcb1", CALLER, BIZ_PHONE, { outreachId: "out-9", contactId: "contact-9" }]);
+    // createCall is the plain 4-argument inbound form; the link is a separate write after it.
+    expect(database.createCall.mock.calls[0]).toEqual([BIZ, "CAcb1", CALLER, BIZ_PHONE]);
+    expect(database.linkCallToOutreach).toHaveBeenCalledWith("CAcb1", "out-9", "contact-9");
 
     expect(prompt).toMatch(/We called this person on Monday 28 September about your clinic software enquiry\./);
-    expect(prompt).toContain("Questions still unanswered: How many people work there?.");
+    expect(prompt).toContain("Questions still unanswered: How many people work there? Once you know why they rang, ask these naturally, one at a time, and record each answer with record_answer.");
     expect(prompt).not.toContain("What is the name of your clinic?");
 
     const decl = conn.tools.flatMap((t) => t.functionDeclarations).find((d) => d.name === "record_answer");
@@ -129,6 +132,7 @@ describe("Live start: inbound callback recognition", () => {
     const database = dbWith({ openOutreachForPhone: vi.fn(async () => ({ ...HIT, answeredKeys: ["clinic_name", "team_size"] })) });
     const { call, prompt, names } = await boot(database);
     expect(prompt).toContain("We called this person on Monday 28 September about your clinic software enquiry.");
+    expect(prompt).not.toContain("record each answer with record_answer");
     expect(prompt).not.toContain("Questions still unanswered");
     expect(names).not.toContain("record_answer");
     await call.hangUp();
@@ -171,6 +175,55 @@ describe("Live start: inbound callback recognition", () => {
     expect(prompt).not.toContain("We called this person");
     expect(logged.filter((l) => l.event === "outbound_callback_lookup_failed")[0]).toMatchObject({ reason: "timeout" });
     await call.hangUp();
+  });
+
+  it("a link that fails: NOT recognised (no callback line, no record_answer), outreach not closed", async () => {
+    const database = dbWith({
+      openOutreachForPhone: vi.fn(async () => HIT),
+      linkCallToOutreach: vi.fn(async () => {
+        throw new Error("linkCallToOutreach: expected 1 row, got 0");
+      }),
+    });
+    const { call, prompt, names } = await boot(database);
+    expect(prompt).not.toContain("We called this person");
+    expect(names).not.toContain("record_answer");
+    expect(database.closeOutreachCalledBack).not.toHaveBeenCalled();
+    expect(logged.filter((l) => l.event === "outbound_callback_lookup_failed")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("createCall failed (no call row): not recognised, nothing linked or closed", async () => {
+    const database = dbWith({ openOutreachForPhone: vi.fn(async () => HIT), createCall: vi.fn(async () => null) });
+    const { call, prompt } = await boot(database);
+    expect(prompt).not.toContain("We called this person");
+    expect(database.linkCallToOutreach).not.toHaveBeenCalled();
+    expect(database.closeOutreachCalledBack).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
+  it("m2: the outreach moved on before the close -> warn, recognition stands", async () => {
+    const database = dbWith({ openOutreachForPhone: vi.fn(async () => HIT), closeOutreachCalledBack: vi.fn(async () => false) });
+    const { call, prompt } = await boot(database);
+    expect(prompt).toContain("We called this person");
+    expect(logged.filter((l) => l.event === "outbound_callback_close_skipped")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("m4: LIVE_PROMPT=minimal builds no callback tail AND declares no record_answer (one gate); the full arm has both", async () => {
+    const minimal = await bootLive({
+      config: CONFIG, businessId: BIZ, businessPhone: BIZ_PHONE, callerPhone: CALLER, callSid: "CAcb1",
+      database: dbWith({ openOutreachForPhone: vi.fn(async () => HIT) }), env: { LIVE_PROMPT: "minimal" },
+    });
+    const mc = minimal.live.connect.mock.calls[0][0].config;
+    const mnames = (mc.tools || []).flatMap((t) => (t.functionDeclarations || []).map((d) => d.name));
+    expect(mc.systemInstruction.parts[0].text).not.toContain("We called this person");
+    expect(mnames).not.toContain("record_answer");
+    await minimal.hangUp();
+
+    const full = await boot(dbWith({ openOutreachForPhone: vi.fn(async () => HIT) }));
+    expect(full.prompt).toContain("We called this person");
+    expect(full.names).toContain("record_answer");
+    await full.call.hangUp();
   });
 
   it("a close that fails is warn-logged and the recognition still stands", async () => {

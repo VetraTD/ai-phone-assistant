@@ -2934,10 +2934,40 @@ const CALLBACK_WINDOW_DAYS = 14;
  *   campaignVersion: number, lastAttemptAt: Date, topic: string|null,
  *   questions: object[], answeredKeys: string[]}>}
  */
-export async function openOutreachForPhone(phoneE164) {
+export async function openOutreachForPhone(phoneE164, { isCancelled = () => false } = {}) {
   requireTenantScope("openOutreachForPhone");
   const canonical = normalizePhoneNumber(phoneE164);
   if (!canonical) return null; // "anonymous", "", a withheld number: nobody to recognise
+  // A SQL error here must not abort the call-start transaction it shares with
+  // createCall and the other context fetches: see withSavepoint.
+  return withSavepoint("cb_lookup", () => lookupOutreach(canonical, isCancelled));
+}
+
+/**
+ * Run `fn` inside a SAVEPOINT on the tenant transaction's client. q() returns
+ * errors instead of throwing, and Postgres aborts the whole transaction on any
+ * statement error, so without this a failing statement in an OPTIONAL lookup
+ * would take createCall and every other fetch in the same withTenant down with
+ * it. On any throw the savepoint is rolled back (the transaction is usable
+ * again) and the error is rethrown to the caller, which treats it as "no".
+ * Callers must run it with nothing else in flight on the client.
+ */
+async function withSavepoint(name, fn) {
+  requireTenantScope(`withSavepoint(${name})`);
+  const sp = await q(`SAVEPOINT ${name}`);
+  if (sp.error) throw sp.error;
+  try {
+    const out = await fn();
+    const rel = await q(`RELEASE SAVEPOINT ${name}`);
+    if (rel.error) throw rel.error;
+    return out;
+  } catch (err) {
+    await q(`ROLLBACK TO SAVEPOINT ${name}`);
+    throw err;
+  }
+}
+
+async function lookupOutreach(canonical, isCancelled) {
   const res = await q(
     `SELECT o.id, o.campaign_id, o.campaign_version, o.contact_id, o.last_attempt_at, v.config
        FROM outreach o
@@ -2954,7 +2984,9 @@ export async function openOutreachForPhone(phoneE164) {
   if (res.error) throw res.error;
   const row = one(res);
   if (!row) return null;
+  if (isCancelled()) return null; // the caller stopped waiting: issue nothing further
   if (await isSuppressed(canonical)) return null;
+  if (isCancelled()) return null;
   const calls = await q(`SELECT answers FROM calls WHERE outreach_id = $1`, [row.id]);
   if (calls.error) throw calls.error;
   const answered = new Set();
@@ -2980,13 +3012,49 @@ export async function openOutreachForPhone(phoneE164) {
 
 /**
  * S4-1: the lead rang back. Closes the outreach `called_back` so no retry
- * dials them mid-callback. Throws (closeOutreach) when the row is no longer
- * open; the caller catches and logs, and recognition still stands.
+ * dials them mid-callback -- but ONLY while it is still 'waiting': if the
+ * dispatcher moved it to dialing / in_call between the lookup and now, it is
+ * left alone (closing it would kill an in-flight attempt's outreach). Returns
+ * whether it closed. Inside a savepoint like the lookup.
  * @param {string} outreachId
+ * @returns {Promise<boolean>}
  */
 export async function closeOutreachCalledBack(outreachId) {
-  await closeOutreach(outreachId, "called_back", null);
-  noteAccess("closeOutreachCalledBack", { resourceIds: [outreachId], rowCount: 1 });
+  requireTenantScope("closeOutreachCalledBack");
+  const closed = await withSavepoint("cb_close", async () => {
+    const res = await q(
+      `UPDATE outreach SET state = 'closed', close_reason = 'called_back', outcome = NULL, closed_at = now(), updated_at = now()
+        WHERE id = $1 AND state = 'waiting'`,
+      [outreachId]
+    );
+    if (res.error) throw res.error;
+    return res.rowCount === 1;
+  });
+  noteAccess("closeOutreachCalledBack", { resourceIds: [outreachId], rowCount: closed ? 1 : 0 });
+  return closed;
+}
+
+/**
+ * S4-1: link the inbound calls row (already written by the plain 4-argument
+ * createCall) to the outreach the caller is ringing back about. Throws unless
+ * exactly one row changed, so "recognised" never means "recognised but the row
+ * is unlinked". Only an unlinked inbound row is touched.
+ * @param {string} callSid
+ * @param {string} outreachId
+ * @param {string} contactId
+ */
+export async function linkCallToOutreach(callSid, outreachId, contactId) {
+  requireTenantScope("linkCallToOutreach");
+  await withSavepoint("cb_link", async () => {
+    const res = await q(
+      `UPDATE calls SET outreach_id = $2, contact_id = $3
+        WHERE twilio_call_sid = $1 AND direction = 'inbound' AND outreach_id IS NULL`,
+      [callSid, outreachId, contactId]
+    );
+    if (res.error) throw res.error;
+    if (res.rowCount !== 1) throw new Error(`linkCallToOutreach: expected 1 row, got ${res.rowCount}`);
+  });
+  noteAccess("linkCallToOutreach", { resourceIds: [outreachId, contactId], rowCount: 1 });
 }
 
 /**

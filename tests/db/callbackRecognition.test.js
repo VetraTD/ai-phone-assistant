@@ -231,9 +231,10 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
     let cb = null;
     let callId = null;
     await db.withTenant(BIZ, async () => {
-      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-inbound" });
-      callId = await db.createCall(BIZ, "CAcb-inbound", LEAD, BIZ_PHONE,
-        cb ? { outreachId: cb.outreachId, contactId: cb.contactId } : undefined);
+      // Exactly the start path's order: the plain 4-argument createCall first,
+      // the lookup LAST, the link only on a hit.
+      callId = await db.createCall(BIZ, "CAcb-inbound", LEAD, BIZ_PHONE);
+      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-inbound", callId });
     });
     expect(cb).toMatchObject({ outreachId, contactId, campaignId });
     expect(cb.remainingQuestions.map((q) => q.key)).toEqual(["team_size", "start_date"]);
@@ -249,6 +250,7 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
     expect(tail).toMatch(/We called this person on \w+ \d{1,2} \w+ about your clinic software enquiry\./);
     expect(tail).toContain("How many people work there?");
     expect(tail).toContain("When would you like to start?");
+    expect(tail).toMatch(/ask these naturally, one at a time, and record each answer with record_answer/);
     expect(tail).not.toContain("What is the name of your clinic?");
 
     // Declarations: record_answer with only the remaining keys.
@@ -271,15 +273,79 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
   it("no outreach: not recognised, createCall stays the 4-argument inbound form", async () => {
     let cb = "unset";
     await db.withTenant(BIZ, async () => {
-      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD_B, callSid: "CAcb-none" });
+      const callId = await db.createCall(BIZ, "CAcb-none", LEAD_B, BIZ_PHONE);
+      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD_B, callSid: "CAcb-none", callId });
     });
     expect(cb).toBeNull();
+    const row = (await admin.query(`SELECT outreach_id, contact_id FROM calls WHERE twilio_call_sid = 'CAcb-none'`)).rows[0];
+    expect(row).toEqual({ outreach_id: null, contact_id: null });
+  });
+
+  it("I1: a SQL error inside the lookup leaves createCall and every other context fetch intact, prompt byte-identical", async () => {
+    const { outreachId } = await seed();
+    await admin.query("ALTER TABLE campaign_versions RENAME TO campaign_versions_cbx");
+    let settled;
+    let cb = "unset";
+    let afterFetch;
+    try {
+      await db.withTenant(BIZ, async () => {
+        settled = await Promise.allSettled([
+          db.createCall(BIZ, "CAcb-sqlerr", LEAD, BIZ_PHONE),
+          db.fetchBusinessKnowledge(BIZ),
+          db.listIntegrationsForBusiness(BIZ, { enabledOnly: true }),
+          db.fetchCallerContext(BIZ, LEAD),
+        ]);
+        cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-sqlerr", callId: settled[0].value });
+        // The transaction is still usable after the failed lookup.
+        afterFetch = await Promise.allSettled([db.fetchBusinessKnowledge(BIZ)]);
+      });
+    } finally {
+      await admin.query("ALTER TABLE campaign_versions_cbx RENAME TO campaign_versions");
+    }
+    expect(settled.map((x) => x.status)).toEqual(["fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
+    expect(settled[0].value).toBeTruthy();
+    expect(afterFetch[0].status).toBe("fulfilled");
+    expect(cb).toBeNull();
+    // The whole transaction COMMITTED: the call row exists, unlinked, and the outreach was not touched.
+    const row = (await admin.query(`SELECT outreach_id FROM calls WHERE twilio_call_sid = 'CAcb-sqlerr'`)).rows[0];
+    expect(row).toEqual({ outreach_id: null });
+    expect((await admin.query(`SELECT state FROM outreach WHERE id = $1`, [outreachId])).rows[0].state).toBe("waiting");
+    const config = { businessName: "Callback Co", timezone: "Europe/London", allowedTasks: ["general_question"] };
+    const base = gemini.buildSystemInstruction("greeting", "general_question", config, { callerPhone: LEAD });
+    const extras = { callerPhone: LEAD, ...(cb ? { callbackOutreach: cb } : {}) };
+    expect(gemini.buildSystemInstruction("greeting", "general_question", config, extras)).toBe(base);
+  });
+
+  it("m2: the close is guarded to 'waiting': an outreach that moved to dialing is left alone", async () => {
+    const { outreachId } = await seed();
+    await admin.query(`UPDATE outreach SET state = 'dialing' WHERE id = $1`, [outreachId]);
+    const closed = await asBiz(BIZ, () => db.closeOutreachCalledBack(outreachId));
+    expect(closed).toBe(false);
+    expect((await admin.query(`SELECT state, close_reason FROM outreach WHERE id = $1`, [outreachId])).rows[0]).toEqual({ state: "dialing", close_reason: null });
+  });
+
+  it("m1: a failed link means NOT recognised and the outreach is not closed", async () => {
+    const { outreachId } = await seed();
+    let cb = "unset";
+    await db.withTenant(BIZ, async () => {
+      // callId claims a row exists but no calls row carries this sid.
+      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-nolink", callId: "fake-call-id" });
+    });
+    expect(cb).toBeNull();
+    expect((await admin.query(`SELECT state FROM outreach WHERE id = $1`, [outreachId])).rows[0].state).toBe("waiting");
+  });
+
+  it("no calls row (createCall failed) -> never recognised", async () => {
+    await seed();
+    await db.withTenant(BIZ, async () => {
+      expect(await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "x", callId: null })).toBeNull();
+    });
   });
 
   it("does not delay: an unresolved lookup yields null at the timeout", async () => {
-    const never = { openOutreachForPhone: () => new Promise(() => {}), closeOutreachCalledBack: async () => {} };
+    const never = { openOutreachForPhone: () => new Promise(() => {}), closeOutreachCalledBack: async () => true, linkCallToOutreach: async () => {} };
     const t0 = Date.now();
-    const cb = await recognize({ database: never, businessId: BIZ, callerPhone: LEAD, callSid: "x", timeoutMs: 60 });
+    const cb = await recognize({ database: never, businessId: BIZ, callerPhone: LEAD, callSid: "x", callId: "c1", timeoutMs: 60 });
     expect(cb).toBeNull();
     expect(Date.now() - t0).toBeLessThan(400);
   });

@@ -1032,7 +1032,11 @@ export function buildCallbackSection(callbackOutreach, timezone) {
   const topic = typeof callbackOutreach.topic === "string" && callbackOutreach.topic.trim() ? ` about ${callbackOutreach.topic.trim()}` : "";
   let text = `=== RETURNED CALL ===\nThis caller is ringing back after we called them. We called this person${when}${topic}.`;
   const asks = (callbackOutreach.remainingQuestions || []).map((q) => q.ask).filter(Boolean);
-  if (asks.length) text += ` Questions still unanswered: ${asks.join(" / ")}.`;
+  if (asks.length) {
+    const list = asks.join(" / ");
+    text += ` Questions still unanswered: ${list}${/[.?!]$/.test(list) ? "" : "."}`;
+    text += " Once you know why they rang, ask these naturally, one at a time, and record each answer with record_answer.";
+  }
   return text;
 }
 

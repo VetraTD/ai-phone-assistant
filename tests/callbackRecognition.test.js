@@ -107,7 +107,7 @@ describe("buildCallbackSection", () => {
   });
   it("lists the questions in the model-facing words, not the keys", () => {
     const s = buildCallbackSection(CB, "Europe/London");
-    expect(s).toContain("Questions still unanswered: How many people work there? / When would you like to start?.");
+    expect(s).toContain("Questions still unanswered: How many people work there? / When would you like to start? Once you know why they rang, ask these naturally");
     expect(s).not.toContain("team_size");
   });
   it("returns '' with no callback", () => {
@@ -167,21 +167,27 @@ describe("recognizeCallback failure modes", () => {
     expect(await recognizeCallback({ database, businessId: "b", callerPhone: "" })).toBeNull();
     expect(database.openOutreachForPhone).not.toHaveBeenCalled();
   });
+  it("no calls row (callId null) -> null without touching the database", async () => {
+    const database = { openOutreachForPhone: vi.fn() };
+    expect(await recognizeCallback({ database, businessId: "b", callerPhone: "+447700900001", callId: null })).toBeNull();
+    expect(database.openOutreachForPhone).not.toHaveBeenCalled();
+  });
   it("a database object without the lookup (a missing wire) -> null WITH a warn log, not silence", async () => {
     const l = log();
-    expect(await recognizeCallback({ database: {}, businessId: "b", callerPhone: "+447700900001", callSid: "CA1", log: l })).toBeNull();
+    expect(await recognizeCallback({ database: {}, businessId: "b", callerPhone: "+447700900001", callSid: "CA1", callId: "c1", log: l })).toBeNull();
     expect(l.error).toHaveBeenCalledWith("outbound_callback_lookup_failed", expect.objectContaining({ severity: "warn" }));
   });
   it("logs carry no phone number", async () => {
     const l = log();
     const database = { openOutreachForPhone: async () => { throw new Error("boom"); } };
-    await recognizeCallback({ database, businessId: "b", callerPhone: "+447700900001", callSid: "CA1", log: l });
+    await recognizeCallback({ database, businessId: "b", callerPhone: "+447700900001", callSid: "CA1", callId: "c1", log: l });
     expect(JSON.stringify(l.error.mock.calls)).not.toContain("447700900001");
   });
   it("a hit closes called_back once and returns ISO date + remaining questions", async () => {
     const l = log();
-    const database = { openOutreachForPhone: async () => HIT, closeOutreachCalledBack: vi.fn(async () => {}) };
-    const r = await recognizeCallback({ database, businessId: "b", callerPhone: "+447700900001", log: l });
+    const database = { openOutreachForPhone: async () => HIT, linkCallToOutreach: vi.fn(async () => {}), closeOutreachCalledBack: vi.fn(async () => true) };
+    const r = await recognizeCallback({ database, businessId: "b", callerPhone: "+447700900001", callSid: "CA1", callId: "c1", log: l });
+    expect(database.linkCallToOutreach).toHaveBeenCalledWith("CA1", "o", "k");
     expect(database.closeOutreachCalledBack).toHaveBeenCalledWith("o");
     expect(r).toMatchObject({ outreachId: "o", campaignId: "c", contactId: "k", topic: "t", remainingQuestions: [] });
     expect(typeof r.lastAttemptAt).toBe("string");
