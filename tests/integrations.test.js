@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock dns.promises.lookup so webhook SSRF check resolves to a public IP
-vi.mock("dns", () => ({
-  default: { promises: { lookup: vi.fn(() => Promise.resolve({ address: "93.184.216.34" })) } },
-  promises: { lookup: vi.fn(() => Promise.resolve({ address: "93.184.216.34" })) },
-}));
+// The webhook talks through lib/net/ssrfGuard.js fetchVetted; these tests
+// intercept at its seam (_setWebhookTransport) so nothing touches DNS or the
+// network. The real vetted transport is covered in tests/webhookSsrf.test.js.
+const transport = vi.fn();
 
 import {
   validateWebhookConfig,
   executeWebhook,
   executeIntegration,
 } from "../services/integrations.js";
+import { _setWebhookTransport } from "../integrations/webhook.js";
+
+const okResponse = (obj, status = 200) => ({ status, headers: {}, body: JSON.stringify(obj), truncated: false });
 
 describe("integrations service", () => {
   describe("validateWebhookConfig", () => {
@@ -39,16 +41,9 @@ describe("integrations service", () => {
 
   describe("executeWebhook", () => {
     beforeEach(() => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(() =>
-          Promise.resolve({
-            ok: true,
-            status: 200,
-            text: () => Promise.resolve(JSON.stringify({ success: true, message: "Done." })),
-          })
-        )
-      );
+      transport.mockReset();
+      transport.mockResolvedValue(okResponse({ success: true, message: "Done." }));
+      _setWebhookTransport(transport);
     });
 
     it("POSTs to config.url with payload", async () => {
@@ -61,7 +56,7 @@ describe("integrations service", () => {
 
       const result = await executeWebhook(integration, payload);
 
-      expect(fetch).toHaveBeenCalledWith(
+      expect(transport).toHaveBeenCalledWith(
         "https://example.com/hook",
         expect.objectContaining({
           method: "POST",
@@ -85,13 +80,7 @@ describe("integrations service", () => {
     });
 
     it("handles non-2xx response", async () => {
-      vi.stubGlobal("fetch", () =>
-        Promise.resolve({
-          ok: false,
-          status: 500,
-          text: () => Promise.resolve(JSON.stringify({ error: "Internal error" })),
-        })
-      );
+      transport.mockResolvedValue(okResponse({ error: "Internal error" }, 500));
       const integration = {
         provider: "webhook",
         name: "test",
@@ -105,16 +94,9 @@ describe("integrations service", () => {
 
   describe("executeIntegration", () => {
     beforeEach(() => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(() =>
-          Promise.resolve({
-            ok: true,
-            status: 200,
-            text: () => Promise.resolve(JSON.stringify({ success: true, message: "OK" })),
-          })
-        )
-      );
+      transport.mockReset();
+      transport.mockResolvedValue(okResponse({ success: true, message: "OK" }));
+      _setWebhookTransport(transport);
     });
 
     it("routes webhook to executeWebhook", async () => {

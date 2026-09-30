@@ -15,10 +15,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // endpoint is itself a signal to that endpoint's operator that a call is
 // happening, and the whole point is that nothing leaves.
 
-const dnsLookup = vi.fn(async () => ({ address: "93.184.216.34" }));
-vi.mock("dns", () => ({
-  default: { promises: { lookup: (...a) => dnsLookup(...a) } },
-  promises: { lookup: (...a) => dnsLookup(...a) },
+// The webhook now goes out through lib/net/ssrfGuard.js (node:dns lookup).
+// Mocked so a resolution attempt is visible; the transport seam
+// (_setWebhookTransport) is the "fetch" spy: the blocked path must touch
+// neither.
+const dnsLookup = vi.fn((_h, _o, cb) => cb(null, [{ address: "93.184.216.34", family: 4 }]));
+vi.mock("node:dns", () => ({
+  default: { lookup: (...a) => dnsLookup(...a) },
+  lookup: (...a) => dnsLookup(...a),
 }));
 
 const INTEGRATION = {
@@ -41,10 +45,10 @@ let fetchSpy;
 
 beforeEach(() => {
   dnsLookup.mockClear();
-  fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-    ok: true,
-    status: 200,
-    text: async () => JSON.stringify({ ok: true }),
+  fetchSpy = vi.fn(async () => ({ status: 200, headers: {}, body: JSON.stringify({ ok: true }), truncated: false }));
+  // Any real network attempt from the blocked path would also show up here.
+  vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+    throw new Error("global fetch must not be used");
   });
 });
 
@@ -58,7 +62,9 @@ async function loadWebhook(mode) {
   if (mode === undefined) delete process.env.DEPLOYMENT_MODE;
   else process.env.DEPLOYMENT_MODE = mode;
   vi.resetModules();
-  return import("../integrations/webhook.js");
+  const mod = await import("../integrations/webhook.js");
+  mod._setWebhookTransport(fetchSpy);
+  return mod;
 }
 
 describe("DEPLOYMENT_MODE=hipaa", () => {

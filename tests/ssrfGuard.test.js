@@ -375,6 +375,28 @@ describe("ssrfGuard: connectVetted (real local HTTPS server, manual redirect, ti
     expect(Buffer.byteLength(res.body, "utf8")).toBeGreaterThan(0);
   });
 
+  // S4-3: maxBodyBytes option + truncated flag. Outbox default unchanged.
+  it("S4-3: default cap is unchanged (8 KiB) and an oversize body reports truncated:true", async () => {
+    const res = await connectVetted({ hostname: "localhost", address: "127.0.0.1", family: 4, port, path: "/huge", method: "POST", tlsOptions: { ca: trustedCa(CERT) } });
+    expect(MAX_BODY_BYTES).toBe(8 * 1024);
+    expect(res.truncated).toBe(true);
+    expect(Buffer.byteLength(res.body, "utf8")).toBe(MAX_BODY_BYTES);
+  });
+
+  it("S4-3: a body under the cap reports truncated:false", async () => {
+    const res = await connectVetted({ hostname: "localhost", address: "127.0.0.1", family: 4, port, path: "/deliver", method: "POST", tlsOptions: { ca: trustedCa(CERT) } });
+    expect(res.truncated).toBe(false);
+  });
+
+  it("S4-3: maxBodyBytes raises the cap, still bounded, and stops a never-ending stream", async () => {
+    const cap = 100 * 1024;
+    const start = Date.now();
+    const res = await connectVetted({ hostname: "localhost", address: "127.0.0.1", family: 4, port, path: "/never-ending", method: "POST", maxBodyBytes: cap, tlsOptions: { ca: trustedCa(CERT) } });
+    expect(res.truncated).toBe(true);
+    expect(Buffer.byteLength(res.body, "utf8")).toBe(cap);
+    expect(Date.now() - start).toBeLessThan(SSRF_TIMEOUT_MS / 2);
+  });
+
   it("a never-ending streamed body is cut off at MAX_BODY_BYTES and the socket is destroyed -- never waits for 'end' or the 6s timeout", async () => {
     const start = Date.now();
     const res = await connectVetted({

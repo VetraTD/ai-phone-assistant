@@ -3,33 +3,23 @@
  * No PHI in logs; HTTPS only; private IP blocking for SSRF prevention.
  */
 
-import dns from "dns";
 import { log } from "../lib/logger.js";
 import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
+import { fetchVetted, SsrfRefusedError } from "../lib/net/ssrfGuard.js";
 
-/**
- * Check if an IP address is private/reserved.
- * @param {string} ip
- * @returns {boolean}
- */
-function isPrivateIP(ip) {
-  if (!ip) return true;
-  // IPv6 loopback and link-local
-  if (ip === "::1" || ip === "::") return true;
-  if (ip.startsWith("fc") || ip.startsWith("fd")) return true; // fc00::/7
-  if (ip.startsWith("fe80")) return true; // fe80::/10
-
-  // IPv4
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4) return false;
-  if (parts[0] === 127) return true; // 127.0.0.0/8
-  if (parts[0] === 10) return true; // 10.0.0.0/8
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
-  if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
-  if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16
-  if (parts[0] === 0) return true; // 0.0.0.0/8
-  return false;
+// Transport seam. Production is lib/net/ssrfGuard.js fetchVetted (every
+// resolved record vetted, pinned IP, redirects refused, one timer over the
+// whole request including the body, bounded body). Tests replace it with
+// _setWebhookTransport; nothing else does.
+let transport = fetchVetted;
+export function _setWebhookTransport(fn) {
+  transport = fn || fetchVetted;
 }
+
+// A tenant endpoint is untrusted. A tool response is a JSON blob the model
+// reads, so 64 KiB is generous; past it the response is a failure, never a
+// truncated parse.
+export const WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
 
 // Must stay comfortably inside the LLM turn budget that wraps it
 // (lib/voice/llmTurn.js: 8s base, extended per tool round). At the old 10s a
@@ -95,7 +85,7 @@ export async function executeWebhook(integration, payload) {
   // disclosure of PHI to a third party, which is what a Business Associate
   // Agreement exists to authorise — so without a recorded one, it does not go.
   //
-  // BEFORE the DNS lookup below, not after. A blocked request must not resolve
+  // BEFORE any DNS lookup (fetchVetted, below), not after. A blocked request must not resolve
   // the hostname either: a DNS query for a tenant's endpoint tells that
   // endpoint's operator (and their resolver) that a call is happening, which is
   // a smaller disclosure than the payload but the same kind. Nothing leaves.
@@ -124,17 +114,6 @@ export async function executeWebhook(integration, payload) {
 
   const url = config.url;
 
-  // SSRF protection: resolve hostname and block private/reserved IPs
-  try {
-    const hostname = new URL(url).hostname;
-    const { address } = await dns.promises.lookup(hostname);
-    if (isPrivateIP(address)) {
-      return { success: false, error: "URL resolves to a private/reserved address" };
-    }
-  } catch (e) {
-    return { success: false, error: `Cannot resolve webhook hostname: ${e.message}` };
-  }
-
   const method = (config.method || "POST").toUpperCase();
   const headers = {
     "Content-Type": "application/json",
@@ -153,20 +132,30 @@ export async function executeWebhook(integration, payload) {
   const start = Date.now();
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
-
-    const res = await fetch(url, {
+    // fetchVetted vets the hostname, pins the connection to the vetted
+    // address, refuses redirects and enforces the timeout over the body too.
+    const res = await transport(url, {
       method,
       headers,
       body,
-      signal: controller.signal,
+      timeoutMs: WEBHOOK_TIMEOUT_MS,
+      maxBodyBytes: WEBHOOK_MAX_BODY_BYTES,
     });
-
-    clearTimeout(timeoutId);
     const durationMs = Date.now() - start;
 
-    const text = await res.text();
+    if (res.truncated) {
+      log.info("integration_webhook", {
+        tool: integration.name,
+        business_id: payload.business_id,
+        status: res.status,
+        duration_ms: durationMs,
+        success: false,
+        error: "response_too_large",
+      });
+      return { success: false, error: "The response was too large." };
+    }
+
+    const text = res.body;
     let data;
     try {
       data = text ? JSON.parse(text) : null;
@@ -174,7 +163,9 @@ export async function executeWebhook(integration, payload) {
       data = { raw: text };
     }
 
-    if (res.ok) {
+    const ok = res.status >= 200 && res.status < 300;
+
+    if (ok) {
       const message = data?.message ?? (typeof data?.success === "boolean" ? (data.success ? "Done." : data?.error ?? "Request failed") : "Done.");
       log.info("integration_webhook", {
         tool: integration.name,
@@ -203,17 +194,27 @@ export async function executeWebhook(integration, payload) {
     };
   } catch (e) {
     const durationMs = Date.now() - start;
-    const isTimeout = e?.name === "AbortError";
+    const isTimeout = e?.name === "AbortError" || e?.message === "timeout";
+    const refused = e instanceof SsrfRefusedError ? e.reason : null;
+    const isDnsFailure = ["ENOTFOUND", "EAI_AGAIN", "ENODATA"].includes(e?.code);
     log.info("integration_webhook", {
       tool: integration.name,
       business_id: payload.business_id,
       duration_ms: durationMs,
       success: false,
-      error: isTimeout ? "timeout" : e?.message,
+      error: isTimeout ? "timeout" : refused ? `refused:${refused}` : e?.message,
     });
     return {
       success: false,
-      error: isTimeout ? "Request timed out." : (e?.message || "Request failed."),
+      error: isTimeout
+        ? "Request timed out."
+        : refused === "private_address"
+          ? "URL resolves to a private/reserved address"
+          : refused === "redirect"
+            ? "The endpoint redirected the request."
+            : refused || isDnsFailure
+              ? `Cannot resolve webhook hostname: ${e.message}`
+              : (e?.message || "Request failed."),
     };
   }
 }
