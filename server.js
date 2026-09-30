@@ -1153,7 +1153,19 @@ app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, asyn
     // system performs on purpose; "somebody exported everything about a patient
     // and we do not know who" is not an acceptable audit answer.
     { actor: { type: "user", id: req.user?.id } }
-  ).catch(() => null);
+  ).catch((err) => {
+    // FINAL FIX WAVE t1: an Art. 15 export that fails must be diagnosable (a
+    // missing SUPPRESSION_HASH_KEY looked exactly like any other 500 and left
+    // no log at all). The cause CLASS only -- the error name and message are
+    // library/config text, but the phone number and the subject's data never
+    // enter this line. The client still gets the generic body below.
+    log.error("dsr_export_failed", {
+      businessId: parsed.businessId,
+      errorName: err?.name || "Error",
+      reason: String(err?.message || err).slice(0, 200).replace(/[0-9]{5,}/g, "#"),
+    });
+    return null;
+  });
   if (!data) return res.status(500).json({ error: "Export failed" });
 
   // Logged as an event because an access request is itself a processing

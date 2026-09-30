@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import request from "supertest";
+import { log } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------
 // A5 — the data-subject request routes, at the HTTP boundary.
@@ -182,6 +183,26 @@ describe("GET export, authorised", () => {
       .set("Authorization", "Bearer t");
 
     expect(res.status).toBe(500);
+  });
+
+  // FINAL FIX WAVE t1. A throwing export (a missing SUPPRESSION_HASH_KEY, a
+  // dropped connection) used to be swallowed into a bare 500 with no log line.
+  it("a THROWING export is a generic 500 to the client and an alertable dsr_export_failed with the cause class -- and no phone -- in the log", async () => {
+    const spy = vi.spyOn(log, "error").mockImplementation(() => {});
+    mockExportCallerData.mockRejectedValue(new Error("SUPPRESSION_HASH_KEY is not set for +15551234567"));
+
+    const res = await request(app)
+      .get(`/api/businesses/${BUSINESS}/callers/${encodeURIComponent(PHONE)}/export`)
+      .set("Authorization", "Bearer t");
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: "Export failed" }); // generic: the cause never reaches the client
+    const call = spy.mock.calls.find(([event]) => event === "dsr_export_failed");
+    expect(call, "dsr_export_failed was logged").toBeDefined();
+    expect(call[1]).toMatchObject({ businessId: BUSINESS, errorName: "Error" });
+    expect(call[1].reason).toMatch(/SUPPRESSION_HASH_KEY/);
+    expect(JSON.stringify(call[1])).not.toContain("5551234567");
+    spy.mockRestore();
   });
 });
 

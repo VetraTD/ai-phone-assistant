@@ -212,9 +212,13 @@ export async function executeWebhook(integration, payload) {
           ? "URL resolves to a private/reserved address"
           : refused === "redirect"
             ? "The endpoint redirected the request."
+            // FINAL FIX WAVE t3: every message here is FIXED. The model reads
+            // tool errors aloud, and e.message carries the resolved address,
+            // TLS text and socket detail; the detail stays in the log line
+            // above (`error: e?.message`) and nowhere the caller can hear.
             : refused || isDnsFailure
-              ? `Cannot resolve webhook hostname: ${e.message}`
-              : (e?.message || "Request failed."),
+              ? "Cannot resolve webhook hostname."
+              : "Request failed.",
     };
   }
 }

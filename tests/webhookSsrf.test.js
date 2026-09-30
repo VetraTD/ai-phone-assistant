@@ -186,6 +186,17 @@ describe("inbound webhook via the REAL fetchVetted: refused before connect", () 
     _setWebhookTransport((url, o) => fetchVetted(url, { ...o, resolver }));
     const r = await executeWebhook({ provider: "webhook", name: "t", config: { url: "https://nope.example.com/x", method: "POST" } }, PAYLOAD);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/^Cannot resolve webhook hostname: /);
+    expect(r.error).toBe("Cannot resolve webhook hostname.");
+    expect(r.error).not.toMatch(/ENOTFOUND|nope/); // the detail stays in the log
+  });
+
+  // FINAL FIX WAVE t3: a transport error that is neither a timeout nor an SSRF
+  // refusal used to forward e.message (resolved IP, TLS text) to the model.
+  it("any other transport error is the fixed 'Request failed.' -- the detail never reaches the model", async () => {
+    _setWebhookTransport(async () => {
+      throw Object.assign(new Error("connect ECONNREFUSED 93.184.216.34:443 (tls: unable to verify the first certificate)"), { code: "ECONNREFUSED" });
+    });
+    const r = await executeWebhook({ provider: "webhook", name: "t", config: { url: "https://x.example.com/x", method: "POST" } }, PAYLOAD);
+    expect(r).toEqual({ success: false, error: "Request failed." });
   });
 });
