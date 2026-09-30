@@ -435,6 +435,262 @@ five new/loosened columns or the three new routing tables, so it keeps working u
 guarantee Part 1's own rollback relied on. The two new secrets and the webhook delivery queue
 traffic are unused by the old revision and harmless.
 
+## Section D: Stage 4 (deploy 3, DRAFT, YES-gated)
+
+**Status: DRAFT, nothing here has been run.** Every command needs its own explicit YES. Stage 4
+deploys ONLY after the 2026-09-30 phone check (window 08:00+ CDT) has been done and passed.
+Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOUND_ENABLED=false`).
+`SHA` = `<STAGE4_SHA>` (the controller fills this at the end: final code head of
+`feat/outbound-stage4`, base `e451d91`; later commits are docs/spend JSON only).
+
+**What stage 4 changes for a caller.**
+- A lead we tried to reach who rings us back within 14 days is recognised on the inbound call: the
+  assistant knows why we rang, asks whatever qualification questions are still unanswered, and the
+  waiting outreach is closed as `called_back` so no retry dials them mid-conversation. A normal
+  inbound caller sees no change.
+- A person who says "stop calling me" while our opener clip is still playing and then hangs up is no
+  longer lost if the live model returned no transcript: the audio is transcribed once by Deepgram (EU
+  endpoint) and the opt-out is honoured. If that also fails the lead is closed `held_for_review`
+  (never silently re-dialled) and an ERROR is logged.
+- EU numbers (27 member states) can now be dialled inside a strict window: Mon-Fri, 10:00-13:00 and
+  14:00-20:00 in the called country's local time, no national public holidays, 19:00 end on the eve
+  of a holiday. Neighbours, overseas territories and every other country code stay refused. GB and
+  US are unchanged. Detail: `docs/outbound-eu-calling-floor.md`.
+- A tenant's tool webhook now goes through the SSRF-vetted client: redirects are refused and the
+  response is capped at 64 KiB (see D9).
+
+**What stage 4 changes for Ilija (the operator).**
+- Call log: a Direction filter (all / inbound / outbound), an outbound pill and an outcome pill on
+  each card, and the qualification answers (and the outcome) in the call details. The CSV export
+  gains Direction and Outcome columns (inserted mid-row, so anyone parsing by position must re-map).
+- New outcome/close reason `held_for_review`: leads the system could not verify as "not an opt-out".
+  They are closed, not retried; Ilija re-adds one by hand if it turns out fine. Watch the held rate
+  in the pilot: a noise-only drain (a cough, then hang-up) also lands here.
+- New alert emails for the three new error events (D7).
+- Art. 15 (subject access) export now also covers the outbound tables.
+
+**Inputs checked for this section (2026-09-30).** No new env var or secret this stage: `.env.example`
+is byte-identical to `e451d91`, and no reviewed diff adds a `process.env`/`env.*` read outside tests
+and scripts. `DEEPGRAM_API_KEY` is already mounted. One new migration: `051_outbound_held_for_review`.
+Gate at the last reviewed head `8280f13`: root 280+1 files / 6440 passed / 5 skipped / 1 todo;
+test:db 43 files / 614 passed; census 63/63; dashboard backend 150, frontend 63; inbound prompt
+snapshots unchanged. Paid sim S4-2 `outbound_stop_midclip_hangup`: PASS 11/11 via the Deepgram
+fallback (P1-SIM-S4, $0.05). <STAGE4_SHA> may be later than `8280f13`; re-confirm with the controller.
+
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+# This machine (Norton) also needs the Windows-roots CA bundle for gcloud:
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=<path to the Windows-roots CA bundle>
+P=vetra-uk-edc8ca; R=europe-west2; SHA=<STAGE4_SHA>
+SA_APP=voice-uk-prod@vetra-uk-edc8ca.iam.gserviceaccount.com
+BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
+```
+
+**D0. Preflight (read).** Three conditions, all must hold.
+```bash
+cd /c/Users/nithi/VetraTD/ai-phone-assistant          # the MAIN checkout, not a worktree
+git status --porcelain --untracked-files=no           # expect empty
+git rev-parse --short HEAD                            # expect $SHA
+git ls-files --eol database/002_*.sql | head -3       # expect w/crlf (see D1)
+gcloud run services describe voice-uk-prod --project=$P --region=$R \
+  --format='value(status.latestReadyRevisionName,status.traffic)'   # expect voice-uk-prod-00095-nhs, 100%
+gcloud run services describe voice-uk-prod --project=$P --region=$R --format=export > /tmp/stage4-before.yaml
+```
+Keep `/tmp/stage4-before.yaml`: D5's env diff compares against it. Also confirm with the owner that
+the 2026-09-30 phone check has been done and PASSED. **STOP if it has not.**
+
+**D1. Build the image from the MAIN checkout.** Production recorded the checksums of the main
+checkout's CRLF working copies of `database/002`-`012` (`i/lf w/crlf`); an image built from an LF
+worktree makes `migrate.js --status` fail with "An already-applied migration has been EDITED"
+(Section A/C, and the C1 rebuild). Do not build from a gate worktree. Untracked files never enter the
+image.
+```bash
+gcloud builds submit --config=cloudbuild.yaml --project=vetra-core-edc8ca \
+  --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
+  --substitutions=_TAG=$SHA
+```
+Check: the build succeeds, all smoke steps pass, and `$IMG` exists in Artifact Registry.
+
+**D2. Point the migrate job at the new image.**
+```bash
+gcloud run jobs update vetra-migrate-uk-prod --image=$IMG --project=$P --region=$R \
+  --update-env-vars=OUTBOUND_TEST_ALLOWLIST=+14699338887
+```
+
+**D3. Status + preflight, read-only, BEFORE migrating.**
+```bash
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js,--status --project=$P --region=$R --wait
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/db-inspect.js,--outbound-preflight --project=$P --region=$R --wait
+```
+**STOP and ask the owner if `--status` shows anything pending other than EXACTLY
+`051_outbound_held_for_review`** (file: `database/051_outbound_held_for_review.sql`), or exits 1 with
+"EDITED" (wrong build source, see D1), or if any preflight table shows `MISMATCH`.
+
+**D4. Apply 051.** It drops and re-adds `outreach_close_reason_check` with every existing value
+(including 047's `missing_goal` and 048's `erased`, `no_legal_floor`) plus `held_for_review`; it
+loosens a CHECK, so every existing row still satisfies it. Rehearsed locally: applied on top of 050,
+idempotent on re-run, and the `schema.sql` fold matches.
+```bash
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js --project=$P --region=$R --wait
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js,--status --project=$P --region=$R --wait   # expect pending: none
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/db-inspect.js,--outbound-preflight --project=$P --region=$R --wait   # every table ok
+```
+Order note: the migration runs BEFORE the service update (D5). The old revision never writes
+`held_for_review`, so the loosened CHECK is harmless to it.
+
+**D5. New revision.** No new env vars or secrets; only `GIT_COMMIT_SHA` changes.
+```bash
+gcloud run services describe voice-uk-prod --project=$P --region=$R \
+  --format='value(spec.template.spec.containers[0].env)' | tr ';' '\n' | grep -E "DEEPGRAM_REGION|OUTBOUND_ENABLED|OUTBOUND_TEST_ALLOWLIST"
+```
+**STOP and ask the owner if `DEEPGRAM_REGION=eu` is not set on the live revision.** S4-2 sends the
+held caller audio (the words of a possible "stop calling me") to Deepgram; without the region switch
+`deepgramEnvironment` falls back to the US endpoint, which is a data-residency change for a UK/EU
+tenant. Only when confirmed:
+```bash
+gcloud run services update voice-uk-prod --image=$IMG --project=$P --region=$R \
+  --update-env-vars=GIT_COMMIT_SHA=$SHA
+```
+Verify (read):
+- New revision Ready, 100% of traffic, image `$SHA`; `curl -s $BASE_URL/` shows `Build: $SHA`.
+- Env diff against `/tmp/stage4-before.yaml`: **empty except `GIT_COMMIT_SHA`** (no secret refs
+  added or removed). `OUTBOUND_ENABLED` still `false`; `OUTBOUND_TEST_ALLOWLIST` still `+14699338887`;
+  `DEEPGRAM_API_KEY` still mounted; `DEEPGRAM_REGION=eu`. **STOP on any other difference.**
+- Note (review finding): the voice service runs with `cpu_idle=true`, so the post-hang-up Deepgram
+  call runs with no request in flight. If it is CPU-throttled, the 5 s bound expires and the lead
+  lands on the `held_for_review` branch (safe, but visible as ERRORs). No change is required; watch
+  D7's alert for it.
+
+**D6. Smoke.** One ordinary inbound call by the owner to +1 817 601 1171: the greeting, a question and
+hang-up behave as before (callback recognition must not change a normal inbound call: the owner's own
+handset is recognised as a callback only if an outreach to it is `waiting` and within 14 days, so
+close or wait out any test outreach first, or expect the callback line).
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND resource.labels.revision_name="<NEW_REVISION>"' \
+  --project=$P --freshness=15m --limit=50 --format='value(jsonPayload.event,severity)'
+```
+Check: boot log has no `outbound_internal_routes_disabled` and no `outbound_secret_missing`; the
+call's `live_call_summary` says `direction:"inbound"`; no `outbound_callback_recognized` and no
+`outbound_callback_lookup_failed` lines for an ordinary caller. **STOP and roll back (D10) on any
+ERROR from the new revision.**
+
+**D7. Alerting: add the three new events to the ONE log-match policy.** The policy is
+`alertPolicies/15114942414748467079` "Outbound: alertable error logged" (email channel
+`notificationChannels/6677425848858041560`), filter on `jsonPayload.event`, currently the 10 events
+in C7. Add, all logged with `log.error`:
+`outbound_optout_unverified_hold` (`lib/outbound/postCall.js`, a lead closed held_for_review),
+`outbound_optout_unverified_marker_failed` (`lib/voice/live/index.js`, `postCall.js`; the marker could
+not be written, the lead may be re-dialled), `outbound_holiday_table_stale`
+(`lib/outbound/legalFloor.js`; the EU holiday table is out of range for a country/year, calls to it
+are refused; the table covers 2026-2030, a hard cliff at 2031-01-01).
+Not added (warn only): `outbound_callback_close_skipped`, `outbound_callback_lookup_failed`,
+`outbound_clip_hold_stt` (info).
+
+First prove the new filter matches (read; it should print zero or historical rows, not an error):
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND jsonPayload.event=("outbound_optout_unverified_hold" OR "outbound_optout_unverified_marker_failed" OR "outbound_holiday_table_stale")' \
+  --project=$P --freshness=30d --limit=5
+gcloud alpha monitoring policies describe alertPolicies/15114942414748467079 --project=$P --format=json > /tmp/policy-before.json
+```
+Edit `/tmp/policy-before.json` into `/tmp/policy-after.json`: in
+`conditions[0].conditionMatchedLog.filter` extend the `jsonPayload.event=(...)` OR-list with the
+three names; keep `labelExtractors`, `alertStrategy` and `notificationChannels` exactly as they are
+(drop only the read-only `name`/`creationRecord`/`mutationRecord` fields if the API rejects them).
+Then, with the owner's YES:
+```bash
+gcloud alpha monitoring policies update alertPolicies/15114942414748467079 --project=$P \
+  --policy-from-file=/tmp/policy-after.json
+gcloud alpha monitoring policies describe alertPolicies/15114942414748467079 --project=$P --format='value(conditions[0].conditionMatchedLog.filter)'
+```
+Check: the describe output lists 13 events and the same channel. **STOP if `update` reports the
+policy replaced with a different channel or condition count.** (Same caveat as C7: read the flags
+against `gcloud alpha monitoring policies update --help` first; only `--policy-from-file` has been
+used against this policy so far.)
+
+**D8. Dashboard (call log, S4-4). DRAFT: CONFIRM THE TARGET WITH THE OWNER BEFORE ANY COMMAND.**
+The call log change spans the dashboard backend (`AI-phone-dashboard/backend/src/routes/calls.js`,
+the `direction` filter) and the frontend. The voice image does not contain them. Deploy routes found
+in the repo (none verified on attempt 2 for this stage; the cutover doc says the 2026-08-31 deploy
+was a LOCAL build plus `deploy-hosting.js`, and `cloudbuild.frontend.yaml` "has not run on attempt
+2"):
+```bash
+# Backend image (source root is the backend dir; .gcloudignore excludes AI-phone-dashboard from the root):
+gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml \
+  --project=vetra-core-edc8ca \
+  --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
+  --substitutions=_TAG=$(git rev-parse --short HEAD)
+gcloud run services update dashboard-api-uk-prod \
+  --image=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/dashboard:<TAG> --project=$P --region=$R
+# Frontend: the APP target (never publish to Firebase without VITE_BUILD_TARGET=app; docs/app-domain-cutover.md)
+cd AI-phone-dashboard/frontend
+VITE_BUILD_TARGET=app VITE_API_URL=<dashboard-api url> VITE_FIREBASE_API_KEY=... \
+VITE_FIREBASE_AUTH_DOMAIN=... VITE_FIREBASE_PROJECT_ID=... npx vite build
+grep -rl "landing-hero-cta" dist/assets/*.js && echo "ABORT: marketing build"
+grep -rl "localhost:3001"   dist/assets/*.js && echo "ABORT: localhost baked in"
+node scripts/deploy-hosting.js --dir dist --site vetra-core-edc8ca --project vetra-core-edc8ca
+```
+**STOP and ask the owner:** (a) which backend deploy route is current (the image name/tag in the
+`gcloud run services update` line above is a placeholder: read it from
+`gcloud run services describe dashboard-api-uk-prod` first, and note the dashboard API service may
+live in project `vetra-uk-edc8ca` while the image registry is `vetra-core-edc8ca`); (b) whether the
+frontend goes to Firebase Hosting `vetra-core-edc8ca` (app target) and whether `vetratd.com` on Vercel
+auto-deploys from `main` (merging this branch to `main` rebuilds the MARKETING site; that is a
+separate decision); (c) the real values of the `VITE_*` variables (public, but not in this repo).
+Deploy the backend BEFORE the frontend (an old backend ignores `direction`, a new frontend would show
+unfiltered rows). Without D8, everything else in this section still works; only Ilija's Direction
+filter, pills and answers are missing.
+
+**D9. Owner pre-deploy check: tenant tool-webhook URLs that redirect.** S4-3 moved the inbound tool
+webhook (`integrations/webhook.js`) onto `fetchVetted`, which REFUSES redirects (so a URL that today
+answers `301`/`302` to its real address will fail with "The endpoint redirected the request.") and
+caps the body at 64 KiB ("The response was too large."). Before D5, list every enabled webhook
+integration and test each URL for a redirect. The read path is the migrate job's `db-inspect.js`,
+but it has NO integrations listing today (its flags: `--counts`, `--business`, `--calls`,
+`--appointments`, `--recording-claims`, `--outbound-preflight`, `--status`). **Could not be
+determined from the repo:** how to list `integrations` rows read-only without a code change. Options
+for the owner: (1) add a tiny `--webhooks` read to `db-inspect.js` (prints `business_id`, `name`,
+`enabled` and the URL host only, never headers or bodies) and build it into the D1 image, or
+(2) ask each tenant contact. The query it would run:
+```sql
+SELECT business_id, name, enabled, config->>'url' AS url FROM integrations WHERE provider = 'webhook';
+```
+Then for each URL (from the owner's machine, no tenant data sent): `curl -sI -o /dev/null -w '%{http_code} %{redirect_url}\n' <url>`.
+Any `3xx` means: fix the stored URL to the final address BEFORE D5. **STOP and ask the owner if any
+URL redirects.** Note the `provider` value and `config.url` key are read from
+`integrations/webhook.js` (`config.url`) and `database/schema.sql`; confirm the `provider` literal
+against a real row.
+
+**D10. Rollback.**
+```bash
+gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00095-nhs=100 --region=$R --project=$P
+gcloud scheduler jobs pause outbound-sweep --location=$R --project=$P   # only if anything dials unexpectedly
+```
+Migration 051 can STAY: it only widens the CHECK, `e451d91` never reads or writes `held_for_review`,
+and any row already closed `held_for_review` is a lead the old revision will not touch (closed
+outreach rows are not dialled). The three alert events are simply never emitted by the old image;
+leave the policy as it is. Dashboard: roll the backend back to its previous revision with
+`gcloud run services update-traffic dashboard-api-uk-prod` and republish the previous frontend; an
+old dashboard ignores the new fields, so this is only needed if the new call log misbehaves.
+
+**D11. What `OUTBOUND_ENABLED=true` still needs (NOT part of this deploy).** Stage 4 leaves outbound
+OFF. Turning it on for anyone but the owner's handset additionally needs:
+- Test round 2 (the owner-run phone rounds against the stage-4 revision, including a callback: ring
+  the handset, let it go unanswered or hang up, ring back, and confirm the callback recognition line;
+  and one EU-number dry run of the calling-hours floor).
+- The Ilija setup session (his campaigns, calling windows, consent basis, webhook URL).
+- D1/T1 verified live (the stage-3 hold-and-drain and transfer paths on a real call; the S4-2 sim
+  proved the mid-clip fallback against the real Deepgram API on the local harness, not on production).
+- Owner sign-offs, none applied by the software: the EU values in `docs/outbound-eu-calling-floor.md`
+  (its 16-item list: e.g. Ireland/Spain/Italy/Netherlands/Portugal hours, B2B exemptions, France's
+  opt-in rule and 4-calls-per-30-days cap, de-facto holidays such as Swedish Midsummer Eve), and the
+  NANPA area-code list (`US_MAINLAND_NANP` unchanged; nationalnanpa.com was unreachable, 0 changes
+  verified, 18 likely-missing codes such as 510, 562, 812 are UNVERIFIED in
+  `.superpowers/sdd/2026-09-29-outbound-stage4/nanpa-check.md`).
+- A decision on the 2031 cliff: the EU holiday table ends 2030-12-31; after that every EU contact is
+  refused `no_legal_floor` (fails closed). Regenerate before then
+  (`scripts/outbound/gen-eu-holidays.mjs`, date-holidays@3.37.0).
+
 ## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
 this deploy)
 
