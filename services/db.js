@@ -1847,7 +1847,7 @@ function suppressionHash(canonicalE164) {
  *
  * @param {string} businessId
  * @param {string} phone
- * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array, smsConsents: Array}|null>}
+ * @returns {Promise<{calls: Array, transcripts: Array, appointments: Array, customerRequests: Array, smsConsents: Array, contacts: Array, consents: Array, outreach: Array, callAttempts: Array, suppressions: Array, outbox: Array}|null>}
  */
 /**
  * The recording URLs this tenant holds for one caller.
@@ -1890,7 +1890,9 @@ export async function exportCallerData(businessId, phone) {
 
   const calls = await q(
     `SELECT id, twilio_call_sid, caller_number, twilio_number, status, started_at, ended_at,
-            duration_seconds, summary, sentiment, outcome
+            duration_seconds, summary, sentiment, outcome,
+            direction, campaign_id, campaign_version, outreach_id, attempt_id, contact_id,
+            answered_by, outcome_code, answers
        FROM calls
       WHERE business_id = $1 AND ${phoneMatch("caller_number", 2)}
       ORDER BY started_at ASC`,
@@ -1959,14 +1961,136 @@ export async function exportCallerData(businessId, phone) {
     return null;
   }
 
+  // ---- Outbound calling tables (S4-3). Mirrors eraseCallerData's coverage:
+  // whatever erasure touches, the data subject can receive first. Each query
+  // is tenant-scoped by business_id (and by RLS under withTenant), and uses
+  // the same phoneMatch rule as the erasure.
+  const contacts = await q(
+    `SELECT id, phone_e164, first_name, last_name, email, timezone, external_ids, attributes,
+            created_at, updated_at
+       FROM contacts
+      WHERE business_id = $1 AND ${phoneMatch("phone_e164", 2)}
+      ORDER BY created_at ASC`,
+    [businessId, phone]
+  );
+  if (contacts.error) {
+    log.error("db_error", { operation: "exportCallerData.contacts", error: contacts.error.message });
+    return null;
+  }
+  const contactIds = contacts.rows.map((c) => c.id);
+
+  const outboundConsents = contactIds.length
+    ? await q(
+        `SELECT id, contact_id, purpose, channels, covers_automated, source, source_ref,
+                wording_version, wording_text, captured_at, expires_at, revoked_at
+           FROM consents WHERE business_id = $1 AND contact_id = ANY($2) ORDER BY captured_at ASC`,
+        [businessId, contactIds]
+      )
+    : { rows: [] };
+  if (outboundConsents.error) {
+    log.error("db_error", { operation: "exportCallerData.consents", error: outboundConsents.error.message });
+    return null;
+  }
+
+  const outreach = contactIds.length
+    ? await q(
+        `SELECT id, campaign_id, campaign_version, contact_id, state, attempts_made,
+                next_attempt_at, last_attempt_at, hold_until, outcome, close_reason,
+                trigger, details, created_at, updated_at, closed_at
+           FROM outreach WHERE business_id = $1 AND contact_id = ANY($2) ORDER BY created_at ASC`,
+        [businessId, contactIds]
+      )
+    : { rows: [] };
+  if (outreach.error) {
+    log.error("db_error", { operation: "exportCallerData.outreach", error: outreach.error.message });
+    return null;
+  }
+
+  // Metadata only. opener_audio / voicemail_audio / transfer_miss_audio are
+  // synthesized speech blobs (the agent's own script), never the subject's
+  // voice, and are not exported.
+  const callAttempts = await q(
+    `SELECT id, outreach_id, attempt_no, twilio_call_sid, from_number, to_number, dialed_at,
+            answered_at, ended_at, twilio_status, answered_by, amd_duration_ms, first_audio_ms,
+            silent, result, call_id, status_completed_at, session_finished_at,
+            post_call_started_at, created_at
+       FROM call_attempts
+      WHERE business_id = $1 AND ${phoneMatch("to_number", 2)}
+      ORDER BY created_at ASC`,
+    [businessId, phone]
+  );
+  if (callAttempts.error) {
+    log.error("db_error", { operation: "exportCallerData.callAttempts", error: callAttempts.error.message });
+    return null;
+  }
+
+  // A suppression outlives erasure as an HMAC hash (spec 13.5), so an erased
+  // subject's row is found by hash. The key is only required when a hashed row
+  // exists to be found -- the same narrowness as eraseCallerData -- and then a
+  // missing key / un-normalizable phone THROWS: an export that silently omits
+  // the do-not-call record is incomplete while reporting success.
+  const hashed = await q(
+    `SELECT 1 FROM suppressions WHERE business_id = $1 AND phone_hash IS NOT NULL LIMIT 1`,
+    [businessId]
+  );
+  if (hashed.error) {
+    log.error("db_error", { operation: "exportCallerData.suppressionsProbe", error: hashed.error.message });
+    return null;
+  }
+  let phoneHash = null;
+  if (hashed.rows.length) {
+    const canonicalPhone = normalizePhoneNumber(phone);
+    if (!canonicalPhone) {
+      throw new Error(
+        "exportCallerData: cannot match erased suppressions — the phone does not normalize to E.164"
+      );
+    }
+    phoneHash = suppressionHash(canonicalPhone); // throws if the key is missing/short
+  }
+  const suppressions = await q(
+    `SELECT id, phone_e164, phone_hash, reason, source_call_id, created_by, created_at
+       FROM suppressions
+      WHERE business_id = $1
+        AND ((phone_e164 IS NOT NULL AND ${phoneMatch("phone_e164", 2)}) OR ($3::text IS NOT NULL AND phone_hash = $3))
+      ORDER BY created_at ASC`,
+    [businessId, phone, phoneHash]
+  );
+  if (suppressions.error) {
+    log.error("db_error", { operation: "exportCallerData.suppressions", error: suppressions.error.message });
+    return null;
+  }
+
+  // Results-channel deliveries: a frozen copy of the contact's details lives in
+  // outbox.payload, keyed only by payload.contact.id (no relational column).
+  const outbox = contactIds.length
+    ? await q(
+        `SELECT id, kind, event_type, payload, status, attempts, next_attempt_at, last_error,
+                created_at, delivered_at
+           FROM outbox
+          WHERE business_id = $1 AND payload->'contact'->>'id' = ANY($2)
+          ORDER BY created_at ASC`,
+        [businessId, contactIds]
+      )
+    : { rows: [] };
+  if (outbox.error) {
+    log.error("db_error", { operation: "exportCallerData.outbox", error: outbox.error.message });
+    return null;
+  }
+
   noteAccess("exportCallerData", {
-    resourceIds: calls.rows.map((c) => c.id),
+    resourceIds: [...calls.rows.map((c) => c.id), ...contactIds, ...suppressions.rows.map((r) => r.id)],
     rowCount:
       calls.rows.length +
       transcripts.rows.length +
       appointments.rows.length +
       requests.rows.length +
-      consents.rows.length,
+      consents.rows.length +
+      contacts.rows.length +
+      outboundConsents.rows.length +
+      outreach.rows.length +
+      callAttempts.rows.length +
+      suppressions.rows.length +
+      outbox.rows.length,
   });
 
   return {
@@ -1975,6 +2099,12 @@ export async function exportCallerData(businessId, phone) {
     appointments: appointments.rows,
     customerRequests: requests.rows,
     smsConsents: consents.rows,
+    contacts: contacts.rows,
+    consents: outboundConsents.rows,
+    outreach: outreach.rows,
+    callAttempts: callAttempts.rows,
+    suppressions: suppressions.rows,
+    outbox: outbox.rows,
   };
 }
 
