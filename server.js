@@ -1159,6 +1159,7 @@ app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, asyn
     // no log at all). The cause CLASS only -- the error name and message are
     // library/config text, but the phone number and the subject's data never
     // enter this line. The client still gets the generic body below.
+    bumpCounter("dsr_export_failed");
     log.error("dsr_export_failed", {
       businessId: parsed.businessId,
       errorName: err?.name || "Error",

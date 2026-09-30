@@ -7,13 +7,11 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { floorFor, isInsideFloor, nextLegalOpening } from "../lib/outbound/legalFloor.js";
+import { floorFor, isInsideFloor, nextLegalOpening, DEFAULT_MAX_DAYS as DEFAULT_SEARCH_DAYS } from "../lib/outbound/legalFloor.js";
 import { zonedComponentsToUtcMs } from "../lib/capabilities/datetime.js";
 import { log } from "../lib/logger.js";
 import { validateCallbackTime } from "../capabilities/callback.js";
 
-/** legalFloor.js's default search bound (nextLegalOpening's maxDays). */
-const DEFAULT_SEARCH_DAYS = 14;
 const HOLIDAYS = JSON.parse(readFileSync(new URL("../lib/outbound/euHolidays.json", import.meta.url), "utf8"));
 
 /** [ISO code, calling code, principal IANA zone] for all 27 member states. */
