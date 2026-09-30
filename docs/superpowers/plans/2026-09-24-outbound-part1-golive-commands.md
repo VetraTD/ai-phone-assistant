@@ -439,6 +439,17 @@ traffic are unused by the old revision and harmless.
 
 **Status: DRAFT, nothing here has been run.** Every command needs its own explicit YES. Stage 4
 deploys ONLY after the 2026-09-30 phone check (window 08:00+ CDT) has been done and passed.
+
+**2026-09-30: phone check ran, stage 4 NOT deployed (owner decision).** Hello: timing PASS, but the
+assistant gave no reason for the call before asking questions (D-R2-1) and doubled part of a sentence
+(D-R2-2). Silent: PASS. Gatekeeper: 10:00-next-day reschedule PASS, but a real defect (D-R2-3):
+`confirm_identity` from the discarded stale reply to "Hello?" still ran during the opener clip
+(`UNHEARD_REFUSED_TOOLS` in `lib/voice/live/index.js` covers only `end_call`/`request_transfer`), so
+the gatekeeper was offered "a 30-minute discovery call". Next: fix D-R2-3 + D-R2-1 on this branch,
+gate, then run this section ONCE with the new SHA (not 2d02d11) and re-run the Hello + Gatekeeper
+calls. Owner pre-answers for that run: keep the Italian eve rule; D8 deploy backend + frontend,
+read-first; D9 owner confirms no tenant tool webhook exists; D6 from the owner's handset, expect the
+callback line (the handset has `waiting` outreach from the phone check).
 Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOUND_ENABLED=false`).
 `SHA` = `2d02d11` (final code head of `feat/outbound-stage4`, base `e451d91`; later commits are
 docs/spend JSON only — `git log --oneline 2d02d11..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json'`
