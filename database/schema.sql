@@ -1463,7 +1463,8 @@ CREATE TABLE IF NOT EXISTS outreach (
   outcome          text,
   -- 'erased' (migration 048, S3-11, P5) and 'no_legal_floor' (reserved for
   -- S3-7) join the list; every other value is unchanged.
-  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal','erased','no_legal_floor')),
+  -- 'held_for_review' (migration 051, Stage 4 S4-2) joins it too.
+  close_reason     text CHECK (close_reason IS NULL OR close_reason IN ('terminal_outcome','attempts_exhausted','give_up_window','consent_missing','consent_expired','consent_not_automated','suppressed','called_back','campaign_deleted','global_disabled','business_disabled','caller_id_invalid','missing_goal','erased','no_legal_floor','held_for_review')),
   trigger          jsonb NOT NULL DEFAULT '{}'::jsonb,
   -- Migration 049 (S3-9): the per-person facts (S3-6) the leads-in trigger's
   -- `data` carried, filtered to the campaign's details_fields at write time

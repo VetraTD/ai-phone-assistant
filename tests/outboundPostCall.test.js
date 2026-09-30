@@ -892,3 +892,81 @@ describe("createPostCall: the exactly-once claim wrapper", () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("S4-2 -- calls.answers._optout_unverified: the lead is held for review, never re-dialled", () => {
+  const MARKED = { _optout_unverified: true };
+  const held = { terminal: true, closeReason: "held_for_review", outcome: "held_for_review", nextAttemptAt: null };
+
+  it("marker + no verified opt-out: outcome held_for_review, outreach CLOSED held_for_review, no next_attempt_at, no enqueue, no summarize", async () => {
+    const summarize = vi.fn(noopSummarize);
+    const enqueue = vi.fn();
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answers: MARKED });
+    await run(db, { summarize, enqueue, log });
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "held_for_review");
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+    expect(summarize).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(db.insertDetectorSuppression).not.toHaveBeenCalled();
+    // The alertable event: ERROR, the exact name, ids only.
+    const alert = log.error.mock.calls.filter(([e]) => e === "outbound_optout_unverified_hold");
+    expect(alert).toHaveLength(1);
+    expect(alert[0][1]).toMatchObject({ outreachId: OUTREACH, attemptId: ATTEMPT, callSid: CALL_SID });
+  });
+
+  it("precedence: a VERIFIED opt-out (the detector on the transcript) beats the marker -- suppression written, outcome opted_out, terminal_outcome", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answers: MARKED }, { fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "please stop calling me" }]) });
+    await run(db, { log });
+    expect(db.insertDetectorSuppression).toHaveBeenCalledTimes(1);
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+    expect(db.applyOutreachResult.mock.calls[0][2]).toMatchObject({ terminal: true, closeReason: "terminal_outcome", outcome: "opted_out" });
+    expect(log.error.mock.calls.filter(([e]) => e === "outbound_optout_unverified_hold")).toHaveLength(0);
+  });
+
+  it("precedence: a tool-set opted_out outcome_code beats the marker", async () => {
+    const db = fakeDb({ answers: MARKED, outcomeCode: "opted_out" });
+    await run(db);
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+    expect(db.applyOutreachResult.mock.calls[0][2].closeReason).toBe("terminal_outcome");
+  });
+
+  it("precedence: the marker beats every other outcome (a tier-1 callback_requested, a tier-3 booking, the summary's guess)", async () => {
+    for (const [ctx, fns] of [
+      [{ answers: MARKED, outcomeCode: "callback_requested" }, {}],
+      [{ answers: MARKED }, { outboundCallEffects: vi.fn(async () => ({ booked: true, optedOut: false })) }],
+      [{ answers: MARKED }, {}],
+    ]) {
+      const db = fakeDb(ctx, fns);
+      await run(db, { summarize: async () => ({ summary: "s", sentiment: "n", outcome: "not_interested" }) });
+      expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "held_for_review");
+      expect(db.applyOutreachResult.mock.calls[0][2]).toEqual(held);
+    }
+  });
+
+  it.each([
+    ["no marker", null],
+    ["marker false", { _optout_unverified: false }],
+    ["marker as a string (not a boolean true)", { _optout_unverified: "true" }],
+    ["unrelated answers", { team_size: "4" }],
+  ])("%s: the ordinary flow -- the unknown outcome is rescheduled exactly as before", async (_label, answers) => {
+    const db = fakeDb({ answers });
+    await run(db);
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "unknown");
+    const arg = db.applyOutreachResult.mock.calls[0][2];
+    expect(arg.terminal).toBe(false);
+    expect(arg.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("a machine/fax answer never reads the marker (the machine path never resolves an outcome)", async () => {
+    const db = fakeDb({ answers: MARKED, answeredBy: "machine_start" });
+    await run(db);
+    expect(db.applyOutreachResult.mock.calls[0][2].closeReason).not.toBe("held_for_review");
+  });
+
+  it("a retry after a released claim (outcome_code already held_for_review) lands on the same hold", async () => {
+    const db = fakeDb({ answers: MARKED, outcomeCode: "held_for_review" });
+    await run(db);
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+  });
+});

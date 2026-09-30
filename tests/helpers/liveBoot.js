@@ -158,6 +158,11 @@ export async function bootLive({
   // test sets them; omitted -> the production constants.
   clipDrainMaxMs,
   clipDrainSettleMs,
+  // Stage 4 S4-2: the one-shot Deepgram fallback for an untranscribed hang-up
+  // drain. NEVER the real vendor from a test: the default is a stub that
+  // fails, which is the "Deepgram unavailable" branch.
+  clipHoldStt,
+  clipHoldSttTimeoutMs,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
@@ -182,6 +187,8 @@ export async function bootLive({
     postCall: postCall ?? fakePostCall(),
     ...(clipDrainMaxMs !== undefined ? { clipDrainMaxMs } : {}),
     ...(clipDrainSettleMs !== undefined ? { clipDrainSettleMs } : {}),
+    clipHoldStt: clipHoldStt ?? (async () => { throw new Error("no Deepgram in tests"); }),
+    ...(clipHoldSttTimeoutMs !== undefined ? { clipHoldSttTimeoutMs } : {}),
   });
 
   ws.deliver({

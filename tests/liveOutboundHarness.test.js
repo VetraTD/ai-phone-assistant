@@ -110,6 +110,10 @@ function harnessDb() {
     fetchAttemptOpenerAudio: vi.fn(async () => null),
     withTenant: vi.fn(async (_id, fn) => fn()),
     withTenantSafe: vi.fn(async (_id, fn) => fn()),
+    // Stage 4 S4-2: this file's fake Live transcribes nothing, so a hang-up
+    // drain ends untranscribed and (bootLive's Deepgram stub failing) the
+    // attempt is marked unverified through this writer.
+    mergeCallAnswers: vi.fn(async () => {}),
     outboundAttemptByCallSid: vi.fn(async (sid) =>
       sid === SID ? { businessId: BIZ, attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 } : null
     ),

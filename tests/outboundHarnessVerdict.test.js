@@ -1120,6 +1120,44 @@ describe("S3-5: outbound situation scripts", () => {
       expect(untranscribed.criteria.hold_drained).toMatchObject({ result: "FAIL", transcribed: false, drain_end: "max" });
     });
 
+    // Stage 4 S4-2. sims-report-B run 4's shape: the drain ended untranscribed
+    // ("max"), then Deepgram read the held audio. Fixtures use the fields the
+    // product's own log line carries (lib/voice/live/index.js runClipHoldStt:
+    // ok, chars, ms, and why on a failure) -- no text.
+    it("outbound_stop_midclip_hangup (S4-2): PASS when Live's drain was untranscribed but the Deepgram fallback recovered the words; the durable criteria still decide the rest", () => {
+      const untranscribedThenStt = {
+        clipHoldDrained: [{ frames: 98, voiced_frames: 38 }],
+        clipHoldDrainSettled: [{ reason: "max", transcribed: false, waited_ms: 2011 }],
+        clipHoldStt: [{ ok: true, chars: 23, ms: 640 }],
+      };
+      const v = verdictFor("outbound_stop_midclip_hangup", {
+        server: base({ extra: untranscribedThenStt }),
+        db: dbFor({ outcome_code: "opted_out", suppression: { reason: "opted_out", created_by: "detector" } }),
+      });
+      expect(v.criteria.hold_drained).toMatchObject({ result: "PASS", transcribed: false, drain_end: "max", stt_fallback: { ok: true, chars: 23 } });
+      expect(v.criteria.suppression_opted_out.result).toBe("PASS");
+      expect(v.criteria.outcome_opted_out.result).toBe("PASS");
+      // A recovered drain with NO suppression still fails the run: the words
+      // were read but nothing durable followed.
+      const noSuppression = verdictFor("outbound_stop_midclip_hangup", { server: base({ extra: untranscribedThenStt }), db: dbFor({ suppression: null }) });
+      expect(noSuppression.criteria.hold_drained.result).toBe("PASS");
+      expect(noSuppression.criteria.suppression_opted_out.result).toBe("FAIL");
+    });
+
+    it("outbound_stop_midclip_hangup (S4-2): FAIL when the Deepgram fallback failed (ok:false) or never ran -- the sim must be able to fail", () => {
+      const drain = {
+        clipHoldDrained: [{ frames: 98, voiced_frames: 38 }],
+        clipHoldDrainSettled: [{ reason: "max", transcribed: false, waited_ms: 2011 }],
+      };
+      const sttFailed = verdictFor("outbound_stop_midclip_hangup", {
+        server: base({ extra: { ...drain, clipHoldStt: [{ ok: false, chars: 0, ms: 5001, why: "error" }] } }),
+        db: dbFor({}),
+      });
+      expect(sttFailed.criteria.hold_drained).toMatchObject({ result: "FAIL", stt_fallback: { ok: false, why: "error" } });
+      const sttMissing = verdictFor("outbound_stop_midclip_hangup", { server: base({ extra: drain }), db: dbFor({}) });
+      expect(sttMissing.criteria.hold_drained).toMatchObject({ result: "FAIL", stt_fallback: null });
+    });
+
     it("outbound_business_greeting: PASS on backstop_slow with no clear, or a clear >= CLIP_BARGE_MIN_MS in; FAIL on a first-frame cut", () => {
       const turns = [turn("Thanks Sam -- I'm calling about our clinic systems.", "Hi, this is Sam.")];
       const server = base({ assistantTurns: turns, firstAudioPath: "backstop_slow" });
