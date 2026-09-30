@@ -88,6 +88,7 @@
  * stays true.
  */
 import { bumpCounter } from "../lib/voice/metrics.js";
+import { log } from "../lib/logger.js";
 
 function campaignQuestions(ctx) {
   const outbound = ctx?.outboundCall;
@@ -235,6 +236,16 @@ export default {
     }
 
     const callSid = ctx.callSid || null;
+    // FINAL FIX WAVE I2: a recognised callback's answers exist to be written.
+    // No call sid there is a missing wire (the cascade tool ctx once had none),
+    // and answering "Recorded." for a write that never ran is a fabricated
+    // success -- fail loudly to the model and to the logs instead.
+    if (!callSid && ctx.callbackOutreach) {
+      bumpCounter("qualification_answer_refused");
+      bumpCounter("qualification_answer_no_callsid");
+      log.error("qualification_answer_no_callsid", { key, severity: "warn" });
+      return refusal(fc, `The answer for "${key}" could not be recorded. Do not tell them it was.`);
+    }
     if (callSid) {
       // Minor (review): unlike opt_out/outcome.js's own writes, this used
       // `?.()` straight through -- a missing `mergeCallAnswers` wire silently

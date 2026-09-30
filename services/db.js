@@ -3135,7 +3135,16 @@ async function lookupOutreach(canonical, isCancelled) {
     campaignVersion: row.campaign_version,
     lastAttemptAt: row.last_attempt_at,
     topic: typeof config.topic === "string" && config.topic.trim() ? config.topic.trim() : null,
-    questions: Array.isArray(config.questions) ? config.questions : [],
+    // FINAL FIX WAVE N1: the campaign's questions are asked on a callback only
+    // when its pinned config ever turned the qualification capability on --
+    // questions and capabilities are validated independently, and a campaign
+    // that never asks on its own calls must not start asking on a return call.
+    // [] here means no tail sentence and no record_answer declaration, both of
+    // which key on there being a question left to ask.
+    questions:
+      Array.isArray(config.questions) && Array.isArray(config.capabilities) && config.capabilities.includes("qualification")
+        ? config.questions
+        : [],
     answeredKeys: [...answered],
   };
 }

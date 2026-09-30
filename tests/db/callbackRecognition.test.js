@@ -20,6 +20,30 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import pg from "pg";
 import { createHmac } from "node:crypto";
 
+// Final fix wave I2: the cascade model is a scripted stub (the ONLY fake in the
+// cascade test below); the tool ctx, the tool guard, record_answer and the DB
+// write behind it are real.
+const G = vi.hoisted(() => {
+  process.env.GEMINI_API_KEY ||= "test-key";
+  return { chunks: [] };
+});
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    constructor() {
+      this.chats = {
+        create: () => ({
+          async sendMessageStream() {
+            const round = G.chunks.shift() ?? [];
+            return (async function* () {
+              for (const c of round) yield c;
+            })();
+          },
+        }),
+      };
+    }
+  },
+}));
+
 const url = process.env.DATABASE_URL;
 const d = url ? describe : describe.skip;
 const APP_URL = "postgres://vetra_app:probe_only@localhost:55432/vetra";
@@ -124,6 +148,33 @@ afterAll(async () => {
 });
 
 d("openOutreachForPhone", () => {
+  it("N1: a campaign whose pinned config never enabled qualification hands back NO questions (no tail sentence, no record_answer)", async () => {
+    const { outreachId } = await seed({ daysAgo: 1, phone: LEAD_B });
+    // The pinned v2 config for this outreach: questions present, capability off.
+    await admin.query(
+      `UPDATE campaign_versions SET config = config || '{"capabilities": []}'::jsonb WHERE campaign_id = $1 AND version = 2`,
+      [campaignId]
+    );
+    try {
+      const hit = await asBiz(BIZ, () => db.openOutreachForPhone(LEAD_B));
+      expect(hit).toMatchObject({ outreachId });
+      expect(hit.questions).toEqual([]);
+      const cb = await db.withTenant(BIZ, async () => {
+        const callId = await db.createCall(BIZ, "CAcb-n1", LEAD_B, BIZ_PHONE);
+        return recognize({ database: db, businessId: BIZ, callerPhone: LEAD_B, callSid: "CAcb-n1", callId });
+      });
+      expect(cb.remainingQuestions).toEqual([]);
+      const config = { businessName: "Callback Co", timezone: "Europe/London", allowedTasks: ["general_question"] };
+      expect(gemini.buildDynamicTail("greeting", "general_question", config, { callbackOutreach: cb, callerPhone: LEAD_B })).not.toMatch(/record_answer|Questions still unanswered/);
+      expect(gemini.buildAllDeclarations(config, { callbackOutreach: cb }).some((x) => x.name === "record_answer")).toBe(false);
+    } finally {
+      await admin.query(
+        `UPDATE campaign_versions SET config = config || '{"capabilities": ["qualification"]}'::jsonb WHERE campaign_id = $1 AND version = 2`,
+        [campaignId]
+      );
+    }
+  });
+
   it("returns the pinned topic + questions, last_attempt_at and the answered keys", async () => {
     const { outreachId, contactId } = await seed({ daysAgo: 2 });
     await admin.query(
@@ -268,6 +319,52 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
     });
     const ans = (await admin.query(`SELECT answers FROM calls WHERE id = $1`, [callId])).rows[0].answers;
     expect(ans).toEqual({ team_size: "4" });
+  });
+
+  // FINAL FIX WAVE I2 (= deferred m5). The cascade path: getReplyStreaming builds
+  // the tool ctx itself. It used to carry no callSid, so record_answer skipped
+  // the write and still said "Recorded.". Real: recognition, createCall link,
+  // getReplyStreaming's ctx, executeToolCallGuarded, qualification.execute,
+  // mergeCallAnswers, the calls row. Stub: the model's streamed reply.
+  async function cascadeRecordAnswer({ withCallSid }) {
+    const { outreachId } = await seed({ daysAgo: 1 });
+    let cb = null;
+    let callId = null;
+    let reply = null;
+    await db.withTenant(BIZ, async () => {
+      callId = await db.createCall(BIZ, "CAcb-cascade", LEAD, BIZ_PHONE);
+      cb = await recognize({ database: db, businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-cascade", callId });
+      expect(cb).toMatchObject({ outreachId });
+    });
+    // The pickup scope has COMMITTED (as in production, where the call row exists
+    // long before the first turn); the turn runs its own tenant scope.
+    {
+      G.chunks = [
+        [{ functionCalls: [{ id: "fc1", name: "record_answer", args: { key: "team_size", value: "4" } }], candidates: [{ finishReason: "STOP" }] }],
+        [{ candidates: [{ content: { parts: [{ text: "Thanks, noted." }] }, finishReason: "STOP" }] }],
+      ];
+      const config = { businessName: "Callback Co", timezone: "Europe/London", allowedTasks: ["general_question"] };
+      // What lib/voice/session.js buildExtras hands the turn on a recognised callback.
+      const extras = { intentMarker: false, businessId: BIZ, callId, callbackOutreach: cb, ...(withCallSid ? { callSid: "CAcb-cascade" } : {}) };
+      for await (const ev of gemini.getReplyStreaming([], "we have four of us", "gather_details", null, config, extras)) {
+        if (ev.done) reply = ev.reply;
+      }
+    }
+    const ans = (await admin.query(`SELECT answers FROM calls WHERE id = $1`, [callId])).rows[0].answers;
+    return { reply, ans };
+  }
+
+  it("I2 cascade: record_answer through getReplyStreaming's own tool ctx lands in calls.answers", async () => {
+    const { reply, ans } = await cascadeRecordAnswer({ withCallSid: true });
+    expect(reply.toolResults?.[0]).toMatchObject({ name: "record_answer", success: true });
+    expect(ans).toEqual({ team_size: "4" });
+  });
+
+  it("I2 cascade: with no call sid on the ctx record_answer REFUSES (never 'Recorded.') and nothing is written", async () => {
+    const { reply, ans } = await cascadeRecordAnswer({ withCallSid: false });
+    expect(ans).toBeNull();
+    expect(JSON.stringify(reply.toolResults)).toMatch(/could not be recorded/);
+    expect(JSON.stringify(reply.toolResults)).not.toMatch(/Recorded./);
   });
 
   it("no outreach: not recognised, createCall stays the 4-argument inbound form", async () => {

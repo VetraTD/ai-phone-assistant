@@ -244,6 +244,10 @@ vi.mock("../services/db.js", () => ({
     voiceId: null,
   })),
   createCall: vi.fn(async () => "call-db-1"),
+  // S4-1 callback recognition: no outreach unless a test says so.
+  openOutreachForPhone: vi.fn(async () => null),
+  linkCallToOutreach: vi.fn(async () => {}),
+  closeOutreachCalledBack: vi.fn(async () => true),
   fetchBusinessKnowledge: vi.fn(async () => []),
   listIntegrationsForBusiness: vi.fn(async () => []),
   fetchCallerContext: vi.fn(async () => null),
@@ -5399,5 +5403,48 @@ describe("session.js — the semantic end-of-turn arbiter", () => {
 
     expect(judgeTurnComplete).not.toHaveBeenCalled();
     expect(runLlmTurn).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Final fix wave I2 (with m5). The cascade tool ctx once carried no callSid, so
+// a recognised callback's record_answer said "Recorded." and wrote nothing.
+// This is the session end of the wire: the extras it hands the LLM turn.
+// (The other end -- getReplyStreaming's tool ctx -> the real record_answer ->
+// calls.answers -- is tests/db/callbackRecognition.test.js.)
+describe("session.js -- a recognised callback carries the call sid to the tool ctx (I2)", () => {
+  const HIT = {
+    outreachId: "out-1",
+    campaignId: "camp-1",
+    contactId: "con-1",
+    campaignVersion: 1,
+    lastAttemptAt: "2026-09-28T10:00:00.000Z",
+    topic: "your enquiry",
+    questions: [{ key: "team_size", ask: "How many people work there?", required: false }],
+    answeredKeys: [],
+  };
+
+  async function oneTurn() {
+    H.llmFactory = () => makeGen([{ type: "done", reply: { text: "Sure.", toolResults: [] } }]);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+    H.turnManagerInstances[0].opts.onTurnEnd("Hi, someone rang me.");
+    await flushUntil(() => runLlmTurn.mock.calls.length > 0);
+    return { sid, extras: runLlmTurn.mock.calls.at(-1)[0].extras };
+  }
+
+  it("a recognised callback: extras carry callbackOutreach AND this call's sid", async () => {
+    db.openOutreachForPhone.mockResolvedValueOnce(HIT);
+    const { sid, extras } = await oneTurn();
+    expect(extras.callbackOutreach).toMatchObject({ outreachId: "out-1" });
+    expect(extras.callSid).toBe(sid);
+  });
+
+  it("no callback: extras have neither key (inbound extras unchanged)", async () => {
+    const { extras } = await oneTurn();
+    expect(extras).not.toHaveProperty("callbackOutreach");
+    expect(extras).not.toHaveProperty("callSid");
   });
 });

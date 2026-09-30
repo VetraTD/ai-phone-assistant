@@ -2990,6 +2990,9 @@ export async function* getReplyStreaming(history, userMessage, step, intent, con
         // only from call metadata, never from model arguments.
         callerContext: extras?.callerContext || null,
         callbackOutreach: extras?.callbackOutreach || null,
+        // FINAL FIX WAVE I2: set (by buildExtras) only on a recognised callback,
+        // where record_answer needs it to write calls.answers. null otherwise.
+        callSid: extras?.callSid || null,
         // Eval/benchmark harness seam: when set, services/tools.js hands this
         // to a capability pack's execute in place of the real CAPABILITY_DEPS.
         // undefined in production, where the real deps are always used.
