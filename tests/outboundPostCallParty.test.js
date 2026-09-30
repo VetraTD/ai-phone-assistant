@@ -144,7 +144,13 @@ async function boot() {
     now: () => 0,
     connect: live.connect,
     database: fakeDb(),
-    env: { TWILIO_VALIDATE_SIGNATURE: "false", POSTCALL_VERIFY: "count" },
+    // OUTBOUND_FIRST_SPEAKER=live (2026-09-30, D-R2-3): under the default
+    // "clip" mode nothing has been heard yet right after boot, so a
+    // confirm_identity there is now REFUSED as coming from an unheard
+    // generation (tests/liveOutboundStart.test.js "D-R2-3" owns that). This
+    // file tests post-call's party gating, so it starts from a call where a
+    // confirmation can legitimately land at once.
+    env: { TWILIO_VALIDATE_SIGNATURE: "false", POSTCALL_VERIFY: "count", OUTBOUND_FIRST_SPEAKER: "live" },
     execute: makeExecute(),
     verify,
     recover,

@@ -16956,3 +16956,14 @@ within the hour. **The STT is not the fallback; it is the only thing that
 addresses the cause** -- and it is parked by owner decision on 2026-09-20,
 because a mangled yes now costs a repeated question rather than a lost booking.
 It moves back up the moment bookings start being lost to it.
+
+## LVX164 — outbound: one sentence generated twice inside a turn (D-R2-2) [record only]
+
+2026-09-30 phone check, call 1 (S1b Hello, callSid ..e4a73a1b): the model
+generated "Thanks for confirming. To start, what's the name of your clinic?"
+TWICE within one turn; `live_repeat_cut` cut 103 chars, but part of the repeat
+was still audible (owner: "part of it was doubled"). Recorded, not fixed, by
+owner decision the same day. The outbound-own prompt (2026-09-30 session) changed
+what that turn is told to say (the reason before the first question), so the
+repeat must be re-checked on the next real outbound calls before any fix: read
+`live_repeat_cut` chars against what the caller heard.
