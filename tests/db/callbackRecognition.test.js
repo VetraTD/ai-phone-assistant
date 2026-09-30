@@ -16,7 +16,7 @@
  * lead mid-callback), the inbound calls row carries outreach_id/contact_id,
  * and an inbound call with no outreach is byte-identical.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { createHmac } from "node:crypto";
 
@@ -342,11 +342,66 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
     });
   });
 
-  it("does not delay: an unresolved lookup yields null at the timeout", async () => {
-    const never = { openOutreachForPhone: () => new Promise(() => {}), closeOutreachCalledBack: async () => true, linkCallToOutreach: async () => {} };
-    const t0 = Date.now();
-    const cb = await recognize({ database: never, businessId: BIZ, callerPhone: LEAD, callSid: "x", callId: "c1", timeoutMs: 60 });
+  it("a lookup slower than the bound yields null (its result is not used) but is awaited to settlement", async () => {
+    let settledAt = 0;
+    const link = vi.fn();
+    const slow = {
+      openOutreachForPhone: async () => {
+        await new Promise((r) => setTimeout(r, 150));
+        settledAt = Date.now();
+        return { outreachId: "o", campaignId: "c", contactId: "k", lastAttemptAt: new Date(), topic: null, questions: [], answeredKeys: [] };
+      },
+      closeOutreachCalledBack: async () => true,
+      linkCallToOutreach: link,
+    };
+    const cb = await recognize({ database: slow, businessId: BIZ, callerPhone: LEAD, callSid: "x", callId: "c1", timeoutMs: 60 });
+    const returnedAt = Date.now();
     expect(cb).toBeNull();
-    expect(Date.now() - t0).toBeLessThan(400);
+    expect(link).not.toHaveBeenCalled();
+    expect(settledAt).toBeGreaterThan(0); // the lookup had settled before recognize returned
+    expect(returnedAt).toBeGreaterThanOrEqual(settledAt);
+  });
+
+  it("I1 residual: a statement that outlives the race and THEN errors is rolled back to its savepoint before the scope commits", async () => {
+    await seed();
+    // The shape of the real lookup (SAVEPOINT ... ROLLBACK TO on error) with a
+    // statement that sleeps past the 100 ms race and then fails. `client` is
+    // the tenant transaction's own connection.
+    const slowThenFail = (client) => ({
+      openOutreachForPhone: async () => {
+        await client.query("SAVEPOINT cb_slow");
+        try {
+          await client.query("SELECT 1 / length(pg_sleep(0.5)::text)");
+        } catch (err) {
+          await client.query("ROLLBACK TO SAVEPOINT cb_slow");
+          throw err;
+        }
+      },
+    });
+    let settled;
+    let cb = "unset";
+    let afterFetch;
+    const t0 = Date.now();
+    await db.withTenant(BIZ, async (client) => {
+      settled = await Promise.allSettled([
+        db.createCall(BIZ, "CAcb-slowfail", LEAD, BIZ_PHONE),
+        db.fetchBusinessKnowledge(BIZ),
+        db.listIntegrationsForBusiness(BIZ, { enabledOnly: true }),
+        db.fetchCallerContext(BIZ, LEAD),
+      ]);
+      cb = await recognize({ database: slowThenFail(client), businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-slowfail", callId: settled[0].value, timeoutMs: 100 });
+      afterFetch = await Promise.allSettled([db.fetchBusinessKnowledge(BIZ)]);
+    });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(450); // it waited for the slow statement to settle
+    expect(settled.map((x) => x.status)).toEqual(["fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
+    expect(afterFetch[0].status).toBe("fulfilled");
+    expect(cb).toBeNull();
+    // The scope COMMITTED: the call row exists.
+    const row = (await admin.query(`SELECT outreach_id FROM calls WHERE twilio_call_sid = 'CAcb-slowfail'`)).rows[0];
+    expect(row).toEqual({ outreach_id: null });
+    const config = { businessName: "Callback Co", timezone: "Europe/London", allowedTasks: ["general_question"] };
+    const base = gemini.buildSystemInstruction("greeting", "general_question", config, { callerPhone: LEAD });
+    const extras = { callerPhone: LEAD, ...(cb ? { callbackOutreach: cb } : {}) };
+    expect(gemini.buildSystemInstruction("greeting", "general_question", config, extras)).toBe(base);
   });
 });

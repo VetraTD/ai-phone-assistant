@@ -167,8 +167,10 @@ describe("Live start: inbound callback recognition", () => {
     await call.hangUp();
   });
 
-  it("a lookup that never answers does not hold the greeting: the session connects after the bound", async () => {
-    const database = dbWith({ openOutreachForPhone: vi.fn(() => new Promise(() => {})) });
+  it("a lookup slower than the bound: result unused (not recognised), the session still connects", async () => {
+    // It settles ~700 ms in, after the 300 ms bound; the start awaits its settlement
+    // (so its savepoint is resolved before the scope commits) but does not USE the hit.
+    const database = dbWith({ openOutreachForPhone: vi.fn(() => new Promise((r) => setTimeout(() => r(HIT), 700))) });
     const t0 = Date.now();
     const { call, prompt } = await boot(database);
     expect(Date.now() - t0).toBeLessThan(1500);
