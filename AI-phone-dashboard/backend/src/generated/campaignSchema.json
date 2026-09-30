@@ -18,6 +18,7 @@
     "min_window_minutes": 30,
     "why_allowed": 300,
     "message_text": 300,
+    "call_reason": 200,
     "details_fields": 10,
     "details_value": 200
   },

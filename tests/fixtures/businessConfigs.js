@@ -279,6 +279,11 @@ const SPEED_TO_LEAD_CAMPAIGN = {
     "We'll try again later, or call us back on {caller_id_spoken}.",
   consent_window_days: 30,
   max_call_minutes: 10,
+  // S3-6 goal + why_allowed (validateCampaign requires both). No call_reason
+  // here on purpose: this fixture pins the neutral fallback sentence
+  // (lib/outbound/prompt.js callReasonFor); speed-to-lead-call-reason sets one.
+  goal: "qualify_then_book",
+  why_allowed: "Every contact submitted our own enquiry form; this call follows up on that enquiry.",
 };
 
 /** `extras.outboundCall` (Task 14's key; also `state.outboundCall`). */
@@ -345,6 +350,21 @@ export const OUTBOUND_FIXTURES = {
   // no pack implements yet, so this also proves the D-c intersection degrades
   // safely: the model is left with exactly the two engine tools, never a
   // phantom one.
+  // 2026-09-30: the campaign's own caller-facing reason and campaign notes
+  // (the outbound stand-in for the tenant's inbound custom rules).
+  "speed-to-lead-call-reason": {
+    config: { ...OUTBOUND_TENANT_CONFIG, customInstructions: "INBOUND-ONLY RULE: ask every caller what they are coming in for." },
+    extras: {
+      ...OUTBOUND_BASE_EXTRAS,
+      outboundCall: outboundCallContext({
+        campaignConfig: {
+          ...SPEED_TO_LEAD_CAMPAIGN,
+          call_reason: "You asked us to call you back about a cleaning appointment.",
+          notes: "Our new-patient special ends on Friday; mention it only if they ask about prices.",
+        },
+      }),
+    },
+  },
   "missed-call-callback": {
     config: OUTBOUND_TENANT_CONFIG,
     extras: {

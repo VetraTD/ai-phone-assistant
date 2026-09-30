@@ -39,6 +39,7 @@ import { noBusinessResult, unknownToolResult } from "../lib/capabilities/results
 import {
   withRequirements,
   requirementPromptLines,
+  outboundRequirementPromptLines,
   notesPromptLines,
   capabilityConfig,
   isClosedNow,
@@ -1109,6 +1110,17 @@ function validateBookingTime(rawScheduledAt, config, deps) {
 // well documented; removing a demand is a different bet from adding one,
 // because a rule that is not there cannot be half-followed. The deterministic
 // half of this fix is the two gates that were already shipped.
+/**
+ * OUTBOUND's booking guardrail (2026-09-30), in place of the inbound one
+ * below: on a call Ava placed she already said the person's first name, so the
+ * "don't say it until spelled" rule is backwards there. What stays: nothing is
+ * booked without a read-back and a clear yes (NON-NEGOTIABLE RULE 3), and --
+ * where the availability tool exists -- no time is offered before it is
+ * checked (the NON-NEGOTIABLE availability rule, which names the tool).
+ */
+const OUTBOUND_BOOKING_GUARDRAIL =
+  `- When booking: read the day, the time and their name back, and book only after a clear yes. Use their first name naturally; if a booking needs their full name, ask for it once and read it back.\n`;
+
 const BOOKING_CONFIRMATION_GUARDRAIL =
   `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them to spell it again. Do not ask them to spell anything unless you are told to.\n`;
 
@@ -1442,6 +1454,33 @@ export default {
     // book. When OFF, the model is told to decline booking cleanly rather than
     // advertise a tool it was never given.
     const enabled = allowed.some((t) => APPOINTMENT_MODULE_TASKS.includes(t));
+
+    // OUTBOUND (owner decision 2026-09-30, the outbound prompt's own booking
+    // rules). Reached only when the campaign listed "appointments"
+    // (promptAssembler.js outboundAllowsPack). Two inbound lines are wrong on a
+    // call Ava placed: BOOKING_CONFIRMATION_GUARDRAIL ("do not say the caller's
+    // name until they spell it" -- Ava opened with "is that Priya?"), and the
+    // tenant's phone requirements, which the DIALLED number already satisfies
+    // once confirm_identity has run (lib/capabilities/requirements.js
+    // phone_on_file / outboundRequirementPromptLines) -- rendering them made
+    // the model ask for a number it had dialled. The tenant's capability notes
+    // are inbound operator prose and stay out (services/gemini.js
+    // buildOutboundSystemInstruction never reads capabilityNotes).
+    if (ctx.outboundCall) {
+      return {
+        static: {
+          capabilities: capabilityClauses(allowed),
+          guardrails: enabled
+            ? [
+                OUTBOUND_BOOKING_GUARDRAIL,
+                ...outboundRequirementPromptLines(capabilityConfig(config, "appointments"), ctx.outboundCall).map((l) => `${l}\n`),
+              ]
+            : [declineGuardrail("book, check, cancel, or reschedule appointments")],
+          capabilityNotes: [],
+        },
+        dynamic: {},
+      };
+    }
 
     return {
       static: {

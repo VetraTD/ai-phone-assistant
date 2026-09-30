@@ -1,18 +1,16 @@
 // tests/outboundPromptSnapshot.test.js
 /**
- * OUTBOUND PROMPT — spec §9.5. Snapshots in this file's `outbound/` directory
- * are committed PENDING OWNER REVIEW (session 2b, "Snapshots" note): the first
- * run writes them, a human reviews the wording once, and only after that are
- * they frozen the way the 110 inbound goldens are. Unlike the inbound
- * snapshots, later 2b tasks (18 adds `confirm_identity`) may still regenerate
- * files under `tests/__snapshots__/prompts/outbound/` — the inbound files
- * never move (G9).
+ * OUTBOUND PROMPT. Since 2026-09-30 (owner decision, "two binders, one
+ * rulebook") the outbound prompt is its OWN build -- services/gemini.js
+ * buildOutboundSystemInstruction, reached through the one switch
+ * buildSystemInstruction -- not the receptionist prompt with a block
+ * appended. So each outbound fixture is pinned as ONE full prompt
+ * (`<name>.prompt.txt`, read in full before it was accepted) plus its tool
+ * declarations (`<name>.tools.json`, unchanged by the split: the tool set did
+ * not move).
  *
- * This suite is the outbound analogue of tests/promptSnapshot.test.js, which
- * stays completely unmodified and untouched by anything here: it iterates
- * FIXTURES (tests/fixtures/businessConfigs.js); this iterates the separate
- * OUTBOUND_FIXTURES export from the same file, and writes into a separate
- * snapshot directory.
+ * tests/promptSnapshot.test.js (the inbound goldens) stays untouched: it
+ * iterates FIXTURES; this iterates OUTBOUND_FIXTURES, into its own directory.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -37,17 +35,14 @@ afterAll(() => {
   vi.useRealTimers();
 });
 
-describe("outbound prompt snapshots (pending owner review)", () => {
+/** The prompt an outbound Live session is actually given (lib/voice/live/index.js). */
+const promptFor = (config, extras) => buildSystemInstruction("identify_intent", null, config, extras);
+
+describe("outbound prompt snapshots", () => {
   for (const [name, { config, extras }] of Object.entries(OUTBOUND_FIXTURES)) {
     describe(name, () => {
-      it("static system prefix", async () => {
-        const prefix = buildStaticSystemPrefix(config, extras);
-        await expect(prefix).toMatchFileSnapshot(`${SNAP_DIR}/${name}.static.txt`);
-      });
-
-      it("dynamic tail (identify_intent)", async () => {
-        const tail = buildDynamicTail("identify_intent", null, config, extras);
-        await expect(tail).toMatchFileSnapshot(`${SNAP_DIR}/${name}.tail.txt`);
+      it("full outbound prompt", async () => {
+        await expect(promptFor(config, extras)).toMatchFileSnapshot(`${SNAP_DIR}/${name}.prompt.txt`);
       });
 
       it("tool declarations", async () => {
@@ -58,17 +53,38 @@ describe("outbound prompt snapshots (pending owner review)", () => {
   }
 });
 
-describe("SITUATIONS section (spec §19, S3-D1) — one guidance line per row, integration check via buildDynamicTail", () => {
-  // The authoritative, table-driven coverage of all 13 rows lives in
-  // tests/outboundPrompt.test.js (direct unit test of outboundCallBlock).
-  // This describe block is the lighter INTEGRATION check: the same content
-  // still reaches a real assembled prompt through buildDynamicTail.
+describe("the switch (owner decision 2026-09-30): one decision by direction picks the builder", () => {
   const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-  const block = buildDynamicTail("identify_intent", null, config, extras);
 
-  it("contains the SITUATIONS heading (replaces the old spec §9.5 table wholesale, per §19)", () => {
-    expect(block).toContain("=== OUTBOUND CALL ===");
-    expect(block).toContain("=== SITUATIONS ===");
+  it("the prompt is step-independent on outbound (Live freezes it at connect; the plan is in the job prompt)", () => {
+    expect(buildSystemInstruction("gather_details", "book_appointment", config, extras)).toBe(promptFor(config, extras));
+  });
+
+  it("the inbound halves refuse an outbound call context -- they never quietly build a receptionist prompt for one", () => {
+    expect(() => buildStaticSystemPrefix(config, extras)).toThrow(/outbound/);
+    expect(() => buildDynamicTail("identify_intent", null, config, extras)).toThrow(/outbound/);
+  });
+
+  it("inbound control: the same config without outboundCall still builds the receptionist prompt", () => {
+    const { outboundCall, ...inboundLikeExtras } = extras;
+    expect(buildSystemInstruction("identify_intent", null, config, inboundLikeExtras)).toMatch(/You are a warm, professional receptionist/);
+  });
+});
+
+describe("SITUATIONS section (spec §19, S3-D1) — integration check through the full outbound prompt", () => {
+  // The table-driven coverage of every row lives in tests/outboundPrompt.test.js
+  // (direct unit test of outboundCallBlock); this checks the rows reach the
+  // assembled prompt.
+  const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+  const block = promptFor(config, extras);
+
+  it("contains the job prompt's three headings, in order", () => {
+    const a = block.indexOf("=== THIS CALL ===");
+    const b = block.indexOf("=== CALL PLAN ===");
+    const c = block.indexOf("=== SITUATIONS ===");
+    expect(a).toBeGreaterThan(0);
+    expect(b).toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
   });
 
   const rows = [
@@ -77,7 +93,7 @@ describe("SITUATIONS section (spec §19, S3-D1) — one guidance line per row, i
     ["a household member or possible child (S3-D1b): one availability question only", /one availability question only/i],
     ["never ask a child anything else", /never ask a child anything else/i],
     ["a wrong number: apologise", /A wrong number.*apologise/is],
-    ["a call screener: name and reason once, then wait", /call-screening assistant/i],
+    ["a call screener: name and the enquiry once, then wait", /call-screening assistant/i],
     ["a bad time or driving gets a specific callback offer", /A bad time or driving.*callback/is],
     ['"email me instead" -> someone will email, ends kindly', /Email me instead.*follow up by email/is],
     ['"is this a sales call?" -> honest follow-up reason', /Is this a sales call\?.*follow-up/is],
@@ -86,16 +102,13 @@ describe("SITUATIONS section (spec §19, S3-D1) — one guidance line per row, i
     ["a bad line or unusable reply -> ask once, then offer a callback", /A bad line or an unusable reply.*callback/is],
     ['"stop calling" is honoured immediately', /Stop calling.*take me off your list/i],
     ['"are you a robot" gets "yes, an AI assistant"', /Are you a robot.*an AI assistant/is],
+    ["a voicemail greeting that got past AMD: no message, nothing about why", /voicemail greeting.*leave no message/is],
   ];
   for (const [label, re] of rows) {
     it(`covers: ${label}`, () => {
       expect(block).toMatch(re);
     });
   }
-
-  it("the voicemail row is ABSENT — AMD (spec §9.4) handles it, not the prompt", () => {
-    expect(block).not.toMatch(/voicemail/i);
-  });
 
   it("no inbound ask-gate phrasing ('anything else I can help/assist')", () => {
     expect(block).not.toMatch(/anything else (?:that )?(?:I|we) can (?:help|assist)/i);
@@ -116,14 +129,13 @@ describe("SITUATIONS section (spec §19, S3-D1) — one guidance line per row, i
 describe("first-turn rule and disclosure (spec §9.3/§9.5, O-2)", () => {
   it("no claimsRecording match anywhere in any outbound prompt", () => {
     for (const [name, { config, extras }] of Object.entries(OUTBOUND_FIXTURES)) {
-      const full = buildSystemInstruction("identify_intent", null, config, extras);
-      expect(claimsRecording(full), name).toBe(false);
+      expect(claimsRecording(promptFor(config, extras)), name).toBe(false);
     }
   });
 
   it("states the first-turn rule: persona name, 'AI assistant', business name", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const full = buildSystemInstruction("identify_intent", null, config, extras);
+    const full = promptFor(config, extras);
     expect(full).toContain(extras.outboundCall.config.persona_name);
     expect(full).toContain("AI assistant");
     expect(full).toContain(config.businessName);
@@ -133,59 +145,45 @@ describe("first-turn rule and disclosure (spec §9.3/§9.5, O-2)", () => {
 
   it("O-2 flag ON: the first reply must also carry the transcription notice, deferred to the next reply if the opener was already seeded", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead-disclosure-on"];
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    expect(tail).toContain(TRANSCRIPTION_DISCLOSURE);
-    expect(tail).toMatch(/give this notice instead in your very next reply/i);
+    const full = promptFor(config, extras);
+    expect(full).toContain(TRANSCRIPTION_DISCLOSURE);
+    expect(full).toMatch(/give this notice instead in your very next reply/i);
   });
 
   it("O-2 flag OFF: the notice is given on request only", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
     expect(config.recordingDisclosureEnabled).toBeFalsy();
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    expect(tail).toMatch(/if they ask about recording or being transcribed/i);
-    expect(tail).toContain(TRANSCRIPTION_DISCLOSURE);
+    const full = promptFor(config, extras);
+    expect(full).toMatch(/if they ask about recording or being transcribed/i);
+    expect(full).toContain(TRANSCRIPTION_DISCLOSURE);
   });
 });
 
 describe("O-9: no first name on file", () => {
-  it("tells Ava she does not know the person's name and must ask before sharing the reason", () => {
+  it("tells Ava she does not know the person's name, and the reason waits until they have confirmed who they are", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead-no-first-name"];
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    expect(tail).toMatch(/do not know this person's name/i);
-    expect(tail).toMatch(/ask who you are speaking to/i);
+    const full = promptFor(config, extras);
+    expect(full).toMatch(/do not know this person's name/i);
+    expect(full).toMatch(/once they have confirmed who they are/i);
+    expect(full).toMatch(/Once they confirm who they are and that they made the enquiry, call confirm_identity/);
   });
 });
 
-describe("O-10 / O-11 (fix round 1): inbound-only framing suppressed on outbound", () => {
-  it("O-10: IDENTIFY_INTENT drops 'Your task: Figure out why the caller is calling' on outbound, but still calls set_call_intent", () => {
+describe("inbound-only framing never reaches the outbound prompt (O-10 / O-11, now structural)", () => {
+  it("no intent step guidance and no set_call_intent instruction", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    expect(tail).not.toMatch(/Your task: Figure out why the caller is calling/i);
-    expect(tail).toMatch(/As soon as you understand, call set_call_intent with the appropriate intent/);
+    const full = promptFor(config, extras);
+    expect(full).not.toMatch(/Your task: Figure out why the caller is calling/i);
+    expect(full).not.toMatch(/CURRENT TASK AND STATE/);
+    expect(full).not.toContain("set_call_intent");
   });
 
-  it("O-10 control: the SAME step keeps the line on inbound (extras.outboundCall absent)", () => {
-    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const { outboundCall, ...inboundLikeExtras } = extras;
-    const tail = buildDynamicTail("identify_intent", null, config, inboundLikeExtras);
-    expect(tail).toMatch(/Your task: Figure out why the caller is calling/i);
-  });
-
-  it("O-10: a later step (booking) keeps its normal guidance on outbound, unaffected", () => {
-    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("gather_details", "book_appointment", config, extras);
-    expect(tail).toMatch(/=== CURRENT TASK AND STATE ===/);
-    // Booking's own step guidance still renders (not suppressed) — a
-    // non-trivial body of scheduling instruction, not just the bare step line.
-    expect(tail.length).toBeGreaterThan(400);
-  });
-
-  it("O-11: AFTER-HOURS BEHAVIOR is suppressed on outbound even when the tenant's own office is closed right now", () => {
+  it("O-11: AFTER-HOURS BEHAVIOR is absent even when the tenant's own office is closed right now", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
     const closedConfig = { ...config, businessHours: { ...WEEKLY_HOURS, mon: { open: null, close: null, closed: true } } };
-    const tail = buildDynamicTail("identify_intent", null, closedConfig, extras);
-    expect(tail).not.toMatch(/AFTER-HOURS BEHAVIOR/);
-    expect(tail).not.toMatch(/office is currently CLOSED/i);
+    const full = promptFor(closedConfig, extras);
+    expect(full).not.toMatch(/AFTER-HOURS BEHAVIOR/);
+    expect(full).not.toMatch(/office is currently CLOSED/i);
   });
 
   it("O-11 control: the SAME closed config renders AFTER-HOURS BEHAVIOR on inbound (extras.outboundCall absent)", () => {
@@ -198,18 +196,14 @@ describe("O-10 / O-11 (fix round 1): inbound-only framing suppressed on outbound
   });
 });
 
-describe("D-b regression guard (fix round 1, item 5): THIS CALLER'S NUMBER stays absent even when extras.callerPhone IS populated", () => {
-  // D-b relied on extras.callerPhone staying "" on outbound (P-3). The
-  // explicit `!outbound` guard added in buildDynamicTail must hold even if
-  // some future wiring bug (or Task 18's ctx.party work) puts a real number
-  // on extras.callerPhone for an outbound call.
+describe("D-b regression guard: THIS CALLER'S NUMBER stays absent even when extras.callerPhone IS populated", () => {
   it("no THIS CALLER'S NUMBER block, and the number itself never appears, when callerPhone is populated on an outbound extras bag", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
     const withCallerPhone = { ...extras, callerPhone: "+15559876543" };
-    const tail = buildDynamicTail("identify_intent", null, config, withCallerPhone);
-    expect(tail).not.toMatch(/THIS CALLER'S NUMBER/);
-    expect(tail).not.toContain("+15559876543");
-    expect(tail).not.toContain("555 987 6543");
+    const full = promptFor(config, withCallerPhone);
+    expect(full).not.toMatch(/THIS CALLER'S NUMBER/);
+    expect(full).not.toContain("+15559876543");
+    expect(full).not.toContain("555 987 6543");
   });
 });
 
@@ -369,7 +363,7 @@ describe("D-c extends to prompt TEXT, not only tool declarations", () => {
   // lib/capabilities/promptAssembler.js `outboundAllowsPack`.
   it("the MESSAGE PROTOCOL section never reaches an outbound prompt (messages is not a legal campaign capability)", () => {
     for (const [name, { config, extras }] of Object.entries(OUTBOUND_FIXTURES)) {
-      const prefix = buildStaticSystemPrefix(config, extras);
+      const prefix = promptFor(config, extras);
       expect(prefix, name).not.toContain("MESSAGE PROTOCOL");
       expect(prefix, name).not.toContain("record_customer_request");
     }
@@ -377,14 +371,14 @@ describe("D-c extends to prompt TEXT, not only tool declarations", () => {
 
   it("ESCALATION and the request_transfer TOOL CONTRACT bullet are present when the campaign lists transfer", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const prefix = buildStaticSystemPrefix(config, extras);
+    const prefix = promptFor(config, extras);
     expect(prefix).toContain("=== ESCALATION ===");
     expect(prefix).toContain("request_transfer");
   });
 
   it("ESCALATION and the request_transfer mention are ABSENT when the campaign does not list transfer", () => {
     const { config, extras } = OUTBOUND_FIXTURES["missed-call-callback"];
-    const prefix = buildStaticSystemPrefix(config, extras);
+    const prefix = promptFor(config, extras);
     expect(prefix).not.toContain("=== ESCALATION ===");
     expect(prefix).not.toContain("request_transfer");
     expect(prefix).not.toContain("check_appointment_availability");
@@ -407,10 +401,10 @@ describe("D-c extends to prompt TEXT, not only tool declarations", () => {
 // so "speed-to-lead" alone is enough for the positive case; the negative case
 // builds a variant with "qualification" filtered out of the campaign's own
 // capabilities list, the same technique the D-c intersection tests above use.
-describe("S3-10 fix round 1 (Ruling R-S3-10-prompt): the CAPABILITIES line lists the campaign's qualification questions", () => {
+describe("S3-10 (moved 2026-09-30 into the CALL PLAN): the prompt lists the campaign's qualification questions", () => {
   it("a qualify_then_book-shaped campaign's prompt contains every question's ask text, key and required/optional mark", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const prefix = buildStaticSystemPrefix(config, extras);
+    const prefix = promptFor(config, extras);
     expect(prefix).toContain("What's the clinic called?");
     expect(prefix).toContain("clinic_name");
     expect(prefix).toMatch(/clinic_name \(required\)/);
@@ -428,7 +422,7 @@ describe("S3-10 fix round 1 (Ruling R-S3-10-prompt): the CAPABILITIES line lists
         },
       },
     };
-    const prefix = buildStaticSystemPrefix(config, withoutQualification);
+    const prefix = promptFor(config, withoutQualification);
     expect(prefix).not.toContain("What's the clinic called?");
     expect(prefix).not.toContain("clinic_name");
   });
@@ -452,7 +446,7 @@ describe("S3-10 fix round 1 (Ruling R-S3-10-prompt): the CAPABILITIES line lists
 describe("c3 (checkpoint 2b review, partial FIX) — NON-NEGOTIABLE RULE 4's referent is outbound-only", () => {
   it("outbound: refers to the person whose identity has been confirmed, not the caller ID", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const prefix = buildStaticSystemPrefix(config, extras);
+    const prefix = promptFor(config, extras);
     expect(prefix).toContain("Only discuss records belonging to the person whose identity you have confirmed");
     expect(prefix).not.toContain("the person calling from this number");
   });
@@ -469,7 +463,7 @@ describe("c3 (checkpoint 2b review, partial FIX) — NON-NEGOTIABLE RULE 4's ref
 describe("M5 (checkpoint 2b review, Controller Ruling OVERNIGHT) — no phantom 'take a message' on outbound", () => {
   it("outbound: NNR 1 and the guardrails offer a callback, never a message, as the POSITIVE instruction", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const prefix = buildStaticSystemPrefix(config, extras);
+    const prefix = promptFor(config, extras);
     expect(prefix).not.toContain("offer to take a message so someone can follow up");
     expect(prefix).not.toContain('take their details for follow-up"');
     expect(prefix).not.toContain("offer to take their details so someone can follow up");
@@ -498,81 +492,54 @@ describe("no fixture renders 'undefined' or 'null' into prompt text", () => {
 
 describe("S3-1 contract item 6 — D3's real source", () => {
   // A word-bounded scan: "phone numbers digit by digit" (the read-back
-  // instruction, unconditional on both directions) must NOT count as an ask,
-  // because \bphone number\b requires a boundary right after "number" and
-  // "numbers" has a word character ("s") there instead.
+  // instruction, shared with inbound) must NOT count as an ask, because
+  // \bphone number\b requires a boundary right after "number".
   const ASK_RE = /\b(best|contact|phone)\s+number\b/i;
+  /** The outbound JOB prompt (THIS CALL onward): the part that says what to do on this call. */
+  const jobPrompt = (config, extras) => {
+    const full = promptFor(config, extras);
+    return full.slice(full.indexOf("=== THIS CALL ==="));
+  };
 
-  // Scoped to buildDynamicTail (CURRENT TASK AND STATE + OUTBOUND CALL +
-  // SITUATIONS + step guidance) rather than the full assembled
-  // buildSystemInstruction: the STATIC prefix's own universal, direction-
-  // agnostic guardrail -- "a phone number digit by digit" (services/
-  // gemini.js's write-order read-back rule, shared byte-for-byte with
-  // inbound) -- is a READ-BACK instruction for digits the caller already
-  // volunteered, not an ask, and would otherwise read as a false positive
-  // no outbound-only fix could ever remove.
-  it("the assembled outbound DYNAMIC TAIL (identify_intent, R1 speed_to_lead) asks for a phone number NOWHERE outside the new number rule -- D3 is a model habit, not a prompt leak", () => {
+  it("the outbound job prompt asks for a phone number NOWHERE outside the number rule", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    const numberRuleLine = tail.split("\n").find((l) => l.includes("Never ask for a phone number."));
+    const job = jobPrompt(config, extras);
+    const numberRuleLine = job.split("\n").find((l) => l.includes("Never ask for a phone number."));
     expect(numberRuleLine).toBeTruthy();
-    const withoutRule = tail.split("\n").filter((l) => l !== numberRuleLine).join("\n");
+    const withoutRule = job.split("\n").filter((l) => l !== numberRuleLine).join("\n");
     expect(withoutRule).not.toMatch(ASK_RE);
   });
 
   it("control: the phrase IS present, confirming the scan can see it at all", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("identify_intent", null, config, extras);
-    expect(tail).toMatch(ASK_RE);
+    expect(jobPrompt(config, extras)).toMatch(ASK_RE);
   });
 
-  it("the STATIC prefix's universal read-back guardrail is untouched and out of scope for this rule -- it is confirming digits already given, not asking for any", () => {
+  it("the shared read-back rule is untouched -- it confirms digits already given, it asks for none", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const prefix = buildStaticSystemPrefix(config, extras);
-    expect(prefix).toMatch(/a phone number digit by digit/i);
+    expect(promptFor(config, extras)).toMatch(/a phone number digit by digit/i);
   });
 });
 
-describe("S3-1 contract item 5 — gather_details/confirm ask-gate fallback replaced by the closing rule on outbound", () => {
-  it("gather_details: an intent no capability pack owns falls back to the closing rule on outbound, not 'ask if anything else'", () => {
+describe("S3-1 contract item 5 — the ask-gate never reaches outbound; the closing rule does", () => {
+  it("outbound: no 'ask if there's anything else' in any form, and the closing rule is the plan's last step", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("gather_details", "general_question", config, extras);
-    expect(tail).not.toMatch(/ask if there's anything else you can help with/i);
-    expect(tail).toMatch(
-      /confirm the next step in one sentence, thank them by name, say goodbye, then end the call/i
-    );
-    expect(tail).toMatch(/never ask whether there is anything else you can help with/i);
+    const full = promptFor(config, extras);
+    expect(full).not.toMatch(/ask if there's anything else/i);
+    expect(full).not.toMatch(/explicitly ask if there's anything else/i);
+    expect(full).toMatch(/\d\. To end the call: confirm the next step in one sentence, thank them by name, say goodbye, then end the call/);
+    expect(full).toMatch(/never ask whether there is anything else you can help with/i);
   });
 
-  it("gather_details control: the SAME unowned intent keeps the ask-gate fallback on inbound", () => {
+  it("inbound control: gather_details and confirm keep the ask-gate wording, byte-identical", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
     const { outboundCall, ...inboundLikeExtras } = extras;
-    const tail = buildDynamicTail("gather_details", "general_question", config, inboundLikeExtras);
-    expect(tail).toMatch(/ask if there's anything else you can help with/i);
-  });
-
-  it("confirm: reads back details, then the closing rule instead of 'ask if anything else', on outbound", () => {
-    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("confirm", "book_appointment", config, extras);
-    expect(tail).toMatch(/read back key information/i);
-    expect(tail).not.toMatch(/explicitly ask if there's anything else they need help with/i);
-    expect(tail).toMatch(
-      /confirm the next step in one sentence, thank them by name, say goodbye, then end the call/i
+    expect(buildDynamicTail("gather_details", "general_question", config, inboundLikeExtras)).toMatch(
+      /ask if there's anything else you can help with/i
     );
-    expect(tail).toMatch(/never ask whether there is anything else you can help with/i);
-  });
-
-  it("confirm control: inbound keeps the ask-gate fallback, byte-identical wording", () => {
-    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const { outboundCall, ...inboundLikeExtras } = extras;
-    const tail = buildDynamicTail("confirm", "book_appointment", config, inboundLikeExtras);
-    expect(tail).toMatch(/explicitly ask if there's anything else they need help with/i);
-  });
-
-  it("confirm: the mid-call intent-switch instruction survives on outbound too (a caller can still ask for something else)", () => {
-    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
-    const tail = buildDynamicTail("confirm", "book_appointment", config, extras);
-    expect(tail).toMatch(/call set_call_intent for the new request instead of ending the call/i);
+    expect(buildDynamicTail("confirm", "book_appointment", config, inboundLikeExtras)).toMatch(
+      /explicitly ask if there's anything else they need help with/i
+    );
   });
 });
 

@@ -755,7 +755,9 @@ describe("the verdict", () => {
 // fixture too, not just asserted PASS alongside a script's own criteria.
 // ---------------------------------------------------------------------------
 describe("S3-5: outbound situation scripts", () => {
-  const TOPIC = TEMPLATES.speed_to_lead.topic; // "our clinic systems"
+  // Pinned literal (2026-09-30): the real runs these fixtures came from used
+  // the then-template topic; the template itself is neutral now.
+  const TOPIC = "our clinic systems";
   const NOW = new Date("2026-09-28T13:00:00Z");
   const TZ = "Europe/London";
   /** A real assistant turn: `text` is what Ava said, `user_text` is the ASR's transcript of what the caller said (null on a filler turn -- the model heard nothing new). */

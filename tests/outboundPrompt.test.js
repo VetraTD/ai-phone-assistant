@@ -87,10 +87,10 @@ describe("M2 (checkpoint 2b review) — the identity-not-confirmed bullet names 
     expect(text).not.toMatch(/confirm they are Priya/i);
   });
 
-  it("the instruction sits on the identity-not-confirmed bullet, not floating detached from it", () => {
+  it("the instruction sits on CALL PLAN step 1 (confirm who you are speaking to), not floating detached from it", () => {
     const line = renderBlock(WITH_FIRST_NAME)
       .split("\n")
-      .find((l) => l.startsWith("You have not confirmed"));
+      .find((l) => l.startsWith("1. Confirm who you are speaking to."));
     expect(line).toMatch(/confirm_identity/i);
   });
 });
@@ -128,7 +128,7 @@ describe("S3-1 — the number rule (D3)", () => {
   });
 });
 
-describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", () => {
+describe("S3-1 — the SITUATIONS section: one line per situation (14 rows)", () => {
   const text = renderBlock(WITH_FIRST_NAME);
   const lines = text.split("\n");
 
@@ -153,7 +153,8 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     ['"already booked" / "already a customer"', /Already booked.*already a customer/i, /apologise/i],
     ["hostile", /^- Hostile/im, /offer to stop calling/i],
     ["a bad line or an unusable reply", /A bad line or an unusable reply/i, /ask once/i],
-    ["call screening", /Call screening/i, /say your name and the reason.*once/i],
+    ["call screening", /Call screening/i, /returning .*enquiry, once/i],
+    ["a voicemail greeting that got past AMD (2026-09-30)", /A voicemail greeting/i, /leave no message/i],
   ];
 
   for (const [label, whoRe, moveRe] of rows) {
@@ -163,11 +164,11 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
     });
   }
 
-  it("is exactly 13 situation rows (lines starting with '- ')", () => {
+  it("is exactly 14 situation rows (lines starting with '- ')", () => {
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     expect(situationsIdx).toBeGreaterThanOrEqual(0);
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(13);
+    expect(situationRows.length).toBe(14);
   });
 
   // S3-3 supersedes this item's old assertion. Before S3-3, none of these
@@ -256,14 +257,14 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
   // my number?" is folded back in, as an alternative phrasing on the "is
   // this a sales call?" line, so the list stays at 13 rows and Ava never
   // improvises a source when a caller asks this on an outbound call.
-  it('fix round 1: "how did you get my number?" is folded into the "is this a sales call?" line, still 13 rows', () => {
+  it('fix round 1: "how did you get my number?" is folded into the "is this a sales call?" line, still one row', () => {
     const line = lines.find((l) => /^- "Is this a sales call\?"/i.test(l));
     expect(line).toBeTruthy();
     expect(line).toMatch(/How did you get my number\?/i);
     expect(line).toMatch(/never invent a source/i);
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(13);
+    expect(situationRows.length).toBe(14);
   });
 });
 
@@ -279,15 +280,19 @@ describe("S3-1 — the SITUATIONS section: one line per situation (13 rows)", ()
 describe("S3-6: the GOAL line", () => {
   it("qualify_then_book renders the brief's own example verbatim", () => {
     const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: "qualify_then_book" } };
-    expect(renderBlock(outboundCall)).toContain("GOAL: Ask the questions, then offer a time to talk.");
+    // 2026-09-30: the questions are their own CALL PLAN step, so the goal's
+    // step is only the offer, and it comes AFTER the questions.
+    const text = renderBlock(outboundCall);
+    expect(text).toContain("The next step: Offer them a time to talk.");
+    expect(text.indexOf("The next step:")).toBeGreaterThan(text.indexOf("Ask these questions"));
   });
 
   it.each([
-    ["book", "GOAL: Offer them a time to book."],
-    ["confirm_or_move", "GOAL: Confirm the appointment, or offer to move it to a time that works better."],
-    ["get_review", "GOAL: Ask them for a review."],
-    ["pass_message", "GOAL: Pass on the message."],
-    ["find_need", "GOAL: Find out what they need."],
+    ["book", "The next step: Offer them a time to book."],
+    ["confirm_or_move", "The next step: Confirm the appointment, or offer to move it to a time that works better."],
+    ["get_review", "The next step: Ask them for a review."],
+    ["pass_message", "The next step: Pass on the message."],
+    ["find_need", "The next step: Find out what they need."],
   ])("%s renders its own goal line", (goal, expectedLine) => {
     const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal } };
     expect(renderBlock(outboundCall)).toContain(expectedLine);
@@ -295,12 +300,12 @@ describe("S3-6: the GOAL line", () => {
 
   it("no goal set at all (named risk 5's prompt-side shape -- dispatch.js already refuses to dial this): no GOAL line, never a blank or 'undefined' one", () => {
     const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: undefined } };
-    expect(renderBlock(outboundCall)).not.toMatch(/^GOAL:/m);
+    expect(renderBlock(outboundCall)).not.toMatch(/The next step:/);
   });
 
   it("an unrecognised goal value also renders no line, rather than guessing at one", () => {
     const outboundCall = { ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, goal: "sell_stuff" } };
-    expect(renderBlock(outboundCall)).not.toMatch(/^GOAL:/m);
+    expect(renderBlock(outboundCall)).not.toMatch(/The next step:/);
   });
 });
 

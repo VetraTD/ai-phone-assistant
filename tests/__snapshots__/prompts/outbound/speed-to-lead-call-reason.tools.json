@@ -1,0 +1,311 @@
+[
+  {
+    "name": "set_call_intent",
+    "description": "Call this as soon as you understand the reason for this call. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "type": "string",
+          "enum": [
+            "general_question",
+            "transfer_human",
+            "book_appointment",
+            "check_appointment",
+            "cancel_reschedule"
+          ],
+          "description": "The caller's primary intent"
+        }
+      },
+      "required": [
+        "intent"
+      ]
+    }
+  },
+  {
+    "name": "end_call",
+    "description": "Signal that the conversation is naturally complete and it is time to end the call. You MUST write your warm sign-off in the SAME response as this call — thank them for their time and wish them well. Nothing you say after this is heard.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Brief reason the call is ending"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    }
+  },
+  {
+    "name": "confirm_identity",
+    "description": "Call this once you have established who you are speaking to, before sharing any details of the enquiry or looking anything up for them. Pass name_confirmed: true only once the person THEMSELVES confirms they are Priya -- never on a gatekeeper's, receptionist's or relative's word. Pass name_confirmed: false if this is the wrong person, a gatekeeper, a child, or you could not confirm who you are speaking to -- share nothing further in that case: ask them to put you through, or offer a callback instead.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name_confirmed": {
+          "type": "boolean",
+          "description": "True once the person's identity is confirmed, false otherwise"
+        }
+      },
+      "required": [
+        "name_confirmed"
+      ]
+    }
+  },
+  {
+    "name": "book_appointment",
+    "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name": {
+          "type": "string",
+          "description": "The caller's full name, exactly as THEY gave it on this call. Never invent one, never use a placeholder such as 'Jane Doe' or 'John Smith', and never take a name from an earlier record the caller has not confirmed. If they have not told you their name yet, ask them for it and wait for the answer before calling this."
+        },
+        "scheduled_at": {
+          "type": "string",
+          "description": "ISO 8601 datetime for the appointment (e.g. 2025-03-15T10:00:00)"
+        },
+        "service_type": {
+          "type": "string",
+          "description": "Type of service or consultation requested"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Any additional notes about the appointment or client needs"
+        },
+        "in_addition_to_existing": {
+          "type": "boolean",
+          "description": "Set true ONLY after you have told the caller they already have an upcoming appointment and they confirmed they want this new one AS WELL AS that one. Never set it pre-emptively — booking is refused without it when the caller already has an appointment."
+        }
+      },
+      "required": [
+        "scheduled_at",
+        "client_name"
+      ]
+    }
+  },
+  {
+    "name": "request_transfer",
+    "description": "Transfer the caller to a human. Use when the caller asks for a person/representative/manager in any language, or when you cannot help and transfer is appropriate.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Brief reason for the transfer"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    }
+  },
+  {
+    "name": "record_answer",
+    "description": "Record the caller's answer to one of this call's qualification questions. Call this right after they answer each one -- do not wait until the end of the call to record several at once, and do not invent an answer they did not give.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "clinic_name"
+          ],
+          "description": "Which question this answers. One of: clinic_name."
+        },
+        "value": {
+          "type": "string",
+          "description": "The caller's answer, in their own words, at most 500 characters."
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ]
+    }
+  },
+  {
+    "name": "set_call_outcome",
+    "description": "Record how this outbound call ended. Call this once, near the end of the call, choosing whichever option best matches what actually happened. Never call this for a booking (book_appointment already records that), an opt-out request (use the opt_out tool instead), or a transfer (request_transfer already records that) -- this tool refuses all three.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "qualified_no_booking",
+            "not_interested",
+            "not_a_fit",
+            "callback_requested",
+            "wrong_person",
+            "wrong_number",
+            "other"
+          ],
+          "description": "qualified_no_booking: a real conversation, no booking made. not_interested: they said no. not_a_fit: they do not meet the criteria. callback_requested: they asked to be called back at a specific time -- use schedule_callback for that, then this. wrong_person: you established this is not the right person (not a wrong NUMBER -- use wrong_number for that). wrong_number: this number does not reach the right person or business at all. other: anything else, with a note."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional short note, e.g. what the contact asked for."
+        }
+      },
+      "required": [
+        "outcome"
+      ]
+    }
+  },
+  {
+    "name": "schedule_callback",
+    "description": "Book a specific day and time to call this contact back. `when_iso` is the day and time IN THE CONTACT'S OWN LOCAL TIME, as YYYY-MM-DDTHH:MM with no timezone offset -- write it exactly as they would read a clock on their own wall, never converted to any other timezone. If the time is not available you will be told the nearest time that is -- offer that instead of guessing another one yourself.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "when_iso": {
+          "type": "string",
+          "description": "The callback's day and time, in the contact's own local time, as YYYY-MM-DDTHH:MM."
+        },
+        "when_text": {
+          "type": "string",
+          "description": "What the contact actually said, e.g. \"tomorrow afternoon\" or \"Thursday around 2\"."
+        }
+      },
+      "required": [
+        "when_iso"
+      ]
+    }
+  },
+  {
+    "name": "opt_out",
+    "description": "Call this the moment the contact asks to stop being called, to be taken off the list, or anything equivalent -- even from a gatekeeper or someone who says this is the wrong number. Say the confirmation sentence you have been given for this situation, then call this tool.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "check_appointment_availability",
+    "description": "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller names a time OR a day. Given a date and time it answers whether that slot is open, and if available is false you offer the returned alternatives instead of collecting details. Given just a date it returns the times open that day: offer open_times first, and if the caller wants something else that day, offer from all_open_times. Never tell a caller nothing else is available while all_open_times still has times in it. Let them choose — never choose for them.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "requested_at": {
+          "type": "string",
+          "description": "What the caller asked for. If they named a time, the full date and time as ISO 8601 (e.g. 2026-03-15T10:00:00). If they named only a day, the date alone (e.g. 2026-03-15) — never invent an hour they did not say."
+        }
+      },
+      "required": [
+        "requested_at"
+      ]
+    }
+  },
+  {
+    "name": "get_caller_appointments_from_db",
+    "description": "Look up the appointments belonging to the person on this call, once their identity has been confirmed with confirm_identity. It cannot search for anyone else, by name or otherwise.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "cancel_appointment_db",
+    "description": "Cancel an appointment in our database. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment (we use the one we looked up).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "appointment_id": {
+          "type": "string",
+          "description": "UUID of the appointment to cancel (optional if caller has one appointment)"
+        },
+        "client_name": {
+          "type": "string",
+          "description": "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the cancellation will be refused."
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "reschedule_appointment_db",
+    "description": "Reschedule an appointment in our database to a new date/time. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "appointment_id": {
+          "type": "string",
+          "description": "UUID of the appointment (optional if caller has one appointment)"
+        },
+        "new_scheduled_at": {
+          "type": "string",
+          "description": "New date and time in ISO 8601 format (e.g. 2026-04-15T10:00:00)"
+        },
+        "client_name": {
+          "type": "string",
+          "description": "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the reschedule will be refused."
+        }
+      },
+      "required": [
+        "new_scheduled_at"
+      ]
+    }
+  },
+  {
+    "name": "correct_appointment_name",
+    "description": "Correct the name on an appointment that is already booked, when the caller tells you it was taken down wrong. Use this whenever they correct their name AFTER a booking exists - do not just say you have updated it, because nothing changes unless this runs. It updates the existing appointment; it does not create a new one.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name": {
+          "type": "string",
+          "description": "The corrected full name, exactly as the caller has now given it."
+        },
+        "appointment_id": {
+          "type": "string",
+          "description": "Which appointment to correct. Omit it for the one booked or discussed earlier in this call."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under. Only needed when the caller is not calling from that number."
+        }
+      },
+      "required": [
+        "client_name"
+      ]
+    }
+  },
+  {
+    "name": "add_appointment_note",
+    "description": "Add a note to an appointment that is already booked - something the caller wants the business to know before they come in. Use this whenever they ask you to note, add, record or pass on a detail about an existing appointment. It ADDS to any note already there; it does not replace it, and it does not change the date, the time or the name. Do not tell the caller a note has been added unless this has run and returned success.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string",
+          "description": "What to record, in the caller's own words, kept short. Do not include payment card details, passwords or security codes even if the caller offers them."
+        },
+        "appointment_id": {
+          "type": "string",
+          "description": "Which appointment to note. Omit it for the one booked or discussed earlier in this call."
+        },
+        "phone_last4": {
+          "type": "string",
+          "description": "The last 4 digits of the phone number the appointment is booked under. Only needed when the caller is not calling from that number."
+        }
+      },
+      "required": [
+        "note"
+      ]
+    }
+  }
+]
