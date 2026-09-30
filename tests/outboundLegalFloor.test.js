@@ -83,12 +83,12 @@ describe("floorFor", () => {
     expect(floorFor(phone, null)).toMatchObject({ country: "US" });
   });
 
-  it("a non-NANP country code (+33 France) is refused -- no invented EU envelope", () => {
-    expect(floorFor("+33612345678", null)).toEqual({ refused: "no_legal_floor" });
-    expect(floorFor("+33612345678", "Europe/Paris")).toEqual({ refused: "no_legal_floor" });
+  it("a non-NANP, non-EU country code (+41 Switzerland) is refused -- no invented envelope (the EU states have one since S4-5)", () => {
+    expect(floorFor("+41791234567", null)).toEqual({ refused: "no_legal_floor" });
+    expect(floorFor("+41791234567", "Europe/Zurich")).toEqual({ refused: "no_legal_floor" });
   });
 
-  it.each([["+491234567890", "+49 Germany"], ["+61412345678", "+61 Australia"], ["", "empty string"], ["not a phone number", "garbage"]])(
+  it.each([["+4791234567", "+47 Norway"], ["+61412345678", "+61 Australia"], ["", "empty string"], ["not a phone number", "garbage"]])(
     "%s (%s): refused, never allow on a lookup miss (named risk 1)",
     (phone) => {
       expect(floorFor(phone, null)).toEqual({ refused: "no_legal_floor" });
@@ -318,7 +318,7 @@ describe("schedule_callback (capabilities/callback.js): the S3-7 floor on the va
       callingWindow: { mon_fri: "00:00-23:59", sat: null, sun: null },
       tz: "Europe/Paris",
       now,
-      phone: "+33612345678",
+      phone: "+41791234567",
     });
     expect(v).toEqual({ ok: false, nearest: null, refused: "no_legal_floor" });
   });

@@ -282,9 +282,40 @@ describe("evaluateGate: the per-country calling-hours floor (S3-7)", () => {
     expect(gate(f)).toEqual({ verdict: "never", reason: "no_legal_floor" });
   });
 
-  it("a +33 (France) number: never, no_legal_floor -- no invented EU envelope", () => {
+  it("a +41 (Switzerland) number: never, no_legal_floor -- neither EU, GB nor US", () => {
     const f = floorBase();
-    f.contact = { phone_e164: "+33612345678", timezone: "Europe/Paris", raw_timezone: "Europe/Paris" };
+    f.contact = { phone_e164: "+41791234567", timezone: "Europe/Zurich", raw_timezone: "Europe/Zurich" };
+    expect(gate(f)).toEqual({ verdict: "never", reason: "no_legal_floor" });
+  });
+
+  // S4-5: the EU floor through the gate.
+  const frContact = () => ({ phone_e164: "+33612345678", timezone: "Europe/Paris", raw_timezone: "Europe/Paris" });
+  it("EU: a +33 number at 11:00 Paris on a Wednesday is allowed", () => {
+    const f = floorBase();
+    f.contact = frContact();
+    f.now = new Date("2026-09-30T09:00:00Z"); // Wed 11:00 CEST (near base() created_at, clear of give_up_window)
+    expect(gate(f)).toEqual({ verdict: "allow" });
+  });
+  it("EU: 13:30 Paris (lunch gap): later, outside_floor, opening at 14:00", () => {
+    const f = floorBase();
+    f.contact = frContact();
+    f.now = new Date("2026-10-14T11:30:00Z"); // 13:30 CEST
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    expect(gate(f).at.toISOString()).toBe("2026-10-14T12:00:00.000Z"); // 14:00 CEST
+  });
+  it("EU: Bastille Day (Tue 14 Jul 2026) 11:00 Paris: later, opening Wed 15 Jul 10:00", () => {
+    const f = floorBase();
+    f.contact = frContact();
+    f.now = new Date("2026-07-14T09:00:00Z");
+    expect(gate(f)).toMatchObject({ verdict: "later", reason: "outside_floor" });
+    expect(gate(f).at.toISOString()).toBe("2026-07-15T08:00:00.000Z");
+  });
+  it("EU: a date past the holiday table (2031) is never allowed -- fails closed as no_legal_floor", () => {
+    const f = floorBase();
+    f.contact = frContact();
+    f.now = new Date("2031-03-12T10:00:00Z"); // Wednesday 11:00 CET
+    f.outreach.created_at = new Date("2031-03-12T09:59:00Z"); // fresh row + consent: only the floor can refuse
+    f.consents[0].captured_at = new Date("2031-03-12T09:58:00Z");
     expect(gate(f)).toEqual({ verdict: "never", reason: "no_legal_floor" });
   });
 
