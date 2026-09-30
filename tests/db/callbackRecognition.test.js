@@ -390,11 +390,12 @@ d("the real start path: recognizeCallback -> createCall link -> prompt -> record
         db.fetchCallerContext(BIZ, LEAD),
       ]);
       cb = await recognize({ database: slowThenFail(client), businessId: BIZ, callerPhone: LEAD, callSid: "CAcb-slowfail", callId: settled[0].value, timeoutMs: 100 });
-      afterFetch = await Promise.allSettled([db.fetchBusinessKnowledge(BIZ)]);
+      // Nothing else is issued after recognize: the scope ends straight into COMMIT, as in the start path.
+
     });
     expect(Date.now() - t0).toBeGreaterThanOrEqual(450); // it waited for the slow statement to settle
     expect(settled.map((x) => x.status)).toEqual(["fulfilled", "fulfilled", "fulfilled", "fulfilled"]);
-    expect(afterFetch[0].status).toBe("fulfilled");
+    
     expect(cb).toBeNull();
     // The scope COMMITTED: the call row exists.
     const row = (await admin.query(`SELECT outreach_id FROM calls WHERE twilio_call_sid = 'CAcb-slowfail'`)).rows[0];
