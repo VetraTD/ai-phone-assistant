@@ -32,6 +32,8 @@ import { BACKSTOP_END_MARK, FIRST_AUDIO_MARK, CLIP_CALLER_HOLD_MAX_MS, CLIP_HOLD
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import { detectOptOut } from "../lib/outbound/detectors.js";
 import { createPostCall } from "../lib/outbound/postCall.js";
+import { ComplianceViolationError } from "../lib/compliance.js";
+import * as realDb from "../services/db.js";
 import { mulaw8kToPcm16k } from "../lib/voice/resample.js";
 
 let allowed = new Set();
@@ -1780,7 +1782,11 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
         if (mergeFails) throw new Error("db down");
         Object.assign(answers, patch);
       });
+      database.fetchCallTranscript = vi.fn(async () => rows.map((r) => ({ ...r })));
       const pcDb = postCallDb(rows);
+      pcDb.mergeCallAnswers = vi.fn(async (_sid, patch) => {
+        Object.assign(answers, patch);
+      });
       const baseCtx = pcDb.outboundPostCallContext;
       pcDb.outboundPostCallContext = vi.fn(async () => ({ ...(await baseCtx()), answers: { ...answers } }));
       const summarize = vi.fn(noopSummarize);
@@ -1817,6 +1823,8 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
 
       // ONE STT call, on the real fixture bytes, in order, frame-aligned.
       expect(stt).toHaveBeenCalledTimes(1);
+      // The session's language (a UK number -> en-GB), not a hard-coded en-US.
+      expect(stt.mock.calls[0][0].language).toMatch(/^en(-GB)?$/);
       const audio = heldAudio(stt);
       expect(audio.length % 160).toBe(0);
       // The WHOLE utterance, contiguous and in order -- not only the voiced
@@ -1835,11 +1843,12 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
       expect(events("outbound_optout_unverified_hold")).toHaveLength(0);
     });
 
-    for (const [label, makeStt, opts] of [
+    for (const [label, makeStt, opts, expectedWhy] of [
       ["Deepgram rejects", () => vi.fn(async () => { throw new Error("503"); }), {}],
       ["Deepgram returns empty text", () => vi.fn(async () => ({ text: "   " })), {}],
       ["Deepgram never answers (bounded)", () => vi.fn(() => new Promise(() => {})), { clipHoldSttTimeoutMs: 120 }],
-      ["hipaa refusal (assertVendorAllowed throws)", () => vi.fn(async () => { throw Object.assign(new Error("deepgram is not permitted in hipaa mode"), { code: "VENDOR_NOT_ALLOWED" }); }), {}],
+      // The producer's own class, as assertVendorAllowed("deepgram") throws it in hipaa mode.
+      ["hipaa refusal (ComplianceViolationError)", () => vi.fn(async () => { throw new ComplianceViolationError("deepgram"); }), {}, "hipaa_refused"],
     ]) {
       it(`${label}: the attempt is marked unverified, post-call holds it for review (CLOSED, no reschedule) and raises the alert event`, async () => {
         allowErrors("outbound_optout_unverified_hold");
@@ -1869,6 +1878,7 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
         expect(alert[0]).toMatchObject({ level: "ERROR", outreachId: "out-1", attemptId: "att-1", callSid: SID });
         expect(JSON.stringify(alert[0])).not.toMatch(/stop calling me/i);
         expect(events("outbound_clip_hold_stt")[0]).toMatchObject({ ok: false, chars: 0 });
+        if (expectedWhy) expect(events("outbound_clip_hold_stt")[0].why).toBe(expectedWhy);
       });
     }
 
@@ -1919,11 +1929,69 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
       const stt = vi.fn(async () => { throw new Error("503"); });
       const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
       await sayStopThenHangUp(call);
-      await vi.waitFor(() => expect(r.pcDb.claimPostCall).toHaveBeenCalled(), { timeout: 4000 });
+      await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalled(), { timeout: 4000 });
       expect(r.database.mergeCallAnswers.mock.calls.length).toBeGreaterThan(1);
       const failed = events("outbound_optout_unverified_marker_failed");
       expect(failed).toHaveLength(1);
       expect(failed[0]).toMatchObject({ level: "ERROR", callSid: SID });
+      // I2: the marker never landed, yet the SAME process's post-call claim
+      // carried the verdict in-process -- held, closed, no reschedule.
+      expect(r.pcDb.applyOutreachResult.mock.calls[0][2]).toEqual({
+        terminal: true,
+        closeReason: "held_for_review",
+        outcome: "held_for_review",
+        nextAttemptAt: null,
+      });
+      allowErrors("outbound_optout_unverified_hold");
+    });
+
+    // I1 (review). The row write "succeeds" against the REAL db layer even
+    // when nothing landed: real withTenantSafe swallows into its fallback and
+    // real addTranscriptEntry no-ops / logs and returns. Here the real
+    // functions run with no pool (an INSERT that never happens), so the old
+    // boolean said ok:true, wrote no marker, and the lead was re-dialled.
+    it("I1: Deepgram recovered the words but the row never landed (real withTenantSafe/addTranscriptEntry/fetchCallTranscript) -> read-back fails -> unverified, held", async () => {
+      allowErrors("outbound_optout_unverified_hold");
+      const r = heldRig();
+      Object.assign(r.database, {
+        withTenantSafe: realDb.withTenantSafe,
+        addTranscriptEntry: realDb.addTranscriptEntry,
+        fetchCallTranscript: realDb.fetchCallTranscript,
+      });
+      const stt = vi.fn(async () => ({ text: "Please stop calling me." }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+      await sayStopThenHangUp(call);
+      await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+      expect(events("outbound_clip_hold_stt")[0]).toMatchObject({ ok: false, why: "write_unverified" });
+      expect(r.answers).toEqual({ _optout_unverified: true });
+      expect(r.pcDb.applyOutreachResult.mock.calls[0][2].closeReason).toBe("held_for_review");
+    });
+
+    it("I1 control: with a working write path the read-back confirms the row and the run is ok:true", async () => {
+      const r = heldRig();
+      const stt = vi.fn(async () => ({ text: "Please stop calling me." }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+      await sayStopThenHangUp(call);
+      await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+      expect(r.database.fetchCallTranscript).toHaveBeenCalled();
+      expect(events("outbound_clip_hold_stt")[0]).toMatchObject({ ok: true });
+    });
+
+    // M1 (review): a whitespace-only Live fragment is not a transcript.
+    it("M1: a whitespace-only inputTranscription during the drain does not count as transcribed -- the Deepgram fallback still runs", async () => {
+      const r = heldRig();
+      const stt = vi.fn(async () => ({ text: "Please stop calling me." }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+      await call.feed(400, { voiced: true });
+      await call.feed(400);
+      transcribeOnReceipt(call, "   ");
+      await call.feed(300);
+      await call.feedFrames(stopFrames());
+      await call.feed(400);
+      await call.hangUp();
+      await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
+      expect(stt).toHaveBeenCalledTimes(1);
+      expect(events("outbound_clip_hold_drain_settled")[0]).toMatchObject({ transcribed: false });
     });
   });
 
@@ -2456,6 +2524,23 @@ describe("inbound unchanged", () => {
       }),
     };
   }
+
+  // S4-2 (review M7): the Deepgram one-shot and the unverified marker are
+  // outbound-only. An inbound hang-up with voiced audio in flight touches neither.
+  it("S4-2: an inbound hang-up mid-speech never runs the STT one-shot or writes the unverified marker", async () => {
+    const database = inboundDb();
+    database.mergeCallAnswers = vi.fn(async () => {});
+    const stt = vi.fn(async () => ({ text: "x" }));
+    const call = await bootLive({ config: CONFIG, callSid: "CAinbound0003", businessPhone: CALLER_ID, callerPhone: INBOUND_CALLER, database, clipHoldStt: stt });
+    await call.feed(400, { voiced: true });
+    await call.feed(400);
+    await call.feed(200, { voiced: true });
+    await call.hangUp();
+    await call.settle();
+    expect(stt).not.toHaveBeenCalled();
+    expect(database.mergeCallAnswers).not.toHaveBeenCalled();
+    expect(events("outbound_clip_hold_stt")).toHaveLength(0);
+  });
 
   it("looks the business up by phone, loads caller history, creates the call with the 4-arg shape, and sends the kick", async () => {
     const database = inboundDb();

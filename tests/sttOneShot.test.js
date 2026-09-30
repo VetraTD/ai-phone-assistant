@@ -11,11 +11,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const gate = vi.hoisted(() => ({ refuse: false }));
 vi.mock("@deepgram/sdk", () => ({ DeepgramClient: vi.fn() }));
 vi.mock("../lib/logger.js", () => ({ log: { debug: vi.fn(), info: vi.fn(), error: vi.fn() } }));
-vi.mock("../lib/compliance.js", () => ({
-  assertVendorAllowed: vi.fn((vendor) => {
-    if (gate.refuse) throw Object.assign(new Error(`refusing ${vendor}`), { name: "ComplianceViolationError" });
-  }),
-}));
+vi.mock("../lib/compliance.js", async (importActual) => {
+  // The producer's own error class, so the refusal has the real shape.
+  const actual = await importActual();
+  return {
+    ...actual,
+    assertVendorAllowed: vi.fn((vendor) => {
+      if (gate.refuse) throw new actual.ComplianceViolationError(vendor);
+    }),
+  };
+});
 
 import { transcribeMulawOnce, wrapMulawAsWav } from "../lib/voice/sttDeepgram.js";
 import { log } from "../lib/logger.js";
@@ -73,7 +78,10 @@ describe("transcribeMulawOnce", () => {
     expect(transcribeFile).toHaveBeenCalledTimes(1);
     const [upload, request, options] = transcribeFile.mock.calls[0];
     expect(Buffer.isBuffer(upload) && upload.toString("ascii", 0, 4)).toBe("RIFF");
-    expect(request).toMatchObject({ model: "nova-3", language: "en-US", mip_opt_out: true });
+    expect(request).toMatchObject({ model: "nova-3", language: "en", mip_opt_out: true });
+    const gbFn = vi.fn(async () => body("x"));
+    await transcribeMulawOnce({ frames: FRAMES, env: ENV, language: "en-GB", clientFactory: factoryFor(gbFn).factory });
+    expect(gbFn.mock.calls[0][1].language).toBe("en-GB");
     expect(options).toMatchObject({ maxRetries: 0 });
     expect(options.abortSignal).toBeInstanceOf(AbortSignal);
     expect(seen.opts.apiKey).toBe("test-key");

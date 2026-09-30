@@ -970,3 +970,60 @@ describe("S4-2 -- calls.answers._optout_unverified: the lead is held for review,
     expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
   });
 });
+
+describe("S4-2 fix round 1 -- the in-process hint (I2) and the once-per-lead alert (M4)", () => {
+  const held = { terminal: true, closeReason: "held_for_review", outcome: "held_for_review", nextAttemptAt: null };
+  const withMerge = (extra = {}) => ({ mergeCallAnswers: vi.fn(async () => {}), ...extra });
+
+  it("hint only (no marker in calls.answers): held_for_review, and the lost marker is re-written for any retry", async () => {
+    const db = fakeDb({ answers: null }, withMerge());
+    await runPostCall({ attemptId: ATTEMPT, businessId: BIZ, hints: { optoutUnverified: true } }, { db, now: () => NOW, rand: () => 0, summarize: noopSummarize });
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+    expect(db.mergeCallAnswers).toHaveBeenCalledWith(CALL_SID, { _optout_unverified: true });
+  });
+
+  it("hint only, and the marker re-write ALSO fails: still held (the hint decides), the failure is logged, nothing throws", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answers: null }, { mergeCallAnswers: vi.fn(async () => { throw new Error("db down"); }) });
+    await runPostCall({ attemptId: ATTEMPT, businessId: BIZ, hints: { optoutUnverified: true } }, { db, now: () => NOW, rand: () => 0, summarize: noopSummarize, log });
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+    expect(log.error.mock.calls.some(([e]) => e === "outbound_optout_unverified_marker_failed")).toBe(true);
+  });
+
+  it("marker only (a different claimant, no hint): held, and no needless re-write", async () => {
+    const db = fakeDb({ answers: { _optout_unverified: true } }, withMerge());
+    await run(db);
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+    expect(db.mergeCallAnswers).not.toHaveBeenCalled();
+  });
+
+  it("the hint never overrides a verified opt-out (opted_out still wins)", async () => {
+    const db = fakeDb({ answers: null }, withMerge({ fetchCallTranscript: vi.fn(async () => [{ speaker: "caller", message: "please stop calling me" }]) }));
+    await runPostCall({ attemptId: ATTEMPT, businessId: BIZ, hints: { optoutUnverified: true } }, { db, now: () => NOW, rand: () => 0, summarize: noopSummarize });
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(CALL_SID, "opted_out");
+    expect(db.applyOutreachResult.mock.calls[0][2].closeReason).toBe("terminal_outcome");
+    expect(db.mergeCallAnswers).not.toHaveBeenCalled();
+  });
+
+  it("createPostCall.tryClaimByAttempt carries the hint into runPostCall (both ends real)", async () => {
+    const db = fakeDb({ answers: null }, withMerge());
+    const pc = createPostCall({ db, now: () => NOW, rand: () => 0, summarize: noopSummarize });
+    expect(await pc.tryClaimByAttempt(ATTEMPT, BIZ, { optoutUnverified: true })).toBe(true);
+    expect(db.applyOutreachResult).toHaveBeenCalledWith(OUTREACH, 1, held);
+    const plain = fakeDb({ answers: null }, withMerge());
+    await createPostCall({ db: plain, now: () => NOW, rand: () => 0, summarize: noopSummarize }).tryClaimByAttempt(ATTEMPT, BIZ);
+    expect(plain.applyOutreachResult.mock.calls[0][2].closeReason).not.toBe("held_for_review");
+  });
+
+  it("M4: the alertable ERROR fires only when the hold was actually applied; an already-applied retry is INFO", async () => {
+    const first = { info: vi.fn(), error: vi.fn() };
+    await run(fakeDb({ answers: { _optout_unverified: true } }), { log: first });
+    expect(first.error.mock.calls.filter(([e]) => e === "outbound_optout_unverified_hold")).toHaveLength(1);
+
+    const retry = { info: vi.fn(), error: vi.fn() };
+    const db = fakeDb({ answers: { _optout_unverified: true } }, { applyOutreachResult: vi.fn(async () => false) });
+    await run(db, { log: retry });
+    expect(retry.error.mock.calls.filter(([e]) => e === "outbound_optout_unverified_hold")).toHaveLength(0);
+    expect(retry.info.mock.calls.some(([e]) => e === "outbound_optout_unverified_hold_already_applied")).toBe(true);
+  });
+});
