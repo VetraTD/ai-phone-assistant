@@ -42,7 +42,7 @@ export class FakeSocket extends EventEmitter {
   }
 }
 
-export function fakeLive() {
+export function fakeLive({ connectGate } = {}) {
   // C1 (checkpoint-A review). `audioIn` records every caller-audio realtime
   // input, in call order -- the only way to prove "caller audio reaches Live
   // AFTER the seed" from outside index.js: `sendRealtimeInput` used to be a
@@ -64,6 +64,8 @@ export function fakeLive() {
   return {
     sent,
     connect: vi.fn(async ({ callbacks }) => {
+      // Final fix wave I1: a test can hold the vendor connect open (cold connect).
+      if (connectGate) await connectGate;
       onmessage = callbacks.onmessage;
       return { session, languagePinned: true, surface: "aistudio", model: "m" };
     }),
@@ -164,10 +166,13 @@ export async function bootLive({
   // fails, which is the "Deepgram unavailable" branch.
   clipHoldStt,
   clipHoldSttTimeoutMs,
+  // Final fix wave I1: a promise the fake vendor connect awaits before it
+  // resolves (a cold connect); a test releases it after the hang-up.
+  connectGate,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
-  const live = fakeLive();
+  const live = fakeLive({ connectGate });
   const { deps, store } = makeFakeDeps({ seedAppointments, slotCapacity });
 
   // A MUTABLE CLOCK, not the frozen `() => 0` this helper used to inject.

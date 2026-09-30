@@ -133,8 +133,8 @@ async function logsDuring(run) {
   return { out, lines, events: (name) => lines.filter((l) => l.event === name) };
 }
 
-function bootOutbound({ database = outboundDb(), env = {}, customParameters = { direction: "outbound" }, authorizedCallSid = SID, callSid = SID, waitForConnect = true, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs } = {}) {
-  return bootLive({ config: CONFIG, callSid, env, customParameters, authorizedCallSid, database, waitForConnect, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs });
+function bootOutbound({ database = outboundDb(), env = {}, customParameters = { direction: "outbound" }, authorizedCallSid = SID, callSid = SID, waitForConnect = true, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs, connectGate } = {}) {
+  return bootLive({ config: CONFIG, callSid, env, customParameters, authorizedCallSid, database, waitForConnect, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs, connectGate });
 }
 
 /** 24 kHz PCM16 as the model sends it: enough for several 20 ms mu-law frames. */
@@ -1669,6 +1669,9 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
     database.addTranscriptEntry = vi.fn(async (_callId, speaker, message, sequence) => {
       rows.push({ speaker, message, sequence });
     });
+    // N2: the drain's row is read back, so the fixture needs the read side of
+    // the same store (the producer's shape: rows of {speaker, message, sequence}).
+    database.fetchCallTranscript = vi.fn(async () => rows.map((r) => ({ ...r })));
     return { rows, database };
   }
 
@@ -1975,6 +1978,152 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
       await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
       expect(r.database.fetchCallTranscript).toHaveBeenCalled();
       expect(events("outbound_clip_hold_stt")[0]).toMatchObject({ ok: true });
+    });
+
+    // FINAL FIX WAVE N2. A drain Live DID transcribe is verified by the same
+    // read-back as the Deepgram branch: the row is fire-and-forget through
+    // swallowing helpers, and a row that never landed must not read as "the
+    // caller said nothing".
+    it("N2: Live transcribed the drain but the row never landed (real withTenantSafe/addTranscriptEntry/fetchCallTranscript) -> unverified marker, held", async () => {
+      allowErrors("outbound_optout_unverified_hold");
+      const r = heldRig();
+      Object.assign(r.database, {
+        withTenantSafe: realDb.withTenantSafe,
+        addTranscriptEntry: realDb.addTranscriptEntry,
+        fetchCallTranscript: realDb.fetchCallTranscript,
+      });
+      const stt = vi.fn(async () => ({ text: "should never be asked" }));
+      const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt });
+      await call.feed(400, { voiced: true });
+      await call.feed(400);
+      transcribeOnReceipt(call, "Stop calling me.");
+      for (let i = 0; i < 3; i++) {
+        await call.feed(160, { voiced: true });
+        await call.feed(40);
+      }
+      await call.hangUp();
+      await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+      expect(stt).not.toHaveBeenCalled(); // Live transcribed: no second ASR
+      expect(r.answers).toEqual({ _optout_unverified: true });
+      expect(events("outbound_clip_hold_drain_row_unverified")).toHaveLength(1);
+      expect(r.pcDb.applyOutreachResult.mock.calls[0][2].closeReason).toBe("held_for_review");
+      expect(r.pcDb.insertDetectorSuppression).not.toHaveBeenCalled();
+    });
+
+    // FINAL FIX WAVE r1. The hint rides only THIS process's own claim. When that
+    // claim is not ours, the durable marker is all another process can see.
+    describe("r1: the hint only reaches this process's own claim", () => {
+      const NOT_OURS = () => ({ tryClaim: async () => false, tryClaimByAttempt: vi.fn(async () => false) });
+
+      it("a claim that is not ours re-tries a marker that was lost, and the retry lands: no hint_dropped alert", async () => {
+        allowErrors("outbound_optout_unverified_marker_failed");
+        const r = heldRig();
+        // The first drain attempts all fail; a later one (post-claim) succeeds.
+        let calls = 0;
+        r.database.mergeCallAnswers = vi.fn(async (_sid, patch) => {
+          calls += 1;
+          if (calls <= 3) throw new Error("db down");
+          Object.assign(r.answers, patch);
+        });
+        const postCall = NOT_OURS();
+        const stt = vi.fn(async () => { throw new Error("503"); });
+        const call = await bootOutbound({ database: r.database, postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+        await sayStopThenHangUp(call);
+        await vi.waitFor(() => expect(r.answers).toEqual({ _optout_unverified: true }), { timeout: 12000 });
+        expect(postCall.tryClaimByAttempt).toHaveBeenCalledWith("att-1", expect.anything(), { optoutUnverified: true });
+        expect(events("outbound_optout_unverified_hint_dropped")).toHaveLength(0);
+      }, 20000);
+
+      it("a claim that is not ours and a marker that never lands: outbound_optout_unverified_hint_dropped (ERROR) fires", async () => {
+        allowErrors("outbound_optout_unverified_marker_failed", "outbound_optout_unverified_hint_dropped");
+        const r = heldRig({ mergeFails: true });
+        const postCall = NOT_OURS();
+        const stt = vi.fn(async () => { throw new Error("503"); });
+        const call = await bootOutbound({ database: r.database, postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+        await sayStopThenHangUp(call);
+        await vi.waitFor(() => expect(events("outbound_optout_unverified_hint_dropped")).toHaveLength(1), { timeout: 15000 });
+        expect(events("outbound_optout_unverified_hint_dropped")[0]).toMatchObject({ level: "ERROR", callSid: SID, claim: "not_claimed" });
+      }, 25000);
+
+      it("a claim that IS ours never retries the marker (the hint already did its job)", async () => {
+        allowErrors("outbound_optout_unverified_marker_failed", "outbound_optout_unverified_hold");
+        const r = heldRig({ mergeFails: true });
+        const stt = vi.fn(async () => { throw new Error("503"); });
+        const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, clipDrainMaxMs: 150 });
+        await sayStopThenHangUp(call);
+        await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        expect(events("outbound_optout_unverified_hint_dropped")).toHaveLength(0);
+      });
+    });
+
+    // FINAL FIX WAVE I1. dialFirstSeconds is built before the vendor connect,
+    // so on a cold (or failed) connect the clip plays and holds speech with no
+    // Live session. The hang-up used to drop that speech: no Deepgram, no
+    // marker, no hint -> re-dial. Real stop_ask frames; the connect never opens
+    // until after the hang-up.
+    describe("I1 (final review): hang-up before the Live session is open", () => {
+      const openGate = () => {
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        return { gate, release };
+      };
+
+      it("the held speech goes straight to Deepgram; the caller row lands; post-call writes the suppression (opted_out)", async () => {
+        const r = heldRig();
+        const stt = vi.fn(async () => ({ text: "Please stop calling me." }));
+        const { gate, release } = openGate();
+        const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, connectGate: gate, waitForConnect: false });
+        try {
+          await sayStopThenHangUp(call);
+          await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
+          expect(stt).toHaveBeenCalledTimes(1);
+          expect(heldAudio(stt).includes(STOP_ASK)).toBe(true);
+          expect(r.rows.filter((x) => x.speaker === "caller").map((x) => x.message)).toEqual(["Please stop calling me."]);
+          expect(r.pcDb.setCallOutcomeCode).toHaveBeenCalledWith(SID, "opted_out");
+          expect(r.database.mergeCallAnswers).not.toHaveBeenCalled();
+          expect(events("outbound_clip_hold_stt")[0]).toMatchObject({ ok: true });
+        } finally {
+          release();
+        }
+      });
+
+      it("Deepgram failing there: the marker is written, the claim carries the hint, the lead is held (CLOSED, no reschedule)", async () => {
+        allowErrors("outbound_optout_unverified_hold");
+        const r = heldRig();
+        const stt = vi.fn(async () => { throw new Error("503"); });
+        const { gate, release } = openGate();
+        const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, connectGate: gate, waitForConnect: false });
+        try {
+          await sayStopThenHangUp(call);
+          await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+          expect(r.database.mergeCallAnswers).toHaveBeenCalledWith(SID, { _optout_unverified: true });
+          expect(r.pcDb.applyOutreachResult.mock.calls[0][2]).toEqual({
+            terminal: true,
+            closeReason: "held_for_review",
+            outcome: "held_for_review",
+            nextAttemptAt: null,
+          });
+          expect(r.pcDb.insertDetectorSuppression).not.toHaveBeenCalled();
+        } finally {
+          release();
+        }
+      });
+
+      it("only silence held before the session opens is not a drain: no Deepgram, no marker", async () => {
+        const r = heldRig();
+        const stt = vi.fn(async () => ({ text: "x" }));
+        const { gate, release } = openGate();
+        const call = await bootOutbound({ database: r.database, postCall: r.postCall, clipHoldStt: stt, connectGate: gate, waitForConnect: false });
+        try {
+          await call.feed(1400);
+          await call.feed(200);
+          await call.hangUp();
+          expect(stt).not.toHaveBeenCalled();
+          expect(r.database.mergeCallAnswers).not.toHaveBeenCalled();
+        } finally {
+          release();
+        }
+      });
     });
 
     // M1 (review): a whitespace-only Live fragment is not a transcript.
