@@ -402,3 +402,14 @@ describe("review M4: only the FIRST confirmation points at the reason", () => {
     expect(r.functionResponse.response.message).not.toMatch(/why you are calling/);
   });
 });
+
+describe("2026-09-30 sim gatekeeper_later-3: only a clear yes confirms identity", () => {
+  const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+  const prompt = promptFor(config, extras);
+  it("step 1 says what is NOT a confirmation (a time, 'he's out', words not caught)", () => {
+    expect(prompt).toMatch(/Anything else is NOT a confirmation: a greeting, a question, a time, "he's out", or words you did not catch/);
+  });
+  it("an unsure speaker is treated as a gatekeeper until they say it is them", () => {
+    expect(prompt).toMatch(/If you are not sure whether you are speaking to Priya or to someone else, treat them as this row/);
+  });
+});

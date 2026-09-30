@@ -734,6 +734,9 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
         "Call this once you have established who you are speaking to, before sharing any " +
         "details of the enquiry or looking anything up for them. Pass name_confirmed: true only " +
         `once ${selfConfirmClause} -- never on a gatekeeper's, receptionist's or relative's word. ` +
+        // 2026-09-30 sim (gatekeeper_later-3): a mangled "He's out. Try
+        // tomorrow at ten." was taken as a yes.
+        "A greeting, a question, a time, or words you did not catch are not a confirmation -- ask again. " +
         "Pass name_confirmed: false if this is the wrong person, a gatekeeper, " +
         "a child, or you could not confirm who you are speaking to -- share nothing further in " +
         "that case: ask them to put you through, or offer a callback instead.",
