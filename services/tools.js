@@ -437,7 +437,13 @@ export async function executeToolCall(fc, ctx) {
   // intercepts a webhook of the same name. The hold itself is engine state
   // (lib/voice/live/index.js holdRequestedAt -> liveFirstLine.enterHold).
   if (fc.name === "wait_on_hold" && ctx?.outboundCall) {
-    const message = "Wait quietly. Say nothing until a person speaks.";
+    // Paid sim hold_transfer-3 (2026-10-01): the person who came back got the
+    // reason with no intro. Spec §4's restart rule rides here, in the reply
+    // the model reads right before it waits -- not only in the job prompt.
+    const message =
+      "Wait quietly. Say nothing until a person speaks. When someone speaks to you again, they may not have heard " +
+      "you yet: start your reply with who you are -- your name, that you are an AI assistant, and the business -- " +
+      "and check who you are speaking to before anything else.";
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {

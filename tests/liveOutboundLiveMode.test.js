@@ -354,7 +354,15 @@ describe("wait_on_hold (spec §4; ruling R3)", () => {
     call.live.push(modelAudioMsg()); // "Sure, thank you."
     await call.settle();
     const [r] = await call.callTool("wait_on_hold", {});
-    expect(r.response).toMatchObject({ success: true, message: "Wait quietly. Say nothing until a person speaks." });
+    // Paid sim hold_transfer-3: the person who came back got the reason with no intro (1 of 2 hold
+    // runs). The rule is in the tool reply the model reads right before it waits (ruling R31).
+    expect(r.response).toEqual({
+      success: true,
+      message:
+        "Wait quietly. Say nothing until a person speaks. When someone speaks to you again, they may not have heard " +
+        "you yet: start your reply with who you are -- your name, that you are an AI assistant, and the business -- " +
+        "and check who you are speaking to before anything else.",
+    });
     expect(call.ws.liveFirstLine.onHold()).toBe(false); // the ack's own generation still plays
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
     call.live.push(modelAudioMsg());
