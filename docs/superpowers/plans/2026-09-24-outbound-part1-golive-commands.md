@@ -482,6 +482,17 @@ describe/update` take the BARE id `15114942414748467079`; `alertPolicies/<id>` d
 Re-test campaigns created (draft): S20 R2-Hello `c488edd2-8776-46d5-ad25-92d3032ce37f`, S21 R2-Gatekeeper
 `d7766147-23d0-46cf-9c1c-ea855d874e4a`. Rollback target stays `voice-uk-prod-00095-nhs`.
 
+**[AS RUN] R2 calls, 2026-10-01 ~10:11-10:25 CDT: Hello PASS (close not reached), Gatekeeper PASS.** A first
+attempt at 20:42 CDT on 09-30 was refused `outside_floor` (no dial): the US floor
+(`lib/outbound/legalFloor.js` `US_WINDOWS`) is Mon-Sat 08:00-20:00, Sun 12:00-20:00 local, so the effective
+window for a US contact is 08:00-20:00 whatever the campaign window says. Hello (S20): confirmed, then the
+`call_reason` sentence BEFORE the first question, the clinic-name question, the offer; the owner hung up before
+the close; no phone-number ask, no "anything else", no doubled sentence. Gatekeeper (S21): the garbled
+"He's out, try tomorrow at ten" produced NO `confirm_identity` at all, no reason, no offer; callback booked
+(Cloud Task `scheduleTime` 2026-10-02T15:00:00Z = 10:00 CDT), outcome `callback_requested`. LVX165 did not
+reproduce (N=1; watch stays). Both campaigns paused. Spend P1-LIVE-R2 $0.0763 (P1 $2.6626 / $10).
+Ops notes: a resumed campaign's re-armed row waits the same 120 s grace before a forced sweep picks it up.
+
 **What stage 4 changes for a caller.**
 - (Outbound test calls only while `OUTBOUND_ENABLED=false`.) The assistant now follows an outbound
   call plan: confirm the person, say why it is calling in one sentence BEFORE any question, ask the
