@@ -434,6 +434,12 @@ describe("FIRST REPLY (live first-speaker mode)", () => {
     expect(live).toContain(`Your intro: "${WITH_FIRST_NAME.openerText}"`);
   });
 
+  it("an opener that names the business but never says 'AI' also falls back (the intro must disclose)", () => {
+    const opener = "Hello {first_name}, it's {persona_name} from {business_name}.";
+    const text = renderBlock({ ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, opener } });
+    expect(text).toContain(`Your intro: "Hi, this is Ava, an AI assistant calling from ${BUSINESS}. Am I speaking with Priya?"`);
+  });
+
   it("the intro is rendered with THIS prompt's business name, never a stale one carried on outbound.openerText", () => {
     const text = renderBlock({ ...WITH_FIRST_NAME, openerText: "Hi, it's Ava, an AI assistant from Some Other Firm." });
     expect(text).not.toContain("Some Other Firm");
