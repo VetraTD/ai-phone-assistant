@@ -44,7 +44,9 @@ function fakeDb(r = row()) {
 const env = { enabled: false, allowlist: new Set(["+447700900001"]), maxConcurrent: 8, inboundReserve: 2, baseUrl: "https://svc.example" };
 const mk = (db, twilio = { calls: { create: vi.fn(async () => ({ sid: "CA123" })) } }, extra = {}) => {
   const enqueue = vi.fn(async () => ({ created: true }));
-  const d = createDispatcher({ db, twilio, enqueue, env, now: () => NOW, rand: () => 0, callerIdValid: async () => true, renderAudio: async () => null, log: { info() {}, error() {} }, ...extra });
+  // 2026-10-01 (ruling R1): this file's tests assert the clip rollback's
+  // render-before-dial; live mode (the default) has its own block below.
+  const d = createDispatcher({ db, twilio, enqueue, env, now: () => NOW, rand: () => 0, callerIdValid: async () => true, renderAudio: async () => null, log: { info() {}, error() {} }, firstSpeaker: "clip", ...extra });
   return { d, enqueue, twilio };
 };
 
@@ -1075,5 +1077,71 @@ describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
     const { d } = mk(db, undefined, { renderAudio });
     await d({ businessId: "b1", outreachId: "o1" });
     expect(renderAudio.mock.calls[0][0].lines.opener).toBe("Hi, is that Sam? It's Ava, an AI assistant from Digile Media.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §2.1, plan Task 6):
+// LIVE mode (the default) has no recorded opener -- dispatch never renders
+// one and never holds the dial for it. Voicemail and transfer_miss clips are
+// unchanged (machine answers and failed transfers still use them).
+// ---------------------------------------------------------------------------
+describe("live first-speaker mode: no opener render, no dial wait (Task 6)", () => {
+  it("the renderer is asked for voicemail + transfer_miss only", async () => {
+    const db = fakeDb();
+    const renderAudio = vi.fn(async () => null);
+    const { d } = mk(db, undefined, { renderAudio, firstSpeaker: "live" });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(renderAudio).toHaveBeenCalledTimes(1);
+    expect(Object.keys(renderAudio.mock.calls[0][0].lines).sort()).toEqual(["transfer_miss", "voicemail"]);
+  });
+
+  it("a hung render does not delay calls.create and logs no outbound_render_late", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = fakeDb();
+      const renderAudio = vi.fn(() => new Promise(() => {}));
+      const log = { info: vi.fn(), error: vi.fn() };
+      const { d, twilio } = mk(db, undefined, { renderAudio, log, firstSpeaker: "live" });
+      const done = d({ businessId: "b1", outreachId: "o1" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+      expect(log.error).not.toHaveBeenCalledWith("outbound_render_late", expect.anything());
+      await vi.advanceTimersByTimeAsync(40_000); // the post-dial cap still bounds the voicemail render
+      expect((await done).status).toBe("dialed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an attempt with nothing else to render (no voicemail due, no transfer) never calls the renderer at all", async () => {
+    const db = fakeDb(
+      row({ attempts_made: 1, config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055", capabilities: ["qualification", "opt_out", "outcome"] } })
+    );
+    const renderAudio = vi.fn(async () => null);
+    const { d, twilio } = mk(db, undefined, { renderAudio, firstSpeaker: "live" });
+    await d({ businessId: "b1", outreachId: "o1" });
+    expect(renderAudio).not.toHaveBeenCalled();
+    expect(twilio.calls.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("the default (no firstSpeaker given) follows OUTBOUND_FIRST_SPEAKER: unset -> live, clip -> clip", async () => {
+    const prev = process.env.OUTBOUND_FIRST_SPEAKER;
+    try {
+      delete process.env.OUTBOUND_FIRST_SPEAKER;
+      const r1 = vi.fn(async () => null);
+      const enqueue = vi.fn(async () => ({ created: true }));
+      const twilio = { calls: { create: vi.fn(async () => ({ sid: "CA1" })) } };
+      const base = { twilio, enqueue, env, now: () => NOW, rand: () => 0, callerIdValid: async () => true, log: { info() {}, error() {} } };
+      await createDispatcher({ ...base, db: fakeDb(), renderAudio: r1 })({ businessId: "b1", outreachId: "o1" });
+      expect(r1.mock.calls[0][0].lines).not.toHaveProperty("opener");
+      process.env.OUTBOUND_FIRST_SPEAKER = "clip";
+      const r2 = vi.fn(async () => null);
+      await createDispatcher({ ...base, db: fakeDb(), renderAudio: r2 })({ businessId: "b1", outreachId: "o1" });
+      expect(r2.mock.calls[0][0].lines).toHaveProperty("opener");
+    } finally {
+      if (prev === undefined) delete process.env.OUTBOUND_FIRST_SPEAKER;
+      else process.env.OUTBOUND_FIRST_SPEAKER = prev;
+    }
   });
 });
