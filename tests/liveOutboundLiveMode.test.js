@@ -693,3 +693,23 @@ describe("final review #8: the read-back must be an EARLIER heard turn, not the 
     await call.hangUp();
   });
 });
+
+describe("paid sim hold_transfer-2: a reply Live never closed (no turnComplete) is still a closed generation", () => {
+  it("the new-caller-turn flush closes it: its disclosure counts, the next turn is not judged as the first reply", async () => {
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantSays(INTRO); // ...and Live never sends turnComplete for it
+    await call.feed(500);
+    await call.feed(600, { voiced: true }); // the person answers: a new caller turn flushes the open one
+    await call.feed(800);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("What were you hoping we could help with?");
+    expect(events("outbound_disclosure_missing")).toEqual([]);
+    expect(events("live_debug_assistant_turn")).toEqual([]); // (LIVE_DEBUG_TRANSCRIPT is off here)
+    await call.hangUp();
+  });
+});

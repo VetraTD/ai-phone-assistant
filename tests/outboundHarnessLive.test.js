@@ -279,3 +279,12 @@ describe("verdictClient: what the runner hands the verdict as `client`", () => {
     expect(verdictClient({}, {})).toEqual({ heard_before_first_post_clip_line_ms: undefined, holdPause: null });
   });
 });
+
+describe("buildProbeScript keeps the hold pause (paid sims hold_transfer-1/-2: it was dropped, so no pause ever ran)", () => {
+  it("pauseAfterQuietMs survives into the loaded line, like afterPreviousMs", async () => {
+    const { buildProbeScript } = await import("../lib/probe/script.js");
+    const loaded = buildProbeScript(resolveScriptLines("outbound_hold_transfer"));
+    expect(loaded.find((l) => l.label === "gk_fetch_confirm").pauseAfterQuietMs).toBe(10000);
+    expect(loaded.find((l) => l.label === "hold_ask").pauseAfterQuietMs).toBeUndefined();
+  });
+});
