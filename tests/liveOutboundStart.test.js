@@ -134,7 +134,10 @@ async function logsDuring(run) {
 }
 
 function bootOutbound({ database = outboundDb(), env = {}, customParameters = { direction: "outbound" }, authorizedCallSid = SID, callSid = SID, waitForConnect = true, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs, connectGate } = {}) {
-  return bootLive({ config: CONFIG, callSid, env, customParameters, authorizedCallSid, database, waitForConnect, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs, connectGate });
+  // 2026-10-01 (ruling R1): live is the default now; this file pins the clip
+  // rollback so every clip assertion below still tests clip. Live mode has its
+  // own file (tests/liveOutboundLiveMode.test.js). An explicit env wins.
+  return bootLive({ config: CONFIG, callSid, env: { OUTBOUND_FIRST_SPEAKER: "clip", ...env }, customParameters, authorizedCallSid, database, waitForConnect, postCall, clipDrainMaxMs, clipDrainSettleMs, clipHoldStt, clipHoldSttTimeoutMs, connectGate });
 }
 
 /** 24 kHz PCM16 as the model sends it: enough for several 20 ms mu-law frames. */
@@ -888,29 +891,6 @@ describe("outbound: the first seconds through the real session", () => {
     await call.hangUp();
   });
 
-  // Live mode (contract item 6): this specifically tests Live's OWN first
-  // turn arriving BEFORE any clip exists -- a scenario clip mode (the new
-  // default) no longer allows (Live never speaks first, S3-D2). Numbers
-  // unchanged from before S3-2.
-  it("first-turn check: an incomplete first reply gets one correction note", async () => {
-    allowErrors("outbound_first_turn_incomplete");
-    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
-    await call.feed(400, { voiced: true });
-    call.live.push(modelAudioMsg());
-    await call.settle();
-    const { events } = await logsDuring(() => call.assistantTurn("Hi, is that Sam?"));
-    expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
-    const notes = call.live.sent.clientContent.filter((m) =>
-      m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly: you are Ava, an AI assistant from Digile Media.")
-    );
-    expect(notes).toHaveLength(1);
-    await call.assistantTurn("Great, and what's the clinic called?");
-    expect(
-      call.live.sent.clientContent.filter((m) => m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly"))
-    ).toHaveLength(1);
-    await call.hangUp();
-  });
-
   it("I1: the reviewer's probe -- a barge cuts the backstop before the disclosure, Live's next turn lacks it, and it is corrected", async () => {
     allowErrors("outbound_first_turn_incomplete");
     const call = await bootOutbound();
@@ -928,42 +908,6 @@ describe("outbound: the first seconds through the real session", () => {
     await call.assistantTurn("Great, thanks Sam. I'm calling about your enquiry.");
 
     const isNote = (m) => m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly: you are Ava, an AI assistant from Digile Media.");
-    expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(1);
-    expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
-    await call.hangUp();
-  });
-
-  // Live mode (contract item 6): "not the backstop" is the whole point of
-  // this test -- Live's own reply IS the first audio, which clip mode (the
-  // new default) no longer permits.
-  it("I5 (checkpoint 2b review): a barge into LIVE'S OWN first reply -- not the backstop -- never corrects on that interrupted turn itself, only re-arms", async () => {
-    allowErrors("outbound_first_turn_incomplete");
-    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
-    // Speech onset with no clip yet: the slow-Live path, so Live's own reply
-    // is the first audio and there is no backstop in play at all.
-    await call.feed(400, { voiced: true });
-    // The person barges before Live has said anything of the disclosure --
-    // the vendor's own `interrupted`, not a local clearAudio on our clip.
-    await call.assistantSays("Hi, is that Sam?");
-    call.live.push({ serverContent: { interrupted: true } });
-    await call.settle();
-
-    const isNote = (m) =>
-      m.turns?.[0]?.parts?.[0]?.text?.includes("Tell them now, briefly: you are Ava, an AI assistant from Digile Media.");
-    // The interrupted turn never corrects itself -- an in-flight barge is not
-    // the moment to talk over the caller a second time -- although its own
-    // text plainly lacks the disclosure. (Without I5's guard, `clearAudio`'s
-    // unconditional call on every interrupted turn happens to re-arm a
-    // wrongly-queued mark too, which is why this assertion, not a chained
-    // one, is what actually distinguishes the fixed wire from the broken
-    // one.)
-    expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(0);
-    expect(events("outbound_first_turn_incomplete")).toHaveLength(0);
-
-    // Still armed: Live's NEXT (complete) turn is judged on its own merits,
-    // and this one also carries no disclosure -- proof the check was never
-    // silently spent by the interrupted turn.
-    await call.assistantTurn("Great, what's the clinic called?");
     expect(call.live.sent.clientContent.filter(isNote)).toHaveLength(1);
     expect(events("outbound_first_turn_incomplete")).toHaveLength(1);
     await call.hangUp();
@@ -3017,39 +2961,6 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     await call.feed(1400);
     await call.hangUp();
     expect(events("outbound_first_audio")).toEqual([expect.objectContaining({ from_answer_ms: 1750, measured: "enqueue" })]);
-  });
-
-  // Live mode (contract item 6): kept as continuous voice (rather than a
-  // short hello) so the clip mode default's hello-end timer (which would
-  // otherwise fire first, before onset + slowLiveMs) cannot interfere -- this
-  // test is specifically about the SLOW path's own seed deferral.
-  it("O-8: the slow-path clip is NOT seeded when it fires -- only when its end mark echoes", async () => {
-    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
-    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    await call.feed(400, { voiced: true }); // onset at 20 (confirmed at ~220)
-    await call.feed(1240); // 1,640: past onset + 1,600
-    expect(enqueue).toHaveBeenCalledWith(OPENER_AUDIO);
-    expect(call.live.sent.clientContent).toEqual([]);
-
-    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
-    expect(call.live.sent.clientContent).toEqual([{ turns: [{ role: "model", parts: [{ text: OPENER }] }], turnComplete: false }]);
-    await call.hangUp();
-  });
-
-  // M2 (fix round 1): reverted to its ORIGINAL 600 ms -- CLIP_BARGE_MIN_MS is
-  // clip-mode-only (the ordinary 300 ms gate threshold governs in `live`
-  // mode, exactly as before S3-2), so this barge only needs to clear the
-  // gate's own 300 ms threshold, not the 600 ms one.
-  it("O-8: a slow-path clip cut by a barge is never seeded", async () => {
-    const call = await bootOutbound({ env: { OUTBOUND_FIRST_SPEAKER: "live" } });
-    const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
-    await call.feed(400, { voiced: true });
-    await call.feed(1240);
-    await call.feed(600, { voiced: true }); // talks over the clip
-    expect(clear).toHaveBeenCalled();
-    call.ws.deliver({ event: "mark", mark: { name: BACKSTOP_END_MARK } });
-    expect(call.live.sent.clientContent.filter(isSeed)).toEqual([]);
-    await call.hangUp();
   });
 
   it("O-9: no first name -- the seed is the opener without its first-name sentence", async () => {

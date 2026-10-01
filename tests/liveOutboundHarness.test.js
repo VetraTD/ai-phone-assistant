@@ -52,7 +52,9 @@ import { createClientObserver, outboundVerdict, parseServerLog } from "../lib/pr
 
 const BASE = "http://localhost:3000";
 const AUTH = "live-outbound-harness-auth";
-const ENV = { BASE_URL: BASE, MEDIA_STREAM_SECRET: "live-outbound-harness-secret", TWILIO_VALIDATE_SIGNATURE: "true" };
+// 2026-10-01 (ruling R1): clip pinned -- these scenarios assert the clip
+// rollback. A test passing OUTBOUND_FIRST_SPEAKER explicitly overrides it.
+const ENV = { BASE_URL: BASE, MEDIA_STREAM_SECRET: "live-outbound-harness-secret", TWILIO_VALIDATE_SIGNATURE: "true", OUTBOUND_FIRST_SPEAKER: "clip" };
 
 const SID = "CAharness00000000000001";
 const BIZ = "biz-harness";
@@ -406,7 +408,10 @@ describe("the simulated outbound call, through the real door and session", () =>
 
     // The harness echoes the first-audio mark (nothing ahead of it: at once).
     echo(call, FIRST_AUDIO_MARK);
-    expect(call.ws.liveDialFirstSeconds.firstAudio()).toMatchObject({ path: "live_reply", measured: "playout" });
+    // 2026-10-01: `live` is the NEW live mode (lib/outbound/liveFirstLine.js),
+    // not the old race -- its first reply is the person's answer, path speech.
+    expect(call.ws.liveFirstLine.firstReply()).toMatchObject({ path: "speech" });
+    expect(call.ws.liveDialFirstSeconds).toBeUndefined();
 
     // --amd human: recorded, and nothing reaches Twilio REST.
     const amd = await send(app, buildOutboundAmdRequest({ ...COMMON, answeredBy: "human", durationMs: 2400 }));
@@ -438,11 +443,14 @@ describe("the simulated outbound call, through the real door and session", () =>
       no_frame_before_onset: "PASS",
       path_backstop_hello_end: "FAIL",
       clip_after_hello_le_2000: "PASS",
-      no_stale_reply_after_clip: "PASS",
+      // 2026-10-01: the new live mode logs no outbound_first_audio /
+      // outbound_live_shadow (clip-only), so the two clip criteria read FAIL
+      // here until plan Task 9 gives the verdict its live-mode criteria.
+      no_stale_reply_after_clip: "FAIL",
       calls_direction_outbound: "PASS",
       post_call_exactly_once: "PASS",
     });
-    expect(v.criteria.path_backstop_hello_end).toMatchObject({ path: "live_reply" });
+    expect(v.criteria.path_backstop_hello_end).toMatchObject({ reason: "no outbound_first_audio for this call" });
     expect(v.criteria.clip_after_hello_le_2000.client_from_speech_ms).toBe(280);
     expect(v.pass).toBe(false);
   });
