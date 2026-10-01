@@ -103,6 +103,27 @@ New SITUATIONS row plus a code state, because a prompt alone does not keep a mod
   and no transcript, the same S4-2 path runs on it (`transcribeMulawOnce`, EU endpoint, then held_for_review). This
   is one of the rules that must hold before `OUTBOUND_ENABLED=true`, so it cannot be dropped with the clip.
 
+## 5b. Read-back of key answers (owner addition 2026-10-01)
+
+On the R2 Hello call the clinic name came through Live's own speech recognition as "best college" and was saved
+without a check. Live's caller transcript is lossy (names, emails, spellings), so the AI cannot tell a mangled
+answer from a real one -- only the person can.
+- **What:** for a qualification question marked `confirm: true` in the campaign (schema: optional boolean on each
+  `questions[]` entry, default `false`; `text`-type questions only), the AI repeats the answer back before saving
+  it: "Brightwork Clinic -- did I get that right?" A yes saves it; a correction replaces it and is read back once
+  more; a second failure saves the latest version and logs `qualification_answer_uncertain {key}` (no third ask -- a
+  caller should never be stuck in a spelling loop; no storage change, so no migration).
+- **How (code, not only prompt):** `record_answer` for a `confirm: true` question is REFUSED unless a read-back
+  turn for that key happened earlier in the call (the engine records the read-back when the AI's output transcript
+  contains the answer value it is about to save, normalised); the refusal text tells the AI to read it back first.
+  A refused write counts by key, so the gate cannot loop (cap: 2 refusals per key, then the write goes through
+  logged `qualification_answer_uncertain`). Prompt: one CALL PLAN line ("for questions marked confirm, read the answer back first").
+- **Defaults:** `speed_to_lead` marks nothing `confirm` (unchanged behaviour); the R2 campaign config
+  (`r1-config.mjs 20|21`) sets `clinic_name` to `confirm: true` for the re-test.
+- **Tests:** schema accepts/refuses the key; the gate refuses a first write, allows after a read-back, passes
+  `uncertain` after 2 refusals (sabotage each); a paid sim with a scripted mangled name checks the read-back
+  happens and the correction is saved.
+
 ## 6. What does not change
 
 Inbound (byte-identical prompts; all 110 goldens), the legal floor and calling windows, AMD and the voicemail clip,
