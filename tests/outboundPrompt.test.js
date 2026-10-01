@@ -513,3 +513,23 @@ describe("hold / transfer row (spec §4, live mode)", () => {
     expect(clip).not.toContain("wait_on_hold");
   });
 });
+
+describe("read-back line for confirm questions (spec §5b)", () => {
+  const withConfirm = {
+    ...WITH_FIRST_NAME,
+    config: {
+      ...WITH_FIRST_NAME.config,
+      questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", confirm: true }],
+    },
+  };
+  it("marks the question and says to read the answer back before saving", () => {
+    const text = renderBlock(withConfirm);
+    expect(text).toContain(`   - clinic_name (required, read back): "What's the clinic called?"`);
+    expect(text).toContain(
+      `For a question marked "read back", repeat their answer to them first -- "Hartley and Sons -- did I get that right?" -- and save it only once they say yes. If they correct it, read the correction back once more.`
+    );
+  });
+  it("no confirm question -> no read-back line (unchanged prompt)", () => {
+    expect(renderBlock(WITH_FIRST_NAME)).not.toContain("read back");
+  });
+});

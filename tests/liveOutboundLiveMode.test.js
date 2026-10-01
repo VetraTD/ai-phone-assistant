@@ -277,6 +277,66 @@ describe("the prompt and tools Live connects with follow the mode", () => {
   });
 });
 
+describe("read-back of a confirm answer, through the running session (spec §5b; both ends real)", () => {
+  function confirmDb() {
+    const db = outboundDb();
+    const base = db.outboundCallContext;
+    db.outboundCallContext = vi.fn(async (...a) => {
+      const ctx = await base(...a);
+      return {
+        ...ctx,
+        config: {
+          ...ctx.config,
+          questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", confirm: true }],
+        },
+      };
+    });
+    return db;
+  }
+
+  it("refused until the AI's HEARD speech reads the value back; then saved", async () => {
+    const call = await bootLiveMode({ database: confirmDb() });
+    const merge = vi.fn(async () => {});
+    call.deps.mergeCallAnswers = merge;
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    await call.callerSays("It's Brightwork Clinic.");
+
+    const [first] = await call.callTool("record_answer", { key: "clinic_name", value: "Brightwork Clinic" });
+    expect(first.response).toEqual({ success: false, message: "Read the answer back to them first, then save it." });
+    expect(merge).not.toHaveBeenCalled();
+
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Brightwork Clinic -- did I get that right?");
+    await call.callerSays("Yes.");
+    const [second] = await call.callTool("record_answer", { key: "clinic_name", value: "Brightwork Clinic" });
+    expect(second.response).toEqual({ success: true, message: "Recorded." });
+    expect(merge).toHaveBeenCalledWith(SID, { clinic_name: "Brightwork Clinic" });
+    await call.hangUp();
+  });
+
+  it("a read-back said while muted on hold is not evidence (never heard)", async () => {
+    const call = await bootLiveMode({ database: confirmDb() });
+    call.deps.mergeCallAnswers = vi.fn(async () => {});
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    call.ws.liveFirstLine.enterHold(call.clock());
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Brightwork Clinic -- did I get that right?");
+    const [r] = await call.callTool("record_answer", { key: "clinic_name", value: "Brightwork Clinic" });
+    expect(r.response.success).toBe(false);
+    await call.hangUp();
+  });
+});
+
 describe("wait_on_hold (spec §4; ruling R3)", () => {
   it("answers 'wait quietly', and the hold engages at the END of the generation that called it -- its 'Sure, thank you' is heard", async () => {
     const call = await bootLiveMode();

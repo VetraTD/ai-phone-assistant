@@ -362,3 +362,88 @@ describe("book_appointment -- the qualification gate through the real dispatch (
     expect(createAppointmentIfAvailable).toHaveBeenCalledTimes(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §5b): read-back of
+// answers marked confirm. record_answer is REFUSED until the AI's own speech
+// earlier in the call contains the value (normalised); a refusal counts per
+// key, and after 2 the write goes through, logged qualification_answer_uncertain.
+// ---------------------------------------------------------------------------
+describe("record_answer -- read-back of confirm questions (spec §5b)", () => {
+  const CONFIRM_Q = [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", confirm: true }];
+  const READ_BACK_FIRST = "Read the answer back to them first, then save it.";
+
+  function ctxFor({ said = "", refusals, questions = CONFIRM_Q } = {}) {
+    return {
+      callSid: "CA1",
+      outboundCall: outboundCallWithQuestions(questions),
+      deps: fakeDeps(),
+      assistantSaidThisCall: said,
+      capabilityState: refusals === undefined ? {} : { qualification: { readBackRefusals: { clinic_name: refusals } } },
+    };
+  }
+  const call = (value, ctx) => qualification.execute({ id: "fc1", name: "record_answer", args: { key: "clinic_name", value } }, ctx);
+
+  it("no prior read-back -> refused with the read-back message, nothing written, refusal counted", async () => {
+    const ctx = ctxFor({ said: "What's the clinic called?" });
+    const out = await call("Brightwork Clinic", ctx);
+    expect(out.functionResponse.response).toEqual({ success: false, message: READ_BACK_FIRST });
+    expect(ctx.deps.mergeCallAnswers).not.toHaveBeenCalled();
+    expect(out.stateEffects.capabilityState).toEqual({ qualification: { readBackRefusals: { clinic_name: 1 } } });
+  });
+
+  it("after an assistant line containing the value -> accepted", async () => {
+    const ctx = ctxFor({ said: "What's the clinic called? Brightwork Clinic -- did I get that right?" });
+    const out = await call("Brightwork Clinic", ctx);
+    expect(out.functionResponse.response).toEqual({ success: true, message: "Recorded." });
+    expect(ctx.deps.mergeCallAnswers).toHaveBeenCalledWith("CA1", { clinic_name: "Brightwork Clinic" });
+  });
+
+  it("Review Focus 5: punctuation and digits -- 'St. Mary's Clinic 2' read back as 'st marys clinic 2' is recognised", async () => {
+    const ctx = ctxFor({ said: "So that's st marys clinic 2, is that right?" });
+    const out = await call("St. Mary's Clinic 2", ctx);
+    expect(out.functionResponse.response.success).toBe(true);
+  });
+
+  it("the model's own transcript spacing differs ('Bright work Clinic') -> still recognised", async () => {
+    const ctx = ctxFor({ said: "Bright work Clinic, did I get that right?" });
+    expect((await call("Brightwork Clinic", ctx)).functionResponse.response.success).toBe(true);
+  });
+
+  it("a read-back of a DIFFERENT value does not count (a correction must be read back again)", async () => {
+    const ctx = ctxFor({ said: "Best College -- did I get that right?" });
+    expect((await call("Brightwork Clinic", ctx)).functionResponse.response.success).toBe(false);
+  });
+
+  it("second refusal is counted too (1 -> 2)", async () => {
+    const out = await call("Brightwork Clinic", ctxFor({ refusals: 1 }));
+    expect(out.functionResponse.response.success).toBe(false);
+    expect(out.stateEffects.capabilityState).toEqual({ qualification: { readBackRefusals: { clinic_name: 2 } } });
+  });
+
+  it("after 2 refusals -> accepted, written, and logged qualification_answer_uncertain (no third ask, no storage change)", async () => {
+    const ctx = ctxFor({ refusals: 2 });
+    const out = await call("Brightwork Clinic", ctx);
+    expect(out.functionResponse.response).toEqual({ success: true, message: "Recorded." });
+    expect(ctx.deps.mergeCallAnswers).toHaveBeenCalledWith("CA1", { clinic_name: "Brightwork Clinic" });
+    expect(out.stateEffects.capabilityEffects).toEqual([{ capability: "qualification", type: "answered", data: { key: "clinic_name" } }]);
+  });
+
+  it("no read-back evidence wire at all (the cascade front-end) -> not gated", async () => {
+    const ctx = ctxFor();
+    delete ctx.assistantSaidThisCall;
+    expect((await call("Brightwork Clinic", ctx)).functionResponse.response.success).toBe(true);
+  });
+
+  it("a question NOT marked confirm is never gated", async () => {
+    const q = [{ ...CONFIRM_Q[0], confirm: false }];
+    expect((await call("Brightwork Clinic", ctxFor({ questions: q }))).functionResponse.response.success).toBe(true);
+  });
+
+  it("the accepted write keeps the answers it already had (the refusal counter never clobbers them)", async () => {
+    const ctx = ctxFor({ said: "Brightwork Clinic, right?" });
+    ctx.capabilityState = { qualification: { answers: { other: "x" }, readBackRefusals: { clinic_name: 1 } } };
+    const out = await call("Brightwork Clinic", ctx);
+    expect(out.stateEffects.capabilityState.qualification.answers).toEqual({ other: "x", clinic_name: "Brightwork Clinic" });
+  });
+});

@@ -160,6 +160,21 @@ function recordAnswerDeclaration(questions, { withAsk = false } = {}) {
   };
 }
 
+/**
+ * 2026-10-01 (spec 2026-10-01-outbound-live-first-line §5b): the read-back
+ * gate's comparison form -- lower case, letters and digits only, no spaces
+ * at all. "St. Mary's Clinic 2" and the model's own transcript of reading it
+ * back ("st marys clinic 2", or "Bright work Clinic" for "Brightwork Clinic")
+ * compare equal; a different value never does.
+ */
+function readBackForm(text) {
+  return String(text ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Refusals before a confirm answer is saved anyway, logged uncertain (spec §5b: no third ask). */
+const READ_BACK_MAX_REFUSALS = 2;
+const READ_BACK_FIRST = "Read the answer back to them first, then save it.";
+
 function refusal(fc, message) {
   return {
     functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
@@ -233,6 +248,39 @@ export default {
     if (typeof value !== "string" || value.length > 500) {
       bumpCounter("qualification_answer_refused");
       return refusal(fc, `The value for "${key}" must be a string of at most 500 characters. Valid keys: ${keys.join(", ")}.`);
+    }
+
+    // 2026-10-01 (spec §5b): a question marked `confirm` is saved only after
+    // the AI has read the answer back -- Live's caller transcript is lossy
+    // ("best college" for a clinic's name), and only the person can tell. The
+    // evidence is the AI's own heard speech earlier in this call
+    // (ctx.assistantSaidThisCall, lib/voice/live/index.js) containing the
+    // value. Refusals count per key; after READ_BACK_MAX_REFUSALS the write
+    // goes through, logged qualification_answer_uncertain -- a caller is never
+    // stuck in a spelling loop, and nothing is stored differently.
+    // Live only: the cascade (lib/voice/session.js, a recognised inbound
+    // callback) supplies no assistantSaidThisCall and stays ungated -- its STT
+    // is not the lossy one this exists for. tests/liveOutboundLiveMode.test.js
+    // proves the Live wire end to end, so a broken wire cannot hide as "off".
+    const question = questions.find((q) => q?.key === key);
+    if (question?.confirm === true && typeof ctx.assistantSaidThisCall === "string") {
+      const qualificationState = ctx?.capabilityState?.qualification || {};
+      const refusals = Number(qualificationState.readBackRefusals?.[key]) || 0;
+      const wanted = readBackForm(value);
+      const readBack = wanted.length > 0 && readBackForm(ctx.assistantSaidThisCall).includes(wanted);
+      if (!readBack) {
+        if (refusals < READ_BACK_MAX_REFUSALS) {
+          bumpCounter("qualification_answer_refused");
+          bumpCounter("qualification_read_back_refused");
+          const out = refusal(fc, READ_BACK_FIRST);
+          out.stateEffects.capabilityState = {
+            qualification: { readBackRefusals: { ...(qualificationState.readBackRefusals || {}), [key]: refusals + 1 } },
+          };
+          return out;
+        }
+        bumpCounter("qualification_answer_uncertain");
+        log.info("qualification_answer_uncertain", { key, callSid: ctx.callSid || null });
+      }
     }
 
     const callSid = ctx.callSid || null;

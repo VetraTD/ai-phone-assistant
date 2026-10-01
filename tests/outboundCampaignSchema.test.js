@@ -391,3 +391,25 @@ describe("speed_to_lead's default intro (2026-10-01)", () => {
     expect(v(good())).toMatchObject({ ok: true });
   });
 });
+
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §5b): `confirm` on a
+// question -- optional boolean, text questions only.
+describe("questions[].confirm (read-back, spec §5b)", () => {
+  const withQ = (q) => ({ ...good(), questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", ...q }] });
+  it("accepts confirm: true on a text question, and confirm: false / absent", () => {
+    expect(v(withQ({ confirm: true }))).toMatchObject({ ok: true });
+    expect(v(withQ({ confirm: false }))).toMatchObject({ ok: true });
+    expect(v(withQ({}))).toMatchObject({ ok: true });
+  });
+  it("refuses a non-boolean confirm", () => {
+    expect(errPaths(v(withQ({ confirm: "yes" })))).toContain("questions[0].confirm");
+    expect(errPaths(v(withQ({ confirm: 1 })))).toContain("questions[0].confirm");
+  });
+  it("refuses confirm: true on a non-text question", () => {
+    expect(errPaths(v(withQ({ type: "yes_no", confirm: true })))).toContain("questions[0].confirm");
+    expect(errPaths(v(withQ({ type: "number", confirm: true })))).toContain("questions[0].confirm");
+  });
+  it("speed_to_lead marks nothing confirm (unchanged behaviour)", () => {
+    expect(TEMPLATES.speed_to_lead.questions.some((q) => q.confirm === true)).toBe(false);
+  });
+});
