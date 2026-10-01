@@ -312,11 +312,15 @@ describe("liveFirstLine: the first answer turn (disclosure check target, ruling 
     expect(ctl.onTurnComplete(6500)).toEqual({ heard: true, firstAnswer: true });
   });
 
-  it("an interrupted first reply is still the first answer (judged on what was said)", () => {
+  it("an interrupted first reply is offered (judged on what was said) but not consumed: the next completed turn is offered too", () => {
     const { ctl } = rig();
     run(ctl, 0, 2000, (t) => t >= 500 && t <= 900);
     ctl.onModelAudio(2500);
     expect(ctl.onInterrupted(2700)).toEqual({ heard: true, firstAnswer: true });
+    ctl.onModelAudio(4000);
+    expect(ctl.onTurnComplete(5000)).toEqual({ heard: true, firstAnswer: true });
+    ctl.onModelAudio(6000);
+    expect(ctl.onTurnComplete(7000)).toEqual({ heard: true, firstAnswer: false });
   });
 });
 

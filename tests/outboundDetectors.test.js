@@ -9,7 +9,31 @@ import {
   sessionEndSilent,
   foldCase,
   detectOutboundTurn,
+  firstReplyDiscloses,
 } from "../lib/outbound/detectors.js";
+
+describe("firstReplyDiscloses (spec 2026-10-01 §5: the live first reply says it is an AI)", () => {
+  it("'Hi, this is Ava, an AI assistant calling from Digile Media' -> true", () => {
+    expect(firstReplyDiscloses("Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Nithin?")).toBe(true);
+  });
+  it("'Hi, this is Ava from Digile Media' -> false", () => {
+    expect(firstReplyDiscloses("Hi, this is Ava from Digile Media. Am I speaking with Nithin?")).toBe(false);
+  });
+  it("an unusable transcript fails closed: '', whitespace, '???', null -> false", () => {
+    expect(firstReplyDiscloses("")).toBe(false);
+    expect(firstReplyDiscloses("   ")).toBe(false);
+    expect(firstReplyDiscloses("???")).toBe(false);
+    expect(firstReplyDiscloses(null)).toBe(false);
+    expect(firstReplyDiscloses(undefined)).toBe(false);
+  });
+  it("the campaign schema's own disclosure words count (virtual / automated assistant, artificial intelligence)", () => {
+    expect(firstReplyDiscloses("It's Ava, a virtual assistant with Digile Media.")).toBe(true);
+    expect(firstReplyDiscloses("I'm an automated assistant from Digile Media.")).toBe(true);
+  });
+  it("'said' / 'maintain' do not read as 'AI' (word boundary)", () => {
+    expect(firstReplyDiscloses("She said to maintain the plan.")).toBe(false);
+  });
+});
 
 describe("detectOptOut (spec §13.3)", () => {
   it("'stop calling me' on the caller side is a hit", () => {

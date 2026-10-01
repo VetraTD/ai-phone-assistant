@@ -114,6 +114,7 @@ function modelAudioMsg(ms = 200) {
 
 const helloCues = (call) =>
   call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes('word for word: \\"Hello?\\"'));
+const INTRO = "Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?";
 const KICK_TEXT = "(The caller has just connected. Open the call now.)";
 
 describe("live mode is the default (OUTBOUND_FIRST_SPEAKER unset)", () => {
@@ -207,11 +208,9 @@ describe("hold", () => {
     const call = await bootLiveMode();
     await call.feed(500, { voiced: true });
     await call.feed(1000);
-    await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?");
     call.live.push(modelAudioMsg());
     await call.settle();
-    call.live.push({ serverContent: { turnComplete: true } });
-    await call.settle();
+    await call.assistantTurn(INTRO);
     call.ws.liveFirstLine.enterHold(call.clock());
     const before = call.live.sent.clientContent.length;
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
@@ -230,8 +229,7 @@ describe("hold", () => {
     await call.feed(1000);
     call.live.push(modelAudioMsg());
     await call.settle();
-    call.live.push({ serverContent: { turnComplete: true } });
-    await call.settle();
+    await call.assistantTurn(INTRO);
     call.ws.liveFirstLine.enterHold(call.clock());
     await call.feed(121000);
     await call.settle();
@@ -247,8 +245,7 @@ describe("hold", () => {
     await call.feed(1000);
     call.live.push(modelAudioMsg());
     await call.settle();
-    call.live.push({ serverContent: { turnComplete: true } });
-    await call.settle();
+    await call.assistantTurn(INTRO);
     call.ws.liveFirstLine.enterHold(call.clock());
     await call.feed(5000);
     await call.feed(600, { voiced: true }); // a person picks up
@@ -270,8 +267,7 @@ describe("hold: what the model does while nobody is on the line", () => {
     await call.feed(1000);
     call.live.push(modelAudioMsg());
     await call.settle();
-    call.live.push({ serverContent: { turnComplete: true } });
-    await call.settle();
+    await call.assistantTurn(INTRO);
     call.ws.liveFirstLine.enterHold(call.clock());
     return call;
   }
@@ -324,6 +320,100 @@ describe("Live unresponsive: what counts as Live answering", () => {
     await call.feed(1000);
     await call.hangUp();
     expect(events("outbound_first_reply")).toEqual([expect.objectContaining({ path: "none", from_answer_ms: null })]);
+  });
+});
+
+describe("disclosure check on the first reply (spec §5; rulings R4, R14)", () => {
+  const CUE = "Say plainly in your next sentence that you are an AI assistant calling from Digile Media.";
+  const cues = (call) => call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes(CUE));
+
+  async function personSpeaks(call) {
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+  }
+
+  it("a first reply without 'AI' -> one ERROR + one cue appended as context (no forced turn); never again", async () => {
+    allowErrors("outbound_disclosure_missing");
+    const call = await bootLiveMode();
+    await personSpeaks(call);
+    await call.assistantTurn("Hi, this is Ava from Digile Media. Am I speaking with Sam?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(1);
+    expect(events("outbound_disclosure_missing")[0]).not.toHaveProperty("text");
+    expect(cues(call)).toEqual([
+      { turns: [{ role: "user", parts: [{ text: `(System: ${CUE})` }] }], turnComplete: false },
+    ]);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Great, thanks Sam.");
+    expect(events("outbound_disclosure_missing")).toHaveLength(1);
+    expect(cues(call)).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("a first reply that discloses -> nothing", async () => {
+    const call = await bootLiveMode();
+    await personSpeaks(call);
+    await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(0);
+    expect(cues(call)).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("an audio-only first reply (no output transcript) fails closed -> missing", async () => {
+    allowErrors("outbound_disclosure_missing");
+    const call = await bootLiveMode();
+    await personSpeaks(call);
+    await call.turnEnds();
+    expect(events("outbound_disclosure_missing")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("I5 kept: a first reply interrupted before the disclosure never corrects itself; the next completed turn is judged", async () => {
+    allowErrors("outbound_disclosure_missing");
+    const call = await bootLiveMode();
+    await personSpeaks(call);
+    await call.assistantSays("Hi, is that Sam?");
+    call.live.push({ serverContent: { interrupted: true } });
+    await call.settle();
+    expect(events("outbound_disclosure_missing")).toHaveLength(0);
+    expect(cues(call)).toHaveLength(0);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Sorry, go ahead -- what's the clinic called?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(1);
+    expect(cues(call)).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("an interrupted first reply that DID disclose satisfies the check", async () => {
+    const call = await bootLiveMode();
+    await personSpeaks(call);
+    await call.assistantSays("Hi, this is Ava, an AI assistant calling from");
+    call.live.push({ serverContent: { interrupted: true } });
+    await call.settle();
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Sure -- is that Sam?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("R4: the silence 'Hello?' turn is not checked; the reply after it is", async () => {
+    const call = await bootLiveMode();
+    await call.feed(2300);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Hello?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(0);
+    await call.feed(500, { voiced: true });
+    await call.feed(800);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?");
+    expect(events("outbound_disclosure_missing")).toHaveLength(0);
+    await call.hangUp();
   });
 });
 
