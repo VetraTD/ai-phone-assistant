@@ -766,7 +766,22 @@ OFF. Turning it on for anyone but the owner's handset additionally needs:
 
 ## Section E: the AI answers live (deploy 4, DRAFT, YES-gated)
 
-**Status: DRAFT 2026-10-01 -- nothing in this section has run.** Every command needs its own explicit YES.
+**Status: E0-E5 RUN 2026-10-01 ~17:15-17:35 CDT; E6 2 of 3 calls PASS, the Hold call FAILED (see [AS RUN]).**
+
+**[AS RUN] 2026-10-01 (owner: "do everything now").** E0 PASS. E1 build `98e6ac49` SUCCESS, `voice:f1f6d50` digest
+`sha256:bbe2aa29...`. E2 pending: none. E3 **`voice-uk-prod-00097-4f5`** 100%, `Build: f1f6d50`, env diff = image +
+`GIT_COMMIT_SHA` only, boot clean. E5 policy 18 events. E4 smoke PASS (inbound, callback line, no ERROR). New test
+campaigns S22 R3-Hello `ba18bc95`, S23 R3-Gatekeeper `09f175e1`, S24 R3-Hold `7cb62d32` (all PAUSED after their call).
+- Hello PASS: first reply 1,457 ms after speech end with the AI intro + name check; reason before the first
+  question; the read-back REFUSED "dust khane", read back, corrected, saved "Best Klinik" after the yes.
+- Gatekeeper PASS: intro, "returning Nithin's enquiry", no reason/confirm/offer, callback task 10:00 CDT next day.
+- Hold FAIL, two defects: (A) the f1f6d50 tool-reply wording made the AI re-introduce itself straight after
+  "Sure, thank you." (Live continues the turn after a tool reply); (B) AMD `machine_end_beep` 29 s into the call
+  (business greeting + hold-music beep) -> voicemail branch -> no clip -> call hung up mid-hold (pre-existing;
+  with a clip it would have played the voicemail into the hold). Owner: fix both next session, redeploy, re-run
+  the Hold call. Production stays on 00097-4f5 (outbound OFF; inbound fine). Rollback target `00096-n5p`.
+
+Previous status: DRAFT 2026-10-01. Every command needs its own explicit YES.
 Spec `docs/superpowers/specs/2026-10-01-outbound-live-first-line-design.md`, plan
 `docs/superpowers/plans/2026-10-01-outbound-live-first-line.md`, ledger
 `.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md` (every ruling made during the build).
