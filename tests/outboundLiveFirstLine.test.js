@@ -75,6 +75,15 @@ describe("liveFirstLine: speech before the cue (Review Focus 4)", () => {
     expect(calls.hello).toHaveLength(0);
   });
 
+  it("one loud frame at pickup (voiced, never voiceActive -- O-6) does NOT cancel the Hello", () => {
+    const { ctl, calls } = rig();
+    run(ctl, 0, 1000);
+    ctl.onCallerFrame(1000, true, false);
+    ctl.tick(1000);
+    run(ctl, 1020, 2300);
+    expect(calls.hello).toHaveLength(1);
+  });
+
   it("speech at 2,220 ms (cue already sent) sends no second cue; the next model turn is the reply", () => {
     const { ctl, calls } = rig();
     run(ctl, 0, 2220);
