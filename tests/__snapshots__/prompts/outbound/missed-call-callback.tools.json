@@ -51,6 +51,14 @@
     }
   },
   {
+    "name": "wait_on_hold",
+    "description": "Call this when they ask you to hold on or say they will fetch or put you through to someone (\"hold on\", \"one moment\", \"I'll get him\"). Say one short line first -- \"Sure, thank you.\" -- in the same reply. After it, say nothing until a person speaks to you again.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "record_answer",
     "description": "Record the caller's answer to one of this call's qualification questions. Call this right after they answer each one -- do not wait until the end of the call to record several at once, and do not invent an answer they did not give.",
     "parameters": {

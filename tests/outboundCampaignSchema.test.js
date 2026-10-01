@@ -377,3 +377,17 @@ describe("S3-6: the custom template is allowed, and custom_basis maps to complia
   it("an unknown custom_basis value is refused", () =>
     expect(errPaths(v({ ...good(), custom_basis: "bogus" }, customMeta("solicited")))).toContain("custom_basis"));
 });
+
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §3): the opener is now
+// "the intro the first reply is built on" (live mode) -- disclosure, business,
+// then the name check -- and still a valid opener for the clip rollback.
+describe("speed_to_lead's default intro (2026-10-01)", () => {
+  it("is the spec's sentence", () => {
+    expect(TEMPLATES.speed_to_lead.opener).toBe(
+      "Hi, this is {persona_name}, an AI assistant calling from {business_name}. Am I speaking with {first_name}?"
+    );
+  });
+  it("still passes the opener validation (business name, bounded AI disclosure, 120 chars rendered)", () => {
+    expect(v(good())).toMatchObject({ ok: true });
+  });
+});

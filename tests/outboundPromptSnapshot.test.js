@@ -139,15 +139,24 @@ describe("first-turn rule and disclosure (spec §9.3/§9.5, O-2)", () => {
     expect(full).toContain(extras.outboundCall.config.persona_name);
     expect(full).toContain("AI assistant");
     expect(full).toContain(config.businessName);
-    expect(full).toMatch(/first reply must include your name/i);
+    // 2026-10-01: live mode (the default) states it as FIRST REPLY rule 2;
+    // the clip rollback keeps its own sentence.
+    expect(full).toMatch(/2\. Say who you are -- your name \(Ava\), that you are an AI assistant/);
     expect(full).toMatch(/never claim to be human/i);
+    const clip = OUTBOUND_FIXTURES["speed-to-lead-clip"];
+    expect(promptFor(clip.config, clip.extras)).toMatch(/first reply must include your name/i);
   });
 
   it("O-2 flag ON: the first reply must also carry the transcription notice, deferred to the next reply if the opener was already seeded", () => {
     const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead-disclosure-on"];
     const full = promptFor(config, extras);
     expect(full).toContain(TRANSCRIPTION_DISCLOSURE);
-    expect(full).toMatch(/give this notice instead in your very next reply/i);
+    // 2026-10-01: live mode has no seeded opener, so no deferral clause; the
+    // clip rollback keeps it.
+    expect(full).toMatch(/Your first reply must also give this notice, word for word/);
+    expect(full).not.toMatch(/give this notice instead in your very next reply/i);
+    const clipExtras = { ...extras, outboundCall: { ...extras.outboundCall, firstSpeaker: "clip" } };
+    expect(promptFor(config, clipExtras)).toMatch(/give this notice instead in your very next reply/i);
   });
 
   it("O-2 flag OFF: the notice is given on request only", () => {
@@ -281,6 +290,8 @@ describe("D-c + O-1: outbound tool set = campaign capabilities ∩ tenant packs,
       "set_call_intent",
       "end_call",
       "confirm_identity",
+      // 2026-10-01: the engine's hold tool, live mode (this fixture's default).
+      "wait_on_hold",
       "record_answer",
       "set_call_outcome",
       "schedule_callback",
@@ -556,5 +567,26 @@ describe("S3-1 contract item 4 — confirm_identity's gatekeeper wording agrees 
     const decl = buildAllDeclarations(config, extras).find((d) => d.name === "confirm_identity");
     expect(decl.description).toMatch(/share nothing further/i);
     expect(decl.description).toMatch(/callback/i);
+  });
+});
+
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §4): wait_on_hold is an
+// engine tool like confirm_identity, declared on an OUTBOUND call in LIVE
+// first-speaker mode only -- never inbound, never in the clip rollback.
+describe("wait_on_hold declaration", () => {
+  const names = (config, extras) => buildAllDeclarations(config, extras).map((d) => d.name);
+  it("declared on a live-mode outbound call (the default)", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    expect(names(config, extras)).toContain("wait_on_hold");
+  });
+  it("not declared in clip mode", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead-clip"];
+    expect(names(config, extras)).not.toContain("wait_on_hold");
+  });
+  it("not declared on inbound", () => {
+    const { config, extras } = OUTBOUND_FIXTURES["speed-to-lead"];
+    const { outboundCall: _o, ...inboundExtras } = extras;
+    expect(names(config, inboundExtras)).not.toContain("wait_on_hold");
+    expect(names(config, inboundExtras)).not.toContain("confirm_identity");
   });
 });

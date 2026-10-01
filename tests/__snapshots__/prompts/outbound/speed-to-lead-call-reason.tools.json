@@ -55,6 +55,14 @@
     }
   },
   {
+    "name": "wait_on_hold",
+    "description": "Call this when they ask you to hold on or say they will fetch or put you through to someone (\"hold on\", \"one moment\", \"I'll get him\"). Say one short line first -- \"Sure, thank you.\" -- in the same reply. After it, say nothing until a person speaks to you again.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
     "name": "book_appointment",
     "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
     "parameters": {

@@ -165,11 +165,16 @@ describe("S3-1 — the SITUATIONS section: one line per situation (15 rows)", ()
     });
   }
 
-  it("is exactly 15 situation rows (lines starting with '- ')", () => {
+  // 2026-10-01: live mode (the default) adds the hold row (spec §4) -> 16;
+  // clip mode keeps exactly the 15.
+  it("is exactly 16 situation rows in live mode, 15 in clip mode (lines starting with '- ')", () => {
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     expect(situationsIdx).toBeGreaterThanOrEqual(0);
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(15);
+    expect(situationRows.length).toBe(16);
+    const clipLines = renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" }).split("\n");
+    const clipIdx = clipLines.findIndex((l) => l === "=== SITUATIONS ===");
+    expect(clipLines.slice(clipIdx + 1).filter((l) => l.startsWith("- ")).length).toBe(15);
   });
 
   // S3-3 supersedes this item's old assertion. Before S3-3, none of these
@@ -265,7 +270,7 @@ describe("S3-1 — the SITUATIONS section: one line per situation (15 rows)", ()
     expect(line).toMatch(/never invent a source/i);
     const situationsIdx = lines.findIndex((l) => l === "=== SITUATIONS ===");
     const situationRows = lines.slice(situationsIdx + 1).filter((l) => l.startsWith("- "));
-    expect(situationRows.length).toBe(15);
+    expect(situationRows.length).toBe(16) // live mode: + the hold row;
   });
 });
 
@@ -376,10 +381,129 @@ describe("S3-6: DETAILS lines -- per-person details from campaign details_fields
       config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields },
       details: { appt_date: "12 March" },
     };
-    const text = renderBlock(outboundCall);
+    // 2026-10-01 (ruling R18): pinned to CLIP mode, where the opener is a
+    // recording and this function never renders its text. Live mode renders
+    // the intro on purpose (spec §3) -- the next test holds it to the same
+    // invariant directly.
+    const text = renderBlock({ ...outboundCall, firstSpeaker: "clip" });
     // outbound.openerText (the rendered backstop line) is never read by this
     // function at all -- so a DETAILS value can only ever show up on its own
     // labelled line, never spliced into the opener sentence.
     expect(text).not.toContain(outboundCall.openerText);
+  });
+
+  it("named risk 3, live mode: the intro in FIRST REPLY carries no DETAILS value -- it is only on its own DETAILS line", () => {
+    const outboundCall = {
+      ...WITH_FIRST_NAME,
+      config: { ...WITH_FIRST_NAME.config, details_fields: detailsFields },
+      details: { appt_date: "12 March" },
+    };
+    const text = renderBlock(outboundCall);
+    const hits = text.split("\n").filter((l) => l.includes("12 March"));
+    expect(hits).toEqual(['DETAILS: Appointment date: "12 March"']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2026-10-01 (spec 2026-10-01-outbound-live-first-line §3/§4, plan Task 7).
+// LIVE first-speaker mode (the default -- no firstSpeaker, or "live"): the
+// AI's live reply is the first thing heard, so the job prompt carries a
+// FIRST REPLY block and a hold row. CLIP mode keeps its old text exactly
+// (tests/outboundPromptSnapshot.test.js pins it byte-for-byte).
+// ---------------------------------------------------------------------------
+describe("FIRST REPLY (live first-speaker mode)", () => {
+  const BUSINESS = BUSINESS_NAME;
+  const live = renderBlock(WITH_FIRST_NAME);
+  const clip = renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" });
+
+  it("live (the default) has the block, ahead of the CALL PLAN; clip has none", () => {
+    expect(live).toContain("=== FIRST REPLY ===");
+    expect(live.indexOf("=== FIRST REPLY ===")).toBeLessThan(live.indexOf("=== CALL PLAN ==="));
+    expect(renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "live" })).toBe(live);
+    expect(clip).not.toContain("=== FIRST REPLY ===");
+  });
+
+  it("states the three rules and the privacy rule", () => {
+    expect(live).toContain("Answer what they actually said");
+    expect(live).toContain(`your name (Ava), that you are an AI assistant, and ${BUSINESS}`);
+    expect(live).toContain('Check you are speaking to Priya ("Am I speaking with Priya?") unless they have already said they are.');
+    expect(live).toContain("Never say why you are calling until they have confirmed who they are.");
+  });
+
+  it("the intro is the campaign's own opener, rendered (spec §3: the intro the first reply is built on)", () => {
+    expect(live).toContain(`Your intro: "${WITH_FIRST_NAME.openerText}"`);
+  });
+
+  it("the intro is rendered with THIS prompt's business name, never a stale one carried on outbound.openerText", () => {
+    const text = renderBlock({ ...WITH_FIRST_NAME, openerText: "Hi, it's Ava, an AI assistant from Some Other Firm." });
+    expect(text).not.toContain("Some Other Firm");
+    expect(text).toContain(`Your intro: "Hi, is that Priya? It's Ava, an AI assistant from ${BUSINESS}."`);
+  });
+
+  it("the seven worked examples, with the campaign's persona / business / first name", () => {
+    const examples = [
+      `- "Hello?" / "Yes?" / "Who's this?" -> "${WITH_FIRST_NAME.openerText}"`,
+      `- "Priya speaking" / "This is Priya" -> "Hi Priya, this is Ava, an AI assistant calling from ${BUSINESS}." -- they said who they are, which is a clear yes: call confirm_identity, then follow the CALL PLAN.`,
+      `- A business greeting ("Good morning, Hartley and Sons.") -> "Hi, this is Ava, an AI assistant calling from ${BUSINESS} -- could I speak to Priya, please?" -- then the gatekeeper row in SITUATIONS.`,
+      `- "Is this a scam call?" / "Is this a sales call?" -> "No, not a scam -- I'm Ava, an AI assistant calling from ${BUSINESS}. Am I speaking with Priya?"`,
+      `- "How did you get my number?" -> "I'm Ava, an AI assistant from ${BUSINESS}, returning an enquiry. Am I speaking with Priya?" -- nothing more until they confirm.`,
+      `- "Stop calling me" -> "This is Ava, an AI assistant from ${BUSINESS}. Of course -- we won't call you again." -- then call opt_out.`,
+      `- "Not a good time" -> "This is Ava, an AI assistant calling from ${BUSINESS}. When would be a good time to call back?" -- then book it with schedule_callback.`,
+    ];
+    for (const e of examples) expect(live).toContain(e);
+  });
+
+  it("the stop example's sentence is one the assistant-side opt-out detector recognises", () => {
+    const line = live.split("\n").find((l) => l.startsWith('- "Stop calling me" ->'));
+    const said = line.match(/-> "([^"]+)"/)[1];
+    expect(ASSISTANT_OPT_OUT_PATTERNS.some((re) => re.test(said))).toBe(true);
+  });
+
+  it("after a silence 'Hello?', the next reply is the first reply", () => {
+    expect(live).toContain('If you said "Hello?" because they were quiet, your next reply is this first reply.');
+  });
+
+  it("no first name on file: a neutral name check, never 'null' / 'undefined'", () => {
+    const text = renderBlock(WITHOUT_FIRST_NAME);
+    expect(text).toContain("=== FIRST REPLY ===");
+    expect(text).toContain("Could I ask who I'm speaking with?");
+    expect(text).not.toMatch(/\bnull\b|\bundefined\b/);
+  });
+
+  it("an unusable campaign opener (no AI disclosure / no business) falls back to the default intro sentence", () => {
+    const text = renderBlock({ ...WITH_FIRST_NAME, config: { ...WITH_FIRST_NAME.config, opener: "Hello {first_name}." } });
+    expect(text).toContain(`Your intro: "Hi, this is Ava, an AI assistant calling from ${BUSINESS}. Am I speaking with Priya?"`);
+  });
+
+  it("clip keeps the recorded-opener first-turn rule; live drops it", () => {
+    const CLIP_RULE = "played for you automatically before you connected";
+    expect(clip).toContain(CLIP_RULE);
+    expect(live).not.toContain(CLIP_RULE);
+  });
+
+  it("the transcription notice (O-2): live asks for it in the first reply, without the clip's 'already been said' clause", () => {
+    const on = { enabled: true, text: null };
+    expect(renderBlock(WITH_FIRST_NAME, on)).toContain("Your first reply must also give this notice, word for word:");
+    expect(renderBlock(WITH_FIRST_NAME, on)).not.toContain("If the opening line has already been said for you");
+    expect(renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" }, on)).toContain("If the opening line has already been said for you");
+  });
+});
+
+describe("hold / transfer row (spec §4, live mode)", () => {
+  const live = renderBlock(WITH_FIRST_NAME);
+  const clip = renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" });
+
+  it("live has the row: one short line, wait_on_hold, quiet, restart with the FIRST REPLY", () => {
+    const row = live.split("\n").find((l) => l.startsWith('- "Hold on"'));
+    expect(row).toBeTruthy();
+    expect(row).toContain('"Sure, thank you."');
+    expect(row).toContain("call wait_on_hold");
+    expect(row).toContain("say nothing");
+    expect(row).toContain("hold music");
+    expect(row).toContain("FIRST REPLY");
+  });
+
+  it("clip has no hold row (and declares no wait_on_hold)", () => {
+    expect(clip).not.toContain("wait_on_hold");
   });
 });

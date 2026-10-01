@@ -260,6 +260,49 @@ describe("hold", () => {
   });
 });
 
+describe("the prompt and tools Live connects with follow the mode", () => {
+  const connectArgs = (call) => JSON.stringify(call.live.connect.mock.calls[0][0]);
+  it("live: FIRST REPLY block + wait_on_hold declared", async () => {
+    const call = await bootLiveMode();
+    expect(connectArgs(call)).toContain("=== FIRST REPLY ===");
+    expect(connectArgs(call)).toContain('"wait_on_hold"');
+    await call.hangUp();
+  });
+  it("clip: neither (the clip prompt and tools are unchanged)", async () => {
+    const call = await bootLiveMode({ env: { OUTBOUND_FIRST_SPEAKER: "clip" } });
+    expect(connectArgs(call)).not.toContain("=== FIRST REPLY ===");
+    expect(connectArgs(call)).not.toContain("wait_on_hold");
+    expect(connectArgs(call)).toContain("played for you automatically before you connected");
+    await call.hangUp();
+  });
+});
+
+describe("wait_on_hold (spec §4; ruling R3)", () => {
+  it("answers 'wait quietly', and the hold engages at the END of the generation that called it -- its 'Sure, thank you' is heard", async () => {
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    await call.feed(400, { voiced: true }); // "Hold on, I'll get him."
+    await call.feed(800);
+    call.live.push(modelAudioMsg()); // "Sure, thank you."
+    await call.settle();
+    const [r] = await call.callTool("wait_on_hold", {});
+    expect(r.response).toMatchObject({ success: true, message: "Wait quietly. Say nothing until a person speaks." });
+    expect(call.ws.liveFirstLine.onHold()).toBe(false); // the ack's own generation still plays
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(enqueue).toHaveBeenCalled();
+    await call.assistantTurn("Sure, thank you.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    expect(events("outbound_hold_entered")).toHaveLength(1);
+    await call.hangUp();
+  });
+});
+
 describe("hold: what the model does while nobody is on the line", () => {
   async function onHold(database = outboundDb()) {
     const call = await bootLiveMode({ database });

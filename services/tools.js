@@ -431,6 +431,23 @@ export async function executeToolCall(fc, ctx) {
     };
   }
 
+  // 2026-10-01 (spec 2026-10-01-outbound-live-first-line §4). Engine tool,
+  // outbound only (declared in services/gemini.js only there, live mode);
+  // gated on ctx.outboundCall like confirm_identity so an inbound call never
+  // intercepts a webhook of the same name. The hold itself is engine state
+  // (lib/voice/live/index.js holdRequestedAt -> liveFirstLine.enterHold).
+  if (fc.name === "wait_on_hold" && ctx?.outboundCall) {
+    const message = "Wait quietly. Say nothing until a person speaks.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+      stateEffects: {
+        holdRequested: true,
+        toolResult: { name: fc.name, success: true, message },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
   switch (fc.name) {
     case "set_call_intent": {
       const intentArgs = fc.args ?? null;

@@ -329,6 +329,14 @@ export const OUTBOUND_FIXTURES = {
     config: OUTBOUND_TENANT_CONFIG,
     extras: { ...OUTBOUND_BASE_EXTRAS, outboundCall: outboundCallContext() },
   },
+  // 2026-10-01: the CLIP first-speaker mode (the rollback). Its snapshots are
+  // byte-for-byte the pre-2026-10-01 speed-to-lead ones: clip mode's prompt and
+  // tools must not change (spec 2026-10-01-outbound-live-first-line §6). The
+  // fixtures without firstSpeaker are the live mode, the default.
+  "speed-to-lead-clip": {
+    config: OUTBOUND_TENANT_CONFIG,
+    extras: { ...OUTBOUND_BASE_EXTRAS, outboundCall: { ...outboundCallContext(), firstSpeaker: "clip" } },
+  },
   // O-2, disclosure flag ON: the tenant wants the transcription notice, and
   // (spec §9.3) the opener line above is exactly the line that gets played as
   // the backstop and seeded as Ava's own first turn -- so when that has

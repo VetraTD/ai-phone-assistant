@@ -235,6 +235,9 @@ const BUILTIN_TOOL_NAMES = [
   // OUTBOUND CALLING, Task 18 (spec §9.6): the third engine-owned tool,
   // declared only on an outbound call.
   "confirm_identity",
+  // 2026-10-01 (spec 2026-10-01-outbound-live-first-line §4): the fourth,
+  // outbound live mode only (hold / transfer).
+  "wait_on_hold",
   // appointments pack
   "book_appointment",
   "check_appointment_availability",

@@ -751,6 +751,23 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
         required: ["name_confirmed"],
       },
     });
+    // 2026-10-01 (spec 2026-10-01-outbound-live-first-line §4): hold and
+    // transfer. Another engine tool, declared only on an outbound call in
+    // LIVE first-speaker mode (the default) -- the clip rollback has no hold
+    // state, and its declarations stay exactly as they were. The engine mutes
+    // the model's audio from the end of this reply until a person speaks
+    // (lib/outbound/liveFirstLine.js), so a prompt alone is not what keeps it
+    // quiet through hold music.
+    if (extras.outboundCall.firstSpeaker !== "clip") {
+      declarations.push({
+        name: "wait_on_hold",
+        description:
+          "Call this when they ask you to hold on or say they will fetch or put you through to someone " +
+          '("hold on", "one moment", "I\'ll get him"). Say one short line first -- "Sure, thank you." -- in ' +
+          "the same reply. After it, say nothing until a person speaks to you again.",
+        parameters: { type: "object", properties: {} },
+      });
+    }
   }
 
   // Capability contributions, in registry order:

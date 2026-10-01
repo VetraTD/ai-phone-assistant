@@ -244,7 +244,8 @@ describe("capability registry — reserved tool names", () => {
 
   it("the names BUILTIN_TOOL_NAMES does reserve are all real", () => {
     for (const name of BUILTIN_TOOL_NAMES) {
-      const isEngineTool = name === "set_call_intent" || name === "end_call" || name === "confirm_identity";
+      // 2026-10-01: wait_on_hold, the outbound live-mode hold tool, is the fourth.
+      const isEngineTool = name === "set_call_intent" || name === "end_call" || name === "confirm_identity" || name === "wait_on_hold";
       const isPackTool = packForTool(name) !== null;
       expect(isEngineTool || isPackTool, `${name} is reserved but nothing owns it`).toBe(true);
     }
