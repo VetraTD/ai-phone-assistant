@@ -437,7 +437,7 @@ traffic are unused by the old revision and harmless.
 
 ## Section D: Stage 4 (deploy 3, DRAFT, YES-gated)
 
-**Status: DRAFT, nothing here has been run.** Every command needs its own explicit YES. Stage 4
+**Status: D0-D7 RUN 2026-09-30 (see [AS RUN] below); D8 not run.** Every command needs its own explicit YES. Stage 4
 deploys ONLY after the 2026-09-30 phone check (window 08:00+ CDT) has been done and passed.
 
 **2026-09-30: phone check ran, stage 4 NOT deployed (owner decision).** Hello: timing PASS, but the
@@ -468,6 +468,19 @@ Rollback target: `voice-uk-prod-00095-nhs` @`e451d91` (production today, `OUTBOU
 `SHA` = `b4d462d` (final code head of `feat/outbound-stage4`, base `e451d91`; later commits are
 docs/spend JSON only — `git log --oneline b4d462d..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'`
 must print nothing; if the branch HEAD is a later docs commit, build from HEAD, it carries the same code).
+
+**[AS RUN] 2026-09-30 ~20:09-20:35 CDT: D0-D7 DONE, `b4d462d` is production.** Built from the main checkout at
+HEAD `f6e5ca0` (docs-only after `b4d462d`), tag `b4d462d`, build `10dbc09d` all steps SUCCESS, digest
+`sha256:5e78f6a3b377...`. D3: pending exactly `051`, preflight 13 ok. D4: `051` applied, pending none. D5:
+revision **`voice-uk-prod-00096-n5p`** 100%, env diff = `GIT_COMMIT_SHA` only (scripted diff), `Build: b4d462d`,
+boot clean. D6 (owner handset): `direction=inbound`, callback line recognised (S10 outreach), no ERROR. D7:
+policy now 16 events, same channel. **D8 NOT RUN (owner):** the live dashboard backend is `e1419d9` (2026-09-08),
+not `2d02d11`, so a backend deploy would ship 10 commits, including four outbound capability cards
+(qualification / outcome / callback / opt_out) on every tenant's Settings page; deploy the dashboard later,
+after hiding outbound-only packs there. D9: owner confirmed no tenant tool webhook. Doc fix: `policies
+describe/update` take the BARE id `15114942414748467079`; `alertPolicies/<id>` doubles the path and 404s.
+Re-test campaigns created (draft): S20 R2-Hello `c488edd2-8776-46d5-ad25-92d3032ce37f`, S21 R2-Gatekeeper
+`d7766147-23d0-46cf-9c1c-ea855d874e4a`. Rollback target stays `voice-uk-prod-00095-nhs`.
 
 **What stage 4 changes for a caller.**
 - (Outbound test calls only while `OUTBOUND_ENABLED=false`.) The assistant now follows an outbound
