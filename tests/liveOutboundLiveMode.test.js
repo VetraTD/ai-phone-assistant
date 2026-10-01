@@ -296,6 +296,16 @@ describe("hold: what the model does while nobody is on the line", () => {
     expect(aiRows).toEqual([]);
     await call.hangUp();
   });
+
+  it("a muted generation whose TEXT arrives before any audio leaves no AI row either", async () => {
+    const db = outboundDb();
+    const call = await onHold(db);
+    db.addTranscriptEntry.mockClear();
+    await call.assistantTurn("Hello? Is anyone there? I'm waiting.");
+    const aiRows = db.addTranscriptEntry.mock.calls.filter((c) => JSON.stringify(c).includes("Is anyone there"));
+    expect(aiRows).toEqual([]);
+    await call.hangUp();
+  });
 });
 
 describe("Live unresponsive: what counts as Live answering", () => {
