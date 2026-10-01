@@ -48,7 +48,7 @@ import {
   buildOutboundStatusRequest,
   buildOutboundAmdRequest,
 } from "../lib/probe/twilioRequests.js";
-import { createClientObserver, outboundVerdict, parseServerLog } from "../lib/probe/outboundHarness.js";
+import { createClientObserver, outboundVerdict, parseServerLog, inferFirstSpeaker } from "../lib/probe/outboundHarness.js";
 
 const BASE = "http://localhost:3000";
 const AUTH = "live-outbound-harness-auth";
@@ -424,35 +424,31 @@ describe("the simulated outbound call, through the real door and session", () =>
 
     await hangUpAndComplete(ctx);
 
+    // 2026-10-01 (plan Task 9): the verdict reads the mode the server ran from
+    // its own log (inferFirstSpeaker) and judges a live call by the live
+    // criteria -- the clip-only ones are not applied. This socket-level test
+    // carries no assistant transcript (no LIVE_DEBUG_TRANSCRIPT), so the text
+    // criteria are UNKNOWN here (never a pass); the paid sims set it.
+    const server = serverLog();
+    expect(inferFirstSpeaker(server)).toBe("live");
     const v = outboundVerdict({
       mode: "speaks_first",
-      clip: true,
+      firstSpeaker: inferFirstSpeaker(server),
+      firstName: "Sam",
+      clip: false,
       client: observer.snapshot(),
-      server: serverLog(),
+      server,
       db: { calls: { direction: db.createCall.mock.calls[0][4].direction }, attempt: { post_call_started_at: db.attempt.postCallStarted ? new Date() : null } },
       personaName: "Ava",
     });
-    // F-R2 fix (harness-fix-brief item 1): path_backstop_hello_end expects
-    // the CURRENT default's clip-first path specifically -- this scenario
-    // deliberately overrides OUTBOUND_FIRST_SPEAKER to exercise the OLD
-    // pre-S3-2 race instead (see this describe's own comment), so it FAILs
-    // that one criterion on the real "live_reply" path while everything else
-    // -- including no_stale_reply_after_clip, since no clip ever played here
-    // to hold anything against -- stays clean.
-    expect(results(v)).toEqual({
-      no_frame_before_onset: "PASS",
-      path_backstop_hello_end: "FAIL",
-      clip_after_hello_le_2000: "PASS",
-      // 2026-10-01: the new live mode logs no outbound_first_audio /
-      // outbound_live_shadow (clip-only), so the two clip criteria read FAIL
-      // here until plan Task 9 gives the verdict its live-mode criteria.
-      no_stale_reply_after_clip: "FAIL",
-      calls_direction_outbound: "PASS",
-      post_call_exactly_once: "PASS",
-    });
-    expect(v.criteria.path_backstop_hello_end).toMatchObject({ reason: "no outbound_first_audio for this call" });
-    expect(v.criteria.clip_after_hello_le_2000.client_from_speech_ms).toBe(280);
-    expect(v.pass).toBe(false);
+    expect(v.criteria.first_reply_logged).toMatchObject({ result: "PASS", path: "speech" });
+    expect(v.criteria.first_reply_le_2000.result).toBe("PASS");
+    expect(v.criteria.calls_direction_outbound.result).toBe("PASS");
+    expect(v.criteria.post_call_exactly_once.result).toBe("PASS");
+    expect(v.criteria.disclosure_in_first_reply.result).toBe("UNKNOWN");
+    for (const k of ["path_backstop_hello_end", "clip_after_hello_le_2000", "no_stale_reply_after_clip", "first_audio_path_backstop"]) {
+      expect(v.criteria[k], k).toBeUndefined();
+    }
   });
 
   // CHANGED (S3-2, P-a): 1,640/1,660/1,650 -> 1,380/1,400 -- silenceBackstopMs

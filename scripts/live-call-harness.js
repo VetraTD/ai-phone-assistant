@@ -178,7 +178,7 @@
 import "dotenv/config";
 import { WebSocket } from "ws";
 import { appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio, OUTBOUND_SITUATION_SCRIPTS } from "../lib/probe/script.js";
+import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio, OUTBOUND_SITUATION_SCRIPTS, OUTBOUND_SCRIPT_CONFIG } from "../lib/probe/script.js";
 import {
   buildInboundAnswerRequest,
   buildOutboundAnswerRequest,
@@ -196,6 +196,7 @@ import {
   decodeLogBuffer,
   parseServerLog,
   outboundVerdict,
+  inferFirstSpeaker,
   priceHarnessRun,
   createSpendGuard,
   pickHarnessNumbers,
@@ -1295,6 +1296,11 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
   // gone -- the caller's first post-clip line. A timed line (afterPreviousMs,
   // spoken over the clip by design) is not it.
   let heardBeforeCaptured = false;
+  // 2026-10-01 (lib/probe/script.js pauseAfterQuietMs): the caller is away
+  // (on hold) -- once Ava has gone quiet, wait this much longer, and count any
+  // assistant audio that reaches us meanwhile (the hold must keep it at 0).
+  let holdPauseStartedAt = null;
+  let holdPauseFrames = 0;
 
   function maybeSpeakNext(now) {
     if (finished || outQueue.length > 0 || cursor >= scriptLines.length || turns.length === 0) return;
@@ -1312,6 +1318,16 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
       const assistantQuiet = heardSomething && now - lastAssistantMediaAt >= GAP_MS;
       gaveUp = !heardSomething && waitedSinceTurnStart >= REPLY_WAIT_MS;
       if (!assistantQuiet && !gaveUp) return;
+      const pauseMs = typeof nextLine.pauseAfterQuietMs === "number" ? nextLine.pauseAfterQuietMs : 0;
+      if (pauseMs > 0) {
+        if (holdPauseStartedAt === null) {
+          holdPauseStartedAt = now;
+          holdPauseFrames = 0;
+        }
+        if (now - holdPauseStartedAt < pauseMs) return;
+        stats.holdPause = { ms: now - holdPauseStartedAt, assistantFramesDuring: holdPauseFrames };
+        holdPauseStartedAt = null;
+      }
 
       // F-R2 harness-fix round 2: the FIRST line sent by ordinary turn-taking
       // is exactly "the caller's first post-clip line" -- the one place to
@@ -1472,6 +1488,7 @@ async function runOutboundCall({ seed, common, parties, mode, scriptLines = [], 
       // scriptLines.length === 1, since maybeSpeakNext never runs then.
       lastAssistantMediaAt = now;
       assistantFramesThisTurn += 1;
+      if (holdPauseStartedAt !== null) holdPauseFrames += 1;
       return;
     }
     if (msg.event === "mark" && msg.mark?.name) {
@@ -1551,7 +1568,7 @@ async function mainOutbound() {
 
   const { default: pg } = await import("pg");
   const db = await import("../services/db.js");
-  const { seedOutboundAttempt, loadOutboundAttempt, renderAttemptClips, openerClipBytes, readBackOutbound, cleanupOutboundSeed, dispatchRowFor } =
+  const { seedOutboundAttempt, loadOutboundAttempt, renderAttemptClips, openerClipBytes, readBackOutbound, cleanupOutboundSeed, dispatchRowFor, HARNESS_FIRST_NAME } =
     await import("../lib/probe/outboundSeed.js");
 
   const admin = new pg.Client({ connectionString: databaseUrl });
@@ -1563,7 +1580,8 @@ async function mainOutbound() {
       seed = await loadOutboundAttempt({ db, callSid: CALL_SID_ARG });
     } else {
       const { callerId, contact } = pickHarnessNumbers();
-      seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact });
+      // 2026-10-01: a script's own campaign config (OUTBOUND_SCRIPT_CONFIG, e.g. the read-back sim's confirm question).
+      seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact, configPatch: OUTBOUND_SCRIPT_CONFIG[SCRIPT_NAME] });
     }
     console.log(`base       ${BASE}`);
     console.log(
@@ -1734,7 +1752,11 @@ async function mainOutbound() {
       personaName: seed.personaName,
       answerToStreamMs: ANSWER_TO_STREAM_MS,
       pacing,
+      // 2026-10-01: the mode the SERVER ran, read from what it logged.
+      firstSpeaker: inferFirstSpeaker(server),
+      firstName: HARNESS_FIRST_NAME,
     });
+    console.log(`first-speaker ${inferFirstSpeaker(server)}${server?.firstReply ? ` (first reply: ${JSON.stringify(server.firstReply)})` : ""}`);
 
     const priced = priceHarnessRun({
       sessionOpened: stats.socketOpened,
