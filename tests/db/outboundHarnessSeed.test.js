@@ -111,8 +111,15 @@ d("the outbound harness's seed, render, read-back and cleanup", () => {
     expect(await seedMod.openerClipBytes({ admin, callSid })).toBe(0);
   });
 
+  it("live mode (the default): the opener is never rendered -- the dispatcher's own rule", async () => {
+    const { dispatchLines } = harness;
+    const row = seedMod.dispatchRowFor(seed);
+    expect(dispatchLines({ row, attemptNo: 1, firstSpeaker: "live" }).lines).not.toHaveProperty("opener");
+  });
+
+  // 2026-10-01 (ruling R1): the clip rollback's render-and-store path, pinned.
   it("renders through the real renderAudio adapter (fake Live) and stores the clips the session then reads", async () => {
-    const render = await seedMod.renderAttemptClips({ db, seed, env: { GEMINI_API_KEY: "test" }, connect: fakeConnect, settleMs: 0 });
+    const render = await seedMod.renderAttemptClips({ db, seed, env: { GEMINI_API_KEY: "test", OUTBOUND_FIRST_SPEAKER: "clip" }, connect: fakeConnect, settleMs: 0 });
     // S3-4 (D6): the harness's speed_to_lead template lists "transfer", so
     // the fixed transfer_miss line renders alongside the two templated ones.
     expect(Object.keys(render.lines).sort()).toEqual(["opener", "transfer_miss", "voicemail"]);
