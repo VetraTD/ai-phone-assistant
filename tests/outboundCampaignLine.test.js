@@ -36,13 +36,13 @@ describe("renderCampaignLine, the shipped speed_to_lead template", () => {
   // name check, so with no name it is the name-check sentence that drops.
   it("with a first name: the whole opener", () => {
     expect(renderCampaignLine(CONFIG.opener, { firstName: "Sam", businessName: BIZ, config: CONFIG })).toBe(
-      "Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?"
+      "Hi, it's Ava, an AI assistant from Digile Media. Is that Sam?"
     );
   });
 
   it.each(NO_NAMES)("no first name (%j): the opener drops its name-check sentence and keeps the disclosure", (firstName) => {
     expect(renderCampaignLine(CONFIG.opener, { firstName, businessName: BIZ, config: CONFIG })).toBe(
-      "Hi, this is Ava, an AI assistant calling from Digile Media."
+      "Hi, it's Ava, an AI assistant from Digile Media."
     );
   });
 
@@ -74,7 +74,7 @@ describe("renderCampaignLine, the usability rule", () => {
 
   it("a business name containing a full stop does not split a sentence (the TEMPLATE is split, not the text)", () => {
     expect(renderCampaignLine(CONFIG.opener, { firstName: null, businessName: "Dr. Patel Clinic", config: CONFIG })).toBe(
-      "Hi, this is Ava, an AI assistant calling from Dr. Patel Clinic."
+      "Hi, it's Ava, an AI assistant from Dr. Patel Clinic."
     );
   });
 });

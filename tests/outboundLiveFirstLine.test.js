@@ -117,7 +117,9 @@ describe("liveFirstLine: speech before the cue (Review Focus 4)", () => {
     ctl.onModelAudio(4300);
     run(ctl, 3000, 20000);
     expect(calls.hello).toHaveLength(1);
-    expect(ctl.firstReply()).toMatchObject({ path: "silence_hello" });
+    // Final review #4: the person spoke before any AI audio, so this IS the
+    // reply to them (path speech), not the Hello.
+    expect(ctl.firstReply()).toMatchObject({ path: "speech" });
   });
 });
 
@@ -321,7 +323,7 @@ describe("liveFirstLine: hold (spec §4, Review Focus 2)", () => {
     expect(b.ctl.droppedThisGeneration()).toBe(true);
     b.ctl.onCallerTranscript("hello?", 9550);
     expect(b.ctl.onHold()).toBe(false);
-    expect(released).toEqual([{ midGeneration: true }]);
+    expect(released).toEqual([{ midGeneration: true, droppedOnHold: 0 }]);
     expect(b.ctl.droppedThisGeneration()).toBe(false);
     expect(b.ctl.onModelAudio(9600)).toBe(true);
     expect(b.ctl.onTurnComplete(10500)).toMatchObject({ heard: true });
@@ -403,6 +405,130 @@ describe("liveFirstLine: after the end", () => {
     ctl.onSessionEnd(1000);
     run(ctl, 1000, 200000);
     expect(calls.hello).toEqual([]);
+    expect(calls.end).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final review fix pass (2026-10-01).
+// ---------------------------------------------------------------------------
+describe("review #1: the speech end is dated from confirmed speech, never a stray loud frame", () => {
+  it("a click at 100 ms, then the Hello heard at 3.0 s: not silent, no slow log, path silence_hello", () => {
+    const { ctl, calls } = rig();
+    ctl.onCallerFrame(100, true, false);
+    ctl.tick(100);
+    run(ctl, 120, 3000);
+    ctl.onModelAudio(3000);
+    expect(ctl.firstReply()).toMatchObject({ path: "silence_hello", from_speech_end_ms: null });
+    expect(ctl.sessionSilent(20000)).toBe(false);
+    expect(events(calls.error, "outbound_first_reply_slow")).toEqual([]);
+  });
+
+  it("stray noise after real speech does not push the end later (a 2.1 s reply still reads slow)", () => {
+    const { ctl, calls } = rig();
+    run(ctl, 0, 1220, (t) => t >= 800 && t <= 1200);
+    ctl.onCallerFrame(2000, true, false); // one stray loud frame later
+    run(ctl, 2020, 3300);
+    ctl.onModelAudio(3300);
+    expect(ctl.firstReply().from_speech_end_ms).toBe(2100);
+    expect(events(calls.error, "outbound_first_reply_slow")).toHaveLength(1);
+  });
+});
+
+describe("review #4: speech at 2.9 s, after the cue was sent but before its audio -> exactly one AI turn", () => {
+  it("the cue's own generation (opened before the speech) is muted and unheard; the reply after it is the first answer, path speech", () => {
+    const { ctl } = rig();
+    run(ctl, 0, 2600);
+    ctl.noteAssistantText(2600); // the Hello generation opens (text first)
+    run(ctl, 2600, 3300, (t) => t >= 2900 && t < 3300); // the person speaks at 2.9 s
+    expect(ctl.onModelAudio(3350)).toBe(false); // the Hello's audio never plays
+    expect(ctl.onTurnComplete(3500)).toEqual({ heard: false, firstAnswer: false });
+    expect(ctl.onModelAudio(4800)).toBe(true); // the reply plays
+    expect(ctl.firstReply()).toMatchObject({ path: "speech" });
+    expect(ctl.onTurnComplete(5500)).toEqual({ heard: true, firstAnswer: true });
+  });
+
+  it("speech after the cue when no generation had opened yet: the next generation is the reply, not the cue's", () => {
+    const { ctl } = rig();
+    run(ctl, 0, 2300);
+    run(ctl, 2300, 3300, (t) => t >= 2900 && t < 3300);
+    expect(ctl.onModelAudio(4500)).toBe(true);
+    expect(ctl.onTurnComplete(5000)).toEqual({ heard: true, firstAnswer: true });
+  });
+});
+
+describe("review #5: a hold releases only on a person after the hold began, never on music", () => {
+  function onHoldRig(overrides = {}) {
+    const r = rig(overrides);
+    run(r.ctl, 0, 2000, (t) => t >= 500 && t <= 900);
+    r.ctl.onModelAudio(2500);
+    r.ctl.onTurnComplete(3000);
+    r.ctl.enterHold(3000);
+    return r;
+  }
+
+  it("a late transcript of speech from BEFORE the hold does not count as words", () => {
+    const { ctl } = onHoldRig();
+    ctl.onCallerTranscript("Hold on, I'll get him.", 3100); // pre-hold speech, transcribed late
+    run(ctl, 3100, 9600, (t) => t >= 9000 && t < 9500); // a short noise/word with no transcript of its own
+    expect(ctl.onHold()).toBe(true);
+  });
+
+  it("an utterance continuously voiced for more than 8 s is music: its lyrics never release the hold", () => {
+    const { ctl } = onHoldRig();
+    run(ctl, 3000, 15000, (t) => t >= 4000); // 11 s of continuous 'voiced' hold music
+    ctl.onCallerTranscript("la la love you", 15000);
+    expect(ctl.onHold()).toBe(true);
+  });
+
+  it("after the music stops, a person's short worded utterance releases it", () => {
+    const { ctl } = onHoldRig();
+    run(ctl, 3000, 15000, (t) => t >= 4000 && t < 13000); // music 4-13 s
+    run(ctl, 15000, 16000, (t) => t < 15600); // "Hi, this is Sam" 600 ms
+    ctl.onCallerTranscript("Hi, this is Sam.", 16000);
+    expect(ctl.onHold()).toBe(false);
+  });
+
+  it("a muted generation that opened BEFORE the person spoke is not flushed on release (it was talking to the music)", () => {
+    const released = [];
+    const { ctl } = onHoldRig({ onRelease: (f) => released.push(f) });
+    run(ctl, 3000, 8000);
+    ctl.noteAssistantText(8000); // Live chatting on hold
+    expect(ctl.onModelAudio(8100)).toBe(false);
+    run(ctl, 8100, 9600, (t) => t >= 9000 && t < 9500);
+    ctl.onCallerTranscript("Hello?", 9600);
+    expect(ctl.onHold()).toBe(false);
+    expect(released).toEqual([expect.objectContaining({ midGeneration: false })]);
+    expect(ctl.onModelAudio(9700)).toBe(false); // the stale generation stays muted to its end
+    expect(ctl.onTurnComplete(9800)).toMatchObject({ heard: false });
+    expect(ctl.onModelAudio(10500)).toBe(true); // the next one is the reply to the person
+  });
+});
+
+describe("review #6: release re-arms the first-answer check and reports dropped hold talk", () => {
+  it("the first heard turn after the release is offered as a first answer again; droppedOnHold counts the muted generations", () => {
+    const released = [];
+    const r = rig({ onRelease: (f) => released.push(f) });
+    run(r.ctl, 0, 2000, (t) => t >= 500 && t <= 900);
+    r.ctl.onModelAudio(2500);
+    expect(r.ctl.onTurnComplete(3000)).toMatchObject({ firstAnswer: true });
+    r.ctl.enterHold(3000);
+    r.ctl.onModelAudio(4000); // muted, then dropped
+    r.ctl.onTurnComplete(4500);
+    run(r.ctl, 4500, 9600, (t) => t >= 9000 && t < 9500);
+    r.ctl.onCallerTranscript("Hello?", 9600);
+    expect(released).toEqual([{ midGeneration: false, droppedOnHold: 1 }]);
+    r.ctl.onModelAudio(10000);
+    expect(r.ctl.onTurnComplete(11000)).toEqual({ heard: true, firstAnswer: true });
+  });
+});
+
+describe("review minor (re-graded): no unresponsive end while on hold", () => {
+  it("wait_on_hold before any AI audio, then silence: no live_unresponsive", () => {
+    const { ctl, calls } = rig();
+    run(ctl, 0, 1500, (t) => t >= 500 && t <= 900);
+    ctl.enterHold(1500);
+    run(ctl, 1500, 30000);
     expect(calls.end).toEqual([]);
   });
 });

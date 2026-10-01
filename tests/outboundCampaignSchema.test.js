@@ -382,10 +382,17 @@ describe("S3-6: the custom template is allowed, and custom_basis maps to complia
 // "the intro the first reply is built on" (live mode) -- disclosure, business,
 // then the name check -- and still a valid opener for the clip rollback.
 describe("speed_to_lead's default intro (2026-10-01)", () => {
-  it("is the spec's sentence", () => {
-    expect(TEMPLATES.speed_to_lead.opener).toBe(
-      "Hi, this is {persona_name}, an AI assistant calling from {business_name}. Am I speaking with {first_name}?"
-    );
+  // Final review #7 (ruling R27): the spec's sentence ("Hi, this is {persona_name}, an AI assistant
+  // calling from {business_name}. Am I speaking with {first_name}?") rendered past the 120-character
+  // budget for business names of 23+ characters, so saving the default campaign failed for them.
+  // Same three parts, the pre-2026-10-01 capacity (business names up to 45).
+  it("is the intro: persona, AI assistant, business, then the name check", () => {
+    expect(TEMPLATES.speed_to_lead.opener).toBe("Hi, it's {persona_name}, an AI assistant from {business_name}. Is that {first_name}?");
+  });
+  it("saves for a 40-character business name with the 30-character worst-case first name", () => {
+    const longName = "Brightwork Family Dental and Implant Clinic".slice(0, 40);
+    expect(longName).toHaveLength(40);
+    expect(validateCampaign(META, good(), { businessName: longName })).toMatchObject({ ok: true });
   });
   it("still passes the opener validation (business name, bounded AI disclosure, 120 chars rendered)", () => {
     expect(v(good())).toMatchObject({ ok: true });

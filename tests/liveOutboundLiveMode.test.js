@@ -195,7 +195,10 @@ describe("Review Focus 1: the person talks over the AI's first reply", () => {
     call.live.push(modelAudioMsg(2000));
     await call.settle();
     const clear = vi.spyOn(call.ws.liveAudioOut, "clear");
-    await call.feed(400, { voiced: true });
+    // Final review: 200 ms -- under our OWN 300 ms barge rule, so the clear
+    // below can only come from the vendor's `interrupted`.
+    await call.feed(200, { voiced: true });
+    expect(clear).not.toHaveBeenCalled();
     call.live.push({ serverContent: { interrupted: true } });
     await call.settle();
     expect(clear).toHaveBeenCalled();
@@ -235,8 +238,9 @@ describe("hold", () => {
     await call.settle();
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(SID, "other");
     expect(db.mergeCallAnswers).toHaveBeenCalledWith(SID, { _outcome_note: "hold timeout" });
-    expect(events("live_session_end").length + events("outbound_hold_timeout").length).toBeGreaterThan(0);
-    expect(call.ws.readyState === 3 || events("outbound_hold_timeout").length === 1).toBe(true);
+    expect(events("outbound_hold_timeout")).toHaveLength(1);
+    // finish() ran: the session wrote its one summary line.
+    expect(events("live_call_summary")).toHaveLength(1);
   });
 
   it("release mid-generation flushes the muted start of the reply to the new person", async () => {
@@ -586,5 +590,106 @@ describe("finish(): the §13.4 silent verdict and first audio in live mode (ruli
     await call.hangUp();
     await vi.waitFor(() => expect(db.finishAttemptSession).toHaveBeenCalled());
     expect(db.finishAttemptSession.mock.calls[0][1]).toMatchObject({ silent: true, firstAudioMs: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final review fix pass (2026-10-01): engine wiring.
+// ---------------------------------------------------------------------------
+describe("final review #6: the release note and the disclosure re-check", () => {
+  async function heldThenReleased({ dropOnHold }) {
+    allowErrors("outbound_disclosure_missing");
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    call.ws.liveFirstLine.enterHold(call.clock());
+    if (dropOnHold) {
+      call.live.push(modelAudioMsg()); // the intro again, to the hold music -- muted
+      await call.settle();
+      await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media.");
+    }
+    await call.feed(5000);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Hi, this is Sam.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(false);
+    return call;
+  }
+  const NOTE = "nothing you said while waiting was heard";
+  const notes = (call) => call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes(NOTE));
+
+  it("a muted turn dropped on hold -> one note appended (no forced turn) telling Live it was not heard", async () => {
+    const call = await heldThenReleased({ dropOnHold: true });
+    expect(notes(call)).toHaveLength(1);
+    expect(notes(call)[0].turnComplete).toBe(false);
+    await call.hangUp();
+  });
+
+  it("nothing dropped on hold -> no note", async () => {
+    const call = await heldThenReleased({ dropOnHold: false });
+    expect(notes(call)).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("the first heard turn after the release is checked again: no 'AI' -> outbound_disclosure_missing", async () => {
+    const call = await heldThenReleased({ dropOnHold: true });
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn("Great, thanks Sam -- so, about your enquiry.");
+    expect(events("outbound_disclosure_missing")).toHaveLength(1);
+    await call.hangUp();
+  });
+});
+
+describe("final review (re-graded minor): identity does not survive a hold", () => {
+  it("confirmed before the hold -> after it, confirm_identity is a FIRST confirmation again", async () => {
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    const [first] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(first.response.message).toMatch(/^Identity confirmed\. Next step of the call plan/);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.callTool("wait_on_hold", {});
+    await call.assistantTurn("Sure, thank you.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    await call.feed(5000);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Hi, it's his wife.");
+    const [again] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(again.response.message).toMatch(/^Identity confirmed\. Next step of the call plan/);
+    await call.hangUp();
+  });
+});
+
+describe("final review #8: the read-back must be an EARLIER heard turn, not the same reply as the save", () => {
+  it("'Best College -- did I get that right?' + record_answer in one reply is refused", async () => {
+    const db = outboundDb();
+    const base = db.outboundCallContext;
+    db.outboundCallContext = vi.fn(async (...a) => ({
+      ...(await base(...a)),
+      config: { ...CAMPAIGN_CONFIG, questions: [{ key: "clinic_name", ask: "What's the clinic called?", required: true, type: "text", confirm: true }] },
+    }));
+    const call = await bootLiveMode({ database: db });
+    call.deps.mergeCallAnswers = vi.fn(async () => {});
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    await call.callerSays("It's Best College.");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantSays("Best College -- did I get that right?");
+    const [r] = await call.callTool("record_answer", { key: "clinic_name", value: "Best College" });
+    expect(r.response.success).toBe(false);
+    await call.hangUp();
   });
 });

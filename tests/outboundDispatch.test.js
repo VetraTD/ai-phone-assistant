@@ -1045,7 +1045,7 @@ describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
     // S3-4: the default template lists "transfer", so the fixed line still
     // renders even though neither the opener nor the voicemail has a name.
     // 2026-10-01: the new default intro drops its name-check sentence instead.
-    expect(lines).toEqual({ opener: "Hi, this is Ava, an AI assistant calling from Digile Media.", transfer_miss: TRANSFER_MISS_LINE });
+    expect(lines).toEqual({ opener: "Hi, it's Ava, an AI assistant from Digile Media.", transfer_miss: TRANSFER_MISS_LINE });
     expect(JSON.stringify(lines)).not.toMatch(/\bnull\b|\bundefined\b/);
     expect(log.error).toHaveBeenCalledWith("outbound_voicemail_render_refused", { attemptId: "a1", reason: "unusable_line" });
   });
@@ -1077,7 +1077,7 @@ describe("dispatch: a contact with no first name (Task 14, O-9)", () => {
     const renderAudio = vi.fn(async () => null);
     const { d } = mk(db, undefined, { renderAudio });
     await d({ businessId: "b1", outreachId: "o1" });
-    expect(renderAudio.mock.calls[0][0].lines.opener).toBe("Hi, this is Ava, an AI assistant calling from Digile Media. Am I speaking with Sam?");
+    expect(renderAudio.mock.calls[0][0].lines.opener).toBe("Hi, it's Ava, an AI assistant from Digile Media. Is that Sam?");
   });
 });
 

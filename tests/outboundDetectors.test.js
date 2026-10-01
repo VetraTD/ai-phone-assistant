@@ -30,6 +30,15 @@ describe("firstReplyDiscloses (spec 2026-10-01 §5: the live first reply says it
     expect(firstReplyDiscloses("It's Ava, a virtual assistant with Digile Media.")).toBe(true);
     expect(firstReplyDiscloses("I'm an automated assistant from Digile Media.")).toBe(true);
   });
+  // Final review #3: Live's own output transcription writes the letters out
+  // or glues words (firstSeconds.js M3 records both on real calls) -- the
+  // shared normaliser (liveRender.js words + foldDottedAI) reads them.
+  it("dotted and glued transcripts count: 'an A.I. assistant', 'A. I.', 'AIassistant'", () => {
+    expect(firstReplyDiscloses("Hi, this is Ava, an A.I. assistant calling from Digile Media.")).toBe(true);
+    expect(firstReplyDiscloses("Hi, this is Ava, an A. I. assistant from Digile Media.")).toBe(true);
+    expect(firstReplyDiscloses("Hi, this is Ava, an AIassistant calling from Digile Media.")).toBe(true);
+  });
+
   it("'said' / 'maintain' do not read as 'AI' (word boundary)", () => {
     expect(firstReplyDiscloses("She said to maintain the plan.")).toBe(false);
   });

@@ -2248,6 +2248,28 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
         expect(r.database.mergeCallAnswers).not.toHaveBeenCalledWith(SID, { _optout_unverified: true });
       });
 
+      it("final review #2: silent pickup, our Hello echoed back, a loud frame, then a hang-up -> no STT, no marker", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("Hello?"));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await call.feed(100, { voiced: true }); // one loud frame at pickup (5 frames, never confirmed speech... see below)
+        await call.feed(2200);
+        call.live.push(modelAudioMsg(1500)); // the AI's "Hello?" plays
+        await call.settle();
+        // ...and comes back down the line as echo while it plays: short bursts
+        // (each under our own 300 ms barge rule, so the AI is not cut), 600 ms
+        // voiced in all -- enough to count as speech if echo were counted.
+        for (let i = 0; i < 3; i++) {
+          await call.feed(200, { voiced: true });
+          await call.feed(100);
+        }
+        expect(call.ws.liveFirstLine.heardSpeech()).toBe(false);
+        await call.hangUp();
+        await vi.waitFor(() => expect(r.pcDb.claimPostCall).toHaveBeenCalled(), { timeout: 4000 });
+        expect(dg.transcribeFile).not.toHaveBeenCalled();
+        expect(r.database.mergeCallAnswers).not.toHaveBeenCalledWith(SID, { _optout_unverified: true });
+      });
+
       it("the buffer is capped at 15 s: the earliest audio is what is kept", async () => {
         const r = heldRig();
         const dg = deepgram(said("Please stop calling me."));
