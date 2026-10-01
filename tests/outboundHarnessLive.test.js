@@ -270,3 +270,12 @@ describe("dispatchLines follows the first-speaker mode like the real dispatcher"
     expect(dispatchLines({ row, attemptNo: 1, firstSpeaker: "live" }).lines).toHaveProperty("voicemail");
   });
 });
+
+describe("verdictClient: what the runner hands the verdict as `client`", () => {
+  it("carries the hold pause (paid sim hold_transfer-1: it was measured but never reached the verdict)", async () => {
+    const { verdictClient } = await import("../lib/probe/outboundHarness.js");
+    const client = verdictClient({ first_media_at: 3400 }, { heardBeforeFirstPostClipLineMs: 6600, holdPause: { ms: 10000, assistantFramesDuring: 0 } });
+    expect(client).toEqual({ first_media_at: 3400, heard_before_first_post_clip_line_ms: 6600, holdPause: { ms: 10000, assistantFramesDuring: 0 } });
+    expect(verdictClient({}, {})).toEqual({ heard_before_first_post_clip_line_ms: undefined, holdPause: null });
+  });
+});

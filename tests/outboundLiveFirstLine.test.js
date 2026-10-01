@@ -84,6 +84,31 @@ describe("liveFirstLine: speech before the cue (Review Focus 4)", () => {
     expect(calls.hello).toHaveLength(1);
   });
 
+  // Paid sim hold_transfer-1 (2026-10-01): a short "Reception?" -- 640 ms
+  // voiced over 1,177 ms, gappy, so the VAD's 200 ms continuous rule
+  // (voiceActive) never latched; the Hello cue went out over the reply.
+  // Speech is also confirmed by COUNT: 11 voiced frames in 800 ms (the clip
+  // path's own CLIP_CONFIRM_* rule).
+  const gappy = (from, to) => (t) => t >= from && t < to && (t / 20) % 3 !== 2; // 40 ms on, 20 ms off
+
+  it("gappy speech that never sets voiceActive (\"Reception?\") still cancels the Hello", () => {
+    const { ctl, calls } = rig();
+    for (let t = 0; t < 4000; t += 20) {
+      ctl.onCallerFrame(t, gappy(1100, 2300)(t), false);
+      ctl.tick(t);
+    }
+    expect(calls.hello).toHaveLength(0);
+  });
+
+  it("a few scattered loud frames (10 in 800 ms) still do NOT cancel it", () => {
+    const { ctl, calls } = rig();
+    for (let t = 0; t < 2400; t += 20) {
+      ctl.onCallerFrame(t, t >= 1000 && t < 1800 && t % 80 === 0, false);
+      ctl.tick(t);
+    }
+    expect(calls.hello).toHaveLength(1);
+  });
+
   it("speech at 2,220 ms (cue already sent) sends no second cue; the next model turn is the reply", () => {
     const { ctl, calls } = rig();
     run(ctl, 0, 2220);
@@ -240,6 +265,17 @@ describe("liveFirstLine: hold (spec §4, Review Focus 2)", () => {
     ctl.onCallerTranscript("la la love you", 9400);
     expect(ctl.onHold()).toBe(true);
     expect(ctl.forwardModelAudio()).toBe(false);
+  });
+
+  it("gappy speech (voiceActive never latched) with 600 ms voiced still releases -- a person must never be held to the 120 s cap", () => {
+    const { ctl } = onHoldRig();
+    for (let t = 3000; t < 10000; t += 20) {
+      const v = t >= 9000 && t < 9900 && (t / 20) % 3 !== 2;
+      ctl.onCallerFrame(t, v, false);
+      ctl.tick(t);
+    }
+    ctl.onCallerTranscript("Hi, this is Sam.", 10000);
+    expect(ctl.onHold()).toBe(false);
   });
 
   it("words without letters ('...', '♪') never release, however long the audio", () => {

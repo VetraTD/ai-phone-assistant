@@ -197,6 +197,7 @@ import {
   parseServerLog,
   outboundVerdict,
   inferFirstSpeaker,
+  verdictClient,
   priceHarnessRun,
   createSpendGuard,
   pickHarnessNumbers,
@@ -1746,7 +1747,7 @@ async function mainOutbound() {
       // reused rather than re-derived so the two can never disagree about
       // whether/how big the stored clip is.
       clipBytes,
-      client: { ...observer.snapshot(), heard_before_first_post_clip_line_ms: stats.heardBeforeFirstPostClipLineMs },
+      client: verdictClient(observer.snapshot(), stats),
       server,
       db: dbExtra,
       personaName: seed.personaName,
