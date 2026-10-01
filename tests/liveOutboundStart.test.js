@@ -35,6 +35,7 @@ import { createPostCall } from "../lib/outbound/postCall.js";
 import { ComplianceViolationError } from "../lib/compliance.js";
 import * as realDb from "../services/db.js";
 import { mulaw8kToPcm16k } from "../lib/voice/resample.js";
+import { transcribeMulawOnce } from "../lib/voice/sttDeepgram.js";
 
 let allowed = new Set();
 /** Declare the ERROR-level events this test expects. Anything else fails it. */
@@ -2138,6 +2139,131 @@ describe("W1 I2 / A26 / A17 / A16 / A12: held speech and the turn rows at the ed
       await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
       expect(stt).toHaveBeenCalledTimes(1);
       expect(events("outbound_clip_hold_drain_settled")[0]).toMatchObject({ transcribed: false });
+    });
+
+    // 2026-10-01 (spec 2026-10-01-outbound-live-first-line §5, plan Task 5).
+    // LIVE MODE has no clip and so no clip hold -- but the S4-2 rule must still
+    // hold: "stop calling me" then a hang-up before Live transcribed it may not
+    // be re-dialled. The person's audio from the answer until Live's first
+    // non-empty input transcript is buffered (cap 15 s) and, if the call ends
+    // with speech in it and no transcript, goes through the SAME runClipHoldStt
+    // path. BOTH ENDS REAL (memory a-test-proves-a-wire-only-if-both-ends-are-
+    // real): the real buffer feeds the real runClipHoldStt, which calls the
+    // REAL transcribeMulawOnce; only Deepgram's client (its HTTP) is stubbed,
+    // in the producer's own response shape.
+    describe("live mode: the early-hang-up opt-out safety net (same S4-2 path)", () => {
+      const LIVE = { OUTBOUND_FIRST_SPEAKER: "live" };
+      function deepgram(transcribe) {
+        const transcribeFile = vi.fn(transcribe);
+        const stt = (args) =>
+          transcribeMulawOnce({
+            ...args,
+            env: { DEEPGRAM_API_KEY: "test-key" },
+            clientFactory: () => ({ listen: { v1: { media: { transcribeFile } } } }),
+          });
+        return { stt, transcribeFile };
+      }
+      const said = (text) => async () => ({ results: { channels: [{ alternatives: [{ transcript: text }] }] } });
+
+      async function stopThenHangUp(call) {
+        await call.feed(200);
+        await call.feedFrames(stopFrames()); // "Please stop calling me." -- straight to Live, nothing held
+        await call.feed(100);
+        await call.hangUp(); // ~1.9 s in, before Live transcribed or answered
+      }
+
+      it("no transcript before the hang-up: Deepgram reads the buffered audio, the caller row is written, post-call opts them out", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("Please stop calling me."));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        expect(call.ws.liveFirstLine).toBeTruthy();
+        const { session } = await call.live.connect.mock.results[0].value;
+        const closeLive = vi.spyOn(session, "close");
+        await stopThenHangUp(call);
+        // Not a Live drain: the vendor session still closes at the hang-up.
+        expect(closeLive).toHaveBeenCalled();
+
+        await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        expect(r.pcDb.setCallOutcomeCode).toHaveBeenCalledWith(SID, "opted_out");
+        expect(dg.transcribeFile).toHaveBeenCalledTimes(1);
+        // The WAV Deepgram got carries the fixture's own bytes, in order.
+        const wav = dg.transcribeFile.mock.calls[0][0];
+        expect(Buffer.from(wav).includes(STOP_ASK)).toBe(true);
+        expect(r.rows.filter((x) => x.speaker === "caller").map((x) => x.message)).toEqual(["Please stop calling me."]);
+        expect(events("outbound_clip_hold_stt")).toEqual([expect.objectContaining({ ok: true })]);
+        expect(events("outbound_live_early_audio_stt")).toEqual([expect.objectContaining({ voiced_frames: expect.any(Number) })]);
+        expect(JSON.stringify(logged)).not.toMatch(/stop calling me/i);
+      });
+
+      it("Deepgram fails: the attempt is marked unverified and post-call holds it for review", async () => {
+        allowErrors("outbound_optout_unverified_hold");
+        const r = heldRig();
+        const dg = deepgram(async () => {
+          throw new Error("503");
+        });
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await stopThenHangUp(call);
+
+        await vi.waitFor(() => expect(r.pcDb.applyOutreachResult).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        expect(r.database.mergeCallAnswers).toHaveBeenCalledWith(SID, { _optout_unverified: true });
+        expect(r.pcDb.setCallOutcomeCode).toHaveBeenCalledWith(SID, "held_for_review");
+        expect(r.pcDb.insertDetectorSuppression).not.toHaveBeenCalled();
+      });
+
+      it("a transcript arrived before the hang-up: no Deepgram call (no double ASR)", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("should never be asked"));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await call.feed(200);
+        await call.feedFrames(stopFrames());
+        await call.callerSays("Please stop calling me.");
+        await call.feed(100);
+        await call.hangUp();
+        await vi.waitFor(() => expect(r.pcDb.claimPostCall).toHaveBeenCalled(), { timeout: 4000 });
+        expect(dg.transcribeFile).not.toHaveBeenCalled();
+        expect(events("outbound_clip_hold_stt")).toHaveLength(0);
+      });
+
+      it("a whitespace-only transcript is not a transcript (M1): Deepgram still runs", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("Please stop calling me."));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await call.feed(200);
+        await call.feedFrames(stopFrames());
+        await call.callerSays("   ");
+        await call.feed(100);
+        await call.hangUp();
+        await vi.waitFor(() => expect(r.pcDb.insertDetectorSuppression).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        expect(dg.transcribeFile).toHaveBeenCalledTimes(1);
+      });
+
+      it("only silence before the hang-up: no Deepgram, no marker", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("never"));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await call.feed(1500);
+        await call.hangUp();
+        await vi.waitFor(() => expect(r.pcDb.claimPostCall).toHaveBeenCalled(), { timeout: 4000 });
+        expect(dg.transcribeFile).not.toHaveBeenCalled();
+        expect(r.database.mergeCallAnswers).not.toHaveBeenCalledWith(SID, { _optout_unverified: true });
+      });
+
+      it("the buffer is capped at 15 s: the earliest audio is what is kept", async () => {
+        const r = heldRig();
+        const dg = deepgram(said("Please stop calling me."));
+        const call = await bootOutbound({ env: LIVE, database: r.database, postCall: r.postCall, clipHoldStt: dg.stt });
+        await call.feed(200);
+        await call.feedFrames(stopFrames());
+        await call.feed(1000);
+        call.live.push(modelAudioMsg()); // Live answers (so it is not "unresponsive") but never transcribes them
+        await call.settle();
+        await call.feed(20000);
+        await call.hangUp();
+        await vi.waitFor(() => expect(dg.transcribeFile).toHaveBeenCalledTimes(1), { timeout: 4000 });
+        const wav = Buffer.from(dg.transcribeFile.mock.calls[0][0]);
+        expect(wav.includes(STOP_ASK)).toBe(true);
+        expect(wav.length).toBeLessThanOrEqual(15 * 8000 + 100); // 15 s of 8 kHz mu-law + the WAV header
+      });
     });
   });
 
