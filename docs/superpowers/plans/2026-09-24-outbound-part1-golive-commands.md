@@ -764,6 +764,127 @@ OFF. Turning it on for anyone but the owner's handset additionally needs:
   refused `no_legal_floor` (fails closed). Regenerate before then
   (`scripts/outbound/gen-eu-holidays.mjs`, date-holidays@3.37.0).
 
+## Section E: the AI answers live (deploy 4, DRAFT, YES-gated)
+
+**Status: DRAFT 2026-10-01 -- nothing in this section has run.** Every command needs its own explicit YES.
+Spec `docs/superpowers/specs/2026-10-01-outbound-live-first-line-design.md`, plan
+`docs/superpowers/plans/2026-10-01-outbound-live-first-line.md`, ledger
+`.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md` (every ruling made during the build).
+`SHA` = 531b869 (final code head of `feat/outbound-stage4`; later commits must be docs/spend only --
+`git log --oneline 531b869..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
+nothing). Rollback target: `voice-uk-prod-00096-n5p` @`b4d462d` (production today, `OUTBOUND_ENABLED=false`).
+
+**What changes for the person we call (outbound test calls only while `OUTBOUND_ENABLED=false`).**
+- No recorded opener. The AI's own live reply is the first thing heard: it answers what they said, says
+  "this is Ava, an AI assistant calling from {business}", and checks it is the right person unless they
+  already said so (never the reason before that). Measured on real calls: ~1.5-1.8 s after they stop.
+- They say nothing: the AI says "Hello?" heard ~3 s after the answer; then the usual silence ladder.
+- "Hold on, I'll get him": "Sure, thank you.", then silence (no nudges, nothing said to hold music, nothing
+  the model says on hold reaches the line) until a person speaks; it then introduces itself again; 120 s cap
+  (call ends, outcome `other`, note "hold timeout", retry schedule applies).
+- A campaign question marked `confirm` is read back before it is saved (max 2 refused saves, then saved and
+  logged `qualification_answer_uncertain`). R2 configs 20/21 mark `clinic_name`.
+- `speed_to_lead`'s default opener is now "Hi, it's {persona_name}, an AI assistant from {business_name}. Is that
+  {first_name}?" (the spec's longer sentence broke the 120-character budget for business names of 23+ characters; this
+  keeps the old 45-character capacity). Existing campaigns keep their own opener; in live mode it is rendered INTO the
+  prompt as the intro (used only if it says "AI" and names the business).
+- "stop calling me" then a hang-up before Live transcribed it: the same Deepgram one-shot (EU) on the
+  buffered audio as in clip mode, else `held_for_review`.
+- Inbound: unchanged (110 prompt snapshots byte-identical). Clip mode (`OUTBOUND_FIRST_SPEAKER=clip`): its
+  prompt and tool list are byte-identical to `b4d462d` (pinned by the `speed-to-lead-clip` snapshots).
+
+**Inputs checked.** No migration. No new env var or secret: `OUTBOUND_FIRST_SPEAKER` already exists (unset
+or `live` = the new default; `clip` = the rollback; anything else = clip + a warn log). `.env.example`
+gains only a comment. Gate at 531b869: root 286 files all green (6,770 passed / 3 skipped / 1 todo at 68adfba; at 531b869 the run was reaped by Claude Code for memory just after its last file -- every one of the 286 per-file lines is a pass, the summary line never printed), test:db 43 files / 618 (42 at 68adfba + outboundHarnessSeed 6/6 after d23825e; NOT re-run after the review fix pass -- run it before E1), census 63/63, liveCorpusReplay 164/164, corpus:sabotage skipped (no gate file changed), outbound prompt snapshots: clip byte-identical to b4d462d, inbound unchanged; paid sims P1-SIM-S6 ~$0.286 (sims report in the ledger dir).
+
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
+P=vetra-uk-edc8ca; R=europe-west2; SHA=531b869
+BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
+```
+
+**E0. Preflight (read).** As D0, expecting `voice-uk-prod-00096-n5p` at 100%. Then the one value this
+deploy depends on:
+```bash
+gcloud run services describe voice-uk-prod --project=$P --region=$R \
+  --format='value(spec.template.spec.containers[0].env)' | tr ';' '\n' | grep -E "OUTBOUND_FIRST_SPEAKER|OUTBOUND_ENABLED|DEEPGRAM_REGION"
+gcloud run services describe voice-uk-prod --project=$P --region=$R --format=export > /tmp/stageE-before.yaml
+```
+`OUTBOUND_FIRST_SPEAKER` must be ABSENT or `live`. **STOP and ask the owner if it is `clip`** (the new
+image would keep playing the recording) **or any other value** (a typo falls back to clip, with
+`outbound_first_speaker_invalid` warnings). `OUTBOUND_ENABLED=false`, `DEEPGRAM_REGION=eu` as before.
+
+**E1. Build from the MAIN checkout** (CRLF migration checksums -- D1's reason):
+```bash
+gcloud builds submit --config=cloudbuild.yaml --project=vetra-core-edc8ca \
+  --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
+  --substitutions=_TAG=$SHA
+```
+
+**E2 = D2/D3 minus the migration.** No D3/D4: nothing pending. Read-only check that this is still true:
+```bash
+gcloud run jobs update vetra-migrate-uk-prod --image=$IMG --project=$P --region=$R
+gcloud run jobs execute vetra-migrate-uk-prod --args=scripts/migrate.js,--status --project=$P --region=$R --wait   # expect pending: none
+```
+**STOP if anything is pending.**
+
+**E3. New revision.** Only `GIT_COMMIT_SHA` changes.
+```bash
+gcloud run services update voice-uk-prod --image=$IMG --project=$P --region=$R --update-env-vars=GIT_COMMIT_SHA=$SHA
+```
+Verify as D5: Ready, 100%, `Build: $SHA`, env diff against `/tmp/stageE-before.yaml` empty except
+`GIT_COMMIT_SHA`. **STOP on any other difference.**
+
+**E4. Smoke = D6** (one ordinary inbound call to +1 817 601 1171; `direction:"inbound"`, no ERROR).
+
+**E5. Alerting (D7 shape): add the two new ERROR events to the ONE policy** (bare id
+`15114942414748467079` -- `alertPolicies/<id>` doubles the path and 404s): `outbound_disclosure_missing`
+(`lib/voice/live/index.js`: the first live reply did not say it is an AI) and `outbound_live_unresponsive`
+(`lib/outbound/liveFirstLine.js`: Live never answered, the call was ended). 16 -> 18 events.
+Not added (warn/info): `outbound_first_reply_slow` (warn: > 2 s from the end of speech),
+`outbound_first_reply`, `outbound_hold_*`, `outbound_silence_hello`, `outbound_live_early_audio_stt`,
+`qualification_answer_uncertain`, `outbound_first_speaker_invalid` (warn).
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="voice-uk-prod" AND jsonPayload.event=("outbound_disclosure_missing" OR "outbound_live_unresponsive")' --project=$P --freshness=30d --limit=5
+gcloud alpha monitoring policies describe 15114942414748467079 --project=$P --format=json > /tmp/policy-before.json
+# edit -> /tmp/policy-after.json (extend the jsonPayload.event OR-list only), then with the owner's YES:
+gcloud alpha monitoring policies update 15114942414748467079 --project=$P --policy-from-file=/tmp/policy-after.json
+gcloud alpha monitoring policies describe 15114942414748467079 --project=$P --format='value(conditions[0].conditionMatchedLog.filter)'   # expect 18 events, same channel
+```
+
+**E6. Real calls (owner's US handset, 08:00-20:00 CDT -- the US floor, not 21:00).** Campaigns S20/S21
+(paused; resume one at a time; recreate from `r1-config.mjs 20|21` if `clinic_name.confirm` is wanted on
+the Hello call) and a hold campaign (S20's config is fine):
+1. **Hello** -- answer, say "Hello?": first sound is the AI ~1.5-2 s after you stop, with "AI assistant",
+   the business and "am I speaking with Nithin?"; confirm; reason before the first question; give a clinic
+   name and expect it read back. Then once say nothing on pickup: "Hello?" at ~3 s.
+2. **Gatekeeper** -- "He's out, try tomorrow at ten": intro, no reason, no identity confirmed, callback 10:00
+   next day.
+3. **Hold-transfer** -- "Hold on, I'll get him" + 20-30 s of silence or music (try one with sung words),
+   then "Hi, it's Nithin": "Sure, thank you.", silence throughout, then the intro again.
+Read per call: `outbound_first_reply` (`from_speech_end_ms`), `outbound_hold_entered/released`,
+`outbound_disclosure_missing` (expect none), the attempt row's `silent` (expect false).
+What the paid sims (P1-SIM-S6, `.superpowers/sdd/2026-10-01-outbound-live-first-line/sims-report.md`) did NOT
+prove, so these calls must: (a) the two last hold fixes (531b869: the hold pause in the harness, and a reply Live
+never closed) -- the hold call is their first real check; (b) the silent pickup: in the sim Live said the full intro
+at ~3.3 s instead of a short "Hello?" (N=1; compliant, but not the line chosen) -- listen for which one you get.
+
+**E7. Rollback.** Fastest, no image change: `--update-env-vars=OUTBOUND_FIRST_SPEAKER=clip` (today's
+recording returns: the dispatcher renders the opener again from the next dial; the clip prompt and tools
+are byte-identical to `b4d462d`). Not byte-identical for campaigns CREATED from the new default template: their
+recorded line is the new intro wording (S20/S21 and every older campaign keep their own opener). Or the previous revision:
+```bash
+gcloud run services update voice-uk-prod --project=$P --region=$R --update-env-vars=OUTBOUND_FIRST_SPEAKER=clip
+gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00096-n5p=100 --region=$R --project=$P
+```
+No migration to undo. The two alert events are simply never emitted by the old image.
+
+**Before any real lead (not this deploy):** the UK reading of the 2-second rule (from the END of the
+person's speech, which also decides the `silent` flag and its 72 h hold -- ruling R8) goes to counsel with
+the other items in `docs/outbound-eu-calling-floor.md`.
+
 ## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
 this deploy)
 
