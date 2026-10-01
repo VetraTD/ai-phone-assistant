@@ -770,8 +770,8 @@ OFF. Turning it on for anyone but the owner's handset additionally needs:
 Spec `docs/superpowers/specs/2026-10-01-outbound-live-first-line-design.md`, plan
 `docs/superpowers/plans/2026-10-01-outbound-live-first-line.md`, ledger
 `.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md` (every ruling made during the build).
-`SHA` = 531b869 (final code head of `feat/outbound-stage4`; later commits must be docs/spend only --
-`git log --oneline 531b869..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
+`SHA` = f1f6d50 (final code head of `feat/outbound-stage4`; later commits must be docs/spend only --
+`git log --oneline f1f6d50..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
 nothing). Rollback target: `voice-uk-prod-00096-n5p` @`b4d462d` (production today, `OUTBOUND_ENABLED=false`).
 
 **What changes for the person we call (outbound test calls only while `OUTBOUND_ENABLED=false`).**
@@ -795,12 +795,12 @@ nothing). Rollback target: `voice-uk-prod-00096-n5p` @`b4d462d` (production toda
 
 **Inputs checked.** No migration. No new env var or secret: `OUTBOUND_FIRST_SPEAKER` already exists (unset
 or `live` = the new default; `clip` = the rollback; anything else = clip + a warn log). `.env.example`
-gains only a comment. Gate at 531b869: root 286 files all green (6,770 passed / 3 skipped / 1 todo at 68adfba; at 531b869 the run was reaped by Claude Code for memory just after its last file -- every one of the 286 per-file lines is a pass, the summary line never printed), test:db 43 files / 618 (42 at 68adfba + outboundHarnessSeed 6/6 after d23825e; NOT re-run after the review fix pass -- run it before E1), census 63/63, liveCorpusReplay 164/164, corpus:sabotage skipped (no gate file changed), outbound prompt snapshots: clip byte-identical to b4d462d, inbound unchanged; paid sims P1-SIM-S6 ~$0.286 (sims report in the ledger dir).
+gains only a comment. Gate at f1f6d50: root 286 files all green (6,770 passed / 3 skipped / 1 todo at 68adfba; at f1f6d50 the run was reaped by Claude Code for memory just after its last file -- every one of the 286 per-file lines is a pass, the summary line never printed), test:db 43 files / 618 passed at 976c4d9 (code = 531b869), census 63/63, liveCorpusReplay 164/164, corpus:sabotage skipped (no gate file changed), outbound prompt snapshots: clip byte-identical to b4d462d, inbound unchanged; paid sims P1-SIM-S6 ~$0.286 (sims report in the ledger dir).
 
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
 export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
-P=vetra-uk-edc8ca; R=europe-west2; SHA=531b869
+P=vetra-uk-edc8ca; R=europe-west2; SHA=f1f6d50
 BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
 IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
 ```
@@ -867,9 +867,9 @@ the Hello call) and a hold campaign (S20's config is fine):
 Read per call: `outbound_first_reply` (`from_speech_end_ms`), `outbound_hold_entered/released`,
 `outbound_disclosure_missing` (expect none), the attempt row's `silent` (expect false).
 What the paid sims (P1-SIM-S6, `.superpowers/sdd/2026-10-01-outbound-live-first-line/sims-report.md`) did NOT
-prove, so these calls must: (a) the two last hold fixes (531b869: the hold pause in the harness, and a reply Live
-never closed) -- the hold call is their first real check; (b) the silent pickup: in the sim Live said the full intro
-at ~3.3 s instead of a short "Hello?" (N=1; compliant, but not the line chosen) -- listen for which one you get.
+prove, so these calls must: (a) the two last hold fixes (f1f6d50: the hold pause in the harness, and a reply Live
+never closed) -- the hold call is their first real check; (b) the silent pickup: sims gave the full intro once, "Hello?"
+(2.95 s) once -- owner accepts either.
 
 **E7. Rollback.** Fastest, no image change: `--update-env-vars=OUTBOUND_FIRST_SPEAKER=clip` (today's
 recording returns: the dispatcher renders the opener again from the next dial; the clip prompt and tools
