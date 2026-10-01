@@ -795,7 +795,12 @@ nothing). Rollback target: `voice-uk-prod-00096-n5p` @`b4d462d` (production toda
 
 **Inputs checked.** No migration. No new env var or secret: `OUTBOUND_FIRST_SPEAKER` already exists (unset
 or `live` = the new default; `clip` = the rollback; anything else = clip + a warn log). `.env.example`
-gains only a comment. Gate at f1f6d50: root 286 files all green (6,770 passed / 3 skipped / 1 todo at 68adfba; at f1f6d50 the run was reaped by Claude Code for memory just after its last file -- every one of the 286 per-file lines is a pass, the summary line never printed), test:db 43 files / 618 passed at 976c4d9 (code = 531b869), census 63/63, liveCorpusReplay 164/164, corpus:sabotage skipped (no gate file changed), outbound prompt snapshots: clip byte-identical to b4d462d, inbound unchanged; paid sims P1-SIM-S6 ~$0.286 (sims report in the ledger dir).
+gains only a comment. Gate: root 286 files all green (6,770 passed / 3 skipped / 1 todo at 68adfba; at 531b869 the run
+was reaped by Claude Code for memory just after its last file -- every one of the 286 per-file lines is a pass, the
+summary line never printed), test:db 43 files / 618 passed at 976c4d9 (code = 531b869), census 63/63,
+liveCorpusReplay 164/164, corpus:sabotage skipped (no gate file changed), outbound prompt snapshots: clip
+byte-identical to b4d462d, inbound unchanged. f1f6d50 changes one tool-reply string after that (its one pinning test
+updated; targeted 264 green). Paid sims P1-SIM-S6 ~$0.343 in all (sims report in the ledger dir).
 
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
@@ -867,9 +872,12 @@ the Hello call) and a hold campaign (S20's config is fine):
 Read per call: `outbound_first_reply` (`from_speech_end_ms`), `outbound_hold_entered/released`,
 `outbound_disclosure_missing` (expect none), the attempt row's `silent` (expect false).
 What the paid sims (P1-SIM-S6, `.superpowers/sdd/2026-10-01-outbound-live-first-line/sims-report.md`) did NOT
-prove, so these calls must: (a) the two last hold fixes (f1f6d50: the hold pause in the harness, and a reply Live
-never closed) -- the hold call is their first real check; (b) the silent pickup: sims gave the full intro once, "Hello?"
-(2.95 s) once -- owner accepts either.
+prove, so these calls must: (a) the re-intro after a hold -- hold_transfer-3 (all hold fixes in) held cleanly
+(10 s, 0 AI frames) but the new person got the reason with NO intro (`outbound_disclosure_missing` fired; 1 of 2
+hold runs); f1f6d50 puts the restart-with-intro rule in wait_on_hold's reply, unverified by a sim -- the hold call is
+its first real check (expect "Hi Nithin, this is Ava, an AI assistant ..." after the hold, and no
+`outbound_disclosure_missing`); (b) the silent pickup: sims gave the full intro once, "Hello?" (2.95 s) once --
+owner accepts either.
 
 **E7. Rollback.** Fastest, no image change: `--update-env-vars=OUTBOUND_FIRST_SPEAKER=clip` (today's
 recording returns: the dispatcher renders the opener again from the next dial; the clip prompt and tools
