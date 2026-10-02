@@ -977,7 +977,20 @@ IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
 
 ## Section G: receptionist fixes from the 2026-10-02 calls (deploy 6, DRAFT, YES-gated)
 
-**Status: DRAFT 2026-10-02.** `SHA` = b772acb (code head of `feat/outbound-stage4`; later commits must be
+**Status: G0-G4 RUN 2026-10-02 ~15:30-16:12 CDT (owner YES for G1-G4).**
+
+**[AS RUN] 2026-10-02.** G0 PASS (00098-278 100%, OUTBOUND_FIRST_SPEAKER absent, OUTBOUND_ENABLED=false,
+DEEPGRAM_REGION=eu, stageG-before.yaml in the session scratchpad). G1 build `bab6daad` SUCCESS (30 s),
+`voice:b772acb` digest `sha256:11e4e824...`. G2 migrate job -> b772acb, execution `dd74h`: pending none / applied
+50. G3 **`voice-uk-prod-00099-lkq`** 100%, Ready, `GET /` -> `Build: b772acb`, env diff = image + `GIT_COMMIT_SHA` +
+nonce only, no boot ERROR. G4 smoke PASS (CAfd993a...a6364722, 21:10Z): inbound, greeting -> answer -> "anything
+else?" -> goodbye, `end_call` refused once then allowed (ask gate), 0 `record_answer`, `postcall_verify` ok; the
+handset matched S20's waiting outreach `b9d70e34` (`outbound_callback_recognized`, closed called_back) and no
+leftover question was asked; WARN `live_debug_transcript_enabled` (pre-existing) + `live_greeting_respoken` (1 cut).
+Gate at b772acb: corpus:sabotage 67 rows = 64 v + the 3 baseline x; root 285/287 files in the gate worktree (1
+worktree-only, 1 skipped), 6,947 tests; test:db 43/629; census 67/67. Rollback target `voice-uk-prod-00098-278`.
+
+`SHA` = b772acb (code head of `feat/outbound-stage4`; later commits must be
 docs/spend/ledger only -- `git log --oneline b772acb..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json'
 ':!.superpowers'` prints nothing). Production today: `voice-uk-prod-00098-278` @a2aa121, `OUTBOUND_ENABLED=false`.
 Rollback target: `voice-uk-prod-00098-278`. Ledger: the "Receptionist fixes 2026-10-02" block in

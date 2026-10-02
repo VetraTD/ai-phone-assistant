@@ -4,7 +4,7 @@ Real calls on the deployed build before Sunday night's freeze and Monday's scopi
 You call from or answer on your US handset **+1 469 933 8887**; the business line is **+1 817 601 1171** (Digile US
 test tenant `2083c6a4`). I fire each outbound call and read the logs after each one, within about 5 minutes.
 
-**Build:** `voice-uk-prod-<REV>` @ `<SHA>` (Section G of `2026-09-24-outbound-part1-golive-commands.md`).
+**Build:** `voice-uk-prod-00099-lkq` @ `b772acb` (Section G of `2026-09-24-outbound-part1-golive-commands.md`, deployed 2026-10-02).
 `OUTBOUND_ENABLED` stays false. Only campaigns S20-S24 dial, and only to your number.
 
 ## When
@@ -13,9 +13,10 @@ test tenant `2083c6a4`). I fire each outbound call and read the logs after each 
   the contact's time zone, which is narrower than the 08:00-20:00 legal floor. A trigger outside that window just waits.
 
 ## Before the first call (me, ~10 min, nothing dials)
-1. Confirm production is `<REV>` at 100% and `OUTBOUND_ENABLED=false`.
+1. Confirm production is `00099-lkq` at 100% and `OUTBOUND_ENABLED=false`.
 2. Dry-run `status` for S20-S24 (migrate job) and read each campaign's state and `reArmed`. S23's "parked row" was
-   most likely closed `called_back` by the 10-02 cancel call (CAffb5c7, 16:27Z). Confirm that, don't assume it.
+   most likely closed `called_back` by the 10-02 cancel call (CAffb5c7, 16:27Z). S20's waiting outreach b9d70e34 was
+   closed `called_back` by the G4 smoke call (21:10Z). Confirm both, don't assume them; O4 needs a fresh trigger.
 3. Confirm **no outreach is `waiting`** for your number. Otherwise every inbound call is treated as a "returned call",
    and I1-I4 would test the wrong thing.
 4. Your contact record has a first name only, which is what O1 needs. O2 adds `--last-name Dodla`, and that can't be
