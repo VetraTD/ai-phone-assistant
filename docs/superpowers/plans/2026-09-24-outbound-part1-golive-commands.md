@@ -908,6 +908,56 @@ No migration to undo. The two alert events are simply never emitted by the old i
 person's speech, which also decides the `silent` flag and its 72 h hold -- ruling R8) goes to counsel with
 the other items in `docs/outbound-eu-calling-floor.md`.
 
+## Section F: the Hold-call fixes (deploy 5, DRAFT, YES-gated)
+
+**Status: DRAFT 2026-10-01 (night). Every production command needs its own explicit YES.**
+`SHA` = a2aa121 (code head of `feat/outbound-stage4`; later commits must be docs/spend only --
+`git log --oneline a2aa121..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
+nothing). Production today: `voice-uk-prod-00097-4f5` @f1f6d50, `OUTBOUND_ENABLED=false`. Rollback target:
+`voice-uk-prod-00097-4f5` (or `00096-n5p`, or `OUTBOUND_FIRST_SPEAKER=clip`). Ledger: the "Hold fixes session"
+block in `.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md` (rulings R33-R40).
+
+**What changes for the person we call (outbound test calls only while `OUTBOUND_ENABLED=false`).**
+- "Hold on": the AI says "Sure, thank you." and nothing more (the f1f6d50 early re-intro is gone). When the person
+  comes back, Live's own answer releases the hold if their speech started after >= 1 s of quiet; otherwise their
+  words do (as before). The AI then introduces itself again: the first `confirm_identity` after a hold runs with
+  "Introduce yourself first" at the head of its reply (sim P1-SIM-S7 #3 PASS).
+- A late AMD "machine" verdict after a real exchange (measured on audio, `calls.answers._exchanged`) is ignored:
+  no hang-up mid-hold, no voicemail over a live call (`outbound_amd_ignored_conversation`, info). Clip mode never
+  writes the marker, so the rollback keeps today's AMD behaviour.
+- "I've scheduled a callback for ..." after a successful `schedule_callback` is no longer an unbacked-claim alert
+  (live gate + post-call); a booking claim beside it still is.
+- No auto-redial after a real conversation with the confirmed person, unless they asked for or booked a callback;
+  a gatekeeper-only talk and a hold timeout keep the retry schedule.
+- Inbound: unchanged (every change is gated on an outbound call).
+
+**Inputs checked.** No migration (only `calls.answers` keys `_exchanged`, `_identity_confirmed`). No new env var
+or secret. New warn-level event `outbound_amd_exchange_check_failed` (not added to the alert policy; ask).
+Gate: root @b22c0a5 286 files / 6,852 passed; after the review fix pass + gate: targeted 66 files / 2,601,
+test:db 43 / 626, census 63/63; corpus:sabotage + root at a2aa121 -- see [AS RUN]. Paid sims P1-SIM-S7 $0.1267.
+
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
+P=vetra-uk-edc8ca; R=europe-west2; SHA=a2aa121
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
+```
+
+**F0. Preflight (read)** as E0: `voice-uk-prod-00097-4f5` at 100%; `OUTBOUND_FIRST_SPEAKER` absent,
+`OUTBOUND_ENABLED=false`, `DEEPGRAM_REGION=eu`; export `/tmp/stageF-before.yaml`.
+**F1. Build from the MAIN checkout** (E1's command, `_TAG=$SHA`).
+**F2. Migrate job image + `--status`** (expect pending: none; STOP otherwise).
+**F3. New revision**, only `GIT_COMMIT_SHA` changes; verify Ready, 100%, `Build: $SHA`, env diff against
+`/tmp/stageF-before.yaml` = image + `GIT_COMMIT_SHA` only.
+**F4. Smoke** = one inbound call from the owner's handset (`direction:"inbound"`, no ERROR).
+**F6. The Hold call (owner's US handset, 08:00-20:00 CDT).** S24 R3-Hold `7cb62d32` (paused): dry-run then
+`status active` via the migrate job (`r1-job.sh`), `r1-fire.sh 24`, pause right after. Owner: "Reception?" ->
+"Hold on, I'll get him" -> 20-30 s of music with a beep -> "Hi, it's Nithin". Expect: intro + ask for Nithin ->
+"Sure, thank you." + silence -> no hang-up -> the intro again -> no `outbound_disclosure_missing`; read
+`outbound_hold_*`, `outbound_hold_intro_prompted`, `outbound_amd*` by callSid.
+**F7. Rollback**: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00097-4f5=100
+--region=$R --project=$P`. No migration to undo; the new `calls.answers` keys are inert to the old image.
+
 ## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
 this deploy)
 
