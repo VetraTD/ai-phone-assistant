@@ -48,7 +48,7 @@
 //     --status active|paused|draft [--confirm]
 //   node scripts/outbound-admin.js outbound --phone +1... --enabled true|false --max 2 [--confirm]
 //   node scripts/outbound-admin.js trigger --phone +1... --campaign-id <uuid> \
-//     --contact-phone +1... [--timezone America/Chicago] [--first-name "Sam"] \
+//     --contact-phone +1... [--timezone America/Chicago] [--first-name "Sam"] [--last-name "Shah"] \
 //     [--consent-manual] [--confirm]
 //   --timezone (an IANA zone) is REQUIRED unless --contact-phone is +44: the
 //   calling window runs on the contact's clock, and only +44 has a default.
@@ -456,7 +456,7 @@ function timezoneError(phone, timezone) {
  * operator re-running the same trigger is not spammed with duplicate
  * "operator test" consent rows.
  */
-export async function triggerOutreach(client, { businessPhone, campaignId, phone, timezone, firstName, consentManual, confirm }) {
+export async function triggerOutreach(client, { businessPhone, campaignId, phone, timezone, firstName, lastName = null, consentManual, confirm }) {
   if (!E164.test(businessPhone || "")) {
     return { ok: false, error: "businessPhone must be an E.164 number" };
   }
@@ -483,6 +483,13 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
   const firstNameResult = validateName(firstName);
   if (!firstNameResult.ok) {
     return { ok: false, error: "--first-name must be a name of at most 40 letters/spaces/'-." };
+  }
+  // 2026-10-02: the surname, validated by the same rule. A booking for this
+  // contact on an outbound call uses first + last instead of asking them to
+  // spell their name (services/tools.js outboundNameOnFile).
+  const lastNameResult = validateName(lastName);
+  if (!lastNameResult.ok) {
+    return { ok: false, error: "--last-name must be a name of at most 40 letters/spaces/'-." };
   }
 
   // ALLOW-LIST GUARD. Refused before any transaction opens and before the
@@ -526,7 +533,7 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       businessId: business.id,
       campaignId: campaign.id,
       campaignVersion: campaign.current_version,
-      contact: { phone_e164: phone, first_name: firstNameResult.value, timezone: tz },
+      contact: { phone_e164: phone, first_name: firstNameResult.value, last_name: lastNameResult.value, timezone: tz },
       consent: consentManual
         ? { source: "manual", covers_automated: true, purpose, channels: ["call"], wording_version: OPERATOR_TEST_WORDING }
         : null,
@@ -541,12 +548,13 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
     // COALESCE (Checkpoint 2a, M8b/M8c): a re-run without --first-name or
     // --timezone keeps the stored value rather than wiping it.
     const contactRes = await client.query(
-      `INSERT INTO contacts (business_id, phone_e164, first_name, timezone)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO contacts (business_id, phone_e164, first_name, timezone, last_name)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (business_id, phone_e164) DO UPDATE SET first_name = COALESCE(EXCLUDED.first_name, contacts.first_name),
+                                                           last_name = COALESCE(EXCLUDED.last_name, contacts.last_name),
                                                            timezone = COALESCE(EXCLUDED.timezone, contacts.timezone), updated_at = now()
        RETURNING id`,
-      [business.id, phone, firstNameResult.value, tz]
+      [business.id, phone, firstNameResult.value, tz, lastNameResult.value]
     );
     const contactId = contactRes.rows[0].id;
 
@@ -582,10 +590,11 @@ export async function triggerOutreach(client, { businessPhone, campaignId, phone
       if (!row.next_attempt_at) mismatches.push("next_attempt_at");
     }
     // The contact fields this run asked for (absent ones were kept, M8b/c).
-    const contactCheck = (await client.query("SELECT first_name, timezone FROM contacts WHERE id = $1", [contactId])).rows[0];
+    const contactCheck = (await client.query("SELECT first_name, last_name, timezone FROM contacts WHERE id = $1", [contactId])).rows[0];
     if (!contactCheck) mismatches.push("contact missing");
     else {
       if (firstNameResult.value && contactCheck.first_name !== firstNameResult.value) mismatches.push("first_name");
+      if (lastNameResult.value && contactCheck.last_name !== lastNameResult.value) mismatches.push("last_name");
       if (tz && contactCheck.timezone !== tz) mismatches.push("timezone");
     }
     if (mismatches.length) {
@@ -1030,6 +1039,7 @@ export function parseArgs(argv) {
     const campaignId = argOf(args, "campaign-id");
     const contactPhone = argOf(args, "contact-phone");
     const firstName = argOf(args, "first-name") || null;
+    const lastName = argOf(args, "last-name") || null;
     // Validated (and required outside +44) by triggerOutreach -- one place.
     const timezone = argOf(args, "timezone") || null;
     const consentManual = has(args, "consent-manual");
@@ -1038,7 +1048,7 @@ export function parseArgs(argv) {
     if (errors.length) return { ok: false, errors };
     return {
       ok: true,
-      value: { command, confirm, businessPhone: phone, campaignId, phone: contactPhone, timezone, firstName, consentManual },
+      value: { command, confirm, businessPhone: phone, campaignId, phone: contactPhone, timezone, firstName, lastName, consentManual },
     };
   }
 
