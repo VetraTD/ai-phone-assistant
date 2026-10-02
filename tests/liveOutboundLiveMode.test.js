@@ -702,11 +702,13 @@ describe("final review (re-graded minor): identity does not survive a hold", () 
 
 // Real Hold call + paid sims hold_transfer-3 (09-30) and P1-SIM-S7 (10-01): the
 // person who came back after a hold got the reason with NO intro -- the release
-// note (appended context) was ignored both times. Owner 2026-10-01: refuse the
-// FIRST confirm_identity after a hold until the AI has said who it is. A tool
-// reply is acted on at once (the real Hold call's defect A), and right after the
-// person came back, at once is the right moment. One refusal per hold.
-describe("hold-intro gate: the first confirm_identity after a hold waits for the intro", () => {
+// note (appended context) was ignored both times. Owner 2026-10-01: make the
+// FIRST confirm_identity after a hold carry the intro. A tool reply is acted on
+// at once (the real Hold call's defect A), and right after the person came back,
+// at once is the right moment. Sim P1-SIM-S7 #2: a REFUSAL got the intro said but
+// the model never re-called confirm_identity (the call stalled), so the call now
+// RUNS and its reply starts with "Introduce yourself first". Once per hold.
+describe("hold-intro gate: the first confirm_identity after a hold carries the intro", () => {
   async function releasedCall() {
     // The re-intro after the hold repeats the first intro on purpose (spec §4).
     allowErrors("outbound_disclosure_missing", "live_repeated_phrase");
@@ -729,27 +731,29 @@ describe("hold-intro gate: the first confirm_identity after a hold waits for the
     await call.settle();
     return call;
   }
+  const PROMPTED = "outbound_hold_intro_prompted";
 
-  it("confirm_identity straight after the release (no intro said) -> refused with 'introduce yourself first'", async () => {
+  it("confirm_identity straight after the release (no intro said) -> RUNS, reply starts 'Introduce yourself first', then the plan", async () => {
     const call = await releasedCall();
     const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
-    expect(r.response.success).toBe(false);
-    expect(r.response.message).toMatch(/introduce yourself first/i);
+    expect(r.response.success).toBe(true);
+    expect(r.response.message).toMatch(/^Introduce yourself first/);
     expect(r.response.message).toMatch(/AI assistant/);
-    expect(events("outbound_hold_intro_refused")).toHaveLength(1);
+    expect(r.response.message).toMatch(/Identity confirmed\. Next step of the call plan/);
+    expect(events(PROMPTED)).toHaveLength(1);
     await call.hangUp();
   });
 
-  it("the intro said in the SAME reply before the tool call -> allowed (no second intro)", async () => {
+  it("the intro said in the SAME reply before the tool call -> the plain reply (no second intro)", async () => {
     const call = await releasedCall();
     await call.assistantSays("Hi Sam, this is Ava, an AI assistant calling from Digile Media.");
     const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
     expect(r.response.message).toMatch(/^Identity confirmed/);
-    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
+    expect(events(PROMPTED)).toHaveLength(0);
     await call.hangUp();
   });
 
-  it("the intro said in an EARLIER completed reply after the hold, confirm in a later one -> never refused", async () => {
+  it("the intro said in an EARLIER completed reply after the hold, confirm in a later one -> the plain reply", async () => {
     const call = await releasedCall();
     await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Is that Sam?");
     await call.feed(500, { voiced: true });
@@ -759,25 +763,11 @@ describe("hold-intro gate: the first confirm_identity after a hold waits for the
     await call.settle();
     const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
     expect(r.response.message).toMatch(/^Identity confirmed/);
-    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
+    expect(events(PROMPTED)).toHaveLength(0);
     await call.hangUp();
   });
 
-  it("refused once, then the intro is said and the person answers -> the next confirm runs", async () => {
-    const call = await releasedCall();
-    await call.callTool("confirm_identity", { name_confirmed: true });
-    await call.assistantTurn("Hi Sam, this is Ava, an AI assistant calling from Digile Media. Is that Sam?");
-    await call.feed(500, { voiced: true });
-    await call.feed(400);
-    await call.callerSays("Yes, it is.");
-    call.live.push(modelAudioMsg());
-    await call.settle();
-    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
-    expect(r.response.message).toMatch(/^Identity confirmed/);
-    await call.hangUp();
-  });
-
-  it("at most ONE refusal per hold: a reply that still skipped the intro does not loop the gate", async () => {
+  it("at most ONCE per hold: a later confirm_identity gets the plain reply even if the intro was skipped", async () => {
     const call = await releasedCall();
     await call.callTool("confirm_identity", { name_confirmed: true });
     await call.assistantTurn("Sorry, could you repeat that?");
@@ -788,11 +778,18 @@ describe("hold-intro gate: the first confirm_identity after a hold waits for the
     await call.settle();
     const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
     expect(r.response.message).toMatch(/^Identity confirmed/);
-    expect(events("outbound_hold_intro_refused")).toHaveLength(1);
+    expect(events(PROMPTED)).toHaveLength(1);
     await call.hangUp();
   });
 
-  it("no hold on the call -> the first confirm_identity runs as before", async () => {
+  it("not the right person (name_confirmed false) after a hold -> the reply also starts with the intro instruction", async () => {
+    const call = await releasedCall();
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: false });
+    expect(r.response.message).toMatch(/^Introduce yourself first/);
+    await call.hangUp();
+  });
+
+  it("no hold on the call -> the first confirm_identity's reply is unchanged", async () => {
     const call = await bootLiveMode();
     await call.feed(500, { voiced: true });
     await call.feed(1000);
@@ -801,7 +798,7 @@ describe("hold-intro gate: the first confirm_identity after a hold waits for the
     await call.assistantTurn(INTRO);
     const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
     expect(r.response.message).toMatch(/^Identity confirmed/);
-    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
+    expect(events(PROMPTED)).toHaveLength(0);
     await call.hangUp();
   });
 });
