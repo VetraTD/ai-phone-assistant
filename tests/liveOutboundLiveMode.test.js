@@ -100,8 +100,17 @@ function outboundDb() {
   };
 }
 
-function bootLiveMode({ env = {}, database = outboundDb() } = {}) {
-  return bootLive({ config: CONFIG, callSid: SID, env, customParameters: { direction: "outbound" }, authorizedCallSid: SID, database });
+function bootLiveMode({ env = {}, database = outboundDb(), verify, judge } = {}) {
+  return bootLive({
+    config: CONFIG,
+    callSid: SID,
+    env,
+    customParameters: { direction: "outbound" },
+    authorizedCallSid: SID,
+    database,
+    verify,
+    judge,
+  });
 }
 
 /** 24 kHz PCM16 as the model sends it. */
@@ -724,5 +733,116 @@ describe("paid sim hold_transfer-2: a reply Live never closed (no turnComplete) 
     expect(events("outbound_disclosure_missing")).toEqual([]);
     expect(events("live_debug_assistant_turn")).toEqual([]); // (LIVE_DEBUG_TRANSCRIPT is off here)
     await call.hangUp();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gatekeeper call 2026-10-01 (CA450e3d...): "I've scheduled a callback for
+// tomorrow at ten o'clock" -- TRUE, schedule_callback had succeeded -- was read
+// as an unbacked booking claim: live_claim_unbacked_by_action + a claim note,
+// then post-call claim_without_row (matcher AND judge, agreed_action "none")
+// -> a false "unconfirmed booking" alert to the tenant. Both ends real: the REAL
+// schedule_callback pack (capabilities/callback.js) answers the tool call, the
+// REAL claim predicates read the sentence, the REAL verifyCall reconciles.
+// ---------------------------------------------------------------------------
+describe("a successful schedule_callback backs a callback claim (live gate + post-call)", () => {
+  const HANDSET = "+14699338887"; // a dialable US number: the callback pack checks the legal floor for it
+  const CLAIM = "Perfect. I've scheduled a callback for tomorrow at ten o'clock. Have a great day!";
+  const tomorrowAt = (hhmm) =>
+    `${new Date(Date.now() + 86400000).toLocaleDateString("en-CA", { timeZone: "America/Chicago" })}T${hhmm}`;
+  const yesterdayAt = (hhmm) =>
+    `${new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "America/Chicago" })}T${hhmm}`;
+
+  function gatekeeperDb() {
+    const db = outboundDb();
+    // The teardown judge reads the call's rows and transcript first (lib/voice/live/index.js).
+    db.listAppointmentsByCallId = vi.fn(async () => []);
+    db.fetchCallTranscript = vi.fn(async () => []);
+    const base = db.outboundCallContext;
+    // A real campaign always carries a calling window; without one the pack refuses
+    // ("no_legal_opening"). Every day, so the test does not depend on the weekday it runs.
+    db.outboundCallContext = vi.fn(async (...a) => {
+      const ctx = await base(...a);
+      return {
+        ...ctx,
+        toNumber: HANDSET,
+        config: { ...ctx.config, calling_window: { mon_fri: "09:00-17:00", sat: "09:00-17:00", sun: "12:00-17:00" } },
+      };
+    });
+    return db;
+  }
+
+  async function gatekeeperCall({ whenIso, claim = CLAIM, ...boot }) {
+    const call = await bootLiveMode({ database: gatekeeperDb(), ...boot });
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("He's out until tomorrow. Try him at ten.");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    const [r] = await call.callTool("schedule_callback", { when_iso: whenIso });
+    await call.assistantTurn(claim);
+    return { call, r };
+  }
+
+  it("the real Gatekeeper shape: callback booked, then claimed -> no unbacked-claim error, no claim note", async () => {
+    const { call, r } = await gatekeeperCall({ whenIso: tomorrowAt("14:00") });
+    expect(r.response).toMatchObject({ success: true }); // the real pack really booked it
+    expect(events("live_claim_unbacked_by_action")).toEqual([]);
+    expect(events("live_turn_note").filter((e) => e.kind === "claim")).toEqual([]);
+    await call.hangUp();
+  });
+
+  it("schedule_callback REFUSED (a time in the past), then the same claim -> the guard still fires", async () => {
+    allowErrors("live_claim_unbacked_by_action", "live_claim_without_action");
+    const { call, r } = await gatekeeperCall({ whenIso: yesterdayAt("14:00") });
+    expect(r.response.success).toBe(false);
+    expect(events("live_claim_unbacked_by_action")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("a callback booked does not vouch for a BOOKING claim in the same reply -> the guard still fires", async () => {
+    allowErrors("live_claim_unbacked_by_action", "live_claim_without_action");
+    const { call, r } = await gatekeeperCall({
+      whenIso: tomorrowAt("14:00"),
+      claim: "You're all booked for Tuesday at 2 p.m., and I've scheduled a callback for Monday.",
+    });
+    expect(r.response).toMatchObject({ success: true });
+    expect(events("live_claim_unbacked_by_action")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("post-call: the engine hands verifyCall the callback and the judge's agreed action; the REAL reconcile says ok", async () => {
+    const { verifyCall } = await import("../lib/postCallVerify.js");
+    // judgeCall's RETURN shape (lib/postCallJudge.js `verdict`), as the prod judge read this call:
+    // agreed_action none, claimed_done true. Never the log line's snake_case.
+    const judge = vi.fn(async () => ({ ran: true, agreedAction: "none", agreedTurn: null, timeStated: true, claimedDone: true, claimedFailure: false, confidence: "high" }));
+    const seen = [];
+    const verify = vi.fn(async (input) => {
+      seen.push(input);
+      return verifyCall(input, {
+        db: { withTenantSafe: async (_b, fn) => fn(), listAppointmentsByCallId: async () => [], getAppointmentById: async () => null },
+        notifications: { notifyUnconfirmedClaim: vi.fn(async () => {}) },
+        log: { info: vi.fn(), error: vi.fn() },
+      });
+    });
+    const { call } = await gatekeeperCall({
+      whenIso: tomorrowAt("14:00"),
+      env: { POSTCALL_VERIFY: "count", POSTCALL_JUDGE: "shadow" },
+      verify,
+      judge,
+    });
+    await call.hangUp();
+    await vi.waitFor(() => expect(verify).toHaveBeenCalledTimes(1));
+    const input = seen[0];
+    expect(input.callbacksScheduled).toBe(1);
+    expect(input.judgeClaimedDone).toBe(true);
+    expect(input.judgeAgreedAction).toBe("none");
+    expect(input.claims).toEqual([expect.objectContaining({ kind: "claim", topic: "callback" })]);
+    expect((await verify.mock.results[0].value).verdict).toBe("ok");
   });
 });

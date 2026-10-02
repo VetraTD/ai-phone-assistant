@@ -169,6 +169,10 @@ export async function bootLive({
   // Final fix wave I1: a promise the fake vendor connect awaits before it
   // resolves (a cold connect); a test releases it after the hang-up.
   connectGate,
+  // The post-call reader seams (lib/voice/live/index.js deps.verify /
+  // deps.judge), passed through only when a test sets them.
+  verify,
+  judge,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
@@ -195,6 +199,8 @@ export async function bootLive({
     ...(clipDrainSettleMs !== undefined ? { clipDrainSettleMs } : {}),
     clipHoldStt: clipHoldStt ?? (async () => { throw new Error("no Deepgram in tests"); }),
     ...(clipHoldSttTimeoutMs !== undefined ? { clipHoldSttTimeoutMs } : {}),
+    ...(verify ? { verify } : {}),
+    ...(judge ? { judge } : {}),
   });
 
   ws.deliver({

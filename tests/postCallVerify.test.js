@@ -1016,3 +1016,72 @@ describe("LVX147 — the judge can add a claim the matcher missed", () => {
     expect(out.claimedByJudge).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Gatekeeper call 2026-10-01 (CA450e3d...): "I've scheduled a callback for
+// tomorrow at ten o'clock" -- true, schedule_callback succeeded -- came back
+// claim_without_row from BOTH readers (prod log: claimed_by_matcher true,
+// claimed_by_judge true, judge agreed_action "none") -> a customer_request
+// 'unconfirmed_claim' + a "please contact the caller" alert. A successful
+// schedule_callback backs a CALLBACK claim; it never vouches for a booking.
+// ---------------------------------------------------------------------------
+describe("verifyCall - a callback claim backed by a successful schedule_callback", () => {
+  beforeEach(() => clearStats());
+  const CALLBACK_CLAIM = { turn: 2, kind: "claim", step: "gather_details", toolBacked: true, topic: "callback" };
+
+  it("the real Gatekeeper shape (matcher callback claim + judge done/none + 1 callback) -> ok, nobody alerted", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ claims: [CALLBACK_CLAIM], judgeClaimedDone: true, judgeAgreedAction: "none", callbacksScheduled: 1 }),
+      deps
+    );
+    expect(out.verdict).toBe("ok");
+    expect(deps.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("the same claim with NO callback scheduled -> claim_without_row (today's behaviour)", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ claims: [CALLBACK_CLAIM], judgeClaimedDone: true, judgeAgreedAction: "none" }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("a callback scheduled never backs a NON-callback claim (no topic) -> claim_without_row", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ claims: [{ turn: 2, kind: "claim" }], judgeClaimedDone: true, judgeAgreedAction: "none", callbacksScheduled: 1 }),
+      deps
+    );
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("a callback claim plus a booking claim on the same call -> claim_without_row", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ claims: [CALLBACK_CLAIM, { turn: 3, kind: "claim" }], callbacksScheduled: 1 }),
+      deps
+    );
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("the judge saw an agreed BOOKING -> its claimed_done stands even with a callback -> claim_without_row", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ claims: [CALLBACK_CLAIM], judgeClaimedDone: true, judgeAgreedAction: "book", callbacksScheduled: 1 }),
+      deps
+    );
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("the judge did not run (agreed action unknown) -> its claimed_done is not explained away", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ claims: [], judgeClaimedDone: true, callbacksScheduled: 1 }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("a callback alone, nothing claimed -> ok (a callback is not a booking row the call failed to mention)", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ claims: [], callbacksScheduled: 1 }), deps);
+    expect(out.verdict).toBe("ok");
+  });
+});

@@ -570,8 +570,11 @@ const SABOTAGES = [
     why:
       "puts the verdict back on the phrase matcher alone. It lost three times on three consecutive production calls -- CA239c7c 'has been SUCCESSFULLY rescheduled', CA7ec8af 'I have THAT CALL booked', CA299f23 'THAT IS all booked' -- with the judge right every time. Without the union a caller told they are booked, on a call that ran no tool at all, reads as verdict ok and nobody hears about it.",
     file: "lib/postCallVerify.js",
-    find: '  const claimed = claims.some((c) => c?.kind === "claim") || judgeClaimedDone === true;',
-    replace: '  const claimed = claims.some((c) => c?.kind === "claim"); // SABOTAGE',
+    // RE-ANCHORED 2026-10-01 (Gatekeeper call): the union line now also lets a
+    // booked callback explain a callback-only claim. Same mutation: the judge's
+    // answer is dropped from the verdict.
+    find: "  const claimed = unbackedMatcherClaims.length > 0 || (judgeClaimedDone === true && !judgeExplainedByCallback);",
+    replace: "  const claimed = unbackedMatcherClaims.length > 0; // SABOTAGE",
     red: [VERIFY],
   },
   {
@@ -583,8 +586,10 @@ const SABOTAGES = [
     // at `j?.claimed_done`, which was the bug it was meant to guard -- so the
     // row was sabotaging a line that already did nothing, and reported red
     // against a wire that was broken in production.
-    find: "          return runVerify(j?.claimedDone === true ? true : undefined);",
-    replace: "          return runVerify(undefined); // SABOTAGE",
+    // RE-ANCHORED 2026-10-01 (Gatekeeper call): the line also hands over the
+    // judge's agreed action now. Same mutation: claimedDone is dropped.
+    find: "          return runVerify(j?.claimedDone === true ? true : undefined, j?.ran === true ? j.agreedAction : undefined);",
+    replace: "          return runVerify(undefined, j?.ran === true ? j.agreedAction : undefined); // SABOTAGE",
     red: [POSTCALLWIRE],
   },
   // -------------------------------------------------------------------------

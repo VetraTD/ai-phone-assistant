@@ -10,7 +10,9 @@ import {
   foldCase,
   detectOutboundTurn,
   firstReplyDiscloses,
+  isCallbackOnlyClaim,
 } from "../lib/outbound/detectors.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 describe("firstReplyDiscloses (spec 2026-10-01 §5: the live first reply says it is an AI)", () => {
   it("'Hi, this is Ava, an AI assistant calling from Digile Media' -> true", () => {
@@ -306,5 +308,52 @@ describe("detectOutboundTurn (S3-1, spec §19 S3-D1)", () => {
   it("missing fields default safely (no assistantText/topic) -- never throws", () => {
     expect(() => detectOutboundTurn({})).not.toThrow();
     expect(detectOutboundTurn({})).toEqual({ askedContactNumber: false, inboundClosing: false, topicToUnverified: false });
+  });
+});
+
+// Gatekeeper call 2026-10-01 (CA450e3d...): "I've scheduled a callback for
+// tomorrow at ten o'clock" -- true, schedule_callback had succeeded -- read as
+// an unbacked BOOKING claim by the live gate AND post-call (a false
+// "unconfirmed booking" alert to the tenant). The REAL predicates, both of
+// them: the narrow one drives the live note, the wide one fills the ledger.
+describe("isCallbackOnlyClaim (the claim is about a callback, nothing else)", () => {
+  const S = getStrings("en");
+  const both = [
+    ["narrow", S.claimsCompletion],
+    ["wide", S.claimsCompletionWide],
+  ];
+  const REAL = "I've scheduled a callback for tomorrow at ten o'clock.";
+
+  it.each(both)("the real Gatekeeper sentence IS a claim to the %s predicate (the false alert's source)", (_n, claims) => {
+    expect(claims(REAL)).toBe(true);
+  });
+
+  it.each([
+    REAL,
+    "Perfect. I've scheduled a callback for tomorrow at ten o'clock. Have a great day!",
+    "Sure, thank you.I've scheduled a callback for tomorrow at ten o'clock.", // Live glues sentences
+    "I've booked a callback for tomorrow at 10 a.m. Speak then!", // the tool reply says "Callback booked"
+    "Great, I've scheduled a call back for Friday at 2 p.m., and Nithin will be expecting it.",
+    "Your callback is booked for tomorrow at ten.",
+  ])("callback-only: %s", (text) => {
+    for (const [, claims] of both) expect(isCallbackOnlyClaim(text, claims)).toBe(true);
+  });
+
+  it.each([
+    // A booking claim beside the callback: the callback must never vouch for it.
+    "You're all booked for Tuesday at 2 p.m., and I've scheduled a callback for Monday.",
+    "Your free strategy call is booked for Tuesday at 2 p.m. I've also scheduled a callback for Monday.",
+    "Your free strategy call is booked for Tuesday at 2 p.m.",
+    // Not a claim at all.
+    "Would you like me to schedule a callback?",
+    // The claim is in a clause that does not name the callback -- ambiguous, so it stays a claim.
+    "That's all set. I'll call you back tomorrow at ten.",
+  ])("NOT callback-only: %s", (text) => {
+    for (const [, claims] of both) expect(isCallbackOnlyClaim(text, claims)).toBe(false);
+  });
+
+  it("bad input is never callback-only", () => {
+    expect(isCallbackOnlyClaim(null, S.claimsCompletion)).toBe(false);
+    expect(isCallbackOnlyClaim(REAL, undefined)).toBe(false);
   });
 });
