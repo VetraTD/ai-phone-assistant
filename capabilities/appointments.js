@@ -45,7 +45,7 @@ import {
   isClosedNow,
 } from "../lib/capabilities/requirements.js";
 import { partyOf, partyOfEffect } from "../lib/capabilities/party.js";
-import { nameSpokenIn } from "../lib/nameQuality.js";
+import { nameSpokenIn, normalizeName } from "../lib/nameQuality.js";
 import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
@@ -2399,7 +2399,13 @@ async function bookAppointment(fc, ctx) {
     // an absent instrument must never be read as evidence -- the same
     // construction the on-file spelling bypass uses to stay unchanged for the
     // cascade, which threads no transcript at all.
-    if (writtenName && heard) {
+    // A name written from the contact's own record on a call we placed
+    // (services/tools.js outboundNameOnFile) was never meant to be spoken --
+    // the screen would flag every one of them (final review, 2026-10-02).
+    const contact = ctx?.outboundCall?.contact;
+    const fileName = contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : "";
+    const fromFile = Boolean(fileName) && normalizeName(writtenName) === normalizeName(fileName);
+    if (writtenName && heard && !fromFile) {
       bumpCounter("booking_name_provenance_checked");
       if (!nameSpokenIn(writtenName, heard)) {
         bumpCounter("booking_name_never_spoken");

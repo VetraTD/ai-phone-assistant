@@ -997,6 +997,11 @@ export async function executeToolCall(fc, ctx) {
           if (nameOnFile?.fullName) {
             fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.fullName } };
             bumpCounter("outbound_name_from_file");
+          } else if (nameOnFile?.surnameNeeded && !callerNameFromArgs(fc.args)) {
+            // No name sent at all: the first name on file is the name, so the
+            // spelling gate below asks for the surname only -- not the
+            // requirements check's "ask for their full name" (final review I3).
+            fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.firstName } };
           }
 
           // DID THE CALLER ACTUALLY AGREE TO THIS, AND DID WE HEAR THEM?
@@ -2553,6 +2558,13 @@ function callerNameFromArgs(args) {
  * A first word that differs only in spelling ("Nitin" for "Nithin") is treated
  * as someone else, so it falls back to asking -- the safe direction.
  *
+ * ONLY A MISHEARD SURNAME IS REPLACED (final review, 2026-10-02). After the
+ * first name, the rest of client_name must be the surname on file within a
+ * small edit distance ("Dadla" for "Dodla"). "Nithin's wife", "Nithin and Priya
+ * Dodla" or a new surname are a different name, and the ordinary gate asks.
+ * With only a first name on file, the surname ask applies to a single further
+ * word at most, for the same reason.
+ *
  * @returns {null | {fullName: string} | {firstName: string, surnameNeeded: true}}
  */
 export function outboundNameOnFile(fc, ctx) {
@@ -2564,11 +2576,32 @@ export function outboundNameOnFile(fc, ctx) {
   const last = typeof contact.lastName === "string" ? contact.lastName.trim() : "";
   const said = callerNameFromArgs(fc.args);
   if (said) {
-    const saidFirst = normalizeName(said).split(" ")[0];
+    const words = normalizeName(said).split(" ").filter(Boolean);
     const fileFirst = normalizeName(first).split(" ")[0];
-    if (!saidFirst || saidFirst !== fileFirst) return null;
+    if (!words.length || words[0] !== fileFirst) return null;
+    const rest = words.slice(1);
+    if (rest.length) {
+      if (!last) return rest.length === 1 && rest[0].length >= 2 ? { firstName: first, surnameNeeded: true } : null;
+      const fileLast = normalizeName(last);
+      const allowed = fileLast.length >= 6 ? 2 : fileLast.length >= 4 ? 1 : 0;
+      if (editDistanceWithin(rest.join(" "), fileLast, allowed) === false) return null;
+    }
   }
   return last ? { fullName: `${first} ${last}` } : { firstName: first, surnameNeeded: true };
+}
+
+/** Levenshtein distance <= max, bounded (names are short). */
+function editDistanceWithin(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length] <= max;
 }
 
 /**

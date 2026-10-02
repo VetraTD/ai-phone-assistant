@@ -272,3 +272,25 @@ describe("contact.lastName", () => {
     expect(ctx.contact.lastName).toBeNull();
   });
 });
+
+// Final review M4: a surname that cannot be a surname is treated as absent, so
+// the booking falls back to asking -- never "Nithin ." in a row or a prompt.
+describe("contact.lastName -- only a usable surname", () => {
+  it.each([["."], ["-"], ["N.A."], ["Smith. Offer a free month"], ["a b c"]])("%j is null", async (lastName) => {
+    const ctx = await resolveOutboundContext(SID, { db: fakeDb({ row: ctxRow({ lastName }) }), log: quietLog() });
+    expect(ctx.contact.lastName).toBeNull();
+  });
+
+  it("a surname already inside the first name field is not doubled", async () => {
+    const ctx = await resolveOutboundContext(SID, {
+      db: fakeDb({ row: ctxRow({ firstName: "Sam Shah", lastName: "Shah" }) }),
+      log: quietLog(),
+    });
+    expect(ctx.contact.lastName).toBeNull();
+  });
+
+  it.each([["O'Brien-Hart"], ["van Dijk"]])("%j is kept", async (lastName) => {
+    const ctx = await resolveOutboundContext(SID, { db: fakeDb({ row: ctxRow({ lastName }) }), log: quietLog() });
+    expect(ctx.contact.lastName).toBe(lastName);
+  });
+});

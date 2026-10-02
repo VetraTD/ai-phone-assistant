@@ -150,3 +150,36 @@ describe("unchanged everywhere else", () => {
     expect(counters().outbound_name_from_file).toBeFalsy();
   });
 });
+
+// Review fixes (2026-10-02, final review I1/I3/M6).
+describe("only a misheard SURNAME is replaced; a different name goes to the ordinary gate", () => {
+  it.each([["Nithin's wife"], ["Nithin and Priya Dodla"], ["Nithin Dodla-Reddy"], ["Nithin Patel"]])(
+    "%j is not booked under the name on file",
+    async (said) => {
+      const res = await bookAs(said, outboundCtx({ firstName: "Nithin", lastName: "Dodla" }));
+      expect(counters().outbound_name_from_file).toBeFalsy();
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(res.functionResponse.response.message).toContain("FULL name");
+    }
+  );
+
+  it("first name only on file, and the model sent no name: the SURNAME is asked for, not the full name", async () => {
+    const res = await bookAs(null, outboundCtx({ lastName: null }));
+    expect(res.functionResponse.response.success).toBe(false);
+    expect(counters().outbound_surname_spell_asked).toBe(1);
+    expect(res.functionResponse.response.message).toContain("SURNAME");
+    expect(res.functionResponse.response.message).toContain('"Nithin"');
+  });
+
+  it("first name only on file, a possessive or a second person: the ordinary full-name ask", async () => {
+    const res = await bookAs("Nithin's wife", outboundCtx({ lastName: null }));
+    expect(counters().outbound_surname_spell_asked).toBeFalsy();
+    expect(res.functionResponse.response.message).toContain("FULL name");
+  });
+
+  it("a name-on-file booking does not trip the never-spoken screen", async () => {
+    const res = await bookAs("Nithin", outboundCtx());
+    expect(res.functionResponse.response.success).toBe(true);
+    expect(counters().booking_name_never_spoken).toBeFalsy();
+  });
+});

@@ -273,3 +273,51 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
   });
 });
 
+
+// Final review M5 (2026-10-02): a completed action spends the write-order
+// state of its pack, not just the stash. Otherwise a proposal the ceiling
+// released before the caller did something else is released again, on its
+// first attempt, with no read-back and no yes behind it.
+describe("a completed action clears the pack's write-order proposal", () => {
+  it("clears writeOrderProposalKey along with pendingWrite", async () => {
+    let n = 0;
+    const execute = vi.fn(async (fc) => {
+      n += 1;
+      if (n === 1) {
+        return {
+          functionResponse: { id: fc.id, name: fc.name, response: { success: false, gated: true, message: "held" } },
+          stateEffects: {
+            toolResult: { name: fc.name, success: false, message: "held" },
+            capabilityState: {
+              appointments: {
+                pendingWrite: { name: fc.name, args: fc.args, reason: "spelling" },
+                writeOrderProposalKey: "P",
+                writeOrderEverReadBack: true,
+                writeOrderRefusals: 1,
+              },
+            },
+          },
+        };
+      }
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+        stateEffects: { toolResult: { name: fc.name, success: true, message: "Cancelled." } },
+      };
+    });
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+14699338887", callId: "c1" },
+      execute,
+      turnState: () => ({ step: "gather_details", callerTurnCount: 3 }),
+    });
+    await runner.handleToolCall({
+      // A cancellation, not a booking: the Live availability guard refuses an
+      // unchecked booking before the stub executor would ever see it.
+      functionCalls: [{ id: "1", name: "cancel_appointment_db", args: { appointment_id: "held-1" } }],
+    });
+    expect(runner.capabilityState.appointments.writeOrderProposalKey).toBe("P");
+    await runner.handleToolCall({ functionCalls: [{ id: "2", name: "cancel_appointment_db", args: { appointment_id: "a1" } }] });
+    expect(runner.capabilityState.appointments.pendingWrite).toBeNull();
+    expect(runner.capabilityState.appointments.writeOrderProposalKey).toBeNull();
+  });
+});
