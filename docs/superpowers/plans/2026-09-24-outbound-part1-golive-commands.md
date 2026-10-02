@@ -910,7 +910,15 @@ the other items in `docs/outbound-eu-calling-floor.md`.
 
 ## Section F: the Hold-call fixes (deploy 5, DRAFT, YES-gated)
 
-**Status: F0-F4 RUN 2026-10-01 ~23:00-23:55 CDT (owner YES for F1-F3); F6 Hold call pending (08:00-20:00 CDT).**
+**Status: F0-F4 RUN 2026-10-01 ~23:00-23:55 CDT (owner YES for F1-F3); F6 Hold call PASS 2026-10-02 11:19 CDT.**
+
+**F6 [AS RUN] 2026-10-02.** Call A (S24, CA1ff2c6...): owner answered "Hello" -- no hold exercised; booked a test
+discovery call (Mon 5 Oct 4:30 PM, US test tenant; owner to cancel). Call B, the Hold test (S22 resume re-armed
+yesterday's Hello outreach, CAc3a400...): PASS -- first reply 1,297 ms with the AI intro; "Hold on a sec" ->
+wait_on_hold -> only "Sure, thank you."; 50.4 s hold, nothing said to the music; AMD `machine_end_other` at 38 s
+**ignored** (`outbound_amd_ignored_conversation`) -- no hang-up; after the hold "Hi Nithin, this is Ava, an AI
+assistant calling from Digile Media"; no `outbound_disclosure_missing`; outcome qualified_no_booking -> outreach
+closed, no redial; 0 ERROR. S22/S24 paused.
 
 **[AS RUN] 2026-10-01.** F0 PASS (00097-4f5 100%, OUTBOUND_FIRST_SPEAKER absent, OUTBOUND_ENABLED=false,
 DEEPGRAM_REGION=eu). F1 build `3c9dd1a4` SUCCESS, `voice:a2aa121` digest `sha256:becde991...`. F2 pending: none
