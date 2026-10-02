@@ -437,13 +437,13 @@ export async function executeToolCall(fc, ctx) {
   // intercepts a webhook of the same name. The hold itself is engine state
   // (lib/voice/live/index.js holdRequestedAt -> liveFirstLine.enterHold).
   if (fc.name === "wait_on_hold" && ctx?.outboundCall) {
-    // Paid sim hold_transfer-3 (2026-10-01): the person who came back got the
-    // reason with no intro. Spec §4's restart rule rides here, in the reply
-    // the model reads right before it waits -- not only in the job prompt.
-    const message =
-      "Wait quietly. Say nothing until a person speaks. When someone speaks to you again, they may not have heard " +
-      "you yet: start your reply with who you are -- your name, that you are an AI assistant, and the business -- " +
-      "and check who you are speaking to before anything else.";
+    // What to do NOW, and nothing about later. Real Hold call 2026-10-01
+    // (ruling R31 reverted): Live continues the same turn after a tool reply,
+    // so "when someone speaks again, start with who you are" here was executed
+    // at once -- "Sure, thank you.Hi, it's Ava ..." to the receptionist. Spec
+    // §4's restart rule rides on the hold-release note instead
+    // (lib/voice/live/index.js onLiveHoldRelease), sent when a person is back.
+    const message = "Wait quietly. Say nothing until a person speaks.";
     return {
       functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
       stateEffects: {

@@ -354,15 +354,11 @@ describe("wait_on_hold (spec §4; ruling R3)", () => {
     call.live.push(modelAudioMsg()); // "Sure, thank you."
     await call.settle();
     const [r] = await call.callTool("wait_on_hold", {});
-    // Paid sim hold_transfer-3: the person who came back got the reason with no intro (1 of 2 hold
-    // runs). The rule is in the tool reply the model reads right before it waits (ruling R31).
-    expect(r.response).toEqual({
-      success: true,
-      message:
-        "Wait quietly. Say nothing until a person speaks. When someone speaks to you again, they may not have heard " +
-        "you yet: start your reply with who you are -- your name, that you are an AI assistant, and the business -- " +
-        "and check who you are speaking to before anything else.",
-    });
+    // Real Hold call 2026-10-01 (defect A, R31 reverted): Live continues the SAME turn after a tool
+    // reply, so a restart instruction here was executed at once ("Sure, thank you.Hi, it's Ava ...").
+    // The reply says only what to do NOW; the restart rule rides on the release note instead.
+    expect(r.response).toEqual({ success: true, message: "Wait quietly. Say nothing until a person speaks." });
+    expect(r.response.message).not.toMatch(/who you are|intro|AI assistant|start your reply/i);
     expect(call.ws.liveFirstLine.onHold()).toBe(false); // the ack's own generation still plays
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
     call.live.push(modelAudioMsg());
@@ -627,17 +623,26 @@ describe("final review #6: the release note and the disclosure re-check", () => 
     return call;
   }
   const NOTE = "nothing you said while waiting was heard";
+  const RESTART = "has not heard who you are";
   const notes = (call) => call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes(NOTE));
+  const releaseNotes = (call) => call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes(RESTART));
 
   it("a muted turn dropped on hold -> one note appended (no forced turn) telling Live it was not heard", async () => {
     const call = await heldThenReleased({ dropOnHold: true });
     expect(notes(call)).toHaveLength(1);
     expect(notes(call)[0].turnComplete).toBe(false);
+    expect(releaseNotes(call)).toHaveLength(1); // the same note carries the restart rule
     await call.hangUp();
   });
 
-  it("nothing dropped on hold -> no note", async () => {
+  it("nothing dropped on hold -> STILL one release note (intro + name check), appended, without the dropped clause", async () => {
+    // Real Hold call 2026-10-01 (defect A): the restart rule moved out of wait_on_hold's tool reply,
+    // so the release note is now its ONLY carrier -- it must go on every release.
     const call = await heldThenReleased({ dropOnHold: false });
+    expect(releaseNotes(call)).toHaveLength(1);
+    expect(releaseNotes(call)[0].turnComplete).toBe(false);
+    expect(JSON.stringify(releaseNotes(call)[0])).toMatch(/intro/);
+    expect(JSON.stringify(releaseNotes(call)[0])).toMatch(/name check/);
     expect(notes(call)).toHaveLength(0);
     await call.hangUp();
   });
