@@ -73,6 +73,7 @@ describe("the scripts", () => {
       "outbound_name_given",
       "outbound_hold_transfer",
       "outbound_readback_mangled",
+      "outbound_booking_name_on_file",
     ]);
   });
 
@@ -239,6 +240,38 @@ describe("read-back before save", () => {
   });
   it("FAIL: nothing saved at all", () => {
     expect(r(verdict({ events: base, situation: "outbound_readback_mangled", db: DB_OK(null) }), "read_back_before_save")).toBe("FAIL");
+  });
+});
+
+// 2026-10-02 (CA1ff2c6): the booking sim -- the row carries the name on file,
+// and nobody is asked to spell it.
+describe("booking with the name on file", () => {
+  const base = [
+    firstReply(),
+    turn(INTRO, "Hello?"),
+    confirmed(true),
+    turn("Shall I book your call for Monday at one PM?", "The earliest one, please."),
+    tool("book_appointment"),
+    turn("You're booked in for Monday at one PM.", "Yes, please."),
+  ];
+  const BOOKED = (client_name, status = "scheduled") => ({ ...DB_OK(), appointments: [{ client_name, status }] });
+  it("PASS: booked as Sam Shah, no spelling question", () => {
+    const v = verdict({ events: base, situation: "outbound_booking_name_on_file", db: BOOKED("Sam Shah") });
+    expect(r(v, "booked_under_name_on_file")).toBe("PASS");
+    expect(r(v, "no_spelling_ask")).toBe("PASS");
+  });
+  it("FAIL: the row carries the name as heard, not the name on file", () => {
+    const v = verdict({ events: base, situation: "outbound_booking_name_on_file", db: BOOKED("Sam Shaw") });
+    expect(r(v, "booked_under_name_on_file")).toBe("FAIL");
+  });
+  it("FAIL: nothing booked", () => {
+    const v = verdict({ events: base, situation: "outbound_booking_name_on_file", db: { ...DB_OK(), appointments: [] } });
+    expect(r(v, "booked_under_name_on_file")).toBe("FAIL");
+  });
+  it("FAIL: the contact was asked to spell their name -- CA1ff2c6's shape", () => {
+    const events = [...base, turn("To finalize the booking, could you please spell your full name for me?", "Yes, please.")];
+    const v = verdict({ events, situation: "outbound_booking_name_on_file", db: BOOKED("Sam Shah") });
+    expect(r(v, "no_spelling_ask")).toBe("FAIL");
   });
 });
 

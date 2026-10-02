@@ -765,8 +765,9 @@ describe("S3-5: outbound situation scripts", () => {
 
   /** The names really are the ones lib/probe/script.js registers. CHANGED (final wave W1): 8 -> 11, the next paid set's three. */
   // 2026-10-01: + the 5 live first-speaker sims (OUTBOUND_LIVE_SCRIPTS).
-  it("OUTBOUND_SITUATION_SCRIPTS names 17 scripts, each with the caller lines a situation criterion assumes", () => {
-    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(17);
+  it("OUTBOUND_SITUATION_SCRIPTS names 18 scripts, each with the caller lines a situation criterion assumes", () => {
+    // 18 since 2026-10-02: outbound_booking_name_on_file.
+    expect(OUTBOUND_SITUATION_SCRIPTS).toHaveLength(18);
     for (const name of OUTBOUND_SITUATION_SCRIPTS) expect(resolveScriptLines(name).length).toBeGreaterThan(0);
   });
 

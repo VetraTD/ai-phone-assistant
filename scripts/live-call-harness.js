@@ -178,7 +178,7 @@
 import "dotenv/config";
 import { WebSocket } from "ws";
 import { appendFileSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio, OUTBOUND_SITUATION_SCRIPTS, OUTBOUND_SCRIPT_CONFIG } from "../lib/probe/script.js";
+import { resolveScriptLines, buildProbeScript, synthesizeCallerAudio, OUTBOUND_SITUATION_SCRIPTS, OUTBOUND_SCRIPT_CONFIG, OUTBOUND_SCRIPT_CONTACT } from "../lib/probe/script.js";
 import {
   buildInboundAnswerRequest,
   buildOutboundAnswerRequest,
@@ -1582,7 +1582,7 @@ async function mainOutbound() {
     } else {
       const { callerId, contact } = pickHarnessNumbers();
       // 2026-10-01: a script's own campaign config (OUTBOUND_SCRIPT_CONFIG, e.g. the read-back sim's confirm question).
-      seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact, configPatch: OUTBOUND_SCRIPT_CONFIG[SCRIPT_NAME] });
+      seed = await seedOutboundAttempt({ admin, db, databaseUrl, callSid: harnessCallSid(), callerId, contact, configPatch: OUTBOUND_SCRIPT_CONFIG[SCRIPT_NAME], lastName: OUTBOUND_SCRIPT_CONTACT[SCRIPT_NAME]?.lastName ?? null });
     }
     console.log(`base       ${BASE}`);
     console.log(
@@ -1699,11 +1699,18 @@ async function mainOutbound() {
     // 3: cross-run contamination).
     let dbExtra = dbRead;
     if (situation) {
-      const [suppressionRes, outreachRes] = await Promise.all([
+      const [suppressionRes, outreachRes, appointmentsRes] = await Promise.all([
         admin.query(`SELECT reason, created_by FROM suppressions WHERE business_id = $1 AND phone_e164 = $2`, [seed.businessId, seed.contact]),
         admin.query(`SELECT next_attempt_at, outcome, state, close_reason FROM outreach WHERE id = $1`, [seed.outreachId]),
+        // 2026-10-02: the booking sim reads the row it should have written.
+        admin.query(`SELECT client_name, status FROM appointments WHERE business_id = $1 ORDER BY created_at`, [seed.businessId]),
       ]);
-      dbExtra = { ...dbRead, suppression: suppressionRes.rows[0] ?? null, outreach: outreachRes.rows[0] ?? null };
+      dbExtra = {
+        ...dbRead,
+        suppression: suppressionRes.rows[0] ?? null,
+        outreach: outreachRes.rows[0] ?? null,
+        appointments: appointmentsRes.rows,
+      };
     }
 
     // H3: measured over the ticker's own lifetime (mediaTickerStartMs ->
