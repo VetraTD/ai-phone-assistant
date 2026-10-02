@@ -3597,6 +3597,38 @@ export async function stampAttemptAnswered(attemptId) {
  * @param {string} attemptId
  * @returns {Promise<{attemptNo: number, complianceClass: string, voicemailOn: number[], callerId: string|null}|null>}
  */
+/**
+ * Real Hold call 2026-10-01 (defect B). Has this call had a real exchange --
+ * the AI's first reply heard AND the person answering it? Read as: a caller
+ * transcript row after the first AI row. Rows land per turn
+ * (lib/voice/live/index.js persistTurnTranscript: caller at n, the HEARD AI
+ * half at n+1), so a greeting + the AI's first reply is not yet an exchange.
+ *
+ * The AMD door (lib/outbound/doorRoutes.js) reads this from the DATABASE
+ * because its callback can land on another instance than the call's session.
+ * THROWS on failure, unlike fetchCallTranscript (which returns [] on error):
+ * "the read failed" must not look like "no exchange", which would hang up.
+ *
+ * @param {string} callSid
+ * @returns {Promise<boolean>}
+ */
+export async function outboundCallHadExchange(callSid) {
+  requireTenantScope("outboundCallHadExchange");
+  const res = await q(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM calls c
+         JOIN call_transcripts t ON t.call_id = c.id AND t.speaker = 'caller'
+        WHERE c.twilio_call_sid = $1
+          AND t.sequence > (SELECT MIN(a.sequence) FROM call_transcripts a WHERE a.call_id = c.id AND a.speaker = 'ai')
+     ) AS exchanged`,
+    [callSid]
+  );
+  if (res.error) throw res.error;
+  noteAccess("outboundCallHadExchange", { rowCount: res.rowCount || 0 });
+  return one(res)?.exchanged === true;
+}
+
 export async function outboundAmdContext(attemptId) {
   requireTenantScope("outboundAmdContext");
   const res = await q(

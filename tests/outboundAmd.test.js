@@ -175,6 +175,9 @@ function fakeDb(over = {}) {
       }
     }),
     stampAttemptAmd: vi.fn(async () => {}),
+    // Real Hold call 2026-10-01: false = no exchange yet (the AI's first reply
+    // has not been answered), so a machine verdict is acted on as before.
+    outboundCallHadExchange: vi.fn(async () => false),
     outboundAmdContext: vi.fn(async () => CTX_DEFAULT),
     fetchAttemptVoicemailAudio: vi.fn(async () => Buffer.from([0xff, 0x7e, 0x80, 0x01])),
     ...over,
@@ -315,6 +318,86 @@ describe("POST /twilio/outbound-amd: routing and recording", () => {
       await postAmd(deps, body);
       expect(deps.db.stampAttemptAmd).toHaveBeenCalledWith(ATTEMPT, expect.objectContaining({ amdDurationMs: null }));
     }
+  });
+});
+
+// Real Hold call 2026-10-01 (CAe10c9c6..., defect B): DetectMessageEnd read
+// "Reception, this is John. How can I help you?" as a machine greeting and the
+// hold music's beep finished it -- machine_end_beep 29 s into a live
+// conversation -> voicemail branch -> no clip -> calls.update completed = the
+// call hung up mid-hold. Owner 2026-10-01: once the AI and the person have
+// actually talked, a machine verdict is ignored (a "conversing" voicemail box
+// gets no message). The check reads the DATABASE -- this callback can land on
+// another instance than the call's own session.
+describe("POST /twilio/outbound-amd: a machine verdict after a real exchange is ignored", () => {
+  it.each(["machine_end_beep", "machine_end_silence", "machine_end_other", "machine_start", "fax"])(
+    "%s after an exchange: no Twilio update, no voicemail, answered_by stamped 'unknown' (post-call must not score a live call as a machine), logged with the raw verdict",
+    async (answeredBy) => {
+      const twilio = twilioClientFake();
+      const db = fakeDb({ outboundCallHadExchange: vi.fn(async () => true) });
+      const deps = fakeDeps({ db, twilioClientFor: twilio.twilioClientFor });
+      const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: answeredBy, MachineDetectionDuration: "29100" });
+      expect(res.status).toBe(200);
+      expect(db.outboundCallHadExchange).toHaveBeenCalledWith(CALL_SID);
+      expect(twilio.twilioClientFor).not.toHaveBeenCalled();
+      expect(twilio.update).not.toHaveBeenCalled();
+      expect(db.fetchAttemptVoicemailAudio).not.toHaveBeenCalled();
+      expect(db.stampAttemptAmd).toHaveBeenCalledTimes(1);
+      expect(db.stampAttemptAmd).toHaveBeenCalledWith(ATTEMPT, { answeredBy: "unknown", amdDurationMs: 29100, result: null });
+      expect(deps.log.info).toHaveBeenCalledWith("outbound_amd_ignored_conversation", {
+        callSid: CALL_SID,
+        attemptId: ATTEMPT,
+        answered_by: answeredBy,
+        reason: "conversation",
+      });
+      expect(deps.log.info).not.toHaveBeenCalledWith("outbound_voicemail", expect.anything());
+    }
+  );
+
+  it("machine_end_beep BEFORE any exchange: the voicemail plays exactly as today", async () => {
+    const twilio = twilioClientFake();
+    const db = fakeDb({ outboundCallHadExchange: vi.fn(async () => false) });
+    const deps = fakeDeps({ db, twilioClientFor: twilio.twilioClientFor });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep" });
+    expect(res.status).toBe(200);
+    expect(db.outboundCallHadExchange).toHaveBeenCalledWith(CALL_SID);
+    expect(twilio.update).toHaveBeenCalledWith(expect.objectContaining({ twiml: expect.stringContaining("<Play>") }));
+    expect(db.stampAttemptAmd).toHaveBeenNthCalledWith(1, ATTEMPT, { answeredBy: "machine_end_beep", amdDurationMs: null, result: null });
+    expect(deps.log.info).not.toHaveBeenCalledWith("outbound_amd_ignored_conversation", expect.anything());
+  });
+
+  it("the exchange check THROWS: the call stays up (a hang-up on a live person is worse than a missed voicemail), stamped 'unknown', warn logged", async () => {
+    const twilio = twilioClientFake();
+    const db = fakeDb({ outboundCallHadExchange: vi.fn(async () => { throw new Error("pg down"); }) });
+    const deps = fakeDeps({ db, twilioClientFor: twilio.twilioClientFor });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep" });
+    expect(res.status).toBe(200);
+    expect(twilio.update).not.toHaveBeenCalled();
+    expect(db.stampAttemptAmd).toHaveBeenCalledWith(ATTEMPT, { answeredBy: "unknown", amdDurationMs: null, result: null });
+    expect(deps.log.error).toHaveBeenCalledWith(
+      "outbound_amd_exchange_check_failed",
+      expect.objectContaining({ callSid: CALL_SID, attemptId: ATTEMPT, severity: "warn" })
+    );
+    expect(deps.log.info).toHaveBeenCalledWith("outbound_amd_ignored_conversation", expect.objectContaining({ reason: "check_failed" }));
+  });
+
+  it("human/unknown never run the check (nothing to ignore)", async () => {
+    for (const answeredBy of ["human", "unknown"]) {
+      const db = fakeDb();
+      const deps = fakeDeps({ db });
+      await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: answeredBy });
+      expect(db.outboundCallHadExchange).not.toHaveBeenCalled();
+    }
+  });
+
+  it("the stamp after an ignored verdict fails -> 500 so Twilio retries (the same rule as every other record write)", async () => {
+    const db = fakeDb({
+      outboundCallHadExchange: vi.fn(async () => true),
+      stampAttemptAmd: vi.fn(async () => { throw new Error("pg down mid-write"); }),
+    });
+    const deps = fakeDeps({ db });
+    const res = await postAmd(deps, { CallSid: CALL_SID, AnsweredBy: "machine_end_beep" });
+    expect(res.status).toBe(500);
   });
 });
 
