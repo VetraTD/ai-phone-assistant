@@ -689,8 +689,119 @@ describe("final review (re-graded minor): identity does not survive a hold", () 
     await call.feed(600, { voiced: true });
     await call.feed(400);
     await call.callerSays("Hi, it's his wife.");
+    // Since 2026-10-01 (hold-intro gate) the person after a hold must hear the
+    // intro before confirm_identity runs -- this reply says it first.
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantSays("Hi, this is Ava, an AI assistant calling from Digile Media. Who am I speaking with?");
     const [again] = await call.callTool("confirm_identity", { name_confirmed: true });
     expect(again.response.message).toMatch(/^Identity confirmed\. Next step of the call plan/);
+    await call.hangUp();
+  });
+});
+
+// Real Hold call + paid sims hold_transfer-3 (09-30) and P1-SIM-S7 (10-01): the
+// person who came back after a hold got the reason with NO intro -- the release
+// note (appended context) was ignored both times. Owner 2026-10-01: refuse the
+// FIRST confirm_identity after a hold until the AI has said who it is. A tool
+// reply is acted on at once (the real Hold call's defect A), and right after the
+// person came back, at once is the right moment. One refusal per hold.
+describe("hold-intro gate: the first confirm_identity after a hold waits for the intro", () => {
+  async function releasedCall() {
+    // The re-intro after the hold repeats the first intro on purpose (spec §4).
+    allowErrors("outbound_disclosure_missing", "live_repeated_phrase");
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.callTool("wait_on_hold", {});
+    await call.assistantTurn("Sure, thank you.");
+    await call.feed(5000);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Hi, this is Sam.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(false);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    return call;
+  }
+
+  it("confirm_identity straight after the release (no intro said) -> refused with 'introduce yourself first'", async () => {
+    const call = await releasedCall();
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.success).toBe(false);
+    expect(r.response.message).toMatch(/introduce yourself first/i);
+    expect(r.response.message).toMatch(/AI assistant/);
+    expect(events("outbound_hold_intro_refused")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("the intro said in the SAME reply before the tool call -> allowed (no second intro)", async () => {
+    const call = await releasedCall();
+    await call.assistantSays("Hi Sam, this is Ava, an AI assistant calling from Digile Media.");
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.message).toMatch(/^Identity confirmed/);
+    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("the intro said in an EARLIER completed reply after the hold, confirm in a later one -> never refused", async () => {
+    const call = await releasedCall();
+    await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Is that Sam?");
+    await call.feed(500, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Yes, speaking.");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.message).toMatch(/^Identity confirmed/);
+    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("refused once, then the intro is said and the person answers -> the next confirm runs", async () => {
+    const call = await releasedCall();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    await call.assistantTurn("Hi Sam, this is Ava, an AI assistant calling from Digile Media. Is that Sam?");
+    await call.feed(500, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Yes, it is.");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.message).toMatch(/^Identity confirmed/);
+    await call.hangUp();
+  });
+
+  it("at most ONE refusal per hold: a reply that still skipped the intro does not loop the gate", async () => {
+    const call = await releasedCall();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    await call.assistantTurn("Sorry, could you repeat that?");
+    await call.feed(500, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("It's Sam.");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.message).toMatch(/^Identity confirmed/);
+    expect(events("outbound_hold_intro_refused")).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("no hold on the call -> the first confirm_identity runs as before", async () => {
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    const [r] = await call.callTool("confirm_identity", { name_confirmed: true });
+    expect(r.response.message).toMatch(/^Identity confirmed/);
+    expect(events("outbound_hold_intro_refused")).toHaveLength(0);
     await call.hangUp();
   });
 });
