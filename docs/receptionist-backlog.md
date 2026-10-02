@@ -17001,3 +17001,15 @@ SILENTLY for the receptionist:
 Proposed tiers: 1a three uptime checks (~15 min, free); 1b log alerts for Live connect / voice DB errors / inbound
 post-call (~45 min, free; confirm event names first); 1c daily Twilio routing check script + scheduler (~1 h, free,
 one image build); 2 daily canary call through Twilio into the UK number (~3-4 h, ~$0.05/call, ~$1.50/month).
+
+## LVX166 — the duplicate-write guard keys on the model's ORIGINAL arguments [record only]
+
+Final review of the 2026-10-02 fixes (b772acb). `lib/voice/live/guards.js` `callKey(fc)` is built from the
+arguments the MODEL sent; services/tools.js can now change them before the write (outboundNameOnFile writes
+"Nithin Dodla" where the model sent "Nithin" or nothing). A later re-call of the same booking with the full
+name therefore does not match the completed write, is not suppressed as a duplicate, and reaches the pack's
+existing-appointment branch ("shall I book this additional one?") instead of the cached success. Pre-existing
+class: any model re-call with slightly different arguments ("Nithin" then "Nithin Dodla") already does this,
+and the pack's branch is the backstop -- a second row needs the caller to say yes to "an additional one".
+Fix when it shows up: return the effective arguments from executeToolCall and key the guard on those.
+Watch: `live_guard_duplicate_suppressed` vs two booked rows for one caller on one call.

@@ -975,6 +975,54 @@ IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
 **F7. Rollback**: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00097-4f5=100
 --region=$R --project=$P`. No migration to undo; the new `calls.answers` keys are inert to the old image.
 
+## Section G: receptionist fixes from the 2026-10-02 calls (deploy 6, DRAFT, YES-gated)
+
+**Status: DRAFT 2026-10-02.** `SHA` = b772acb (code head of `feat/outbound-stage4`; later commits must be
+docs/spend/ledger only -- `git log --oneline b772acb..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json'
+':!.superpowers'` prints nothing). Production today: `voice-uk-prod-00098-278` @a2aa121, `OUTBOUND_ENABLED=false`.
+Rollback target: `voice-uk-prod-00098-278`. Ledger: the "Receptionist fixes 2026-10-02" block in
+`.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md`.
+
+**What changes for callers (inbound and outbound).**
+- A one-word yes the transcript wrote in another language ("Ja.", "bien", "Ah, ya.", "Mhm.", "go on"), when it IS
+  the caller's whole turn and not a question, now counts as agreement to a read-back (CA1ff2c6, CAffb5c7). Never
+  inside a sentence; a negation still wins.
+- A write the write-order ceiling released and another gate then held (spelling, qualification, requirements) is
+  no longer refused again by the write-order gate on its retry (CA1ff2c6 102.2 s). A completed action clears that
+  state with the stash.
+- Outbound, booking for the verified contact: full name on file -> booked under it, **no name or spelling
+  question** (`outbound_name_from_file`); first name only -> asks the **surname** only
+  (`outbound_surname_spell_asked`); someone else's name, a new surname, or inbound -> unchanged.
+  `outbound-admin trigger --last-name` sets the surname (migrate job image).
+- Returned call (inbound lead whose outreach is waiting): the leftover campaign questions are asked only if they
+  rang back about our call or to book, and are **dropped entirely when they already have an upcoming
+  appointment** (`outbound_callback_questions_suppressed`). Inbound with no waiting outreach: byte-identical.
+
+**Inputs checked.** No migration (`contacts.last_name` exists since 042). No new env var or secret. New counters
+only (no new ERROR events, alert policy unchanged). Paid sim P1-SIM-S8 $0.0924 (booking with the name on file:
+booked "Sam Shah", no spelling ask). Gate at b772acb: see [AS RUN].
+
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
+P=vetra-uk-edc8ca; R=europe-west2; SHA=b772acb
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
+```
+
+**G0. Preflight (read)** as E0: `voice-uk-prod-00098-278` at 100%; `OUTBOUND_FIRST_SPEAKER` absent,
+`OUTBOUND_ENABLED=false`, `DEEPGRAM_REGION=eu`; export `/tmp/stageG-before.yaml`.
+**G1. Build from the MAIN checkout** (E1's command, `_TAG=$SHA`; CRLF migration checksums).
+**G2. Migrate job image + `--status`** (expect pending: none; STOP otherwise). This image is also the first with
+`outbound-admin trigger --last-name`.
+**G3. New revision**, only `GIT_COMMIT_SHA` changes; verify Ready, 100%, `Build: $SHA` from `GET /`, env diff
+against `/tmp/stageG-before.yaml` = image + `GIT_COMMIT_SHA` only. STOP on any other difference.
+**G4. Smoke** = one inbound call from the owner's handset to +1 817 601 1171 (`direction:"inbound"`, no ERROR;
+if an outreach is waiting for the handset, expect the returned-call line).
+**G5. Saturday test round** = `docs/superpowers/plans/2026-10-03-saturday-test-round.md`.
+**G6. Rollback**: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00098-278=100
+--region=$R --project=$P`. No migration to undo. A surname set with `--last-name` stays on the contact and is
+inert to the old image.
+
 ## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
 this deploy)
 
