@@ -315,16 +315,18 @@ describe("liveFirstLine: hold (spec §4, Review Focus 2)", () => {
     expect(a.ctl.droppedThisGeneration()).toBe(false);
 
     // Live answered the new person before its transcript reached us: the
-    // muted start is not lost -- onRelease tells the engine to flush it.
+    // generation that opens after their speech IS the release (Gatekeeper
+    // call 2026-10-01: transcript lag p50 9,397 ms -- waiting for words could
+    // leave a returning person in silence for seconds). Heard from its start.
     const released = [];
     const b = onHoldRig({ onRelease: (fields) => released.push(fields) });
     run(b.ctl, 3000, 9500, (t) => t >= 9000);
-    expect(b.ctl.onModelAudio(9500)).toBe(false);
-    expect(b.ctl.droppedThisGeneration()).toBe(true);
-    b.ctl.onCallerTranscript("hello?", 9550);
+    expect(b.ctl.onModelAudio(9500)).toBe(true);
     expect(b.ctl.onHold()).toBe(false);
     expect(released).toEqual([{ midGeneration: true, droppedOnHold: 0 }]);
     expect(b.ctl.droppedThisGeneration()).toBe(false);
+    b.ctl.onCallerTranscript("hello?", 9550); // the late transcript changes nothing
+    expect(released).toHaveLength(1);
     expect(b.ctl.onModelAudio(9600)).toBe(true);
     expect(b.ctl.onTurnComplete(10500)).toMatchObject({ heard: true });
   });
@@ -502,6 +504,79 @@ describe("review #5: a hold releases only on a person after the hold began, neve
     expect(ctl.onModelAudio(9700)).toBe(false); // the stale generation stays muted to its end
     expect(ctl.onTurnComplete(9800)).toMatchObject({ heard: false });
     expect(ctl.onModelAudio(10500)).toBe(true); // the next one is the reply to the person
+  });
+});
+
+// Gatekeeper call 2026-10-01: input_transcript_lag_ms_p50 9,397 ms (Hello 255
+// ms). A hold that waits for a WORDED transcript can leave the person who comes
+// back in silence for seconds. Live answering = a person spoke: a muted
+// generation that OPENS after a confirmed speech onset since the hold began
+// releases the hold -- with the same music guards as the transcript path
+// (utterance <= 8 s and >= 400 ms voiced; nothing from before the hold).
+describe("hold release when Live answers a person (no transcript needed)", () => {
+  function onHoldRig(overrides = {}) {
+    const released = [];
+    const r = rig({ onRelease: (f) => released.push(f), ...overrides });
+    run(r.ctl, 0, 2000, (t) => t >= 500 && t <= 900);
+    r.ctl.onModelAudio(2500);
+    r.ctl.onTurnComplete(3000);
+    r.ctl.enterHold(3000);
+    return { ...r, released };
+  }
+
+  it("600 ms of speech after the hold, then Live opens a generation -> released at the open, heard, one release", () => {
+    const { ctl, calls, released } = onHoldRig();
+    run(ctl, 3000, 9700, (t) => t >= 9000 && t < 9600);
+    expect(ctl.onHold()).toBe(true); // no words yet: still holding
+    expect(ctl.onModelAudio(9700)).toBe(true);
+    expect(ctl.onHold()).toBe(false);
+    expect(released).toEqual([{ midGeneration: true, droppedOnHold: 0 }]);
+    expect(events(calls.info, "outbound_hold_released")).toHaveLength(1);
+  });
+
+  it("a text-first generation (output transcript before audio) releases the same way", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 9700, (t) => t >= 9000 && t < 9600);
+    ctl.noteAssistantText(9700);
+    expect(ctl.onHold()).toBe(false);
+    expect(released).toEqual([{ midGeneration: true, droppedOnHold: 0 }]);
+    expect(ctl.onModelAudio(9750)).toBe(true);
+  });
+
+  it("no speech since the hold began (only the pre-hold 'hold on') -> a generation stays muted", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 8000);
+    expect(ctl.onModelAudio(8000)).toBe(false);
+    expect(ctl.onHold()).toBe(true);
+    expect(released).toEqual([]);
+  });
+
+  it("9 s of continuous 'voiced' hold music, then Live talks -> muted (music guard)", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 13500, (t) => t >= 4000);
+    expect(ctl.onModelAudio(13500)).toBe(false);
+    expect(ctl.onHold()).toBe(true);
+    expect(released).toEqual([]);
+  });
+
+  it("a 300 ms blip (under the 400 ms voiced floor), then Live talks -> muted", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 9500, (t) => t >= 9000 && t < 9300);
+    expect(ctl.onModelAudio(9500)).toBe(false);
+    expect(ctl.onHold()).toBe(true);
+    expect(released).toEqual([]);
+  });
+
+  it("speech still going on when the hold engaged (onset before the hold) -> a generation stays muted", () => {
+    const r = rig();
+    run(r.ctl, 0, 2000, (t) => t >= 500 && t <= 900);
+    r.ctl.onModelAudio(2500);
+    r.ctl.onTurnComplete(3000);
+    run(r.ctl, 3000, 3200, () => true); // "...I'll get him" -- onset before the hold
+    r.ctl.enterHold(3200);
+    run(r.ctl, 3200, 3700, () => true); // the same utterance runs on
+    expect(r.ctl.onModelAudio(3700)).toBe(false);
+    expect(r.ctl.onHold()).toBe(true);
   });
 });
 

@@ -261,11 +261,15 @@ describe("hold", () => {
     await call.assistantTurn(INTRO);
     call.ws.liveFirstLine.enterHold(call.clock());
     await call.feed(5000);
-    await call.feed(600, { voiced: true }); // a person picks up
+    // Since 2026-10-01 (Gatekeeper transcript lag) a generation that opens after
+    // a releasable utterance releases at once (next describe). The flush still
+    // matters when Live opens while the speech is under the 400 ms floor:
+    await call.feed(300, { voiced: true }); // "Hello?" -- a person picks up
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    call.live.push(modelAudioMsg(400)); // Live answers before its transcript lands
+    call.live.push(modelAudioMsg(400)); // Live answers that early, before its transcript lands
     await call.settle();
     expect(enqueue).not.toHaveBeenCalled();
+    await call.feed(300, { voiced: true }); // "...this is Sam." -- the same utterance runs on
     await call.callerSays("Hello? This is Sam.");
     expect(call.ws.liveFirstLine.onHold()).toBe(false);
     expect(enqueue).toHaveBeenCalled(); // the muted start, flushed
@@ -891,6 +895,37 @@ describe("confirm_identity(true) marks calls.answers._identity_confirmed once (t
     await call.callTool("confirm_identity", { name_confirmed: true });
     await call.settle();
     expect(marks(db)).toHaveLength(1);
+    await call.hangUp();
+  });
+});
+
+// Gatekeeper call 2026-10-01: transcript lag p50 9,397 ms. The engine wire for
+// the controller's release-on-answer: Live's audio after the person's speech is
+// forwarded with NO input transcript at all, and the release note goes once.
+describe("hold: Live answering the person who came back releases it without a transcript", () => {
+  it("speech after the hold, then Live audio -> forwarded, hold over, one release note", async () => {
+    allowErrors("outbound_disclosure_missing");
+    const call = await bootLiveMode();
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.callTool("wait_on_hold", {});
+    await call.assistantTurn("Sure, thank you.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    await call.feed(5000);
+    await call.feed(600, { voiced: true }); // "Hi, it's Sam" -- no transcript ever arrives
+    await call.feed(200);
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    expect(call.ws.liveFirstLine.onHold()).toBe(false);
+    expect(enqueue).toHaveBeenCalled();
+    const notes = call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes("has not heard who you are"));
+    expect(notes).toHaveLength(1);
     await call.hangUp();
   });
 });
