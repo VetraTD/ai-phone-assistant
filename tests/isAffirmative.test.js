@@ -169,3 +169,67 @@ describe("an agreement idiom that happens to contain 'no'", () => {
     expect(isAffirmative(text)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A ONE-WORD YES THE TRANSCRIPT RENDERED IN ANOTHER LANGUAGE. 2026-10-02.
+//
+// Gemini Live transcribes the caller itself, and a short English "yes" comes
+// back as whatever language it guessed. CA1ff2c6 (outbound, booking):
+//
+//   A: "Shall we book your discovery call for Monday, October fifth at four
+//       thirty PM?"
+//   C: "Ja."                       -> agreed_now FALSE
+//
+// and CAffb5c7 (inbound, cancellation) answered its read-back with "bien".
+// Both were released by the ceiling; on a call where the model reads back
+// FIRST, the same miss costs a whole extra turn and the consent latch.
+//
+// WHOLE TURN ONLY. These words are accepted when they ARE the caller's turn
+// (optionally after "ah"/"oh", optionally doubled), never when they appear
+// inside a longer sentence -- "si puede, cámbielo al jueves" stays false for
+// the reason the comment on AFFIRMATIVE_RE gives. And never as a QUESTION:
+// "Ja?" is "huh?".
+//
+// Every positive below is a real caller turn. Checked against all 444 unique
+// caller turns in call-corpus/, tests/fixtures/liveCalls/ and the two calls of
+// 2026-10-02 before it was written: 9 verdicts changed, every one a yes; the
+// six that followed a read-back are the cases here.
+// ---------------------------------------------------------------------------
+describe("isAffirmative — a whole-turn yes in a word the transcript chose", () => {
+  it.each([
+    ["Ja.", "CA1ff2c6 2026-10-02, after 'Shall we book your discovery call ...?'"],
+    ["Ja.", "CAb4c0eb, after 'Shall we book that in for you?'"],
+    ["bien", "CAffb5c7 2026-10-02, after 'To confirm, you would like to cancel ...?'"],
+    ["Ah, ya.", "CA00649d, after 'are you asking me to go ahead and cancel ...?'"],
+    ["go on", "CA240834, after 'Shall I go ahead with that?'"],
+    ["Mhm.", "CA58bb36"],
+    ["Ah, oui, oui.", "CA919b69"],
+  ])("reads %j as agreement (%s)", (text) => {
+    expect(isAffirmative(text)).toBe(true);
+  });
+
+  it.each([["Si."], ["Oui."], ["Ja ja."], ["Mm-hm."], ["Uh huh."], ["Ya."], ["Da."]])(
+    "reads the bare token %j as agreement",
+    (text) => {
+      expect(isAffirmative(text)).toBe(true);
+    }
+  );
+
+  it.each([
+    ["Ja?"],
+    ["bien?"],
+    ["Si?"],
+    ["ja I want Tuesday"],
+    ["si puede, cámbielo al jueves"],
+    ["da, wait"],
+    ["bien, but can we do Friday?"],
+    ["Ja, nein."],
+    ["go on then, what else is there?"],
+    ["Oh."],
+    ["da, ja, das"],
+    ["Dora"],
+    ["Gone."],
+  ])("does not read %j as agreement", (text) => {
+    expect(isAffirmative(text)).toBe(false);
+  });
+});

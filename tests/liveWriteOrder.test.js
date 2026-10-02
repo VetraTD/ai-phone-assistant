@@ -1130,7 +1130,10 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
     clearStats();
     const second = await book(
       ctx({
-        said: "Ah, ya.",
+        // Was CA00649d's "Ah, ya.", which isAffirmative reads as a whole-turn
+        // yes since 2026-10-02. This needs an answer that is STILL unreadable,
+        // so it uses CA954592's "nada works" -- the same kind of mangled yes.
+        said: "nada works",
         replied: "Just to confirm, are you asking me to go ahead and book the strategy call?",
         capabilityState: first.stateEffects.capabilityState,
         turn: 5,
