@@ -21,7 +21,8 @@ import {
   buildAllDeclarations,
   buildCallbackSection,
 } from "../services/gemini.js";
-import { recognizeCallback, remainingQuestionsOf } from "../lib/outbound/callbackRecognition.js";
+import { recognizeCallback, remainingQuestionsOf, callbackOutreachForCall } from "../lib/outbound/callbackRecognition.js";
+import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 import qualification from "../capabilities/qualification.js";
 import { FIXTURES } from "./fixtures/businessConfigs.js";
 
@@ -107,7 +108,7 @@ describe("buildCallbackSection", () => {
   });
   it("lists the questions in the model-facing words, not the keys", () => {
     const s = buildCallbackSection(CB, "Europe/London");
-    expect(s).toContain("Questions still unanswered: How many people work there? / When would you like to start? Once you know why they rang, ask these naturally");
+    expect(s).toContain("Questions still unanswered: How many people work there? / When would you like to start? Only if they rang back about our call or to book, ask these naturally");
     expect(s).not.toContain("team_size");
   });
   it("returns '' with no callback", () => {
@@ -191,5 +192,60 @@ describe("recognizeCallback failure modes", () => {
     expect(database.closeOutreachCalledBack).toHaveBeenCalledWith("o");
     expect(r).toMatchObject({ outreachId: "o", campaignId: "c", contactId: "k", topic: "t", remainingQuestions: [] });
     expect(typeof r.lastAttemptAt).toBe("string");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A CALLBACK ABOUT SOMETHING ELSE IS NOT A QUALIFICATION CALL. 2026-10-02.
+//
+// CAffb5c7: the owner's handset matched a still-waiting outreach (S23), the
+// caller said "I think I have a discovery call that I booked" and wanted to
+// cancel it, and the assistant asked "To ensure I have everything ready, what
+// is the name of your clinic?" -- the outreach's leftover question -- before
+// cancelling. The tail line said "Once you know why they rang, ask these",
+// whatever the reason was.
+// ---------------------------------------------------------------------------
+describe("callback questions are not asked of a caller ringing about something else", () => {
+  it("the line limits the questions to a callback about our call or a booking", () => {
+    const s = buildCallbackSection(CB, "Europe/London");
+    expect(s).toContain("Only if they rang back about our call or to book, ask these naturally");
+    expect(s).toContain("If they rang about an appointment they already have");
+    expect(s).toContain("do not ask these at all");
+    expect(s).not.toContain("Once you know why they rang, ask these");
+  });
+
+  const UPCOMING = { upcomingAppointments: [{ scheduled_at: "2026-10-05T21:30:00.000Z", client_name: "Nithin" }] };
+  const PAST_ONLY = { upcomingAppointments: [{ scheduled_at: "2026-09-01T10:00:00.000Z", client_name: "Nithin" }] };
+
+  it("drops the leftover questions when the caller already has an upcoming appointment", () => {
+    clearStats();
+    const out = callbackOutreachForCall(CB, UPCOMING);
+    expect(out.remainingQuestions).toEqual([]);
+    expect(out.outreachId).toBe(CB.outreachId);
+    expect(CB.remainingQuestions).toHaveLength(2); // not mutated
+    expect(getLatencyStats().turnTaking.outbound_callback_questions_suppressed).toBe(1);
+    // ...so nothing is asked and record_answer is not declared.
+    expect(buildCallbackSection(out, "Europe/London")).not.toContain("Questions still unanswered");
+    expect(qualification.tools({}, { callbackOutreach: out })).toEqual([]);
+  });
+
+  it("keeps the questions when the caller has no upcoming appointment", () => {
+    clearStats();
+    expect(callbackOutreachForCall(CB, null)).toBe(CB);
+    expect(callbackOutreachForCall(CB, { upcomingAppointments: [] })).toBe(CB);
+    expect(callbackOutreachForCall(CB, PAST_ONLY)).toBe(CB);
+    expect(getLatencyStats().turnTaking.outbound_callback_questions_suppressed).toBeFalsy();
+  });
+
+  it("no callback is still no callback", () => {
+    expect(callbackOutreachForCall(null, UPCOMING)).toBeNull();
+    expect(callbackOutreachForCall(undefined, UPCOMING)).toBeNull();
+  });
+
+  it("does not count a suppression when there was nothing left to ask", () => {
+    clearStats();
+    const none = { ...CB, remainingQuestions: [] };
+    expect(callbackOutreachForCall(none, UPCOMING)).toBe(none);
+    expect(getLatencyStats().turnTaking.outbound_callback_questions_suppressed).toBeFalsy();
   });
 });

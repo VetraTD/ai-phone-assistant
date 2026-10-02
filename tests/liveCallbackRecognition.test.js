@@ -89,7 +89,7 @@ describe("Live start: inbound callback recognition", () => {
     expect(database.linkCallToOutreach).toHaveBeenCalledWith("CAcb1", "out-9", "contact-9");
 
     expect(prompt).toMatch(/We called this person on Monday 28 September about your clinic software enquiry\./);
-    expect(prompt).toContain("Questions still unanswered: How many people work there? Once you know why they rang, ask these naturally, one at a time, and record each answer with record_answer.");
+    expect(prompt).toContain("Questions still unanswered: How many people work there? Only if they rang back about our call or to book, ask these naturally, one at a time, and record each answer with record_answer.");
     expect(prompt).not.toContain("What is the name of your clinic?");
 
     const decl = conn.tools.flatMap((t) => t.functionDeclarations).find((d) => d.name === "record_answer");
@@ -125,6 +125,28 @@ describe("Live start: inbound callback recognition", () => {
     expect(prompt).not.toMatch(/RETURNED CALL|We called this person/);
     expect(names).not.toContain("record_answer");
     expect(logged.filter((l) => l.event === "outbound_callback_recognized")).toEqual([]);
+    await call.hangUp();
+  });
+
+  // 2026-10-02 (CAffb5c7): a recognised caller who already has an upcoming
+  // appointment rang about it -- the leftover questions are dropped, through
+  // the running session's own fetchCallerContext, not a stubbed extras key.
+  it("a callback from a caller with an upcoming appointment: recognised, but no questions and no record_answer", async () => {
+    const future = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const database = dbWith({
+      openOutreachForPhone: vi.fn(async () => HIT),
+      fetchCallerContext: vi.fn(async () => ({
+        callCount: 1,
+        upcomingAppointments: [{ id: "appt-9", scheduled_at: future, client_name: "Nithin", service_type: "discovery call" }],
+      })),
+    });
+    const { call, prompt, names } = await boot(database);
+    expect(database.closeOutreachCalledBack).toHaveBeenCalledWith("out-9");
+    expect(database.linkCallToOutreach).toHaveBeenCalledWith("CAcb1", "out-9", "contact-9");
+    expect(prompt).toContain("We called this person on Monday 28 September about your clinic software enquiry.");
+    expect(prompt).not.toContain("Questions still unanswered");
+    expect(prompt).not.toContain("How many people work there?");
+    expect(names).not.toContain("record_answer");
     await call.hangUp();
   });
 

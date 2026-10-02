@@ -5447,4 +5447,23 @@ describe("session.js -- a recognised callback carries the call sid to the tool c
     expect(extras).not.toHaveProperty("callbackOutreach");
     expect(extras).not.toHaveProperty("callSid");
   });
+
+  // 2026-10-02 (CAffb5c7): the cascade drops the leftover questions for a
+  // caller with an upcoming appointment, exactly as the Live path does
+  // (lib/outbound/callbackRecognition.js callbackOutreachForCall).
+  it("a recognised callback from a caller with an upcoming appointment: no remaining questions", async () => {
+    db.openOutreachForPhone.mockResolvedValueOnce(HIT);
+    db.fetchCallerContext.mockResolvedValueOnce({
+      callCount: 1,
+      upcomingAppointments: [{ id: "a1", scheduled_at: new Date(Date.now() + 86_400_000).toISOString(), client_name: "Sam" }],
+    });
+    const { extras } = await oneTurn();
+    expect(extras.callbackOutreach).toMatchObject({ outreachId: "out-1", remainingQuestions: [] });
+  });
+
+  it("a recognised callback with no upcoming appointment keeps its questions", async () => {
+    db.openOutreachForPhone.mockResolvedValueOnce(HIT);
+    const { extras } = await oneTurn();
+    expect(extras.callbackOutreach.remainingQuestions.map((q) => q.key)).toEqual(["team_size"]);
+  });
 });

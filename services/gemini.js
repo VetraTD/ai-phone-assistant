@@ -1058,7 +1058,14 @@ export function buildCallbackSection(callbackOutreach, timezone) {
   if (asks.length) {
     const list = asks.join(" / ");
     text += ` Questions still unanswered: ${list}${/[.?!]$/.test(list) ? "" : "."}`;
-    text += " Once you know why they rang, ask these naturally, one at a time, and record each answer with record_answer.";
+    // 2026-10-02 (CAffb5c7): "Once you know why they rang, ask these" was read
+    // as "whatever they rang about", and a caller ringing to cancel a booking
+    // was asked for their clinic's name first. The questions belong to a
+    // callback about OUR call; anything else gets help, not a questionnaire.
+    text +=
+      " Only if they rang back about our call or to book, ask these naturally, one at a time, and record each " +
+      "answer with record_answer. If they rang about an appointment they already have -- to check, move or " +
+      "cancel it -- or about anything else, do not ask these at all: just help with what they asked.";
   }
   return text;
 }
