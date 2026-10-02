@@ -1265,3 +1265,82 @@ describe("LVX156 — asked twice and unreadable is not the same as never asked",
     expect(counters().write_order_gate_ceiling).toBeFalsy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// A WRITE THE CEILING RELEASED MUST STAY RELEASED WHEN ANOTHER GATE HOLDS IT.
+//
+// CA1ff2c6, 2026-10-02 (outbound booking, rev 00098):
+//
+//   73.1 s  book_appointment, no read-back yet           write_order_refused
+//   78.0 s  A: "Shall we book your discovery call for Monday ... four thirty PM?"
+//   80.1 s  C: "Ja." (unreadable then)  readback_now=TRUE  write_order_gate_ceiling
+//           ...and the SPELLING gate held it: "spell your full name"
+//  102.2 s  retryPendingWrite, last reply "I cannot share the details on file.
+//           Please spell your full name..."              write_order_refused AGAIN
+//
+// The ceiling release at 80.1 s went straight on to the spelling gate, whose
+// refusal patch carried none of the write-order state, so the proposal's
+// `writeOrderEverReadBack` stayed at the FALSE the 73.1 s refusal wrote. The
+// retry no longer had a read-back in view, fell back to the never-asked
+// ceiling of two, and was refused by the gate that had already let it go.
+// ---------------------------------------------------------------------------
+describe("a ceiling release survives a later gate's refusal — CA1ff2c6", () => {
+  // The engine's merge: shallow at the capability level (lib/capabilities/effects.js).
+  const merge = (a = {}, b = {}) => {
+    const out = { ...a };
+    for (const [k, v] of Object.entries(b)) out[k] = { ...(a[k] || {}), ...v };
+    return out;
+  };
+  const OFFER = "I have availability on Monday, October fifth at one PM or four thirty PM. Which suits you better?";
+  const READ_BACK_A = "Shall we book your discovery call for Monday, October fifth at four thirty PM?";
+  const ASK_SPELLING_AGAIN =
+    "I cannot share the details on file. Please spell your full name so I can finish booking your discovery call.";
+
+  it("does not refuse the retry of a proposal the ceiling already released", async () => {
+    const first = await book({ ...ctx({ said: "4:30", replied: OFFER, turn: 4 }), spellingSettled: false });
+    expect(first.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+
+    // Unreadable, read back: the ceiling releases and the spelling gate holds.
+    const second = await book({
+      ...ctx({ said: "nada works", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
+      spellingSettled: false,
+    });
+    expect(counters().write_order_gate_ceiling).toBe(1);
+    expect(second.functionResponse.response.success).toBe(false);
+    expect(counters().spelling_gate_refusals).toBe(1);
+
+    clearStats();
+    const third = await book(
+      ctx({
+        said: "What do you have on file?",
+        replied: ASK_SPELLING_AGAIN,
+        capabilityState: merge(first.stateEffects.capabilityState, second.stateEffects.capabilityState),
+        turn: 7,
+      })
+    );
+    expect(counters().write_order_refused).toBeFalsy();
+    expect(third.functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+  });
+
+  it("still gives a DIFFERENT proposal its own budget after the release", async () => {
+    const first = await book({ ...ctx({ said: "4:30", replied: OFFER, turn: 4 }), spellingSettled: false });
+    const second = await book({
+      ...ctx({ said: "nada works", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
+      spellingSettled: false,
+    });
+    clearStats();
+    const other = await bookSlot(
+      DAY_THREE,
+      ctx({
+        said: "What do you have on file?",
+        replied: ASK_SPELLING_AGAIN,
+        capabilityState: merge(first.stateEffects.capabilityState, second.stateEffects.capabilityState),
+        turn: 7,
+      })
+    );
+    expect(other.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+  });
+});

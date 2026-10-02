@@ -1369,6 +1369,15 @@ export async function executeToolCall(fc, ctx) {
             };
           }
 
+          // What the write-order gate's CEILING decided, carried to the gates
+          // after it. CA1ff2c6, 2026-10-02: the ceiling released a read-back
+          // proposal, the spelling gate then held it, and that refusal's patch
+          // carried none of the write-order state -- so the retry found
+          // `writeOrderEverReadBack` still false, fell back to the never-asked
+          // ceiling of two, and was refused by the gate that had already let it
+          // go. Every refusal below spreads this into the pack's state.
+          let orderReleasePatch = null;
+
           if (lastCallerText.trim() !== "") {
             const consentRefusal =
               isHesitationOnly(lastCallerText)
@@ -1930,6 +1939,12 @@ export async function executeToolCall(fc, ctx) {
                 // refuse forever holds a caller on the line over our own
                 // vocabulary; LVX21 is what a hair trigger on this path costs.
                 bumpCounter("write_order_gate_ceiling");
+                orderReleasePatch = {
+                  writeOrderReadBackKey: readBackKey,
+                  writeOrderProposalKey: proposalKey,
+                  writeOrderEverReadBack: everReadBackThisProposal,
+                  writeOrderRefusals: orderRefusals,
+                };
                 log.error("write_order_gate_ceiling", {
                   // callSid as well as callId. These three lines carried only
                   // callId, so filtering a call by its SID returned every event
@@ -2284,6 +2299,7 @@ export async function executeToolCall(fc, ctx) {
                     // gates used to read as two-and-two, under two separate
                     // ceilings, while the caller experienced four.
                     ...writeAttemptPatch(spellAttemptBudget),
+                    ...(orderReleasePatch || {}),
                     ...(priorSpellFacts.Name
                       ? {}
                       : { callerFacts: { ...priorSpellFacts, Name: pendingName } }),
@@ -2312,7 +2328,10 @@ export async function executeToolCall(fc, ctx) {
                 stateEffects: {
                   toolResult: { name: fc.name, success: false, message: qGate.message },
                   toolCallEvent: { name: fc.name, args: fc.args, silent: true },
-                  capabilityState: { qualification: { bookingGateRefusals: 1 } },
+                  capabilityState: {
+                    qualification: { bookingGateRefusals: 1 },
+                    ...(orderReleasePatch ? { [pack.id]: orderReleasePatch } : {}),
+                  },
                 },
               };
             }
@@ -2348,10 +2367,15 @@ export async function executeToolCall(fc, ctx) {
                 // refused before execution — see the spelling gate above.
                 toolResult: { name: fc.name, success: false, message: check.message },
                 toolCallEvent: { name: fc.name, args: fc.args, silent: true },
-                ...(heardName && !priorFacts.Name
+                ...((heardName && !priorFacts.Name) || orderReleasePatch
                   ? {
                       capabilityState: {
-                        [pack.id]: { callerFacts: { ...priorFacts, Name: heardName } },
+                        [pack.id]: {
+                          ...(orderReleasePatch || {}),
+                          ...(heardName && !priorFacts.Name
+                            ? { callerFacts: { ...priorFacts, Name: heardName } }
+                            : {}),
+                        },
                       },
                     }
                   : {}),
