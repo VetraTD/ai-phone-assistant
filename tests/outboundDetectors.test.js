@@ -349,6 +349,10 @@ describe("isCallbackOnlyClaim (the claim is about a callback, nothing else)", ()
     "Would you like me to schedule a callback?",
     // The claim is in a clause that does not name the callback -- ambiguous, so it stays a claim.
     "That's all set. I'll call you back tomorrow at ten.",
+    // Final review #7: joiners beyond and/but/also.
+    "Your consultation is confirmed for Tuesday so we'll call you back Monday.",
+    "Your consultation is booked for Tuesday -- I've also scheduled a callback for Monday.",
+    "You're booked for Tuesday at 2 p.m., then I've scheduled a callback for Monday.",
   ])("NOT callback-only: %s", (text) => {
     for (const [, claims] of both) expect(isCallbackOnlyClaim(text, claims)).toBe(false);
   });

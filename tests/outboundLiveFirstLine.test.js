@@ -567,6 +567,36 @@ describe("hold release when Live answers a person (no transcript needed)", () =>
     expect(released).toEqual([]);
   });
 
+  // Final review #1 (Critical): Live talking to hold MUSIC is why the mute
+  // exists. Music with short breaks makes each phrase a fresh onset under 8 s,
+  // and a "hold please" said after the hold began stays the last utterance
+  // through continuous music. The open-release needs the MOST RECENT
+  // utterance to be releasable AND to have started after >= 1 s of quiet (a
+  // person after the music stopped). Anything else waits for words (the
+  // transcript path, today's behaviour).
+  it("gappy hold music (2 s phrases, 400 ms breaks), then Live talks -> muted", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 12000, (t) => t >= 4000 && (t - 4000) % 2400 < 2000);
+    expect(ctl.onModelAudio(12000)).toBe(false);
+    expect(ctl.onHold()).toBe(true);
+    expect(released).toEqual([]);
+  });
+
+  it("'hold please' after the hold began, then continuous music, Live talks during the music -> muted", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 15000, (t) => (t >= 3500 && t < 4500) || t >= 5500);
+    expect(ctl.onModelAudio(15000)).toBe(false);
+    expect(ctl.onHold()).toBe(true);
+    expect(released).toEqual([]);
+  });
+
+  it("music, then 1.5 s of quiet, then a person (600 ms), Live answers -> released", () => {
+    const { ctl, released } = onHoldRig();
+    run(ctl, 3000, 16200, (t) => (t >= 4000 && t < 13000) || (t >= 14500 && t < 15100));
+    expect(ctl.onModelAudio(16200)).toBe(true);
+    expect(released).toEqual([{ midGeneration: true, droppedOnHold: 0 }]);
+  });
+
   it("speech still going on when the hold engaged (onset before the hold) -> a generation stays muted", () => {
     const r = rig();
     run(r.ctl, 0, 2000, (t) => t >= 500 && t <= 900);
@@ -605,5 +635,58 @@ describe("review minor (re-graded): no unresponsive end while on hold", () => {
     ctl.enterHold(1500);
     run(ctl, 1500, 30000);
     expect(calls.end).toEqual([]);
+  });
+});
+
+// Final review #4/#5: the AMD door's "real exchange" read used transcript rows,
+// which land only at a turn's close and only with the caller's TEXT (transcript
+// lag reached 9.4 s p50 on 2026-10-01), and clip mode seeds an AI row before any
+// caller row. The exchange is now measured on AUDIO, here: a completed AI turn
+// that was heard, then the person's confirmed speech after it. Reported once.
+describe("onExchange: the AI's turn was heard and the person answered it (audio, not transcripts)", () => {
+  function exRig() {
+    const exchanges = [];
+    const r = rig({ onExchange: (atMs) => exchanges.push(atMs) });
+    return { ...r, exchanges };
+  }
+
+  it("person speaks, the AI's reply plays and completes, the person answers -> one exchange", () => {
+    const { ctl, exchanges } = exRig();
+    run(ctl, 0, 2000, (t) => t >= 500 && t <= 900); // "Reception?"
+    ctl.onModelAudio(2500);
+    ctl.onTurnComplete(3000);
+    expect(exchanges).toEqual([]);
+    run(ctl, 3000, 4500, (t) => t >= 3500 && t < 4100); // "Let me check, one sec."
+    expect(exchanges).toHaveLength(1);
+    run(ctl, 4500, 8000, (t) => t >= 6000 && t < 6600);
+    expect(exchanges).toHaveLength(1);
+  });
+
+  it("the silence 'Hello?' completes and the person answers -> an exchange (the cue is a heard AI turn)", () => {
+    const { ctl, exchanges } = exRig();
+    run(ctl, 0, 2300);
+    ctl.onModelAudio(2900);
+    ctl.onTurnComplete(3300);
+    run(ctl, 3300, 5000, (t) => t >= 3600 && t < 4000);
+    expect(exchanges).toHaveLength(1);
+  });
+
+  it("an AI turn that was INTERRUPTED (a greeting talking over it) does not count; speech before any completed turn does not count", () => {
+    const { ctl, exchanges } = exRig();
+    run(ctl, 0, 2000, (t) => t >= 500 && t <= 1500); // a voicemail greeting
+    ctl.onModelAudio(2500);
+    ctl.onInterrupted(2700); // the greeting resumes over the AI
+    run(ctl, 2700, 6000, (t) => t >= 2700 && t < 5500); // "...leave a message after the tone"
+    expect(exchanges).toEqual([]);
+  });
+
+  it("a muted (on-hold) turn is not a heard turn", () => {
+    const { ctl, exchanges } = exRig();
+    run(ctl, 0, 2000, (t) => t >= 500 && t <= 900);
+    ctl.enterHold(2000);
+    ctl.onModelAudio(2500);
+    ctl.onTurnComplete(3000);
+    run(ctl, 3000, 4000, (t) => t >= 3200 && t < 3300); // a blip
+    expect(exchanges).toEqual([]);
   });
 });

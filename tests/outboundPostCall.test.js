@@ -400,6 +400,29 @@ describe("runPostCall: no redial after a real conversation (owner 2026-10-01)", 
     expect(opts.nextAttemptAt.toISOString()).toBe(new Date(requested).toISOString());
   });
 
+  // Final review #3: set_call_outcome OVERWRITES outcome_code, so a callback
+  // booked with schedule_callback and followed by set_call_outcome
+  // qualified_no_booking reads as "no callback asked". The booked time
+  // (calls.answers._callback_requested_at) is what was promised: kept.
+  it("a callback was BOOKED, then the outcome was recorded as qualified_no_booking -> rings back at the booked time", async () => {
+    const requested = "2026-09-30T14:00:00Z";
+    const db = talked({ answers: { ...confirmed, _callback_requested_at: requested } });
+    await run(db, scored("qualified_no_booking"));
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(requested).toISOString());
+  });
+
+  it("the session's audio exchange marker counts when the transcript lost the caller's text (lag)", async () => {
+    const db = fakeDb(
+      { answers: { ...confirmed, _exchanged: true } },
+      { fetchCallTranscript: vi.fn(async () => REAL_TALK.filter((r) => r.speaker === "ai")) }
+    );
+    await run(db, scored("qualified_no_booking"));
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts).toMatchObject({ terminal: true, closeReason: "terminal_outcome" });
+  });
+
   it("a hold timeout (outcome other, note 'hold timeout') -> reschedules: we never reached the person after the hold", async () => {
     const db = talked({ outcomeCode: "other", answers: { ...confirmed, _outcome_note: "hold timeout" } });
     await run(db);

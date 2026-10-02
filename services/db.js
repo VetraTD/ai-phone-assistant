@@ -3599,10 +3599,13 @@ export async function stampAttemptAnswered(attemptId) {
  */
 /**
  * Real Hold call 2026-10-01 (defect B). Has this call had a real exchange --
- * the AI's first reply heard AND the person answering it? Read as: a caller
- * transcript row after the first AI row. Rows land per turn
- * (lib/voice/live/index.js persistTurnTranscript: caller at n, the HEARD AI
- * half at n+1), so a greeting + the AI's first reply is not yet an exchange.
+ * the AI's turn heard AND the person answering it? The live session measures
+ * that on AUDIO (lib/outbound/liveFirstLine.js onExchange) and marks
+ * calls.answers._exchanged (lib/voice/live/index.js markExchanged). Not from
+ * transcript rows (final review of the hold fixes, #4/#5): they land only at
+ * a turn's close and only with the caller's TEXT (transcript lag reached 9.4 s
+ * p50), and clip mode seeds an AI row before any caller row, so a voicemail
+ * greeting read as an exchange there. Clip mode never writes the marker.
  *
  * The AMD door (lib/outbound/doorRoutes.js) reads this from the DATABASE
  * because its callback can land on another instance than the call's session.
@@ -3616,11 +3619,7 @@ export async function outboundCallHadExchange(callSid) {
   requireTenantScope("outboundCallHadExchange");
   const res = await q(
     `SELECT EXISTS (
-       SELECT 1
-         FROM calls c
-         JOIN call_transcripts t ON t.call_id = c.id AND t.speaker = 'caller'
-        WHERE c.twilio_call_sid = $1
-          AND t.sequence > (SELECT MIN(a.sequence) FROM call_transcripts a WHERE a.call_id = c.id AND a.speaker = 'ai')
+       SELECT 1 FROM calls c WHERE c.twilio_call_sid = $1 AND c.answers -> '_exchanged' = 'true'::jsonb
      ) AS exchanged`,
     [callSid]
   );

@@ -118,22 +118,21 @@ d("stampAttemptAmd, as vetra_app inside withTenant", () => {
 });
 
 // Real Hold call 2026-10-01 (defect B): the AMD door ignores a machine verdict
-// once the call has had a real exchange -- a caller transcript row AFTER the
-// first AI row (the AI's first reply was heard AND the person answered it).
-// Rows land per turn from lib/voice/live/index.js persistTurnTranscript:
-// caller at sequence n, the heard AI half at n+1.
-d("outboundCallHadExchange, as vetra_app inside withTenant", () => {
-  let callId;
-  async function rows(list) {
+// once the call has had a real exchange. Final review of the hold fixes (#4/#5):
+// measured on AUDIO by the live session and written as calls.answers._exchanged
+// (lib/voice/live/index.js markExchanged) -- NOT from transcript rows, which
+// land only at a turn's close and only with the caller's text (lag reached
+// 9.4 s p50), and which in clip mode start with a seeded AI row.
+d("outboundCallHadExchange (calls.answers._exchanged), as vetra_app inside withTenant", () => {
+  async function callRow({ answers = null, transcript = [] } = {}) {
     await admin.query(`DELETE FROM calls WHERE twilio_call_sid = $1`, [SID]);
     const c = await admin.query(
-      `INSERT INTO calls (business_id, twilio_call_sid, direction, attempt_id) VALUES ($1,$2,'outbound',$3) RETURNING id`,
-      [BIZ, SID, attemptId]
+      `INSERT INTO calls (business_id, twilio_call_sid, direction, attempt_id, answers) VALUES ($1,$2,'outbound',$3,$4::jsonb) RETURNING id`,
+      [BIZ, SID, attemptId, answers === null ? null : JSON.stringify(answers)]
     );
-    callId = c.rows[0].id;
-    for (const [speaker, message, sequence] of list) {
+    for (const [speaker, message, sequence] of transcript) {
       await admin.query(`INSERT INTO call_transcripts (call_id, speaker, message, sequence) VALUES ($1,$2,$3,$4)`, [
-        callId,
+        c.rows[0].id,
         speaker,
         message,
         sequence,
@@ -141,38 +140,33 @@ d("outboundCallHadExchange, as vetra_app inside withTenant", () => {
     }
   }
 
-  it("the real Hold call's shape (greeting, intro, 'let me check', 'Sure, thank you') -> true", async () => {
-    await rows([
-      ["caller", "Reception, this is John. How can I help you?", 0],
-      ["ai", "Hi, this is Ava, an AI assistant calling from Digile Media. Could I speak to Nithin, please?", 1],
-      ["caller", "Let me go check. One sec.", 2],
-      ["ai", "Sure, thank you.", 3],
-    ]);
+  it("the session marked the exchange -> true", async () => {
+    await callRow({ answers: { _exchanged: true } });
     expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(true);
   });
 
-  it("a greeting and the AI's first reply only (a voicemail box at its beep) -> false", async () => {
-    await rows([
-      ["caller", "Hi, you've reached John, leave a message.", 0],
-      ["ai", "Hi, this is Ava, an AI assistant calling from Digile Media.", 1],
-    ]);
+  it("no marker (answers null) -> false", async () => {
+    await callRow();
     expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
   });
 
-  it("the AI spoke twice with no answer between (intro, then a silence nudge -- a turn with no caller text) -> false", async () => {
-    await rows([
-      ["caller", "Hi, you've reached John.", 0],
-      ["ai", "Hi, this is Ava, an AI assistant calling from Digile Media.", 1],
-      ["ai", "Are you still there?", 3],
-    ]);
+  it("other markers only (_identity_confirmed, _callback_requested_at) -> false", async () => {
+    await callRow({ answers: { _identity_confirmed: true, _callback_requested_at: "2026-10-02T15:00:00Z" } });
     expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
   });
 
-  it("caller rows only (the AI half never heard, e.g. muted) -> false", async () => {
-    await rows([
-      ["caller", "Hello?", 0],
-      ["caller", "Hello, anyone there?", 2],
-    ]);
+  it("transcript rows that LOOK like an exchange but no marker (clip mode: the seeded opener row, then a greeting) -> false", async () => {
+    await callRow({
+      transcript: [
+        ["ai", "Hi, this is Ava, an AI assistant calling from Digile Media.", 0],
+        ["caller", "Hi, you've reached John, leave a message after the tone.", 1],
+      ],
+    });
+    expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
+  });
+
+  it("a marker that is not literally true ('false', a string) -> false", async () => {
+    await callRow({ answers: { _exchanged: "yes" } });
     expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
   });
 
@@ -181,12 +175,8 @@ d("outboundCallHadExchange, as vetra_app inside withTenant", () => {
     expect(await db.withTenant(BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
   });
 
-  it("another tenant's scope sees no exchange (RLS), never another tenant's transcript", async () => {
-    await rows([
-      ["caller", "Reception?", 0],
-      ["ai", "Hi, this is Ava.", 1],
-      ["caller", "One sec.", 2],
-    ]);
+  it("another tenant's scope sees no exchange (RLS)", async () => {
+    await callRow({ answers: { _exchanged: true } });
     expect(await db.withTenant(OTHER_BIZ, () => db.outboundCallHadExchange(SID))).toBe(false);
   });
 

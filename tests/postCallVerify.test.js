@@ -1079,6 +1079,19 @@ describe("verifyCall - a callback claim backed by a successful schedule_callback
     expect(out.verdict).toBe("claim_without_row");
   });
 
+  // Final review #6: with NO matcher claim, "every matcher claim was a backed
+  // callback" is vacuously true -- and judgeCall returns agreed_action "none"
+  // for malformed output too. A matcher-missed fabricated booking on a call that
+  // also booked a callback must still be reported.
+  it("judge done/none + a callback booked, but the matcher saw NO claim -> claim_without_row (not explained away)", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ claims: [], judgeClaimedDone: true, judgeAgreedAction: "none", callbacksScheduled: 1 }),
+      deps
+    );
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
   it("a callback alone, nothing claimed -> ok (a callback is not a booking row the call failed to mention)", async () => {
     const deps = fakeDeps({ booked: [] });
     const out = await verifyCall(input({ claims: [], callbacksScheduled: 1 }), deps);

@@ -904,7 +904,8 @@ describe("confirm_identity(true) marks calls.answers._identity_confirmed once (t
 // forwarded with NO input transcript at all, and the release note goes once.
 describe("hold: Live answering the person who came back releases it without a transcript", () => {
   it("speech after the hold, then Live audio -> forwarded, hold over, one release note", async () => {
-    allowErrors("outbound_disclosure_missing");
+    // The re-intro after the hold repeats the first intro on purpose (spec §4).
+    allowErrors("outbound_disclosure_missing", "live_repeated_phrase");
     const call = await bootLiveMode();
     await call.feed(500, { voiced: true });
     await call.feed(1000);
@@ -924,8 +925,53 @@ describe("hold: Live answering the person who came back releases it without a tr
     await call.settle();
     expect(call.ws.liveFirstLine.onHold()).toBe(false);
     expect(enqueue).toHaveBeenCalled();
-    const notes = call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes("has not heard who you are"));
-    expect(notes).toHaveLength(1);
+    const notes = () => call.live.sent.clientContent.filter((c) => JSON.stringify(c).includes("has not heard who you are"));
+    // Final review #2: client content sent while Live is generating can cut that
+    // generation -- the reply to the person who just came back. A release
+    // mid-generation sends its note at that generation's close instead.
+    expect(notes()).toHaveLength(0);
+    await call.assistantTurn("Hi, this is Ava, an AI assistant calling from Digile Media. Is that Sam?");
+    expect(notes()).toHaveLength(1);
+    expect(notes()[0].turnComplete).toBe(false);
+    await call.hangUp();
+  });
+});
+
+// Final review #4/#5: the AMD door reads calls.answers._exchanged, written here
+// from AUDIO (lib/outbound/liveFirstLine.js onExchange) the moment the person
+// answers a completed, heard AI turn -- not from transcript rows (late, lossy,
+// and clip mode seeds an AI row first).
+describe("the exchange marker for the AMD door (calls.answers._exchanged)", () => {
+  const marks = (db) => db.mergeCallAnswers.mock.calls.filter(([, patch]) => patch && "_exchanged" in patch);
+
+  it("the AI's intro completes, the person answers -> one merge of {_exchanged: true}", async () => {
+    const db = outboundDb();
+    const call = await bootLiveMode({ database: db });
+    await call.feed(500, { voiced: true }); // "Reception?"
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    expect(marks(db)).toHaveLength(0);
+    await call.feed(1500); // the intro's audio plays out (own audio masks the line)
+    await call.feed(600, { voiced: true }); // "Let me check, one sec."
+    await call.feed(400);
+    await vi.waitFor(() => expect(marks(db)).toHaveLength(1));
+    expect(marks(db)[0]).toEqual([SID, { _exchanged: true }]);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    expect(marks(db)).toHaveLength(1);
+    await call.hangUp();
+  });
+
+  it("clip mode (the rollback) never writes it -- the door keeps today's AMD behaviour there", async () => {
+    const db = outboundDb();
+    const call = await bootLiveMode({ database: db, env: { OUTBOUND_FIRST_SPEAKER: "clip" } });
+    await call.feed(3000, { voiced: true });
+    await call.feed(3000);
+    await call.feed(800, { voiced: true });
+    await call.feed(400);
+    expect(marks(db)).toHaveLength(0);
     await call.hangUp();
   });
 });
