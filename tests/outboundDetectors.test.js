@@ -11,6 +11,7 @@ import {
   detectOutboundTurn,
   firstReplyDiscloses,
   isCallbackOnlyClaim,
+  hadRealExchange,
 } from "../lib/outbound/detectors.js";
 import { getStrings } from "../lib/voice/strings.js";
 
@@ -355,5 +356,32 @@ describe("isCallbackOnlyClaim (the claim is about a callback, nothing else)", ()
   it("bad input is never callback-only", () => {
     expect(isCallbackOnlyClaim(null, S.claimsCompletion)).toBe(false);
     expect(isCallbackOnlyClaim(REAL, undefined)).toBe(false);
+  });
+});
+
+// The same rule the AMD door reads from SQL (services/db.js
+// outboundCallHadExchange): a caller row after the first AI row. Post-call
+// applies it to the transcript rows it already reads (the redial rule).
+describe("hadRealExchange (the AI's first reply was heard AND answered)", () => {
+  const row = (speaker, sequence) => ({ speaker, message: "x", sequence });
+  it("the real Hello / Hold shape -> true", () => {
+    expect(hadRealExchange([row("caller", 0), row("ai", 1), row("caller", 2), row("ai", 3)])).toBe(true);
+  });
+  it("greeting + first reply only -> false", () => {
+    expect(hadRealExchange([row("caller", 0), row("ai", 1)])).toBe(false);
+  });
+  it("the AI twice with no answer (a silence nudge) -> false", () => {
+    expect(hadRealExchange([row("caller", 0), row("ai", 1), row("ai", 3)])).toBe(false);
+  });
+  it("caller rows only -> false", () => {
+    expect(hadRealExchange([row("caller", 0), row("caller", 2)])).toBe(false);
+  });
+  it("order by sequence, not array position", () => {
+    expect(hadRealExchange([row("caller", 2), row("ai", 1), row("caller", 0)])).toBe(true);
+    expect(hadRealExchange([row("ai", 1), row("caller", 0)])).toBe(false);
+  });
+  it("empty / not an array -> false", () => {
+    expect(hadRealExchange([])).toBe(false);
+    expect(hadRealExchange(null)).toBe(false);
   });
 });

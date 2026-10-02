@@ -846,3 +846,51 @@ describe("a successful schedule_callback backs a callback claim (live gate + pos
     expect((await verify.mock.results[0].value).verdict).toBe("ok");
   });
 });
+
+// Hello call 2026-10-01: the redial rule (lib/outbound/postCall.js) needs to know
+// the PERSON was confirmed, after the call -- the engine marks it in calls.answers.
+describe("confirm_identity(true) marks calls.answers._identity_confirmed once (the no-redial rule's input)", () => {
+  async function confirmedCall(db = outboundDb()) {
+    const call = await bootLiveMode({ database: db });
+    await call.feed(500, { voiced: true });
+    await call.feed(1000);
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(INTRO);
+    return { call, db };
+  }
+  const marks = (db) => db.mergeCallAnswers.mock.calls.filter(([, patch]) => patch && "_identity_confirmed" in patch);
+
+  it("a confirmed person -> one merge of {_identity_confirmed: true} for this call", async () => {
+    const { call, db } = await confirmedCall();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    await vi.waitFor(() => expect(marks(db)).toHaveLength(1));
+    expect(marks(db)[0]).toEqual([SID, { _identity_confirmed: true }]);
+    await call.hangUp();
+  });
+
+  it("confirm_identity(false) -> no mark", async () => {
+    const { call, db } = await confirmedCall();
+    await call.callTool("confirm_identity", { name_confirmed: false });
+    await call.settle();
+    expect(marks(db)).toHaveLength(0);
+    await call.hangUp();
+  });
+
+  it("confirmed again after a hold -> still one mark", async () => {
+    const { call, db } = await confirmedCall();
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.callTool("wait_on_hold", {});
+    await call.assistantTurn("Sure, thank you.");
+    await call.feed(5000);
+    await call.feed(600, { voiced: true });
+    await call.feed(400);
+    await call.callerSays("Hi, it's Sam.");
+    await call.callTool("confirm_identity", { name_confirmed: true });
+    await call.settle();
+    expect(marks(db)).toHaveLength(1);
+    await call.hangUp();
+  });
+});

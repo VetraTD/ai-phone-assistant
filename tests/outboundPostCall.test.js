@@ -298,7 +298,7 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
-  it("qualified_no_booking is NOT terminal -- reschedules", async () => {
+  it("qualified_no_booking WITHOUT a confirmed real conversation is NOT terminal -- reschedules", async () => {
     const db = fakeDb({}, { fetchCallTranscript: vi.fn(async () => [{ speaker: "ai", message: "ok" }]) });
     await run(db, { summarize: async () => ({ summary: "s", sentiment: "neutral", outcome: "qualified_no_booking" }) });
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
@@ -346,6 +346,66 @@ describe("runPostCall: terminal vs. reschedule (spec §8)", () => {
     await run(db);
     const [, , opts] = db.applyOutreachResult.mock.calls[0];
     expect(opts.nextAttemptAt.toISOString()).toBe(new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  });
+});
+
+// Hello call 2026-10-01 (outreach 6df56867): a person confirmed, answered the
+// questions, outcome qualified_no_booking -- and the schedule redialled them
+// +10 min later (23:44:02Z outbound_gate_refused campaign_paused was the dial
+// that tried). Owner 2026-10-01: no auto-redial after a real conversation,
+// unless they asked for a callback. "Real conversation" = the person was
+// CONFIRMED (calls.answers._identity_confirmed, written by the engine on
+// confirm_identity) AND a transcript exchange (a caller row after the first
+// AI row) -- so a gatekeeper-only talk never closes the lead.
+describe("runPostCall: no redial after a real conversation (owner 2026-10-01)", () => {
+  const REAL_TALK = [
+    { speaker: "caller", message: "Hello?", sequence: 0 },
+    { speaker: "ai", message: "Hi, it's Ava, an AI assistant from Digile Media. Is that Nithin?", sequence: 1 },
+    { speaker: "caller", message: "Yes.", sequence: 2 },
+    { speaker: "ai", message: "Great -- you asked about growing the clinic.", sequence: 3 },
+  ];
+  const confirmed = { _identity_confirmed: true };
+  const talked = (ctx = {}) => fakeDb({ answers: confirmed, ...ctx }, { fetchCallTranscript: vi.fn(async () => REAL_TALK) });
+  const scored = (outcome) => ({ summarize: async () => ({ summary: "s", sentiment: "neutral", outcome }) });
+
+  it.each(["qualified_no_booking", "other"])("%s after a confirmed real conversation closes the outreach -- no redial", async (outcome) => {
+    const db = talked();
+    await run(db, scored(outcome));
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts).toMatchObject({ terminal: true, closeReason: "terminal_outcome", outcome, nextAttemptAt: null });
+  });
+
+  it("the same talk WITHOUT a confirmed person (a gatekeeper) -> reschedules as before", async () => {
+    const db = fakeDb({ answers: null }, { fetchCallTranscript: vi.fn(async () => REAL_TALK) });
+    await run(db, scored("other"));
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt).toBeInstanceOf(Date);
+  });
+
+  it("confirmed but no exchange (the person never answered the AI) -> reschedules", async () => {
+    const db = talked({}, {});
+    db.fetchCallTranscript = vi.fn(async () => REAL_TALK.slice(0, 2));
+    await run(db, scored("other"));
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+  });
+
+  it("callback_requested after a real conversation keeps the asked time", async () => {
+    const requested = "2026-09-30T14:00:00Z";
+    const db = talked({ outcomeCode: "callback_requested", answers: { ...confirmed, _callback_requested_at: requested } });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt.toISOString()).toBe(new Date(requested).toISOString());
+  });
+
+  it("a hold timeout (outcome other, note 'hold timeout') -> reschedules: we never reached the person after the hold", async () => {
+    const db = talked({ outcomeCode: "other", answers: { ...confirmed, _outcome_note: "hold timeout" } });
+    await run(db);
+    const [, , opts] = db.applyOutreachResult.mock.calls[0];
+    expect(opts.terminal).toBe(false);
+    expect(opts.nextAttemptAt).toBeInstanceOf(Date);
   });
 });
 
