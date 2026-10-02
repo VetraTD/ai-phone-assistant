@@ -16985,3 +16985,19 @@ but no yes (cost: a garbled real "yes, speaking" hears "am I speaking with Sam?"
 once). Decision: ship prompt-only, watch the Part B Gatekeeper call and the
 pilot -- count `outbound_identity_confirmed{confirmed:true}` on calls whose
 outcome is callback_requested / wrong_person, and `outbound_topic_to_unverified`.
+
+### MONITORING GAPS (parked by the owner 2026-10-02: "focus on the actual receptionist for now") `[cheap]`
+
+Watched today (vetra-uk-edc8ca): uptime check `voice-uk-prod reachable` (GET /, 5 min) + 5 log alerts (ElevenLabs
+breaker, STT gave up, unrouted number, unscoped DB write, outbound alertable events). NOT watched -- each one fails
+SILENTLY for the receptionist:
+- Gemini Live cannot connect (key, quota, retired model): every inbound call is dead air, no alert.
+- A Twilio number's webhook changed or the number released: calls never reach us, so there are no logs at all.
+- Database unreachable from the voice server: GET / does not touch it; errors in logs, no alert.
+- Inbound post-call failures (summary, confirmations): no alert.
+- Nothing proves a real call gets a sensible answer end to end.
+- Dashboard pieces: `app.vetratd.com/app` (the 2026-10-02 GoDaddy NXDOMAIN incident would have been caught),
+  `dashboard-api-uk-prod /health` (200; scales to zero -> 30 s timeout), marketing `vetratd.com`.
+Proposed tiers: 1a three uptime checks (~15 min, free); 1b log alerts for Live connect / voice DB errors / inbound
+post-call (~45 min, free; confirm event names first); 1c daily Twilio routing check script + scheduler (~1 h, free,
+one image build); 2 daily canary call through Twilio into the UK number (~3-4 h, ~$0.05/call, ~$1.50/month).
