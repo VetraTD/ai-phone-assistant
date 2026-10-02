@@ -1,6 +1,16 @@
 # app.vetratd.com — the dashboard's own origin
 
-Status: **waiting on DNS.** Everything on the GCP side is done and applied.
+Status: **LIVE.** Records in place at GoDaddy (`ns65`/`ns66.domaincontrol.com`); Firebase reports host, ownership
+and certificate ACTIVE (checked 2026-10-02).
+
+> **Incident 2026-10-02 -- `DNS_PROBE_FINISHED_NXDOMAIN` for `app.vetratd.com`.** GoDaddy's two nameservers were
+> serving different zone versions: `ns65` had serial `2026090702` (with the `app` CNAME, added 2026-09-07) while
+> `ns66` was stuck on `2026070804` (8 July, no `app`). Every resolver that asked `ns66` cached NXDOMAIN for the
+> zone's negative TTL -- **1 day** (SOA default TTL 86400) -- so the dashboard worked or failed depending on which
+> nameserver a cache had drawn. Fixed by re-saving the `app` record in GoDaddy (TTL 1 h -> 600 s), which pushed
+> serial `2026100200` to both. Check it any time:
+> `nslookup -type=SOA vetratd.com ns65.domaincontrol.com` and the same against `ns66` -- the serials must match.
+> Fallback that never depends on this DNS: `https://vetra-core-edc8ca.web.app/app`.
 
 `vetratd.com` stays on Vercel. GCP serves only the dashboard, on its own
 subdomain.
