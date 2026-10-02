@@ -116,6 +116,10 @@ const CLAIMRACE = "tests/liveClaimGuardRefusedWrite.test.js";
 const CLAIM = "tests/liveClaimGuard.test.js";
 const AFFIRM = "tests/isAffirmative.test.js";
 const ORDER = "tests/liveWriteOrder.test.js";
+// 2026-10-02 rows: the outbound name-on-file rule and the callback-question
+// suppression, each proven through the suite that drives the real code path.
+const NAMEFILE = "tests/outboundNameOnFile.test.js";
+const CALLBACKLIVE = "tests/liveCallbackRecognition.test.js";
 // The teardown wiring, which is a different question from what verifyCall does
 // with what it is handed.
 const POSTCALLWIRE = "tests/livePostCall.test.js";
@@ -847,6 +851,45 @@ const SABOTAGES = [
     find: '    if (!complete) return; // I5: interrupted -- never satisfies, never corrects here',
     replace: "    // SABOTAGE",
     red: [FIRSTSECONDS],
+  },
+  // -------------------------------------------------------------------------
+  // 2026-10-02 receptionist fixes (CA1ff2c6, CAffb5c7).
+  // -------------------------------------------------------------------------
+  {
+    name: "bare-affirmative-token",
+    why:
+      "stops reading a whole-turn one-word yes the transcript wrote in another language. CA1ff2c6: 'Shall we book your discovery call for Monday, October fifth at four thirty PM?' was answered 'Ja.', and CAffb5c7's cancellation read-back was answered 'bien' -- both read as no answer, so the write waited on the ceiling and the consent latch never recorded the agreement.",
+    file: "lib/transcriptUtils.js",
+    find: "  return AFFIRMATIVE_RE.test(trimmed) || isBareAffirmative(trimmed);",
+    replace: "  return AFFIRMATIVE_RE.test(trimmed); // SABOTAGE",
+    red: [AFFIRM],
+  },
+  {
+    name: "ceiling-release-carried",
+    why:
+      "drops the write-order state the ceiling release now carries into the spelling gate's refusal. CA1ff2c6: the ceiling released a read-back booking, the spelling gate held it, the retry found writeOrderEverReadBack still false, fell back to the never-asked ceiling of two, and was refused again by the gate that had already let it go.",
+    file: "services/tools.js",
+    find: "                    ...(orderReleasePatch || {}),\n                    ...(priorSpellFacts.Name",
+    replace: "                    // SABOTAGE\n                    ...(priorSpellFacts.Name",
+    red: [ORDER],
+  },
+  {
+    name: "outbound-name-on-file",
+    why:
+      "stops using the lead's name on file for a booking made for them on a call we placed. CA1ff2c6: the lead had agreed to a discovery call and was then asked to spell their full name, asked 'What do you have on file?', heard 'I cannot share the details on file', and lost three turns to a name the business already had.",
+    file: "services/tools.js",
+    find: "          const nameOnFile = outboundNameOnFile(fc, ctx);",
+    replace: "          const nameOnFile = null; // SABOTAGE",
+    red: [NAMEFILE],
+  },
+  {
+    name: "callback-questions-suppressed",
+    why:
+      "hands the Live session the callback's leftover questions even when the caller already has an upcoming appointment. CAffb5c7: a caller ringing to cancel the discovery call they had booked was asked the outreach's 'what is the name of your clinic?' first.",
+    file: "lib/voice/live/index.js",
+    find: "        extras.callbackOutreach = callbackOutreachForCall(callbackOutreach, extras.callerContext);",
+    replace: "        extras.callbackOutreach = callbackOutreach; // SABOTAGE",
+    red: [CALLBACKLIVE],
   },
 ];
 
