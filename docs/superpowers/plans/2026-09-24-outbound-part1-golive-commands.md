@@ -910,7 +910,16 @@ the other items in `docs/outbound-eu-calling-floor.md`.
 
 ## Section F: the Hold-call fixes (deploy 5, DRAFT, YES-gated)
 
-**Status: DRAFT 2026-10-01 (night). Every production command needs its own explicit YES.**
+**Status: F0-F4 RUN 2026-10-01 ~23:00-23:55 CDT (owner YES for F1-F3); F6 Hold call pending (08:00-20:00 CDT).**
+
+**[AS RUN] 2026-10-01.** F0 PASS (00097-4f5 100%, OUTBOUND_FIRST_SPEAKER absent, OUTBOUND_ENABLED=false,
+DEEPGRAM_REGION=eu). F1 build `3c9dd1a4` SUCCESS, `voice:a2aa121` digest `sha256:becde991...`. F2 pending: none
+(applied 50). F3 **`voice-uk-prod-00098-278`** 100%, Ready, `GET /` -> `Build: a2aa121`, env diff = image +
+`GIT_COMMIT_SHA` (+ nonce) only, boot clean, no ERROR. F4 smoke PASS (CAd152b7..., `direction` inbound,
+`outbound_callback_recognized` = the waiting test outreach, `postcall_verify` ok, no ERROR; WARN
+`live_repeated_phrase` + `live_debug_transcript_enabled` pre-existing). Gate at a2aa121: corpus:sabotage 60 v + the 3
+baseline x; root 285/286 files in the gate worktree (the 1 needs gitignored caller audio; passes in the main tree);
+test:db 43/626 @7e53a04; census 63/63. Rollback target `voice-uk-prod-00097-4f5`.
 `SHA` = a2aa121 (code head of `feat/outbound-stage4`; later commits must be docs/spend only --
 `git log --oneline a2aa121..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
 nothing). Production today: `voice-uk-prod-00097-4f5` @f1f6d50, `OUTBOUND_ENABLED=false`. Rollback target:
