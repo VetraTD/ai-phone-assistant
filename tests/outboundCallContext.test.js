@@ -258,3 +258,17 @@ describe("O-9: a contact with no first name (fix round 2)", () => {
     }
   });
 });
+
+// 2026-10-02 (CA1ff2c6): the surname the lead typed rides on the context, so a
+// booking for them uses the name on file (services/tools.js outboundNameOnFile).
+describe("contact.lastName", () => {
+  it("carries the surname on file, trimmed", async () => {
+    const ctx = await resolveOutboundContext(SID, { db: fakeDb({ row: ctxRow({ lastName: "  Shah " }) }), log: quietLog() });
+    expect(ctx.contact.lastName).toBe("Shah");
+  });
+
+  it.each([null, undefined, "", "   "])("lastName %j is null, never '' or 'undefined'", async (lastName) => {
+    const ctx = await resolveOutboundContext(SID, { db: fakeDb({ row: ctxRow({ lastName }) }), log: quietLog() });
+    expect(ctx.contact.lastName).toBeNull();
+  });
+});

@@ -20,7 +20,7 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
-import { shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { normalizeName, shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
@@ -988,6 +988,15 @@ export async function executeToolCall(fc, ctx) {
                 toolCallEvent: { name: fc.name, args: fc.args, silent: true },
               },
             };
+          }
+
+          // THE NAME ON FILE, on a call we placed (outboundNameOnFile). Done
+          // HERE, before every gate below, so the write-order gate's proposal
+          // key and the spelling gate both see the name that will be written.
+          const nameOnFile = outboundNameOnFile(fc, ctx);
+          if (nameOnFile?.fullName) {
+            fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.fullName } };
+            bumpCounter("outbound_name_from_file");
           }
 
           // DID THE CALLER ACTUALLY AGREE TO THIS, AND DID WE HEAR THEM?
@@ -2123,8 +2132,12 @@ export async function executeToolCall(fc, ctx) {
           // made rather than an oversight: a callback from "Nathan Dasler" on the
           // right number reaches the right person, and a callback that does not
           // exist reaches nobody.
+          // A full name on file is the spelling (outboundNameOnFile), so there
+          // is nothing to ask.
           const pendingName =
-            CONFIRM_HARD_NAMES && ctx?.lastChance !== true ? callerNameFromArgs(fc.args) : null;
+            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile?.fullName
+              ? callerNameFromArgs(fc.args)
+              : null;
           // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
@@ -2214,7 +2227,19 @@ export async function executeToolCall(fc, ctx) {
             // Every constraint the old wording carried is kept: not caller
             // speech, the name quoted, one attempt per caller turn, and the
             // decline escape hatch that stops a caller being asked forever.
-            const message =
+            // FIRST NAME ON FILE, SURNAME NOT (outboundNameOnFile): the lead
+            // typed their first name, so only the surname is asked for.
+            const message = nameOnFile?.surnameNeeded
+              ? heldWritePreamble(fc.name) +
+                `this booking is still going ahead, it just needs one more thing first. Their first ` +
+                `name "${nameOnFile.firstName}" is already on file, spelled correctly -- do not ask for it ` +
+                `or how to spell it. Ask the caller to spell their SURNAME only, and read the letters back. ` +
+                `Do not tell the caller anything went wrong, do not offer a callback, and do not take a ` +
+                `message instead. Ask them now and wait for their answer; do not call this function again ` +
+                `until they have replied, then call it again with "${nameOnFile.firstName}" and the surname ` +
+                `they spelled. If they decline or tell you it is spelled how it sounds, accept that and ` +
+                `record the name exactly as you heard it.`
+              :
               heldWritePreamble(fc.name) +
               `this booking is still going ahead, it just needs one ` +
               `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
@@ -2237,6 +2262,7 @@ export async function executeToolCall(fc, ctx) {
             // fired or how often it ran out. The cap is the interesting half:
             // the refusal AFTER the last one writes the name as heard.
             bumpCounter("spelling_gate_refusals");
+            if (nameOnFile?.surnameNeeded) bumpCounter("outbound_surname_spell_asked");
             if (refusalIsNew && gateRefusals + 1 >= spellMissCap()) {
               bumpCounter("spelling_gate_cap_reached");
             }
@@ -2505,6 +2531,44 @@ function callerNameFromArgs(args) {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   return trimmed || null;
+}
+
+/**
+ * On a call WE placed, the contact's own name is on file -- typed by them on
+ * the lead form -- and a booking made for them should use it, not ask them to
+ * spell it. CA1ff2c6, 2026-10-02: the spelling gate asked a lead who had just
+ * agreed to a discovery call to "spell your full name", the lead asked "What do
+ * you have on file?", heard "I cannot share the details on file", and three
+ * turns went on a name the business already had.
+ *
+ * Owner rule, 2026-10-02: full name on file -> use it and ask nothing; first
+ * name only -> ask for the SURNAME spelling only; no name -> the ordinary ask.
+ *
+ * Returns null -- the ordinary gate, unchanged -- unless ALL of: an outbound
+ * call, the party verified by confirm_identity (O-12 refuses earlier otherwise,
+ * so this is belt and braces), a book_appointment, a first name on file, and a
+ * booking FOR the contact: client_name absent or its first word the first name
+ * on file. A booking for someone else ("Priya Shah") is theirs to spell.
+ *
+ * A first word that differs only in spelling ("Nitin" for "Nithin") is treated
+ * as someone else, so it falls back to asking -- the safe direction.
+ *
+ * @returns {null | {fullName: string} | {firstName: string, surnameNeeded: true}}
+ */
+export function outboundNameOnFile(fc, ctx) {
+  if (fc?.name !== "book_appointment") return null;
+  const contact = ctx?.outboundCall?.contact;
+  if (!contact || ctx?.party?.verified !== true) return null;
+  const first = typeof contact.firstName === "string" ? contact.firstName.trim() : "";
+  if (!first) return null;
+  const last = typeof contact.lastName === "string" ? contact.lastName.trim() : "";
+  const said = callerNameFromArgs(fc.args);
+  if (said) {
+    const saidFirst = normalizeName(said).split(" ")[0];
+    const fileFirst = normalizeName(first).split(" ")[0];
+    if (!saidFirst || saidFirst !== fileFirst) return null;
+  }
+  return last ? { fullName: `${first} ${last}` } : { firstName: first, surnameNeeded: true };
 }
 
 /**

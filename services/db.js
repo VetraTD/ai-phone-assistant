@@ -3678,7 +3678,7 @@ export async function outboundCallContext(attemptId) {
             o.id AS outreach_id, o.campaign_id, o.campaign_version, o.contact_id, o.trigger, o.details,
             c.template_key, c.compliance_class, c.audience,
             v.config,
-            k.first_name, k.timezone AS contact_timezone
+            k.first_name, k.last_name, k.timezone AS contact_timezone
        FROM call_attempts a
        JOIN outreach o ON o.id = a.outreach_id
        JOIN campaigns c ON c.id = o.campaign_id
@@ -3710,6 +3710,7 @@ export async function outboundCallContext(attemptId) {
     audience: row.audience,
     config: row.config,
     firstName: row.first_name ?? null,
+    lastName: row.last_name ?? null,
     contactTimezone: row.contact_timezone ?? null,
   };
 }

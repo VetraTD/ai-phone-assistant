@@ -533,3 +533,28 @@ describe("read-back line for confirm questions (spec §5b)", () => {
     expect(renderBlock(WITH_FIRST_NAME)).not.toContain("read back");
   });
 });
+
+// 2026-10-02 (CA1ff2c6): the lead's surname is on file, so the prompt says the
+// full name and that it is not to be asked for. Only when a surname IS on file
+// -- every existing fixture has none, which keeps the snapshots byte-identical.
+describe("name on file (2026-10-02)", () => {
+  const WITH_FULL_NAME = {
+    ...WITH_FIRST_NAME,
+    contact: { ...WITH_FIRST_NAME.contact, lastName: "Shah" },
+  };
+  const firstName = WITH_FIRST_NAME.contact.firstName;
+
+  it("states the full name on file and not to ask for it", () => {
+    const text = renderBlock(WITH_FULL_NAME);
+    expect(text).toContain(`Their full name on file is ${firstName} Shah`);
+    expect(text).toMatch(/do not ask for their name or how to spell it/);
+  });
+
+  it("is absent with only a first name on file", () => {
+    expect(renderBlock(WITH_FIRST_NAME)).not.toContain("full name on file");
+  });
+
+  it("is absent when this call cannot book", () => {
+    expect(renderBlock({ ...WITH_FULL_NAME, canBook: false })).not.toContain("full name on file");
+  });
+});

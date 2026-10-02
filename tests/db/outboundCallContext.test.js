@@ -270,3 +270,20 @@ d("storeAttemptAudio writes only what it is given; fetchAttemptOpenerAudio", () 
     await expect(db.withTenant(OTHER_BIZ, () => db.storeAttemptAudio(attemptId, { opener: Buffer.from([2]) }))).rejects.toThrow(/expected 1 row/);
   });
 });
+
+// 2026-10-02 (CA1ff2c6): the surname the lead typed must reach the call -- the
+// query selects it and the resolver carries it. Both ends real: a fake db
+// proves neither the SELECT list nor the column name.
+d("outboundCallContext carries the contact's last_name", () => {
+  it("lastName is the stored surname, and null when none is stored", async () => {
+    await admin.query(`UPDATE contacts SET last_name = 'Shah' WHERE id = $1`, [contactId]);
+    try {
+      const ctx = await resolveOutboundContext(SID, { db });
+      expect(ctx.contact.lastName).toBe("Shah");
+    } finally {
+      await admin.query(`UPDATE contacts SET last_name = NULL WHERE id = $1`, [contactId]);
+    }
+    const none = await resolveOutboundContext(SID, { db });
+    expect(none.contact.lastName).toBeNull();
+  });
+});
