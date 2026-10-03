@@ -1043,8 +1043,8 @@ inert to the old image.
 fail) AND the final review has no Critical left after the fix pass; any failed step -> roll back to
 `voice-uk-prod-00099-lkq` and verify. The smoke call (H4) waits for the owner.
 
-`SHA` = b2a7082 (code head of `feat/outbound-stage4`; later commits must be docs/spend/ledger only --
-`git log --oneline b2a7082..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
+`SHA` = c755f56 (code head of `feat/outbound-stage4`; later commits must be docs/spend/ledger only --
+`git log --oneline c755f56..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
 nothing). Production today: `voice-uk-prod-00099-lkq` @b772acb, `OUTBOUND_ENABLED=false`. Rollback target:
 `voice-uk-prod-00099-lkq`. Ledger: the "Batch 2 2026-10-02 night" block in
 `.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md`.
@@ -1077,7 +1077,7 @@ b2a7082: see [AS RUN].
 ```bash
 export CLOUDSDK_CONFIG=~/.gcloud-vetra2
 export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
-P=vetra-uk-edc8ca; R=europe-west2; SHA=b2a7082
+P=vetra-uk-edc8ca; R=europe-west2; SHA=c755f56
 BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
 IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
 ```
