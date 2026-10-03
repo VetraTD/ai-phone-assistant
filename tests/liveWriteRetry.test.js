@@ -544,6 +544,20 @@ describe("the refused write is re-issued when the caller agrees", () => {
     expect(c().write_retry_attempted).toBeFalsy();
   });
 
+  // Final review 2026-10-02 (batch 2), C2. `spellingSettled` is sticky for the
+  // call, so riding it re-issued a write-order (or in_addition) stash at EVERY
+  // turn end once a name had been spelled -- and the gate's loose rule then
+  // wrote it on whatever the caller said. Only a SPELLING-gate stash (no reason)
+  // rides the spelling; a write held for agreement needs a clear yes.
+  it("does not re-issue a write-order stash just because a spelling settled (review C2)", async () => {
+    const s = await boot({ reason: "write_order" });
+    await s.book();
+    await s.spell("n i t h i n  d o d l a");
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().write_retry_attempted).toBeFalsy();
+  });
+
   it("does not re-issue on a LOOSE answer — that rule is for writes the AI chose (owner, 2026-10-02)", async () => {
     // The gate now trusts an unreadable answer after a read-back, because the
     // MODEL heard the audio and called the tool. This retry is code writing

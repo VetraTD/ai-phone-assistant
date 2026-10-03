@@ -1378,8 +1378,10 @@ describe("a ceiling release survives a later gate's refusal — CA1ff2c6", () =>
 // answer that is not a clear refusal, a question or a bare "um" is agreement.
 // ---------------------------------------------------------------------------
 describe("trust the AI after a proper read-back — O3 CA9c2d26", () => {
+  // O3's wording, at the slot this file writes (ten a.m.): since the review fix
+  // pass the loose half also needs the read-back to name the slot being written.
   const O3_READ_BACK =
-    "Just to confirm, I've scheduled your discovery call for Monday, October 5th at 4 30 PM. Shall we go ahead and book that?";
+    "Just to confirm, I've scheduled your discovery call at 10 AM. Shall we go ahead and book that?";
   const probes = () =>
     log.info.mock.calls.filter((c) => c[0] === "write_consent_probe").map((c) => c[1]);
 
@@ -1422,5 +1424,43 @@ describe("trust the AI after a proper read-back — O3 CA9c2d26", () => {
     expect(functionResponse.response.success).toBe(false);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
     expect(counters().write_order_released_unreadable_after_readback).toBeFalsy();
+  });
+});
+
+// Final review 2026-10-02 (batch 2), I1: the loose half is tied to the slot being
+// written. CA6b662e's shape -- the caller amends without a no or a time word and
+// the model reads back B and writes B in the same breath -- must not write B on
+// an answer the caller gave to A. A write with no slot keeps the strict rule.
+describe("trust after read-back is tied to the slot being written (review I1)", () => {
+  const READ_BACK_TEN = "Just to confirm, shall I book that for ten a.m. for you?";
+  const ELEVEN = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T11:00:00`;
+
+  it.each([["Earlier would be better"], ["Can you check the next day"], ["The second one"]])(
+    "refuses a write of ANOTHER slot after %j",
+    async (said) => {
+      const res = await bookSlot(ELEVEN, ctx({ said, replied: READ_BACK_TEN }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+    }
+  );
+
+  it("still writes the slot that WAS read back on a loose answer", async () => {
+    const res = await book(ctx({ said: "nada más", replied: READ_BACK_TEN }));
+    expect(res.functionResponse.response.success).toBe(true);
+  });
+
+  it("a slotless write (cancel) keeps the strict rule on a loose answer", async () => {
+    mockGetAppointmentById.mockResolvedValue({
+      id: "a1",
+      client_phone: "+15551234567",
+      scheduled_at: FUTURE_SLOT,
+      status: "scheduled",
+    });
+    const { functionResponse } = await executeToolCall(
+      { id: "fc9", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+      ctx({ said: "A la works.", replied: "Would you like me to cancel that appointment at ten a.m.?" })
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
   });
 });

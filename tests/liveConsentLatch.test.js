@@ -263,7 +263,11 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     await s.callerSays("n i t h i n d o d l a");
     await s.book();
 
-    expect(c().consent_agreement_recorded).toBe(1);
+    // Review C1: the loose agreement is a SEPARATE record, read only by the
+    // consent latch. The strict one (post-call bookingOwed, the recovery gate,
+    // the silent-turn token) still needs a clear yes.
+    expect(c().consent_agreement_recorded).toBeFalsy();
+    expect(c().consent_loose_agreement_recorded).toBe(1);
     expect(s.store.scheduled()).toHaveLength(1);
   });
 
@@ -278,6 +282,22 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     await s.book();
 
     expect(c().consent_agreement_recorded).toBeFalsy();
+    expect(c().consent_loose_agreement_recorded).toBeFalsy();
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  // Review I6 (pre-existing, widened by the loose ledger): a standing agreement
+  // does not survive the caller withdrawing it on the turn the write arrives.
+  it("does not carry an agreement past a withdrawal on the current turn", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    await s.assistantTurn(SPELL_ASK);
+    await s.callerSays("No, forget it, I don't want it.");
+    await s.book();
+
     expect(s.store.scheduled()).toHaveLength(0);
   });
 

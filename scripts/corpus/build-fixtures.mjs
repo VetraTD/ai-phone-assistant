@@ -687,8 +687,8 @@ const EXPECTATIONS = {
       },
       { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
       {
-        expect: "write",
-        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). 'To confirm, you would like to cancel your appointment on Tuesday, September 22nd at 2 30 PM?' answered 'all? la' -- not a refusal, not a question -- and the model reported the cancellation next. It lands here instead of on the ceiling one attempt later.",
+        expect: "refuse",
+        why: "BACK TO refuse in the batch-2 final-review fix pass (I1): the loose rule needs the read-back to name the SLOT being written, and a cancellation writes no slot, so it keeps the strict rule -- the ceiling still releases this mangled yes on the next attempt, as before batch 2. Was: 'To confirm, you would like to cancel your appointment on Tuesday, September 22nd at 2 30 PM?' answered 'all? la' -- not a refusal, not a question -- and the model reported the cancellation next. It lands here instead of on the ceiling one attempt later.",
       },
       {
         expect: "write",
@@ -825,8 +825,8 @@ const EXPECTATIONS = {
       "3.8, rev 00088. A cancellation that needed no hatch: refused once for a question that was not agreement, asked again, and got a readable answer. The gate working as designed rather than being rescued.",
     attempts: [
       {
-        expect: "write",
-        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). The read-back ('To confirm, you'd like to cancel your appointment on Wednesday, September 23rd at 12:30 PM?') was answered 'dora' -- the earlier 'Yeah, can I cancel that?' was the REQUEST, not the answer. The caller confirmed the same cancellation on the next ask, so this writes one turn earlier.",
+        expect: "refuse",
+        why: "BACK TO refuse in the batch-2 final-review fix pass (I1): the loose rule needs the read-back to name the SLOT being written, and a cancellation writes no slot, so it keeps the strict rule -- the ceiling still releases this mangled yes on the next attempt, as before batch 2. Was: The read-back ('To confirm, you'd like to cancel your appointment on Wednesday, September 23rd at 12:30 PM?') was answered 'dora' -- the earlier 'Yeah, can I cancel that?' was the REQUEST, not the answer. The caller confirmed the same cancellation on the next ask, so this writes one turn earlier.",
       },
       { expect: "write", why: "asked again, answered readably, written." },
     ],
@@ -906,8 +906,8 @@ const EXPECTATIONS = {
       "3.8, rev 00085, AND THE CALL THAT FOUND LVX153. A caller asked to cancel, was refused three times, was told twice 'I'm unable to process the cancellation right now', was offered a callback, and hung up with the appointment still standing. The trigger was a mangled yes -- 'A la works.' -- which isAffirmative cannot read and neither can a human.",
     attempts: [
       {
-        expect: "write",
-        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). The read-back was answered 'A la works.' -- the mangled yes this call is famous for. The model called the tool on it; the cancellation lands on the first attempt instead of after three refusals and a callback offer.",
+        expect: "refuse",
+        why: "BACK TO refuse in the batch-2 final-review fix pass (I1): the loose rule needs the read-back to name the SLOT being written, and a cancellation writes no slot, so it keeps the strict rule -- the ceiling still releases this mangled yes on the next attempt, as before batch 2. Was: The read-back was answered 'A la works.' -- the mangled yes this call is famous for. The model called the tool on it; the cancellation lands on the first attempt instead of after three refusals and a callback offer.",
       },
       {
         expect: "write",

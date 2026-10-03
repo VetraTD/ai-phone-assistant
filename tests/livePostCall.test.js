@@ -751,3 +751,36 @@ describe("LVX147 — the judge's answer reaches the verification", () => {
     expect(arg(s.verify).judgeClaimedDone).toBeUndefined();
   });
 });
+
+// Final review 2026-10-02 (batch 2), C1. The owner's trust-after-read-back rule
+// is for writes the model chose to make. It must not make the POST-CALL readers
+// (verifyCall's bookingOwed, which texts the caller and opens a staff task with
+// POSTCALL_VERIFY=send) treat a loose answer as agreement.
+describe("post-call bookingOwed still needs a clear yes (review C1)", () => {
+  beforeEach(() => clearStats());
+  const READ_BACK_PC = "Shall I go ahead and book that for Monday at ten AM?";
+
+  async function answer(said) {
+    const s = await boot();
+    s.say(READ_BACK_PC);
+    s.endTurn();
+    await s.settle();
+    s.live.push({ serverContent: { inputTranscription: { text: said } } });
+    await s.settle();
+    s.say("Okay.");
+    s.endTurn();
+    await s.settle();
+    await s.hangUp();
+    return s;
+  }
+
+  it("a loose answer to a read-back is not bookingOwed.agreed", async () => {
+    const s = await answer("nada más");
+    expect(arg(s.verify).bookingOwed.agreed).toBe(false);
+  });
+
+  it("a clear yes still is", async () => {
+    const s = await answer("Yes, please.");
+    expect(arg(s.verify).bookingOwed.agreed).toBe(true);
+  });
+});

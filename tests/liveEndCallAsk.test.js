@@ -249,3 +249,37 @@ describe("a caller who closed the call themselves", () => {
     expect(counters().live_goodbye_exit_caller_closed).toBe(1);
   });
 });
+
+// Final review 2026-10-02 (batch 2), I4. "Yes, that's it." answering a READ-BACK
+// is a confirmation, not "I'm done": if the model books and signs off in that
+// same turn -- the CAb08e4e shape LVX132 was built for -- the caller must still
+// be asked. The close counts only when the previous assistant turn was not a
+// read-back and nothing was completed in this turn.
+describe("a close that is really the answer to a read-back (review I4)", () => {
+  async function confirmedWith(callSid, said) {
+    const s = await bootLive({ config: CONFIG, callSid });
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.callerSays("I'd like Friday afternoon.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays(said);
+    await s.callTool("book_appointment", { client_name: CLIENT, scheduled_at: SLOT });
+    expect(s.store.scheduled()).toHaveLength(1);
+    return s;
+  }
+
+  it("end_call in the same turn as the booking is still asked 'anything else?'", async () => {
+    const s = await confirmedWith("CA_i4_gate", "Yes, that's it.");
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_no_ask).toBe(1);
+    expect(counters().end_call_ask_satisfied_by_caller_close).toBeFalsy();
+  });
+
+  it("a farewell (no end_call) in that same turn is held for the ask", async () => {
+    const s = await confirmedWith("CA_i4_door", "Yes, we're all set.");
+    await s.assistantTurn("You're all booked. Thank you for calling Brightwork, and have a great day.");
+    expect(counters().live_goodbye_exit_held_no_ask).toBe(1);
+    expect(counters().live_goodbye_exit_caller_closed || 0).toBe(0);
+  });
+});
+

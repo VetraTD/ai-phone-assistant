@@ -365,7 +365,6 @@ describe("confirmReadBackRe — 'does that work for you?' closing a turn that na
     "We can now book your free strategy call, and I have availability on Monday, September 21st at 9:00 AM. Does that work for you?",
     "I have a free strategy call available for you on Monday, October 5th at 9 AM. Does that work for you?",
     "That would be Friday at four thirty PM. Does that work?",
-    "So that's Thursday at 2 p.m. Does that still work for you?",
   ];
   for (const said of READ_BACKS) {
     it(`recognises: ${said.slice(-60)}`, () => expect(en.test(said)).toBe(true));
@@ -381,6 +380,12 @@ describe("confirmReadBackRe — 'does that work for you?' closing a turn that na
     "Does Tuesday work for you?",
     "The call takes about thirty minutes. Does that work for you?",
     "Does that work for you?",
+    // Final review (I5): two times is an offer of a choice, not one slot read
+    // back; "still work" asks about an EXISTING appointment.
+    "I have Tuesday at nine AM or Wednesday at ten AM. Does that work for you?",
+    "I have nine AM, or if you prefer the afternoon, two PM. Does that work for you?",
+    "Your appointment is at 3 PM. Does that still work for you?",
+    "So that's Thursday at 2 p.m. Does that still work for you?",
   ];
   for (const said of NOT_READ_BACKS) {
     it(`ignores: ${said.slice(-60)}`, () => expect(en.test(said)).toBe(false));

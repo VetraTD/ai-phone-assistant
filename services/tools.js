@@ -681,7 +681,21 @@ export async function executeToolCall(fc, ctx) {
       // question this gate would make the model ask. Thanks alone does not
       // (lib/transcriptUtils.js callerClosesCall). Folded into the asked flag
       // so the gate line below stays the hangup-without-asking anchor.
-      const callerClosedCall = askWireLive && callerClosesCall(lastCallerText);
+      //
+      // FINAL REVIEW (I4): only a close that answers nothing else. "Yes, that's
+      // it." in answer to a READ-BACK is a confirmation; if the model books and
+      // signs off in that same turn (the CAb08e4e shape this gate was built
+      // for) the caller still gets the question. So the previous assistant
+      // turn must not have been a read-back, and nothing may have completed in
+      // this round.
+      const closeAnswersReadBack =
+        typeof ctx?.lastReplyText === "string" &&
+        Boolean(getStrings(ctx?.config)?.confirmReadBackRe?.test(ctx.lastReplyText));
+      const callerClosedCall =
+        askWireLive &&
+        callerClosesCall(lastCallerText) &&
+        !closeAnswersReadBack &&
+        ctx?.completedActionThisTurn !== true;
       if (callerClosedCall && ctx?.askedAnythingElse !== true) {
         bumpCounter("end_call_ask_satisfied_by_caller_close");
       }
@@ -1176,7 +1190,19 @@ export async function executeToolCall(fc, ctx) {
           // reason: the probe logs it and the gate consumes it, from one copy.
           // `probeReadBack` is the gate's own readBackMade (same reply, same
           // regex). See agreesAfterReadBack for what it accepts and why.
-          const callerAgreedAfterReadBack = Boolean(probeReadBack && agreesAfterReadBack(lastCallerText));
+          //
+          // FINAL REVIEW (I1): tied to the slot being written. The read-back the
+          // caller answered must NAME the slot this tool is about to write, so a
+          // model that reads back B and writes B in the same breath (CA6b662e's
+          // shape) cannot ride an answer the caller gave to A. A write with no
+          // slot (a cancellation) keeps the strict rule; the ceiling still
+          // releases its mangled yes on the second attempt, as before.
+          const callerAgreedAfterReadBack = Boolean(
+            probeReadBack &&
+              writeSlot &&
+              readBackMentionsSlot(probeReply, writeSlot) &&
+              agreesAfterReadBack(lastCallerText)
+          );
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
           // services/gemini.js never mentions callerSaidThisCall; Live
@@ -1660,7 +1686,16 @@ export async function executeToolCall(fc, ctx) {
             // that hole exactly the size it already was rather than widening it.
             // -----------------------------------------------------------------
             const consentLatchOn = !consentLatchOff();
-            const agreementKey = ctx?.lastAgreementReadBackKey ?? null;
+            // FINAL REVIEW (C1): the LATCH reads the loose ledger (a caller who
+            // answered the read-back with an unreadable yes the gate accepted on
+            // the turn), so a spelling question in between cannot strand that
+            // agreement. Every other reader of agreement -- the silent-turn token
+            // above, post-call bookingOwed, the recovery gate -- keeps the strict
+            // one. Live supplies both keys; the cascade supplies neither.
+            const agreementKey =
+              ctx?.lastLooseAgreementReadBackKey !== undefined
+                ? ctx.lastLooseAgreementReadBackKey
+                : (ctx?.lastAgreementReadBackKey ?? null);
             const standingReadBackKey = ctx?.lastReadBackKey ?? null;
             // The caller agreed to a read-back that is no longer the one on the
             // table: the model has proposed something else since and they have
@@ -1732,7 +1767,10 @@ export async function executeToolCall(fc, ctx) {
                 standingReadBackKey &&
                 agreementKey === standingReadBackKey &&
                 latchSlotAgreed &&
-                !agreementSpent
+                !agreementSpent &&
+                // FINAL REVIEW (I6): "No, forget it, I don't want it" in answer to
+                // the spelling question withdraws what was agreed before it.
+                !withdrawsAgreement(lastCallerText)
             );
             if (consentLatched && !(readBackMade && callerAgreed)) {
               // Counted only when it CHANGES the outcome, so the number answers

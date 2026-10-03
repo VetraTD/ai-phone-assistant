@@ -355,3 +355,42 @@ describe("callerClosesCall", () => {
     expect(callerClosesCall(text)).toBe(false);
   });
 });
+
+// Final review 2026-10-02 (batch 2), I3 + C1: the refusal list is now the whole
+// of what stops a write after a read-back, so clear English/Spanish refusals it
+// missed are on it; and a turn with no readable words is not an answer at all.
+describe("agreesAfterReadBack -- review fix pass (I3, C1)", () => {
+  it.each([
+    ["That doesn't work for me."],
+    ["I can't make it."],
+    ["I cannot do that day."],
+    ["I won't be able to."],
+    ["Never."],
+    ["Negative."],
+    ["Stop."],
+    ["Forget it."],
+    ["I changed my mind."],
+    ["Hold up."],
+    ["Uh-uh."],
+    ["Give me a second."],
+    ["I'll think it over and call back."],
+    ["Espera."],
+    ["Espérame."],
+    ["Para nada."],
+    ["at four"],
+    ["half past four"],
+    ["4 30"],
+    ["the 6th"],
+    ["October 7th"],
+    ["에레는"],
+    ["<noise>"],
+    ["[inaudible]"],
+    ["..."],
+  ])("does not accept %j", (text) => {
+    expect(agreesAfterReadBack(text)).toBe(false);
+  });
+
+  it.each([["Uh-huh."], ["nada más"], ["Now works."], ["A la works."]])("still accepts %j", (text) => {
+    expect(agreesAfterReadBack(text)).toBe(true);
+  });
+});

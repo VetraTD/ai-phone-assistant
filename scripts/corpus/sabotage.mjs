@@ -915,8 +915,11 @@ const SABOTAGES = [
     why:
       "puts the agreement ledger back on the word-level yes while the gate trusts a loose one. The gate then accepts 'nada más' on the turn, and the consent latch forgets it the moment a spelling question comes between -- the gate and the ledger disagreeing about the same answer, which is the CAf1d6447d34 shape.",
     file: "lib/voice/live/index.js",
-    find: "        const agreedNow = agreesAfterReadBack(turnUserText.trim());",
-    replace: "        const agreedNow = isAffirmative(turnUserText.trim()); // SABOTAGE",
+    // RE-ANCHORED in the final-review fix pass (C1): the ledger now keeps a
+    // strict and a loose record; this sabotage stops the LOOSE one, which is
+    // the only one the consent latch reads.
+    find: "        if (readBackThen && agreesAfterReadBack(said)) {",
+    replace: "        if (readBackThen && isAffirmative(said)) { // SABOTAGE",
     red: [LATCH],
   },
   {
@@ -933,7 +936,9 @@ const SABOTAGES = [
     why:
       "removes the whole 2026-10-02 hedge addition from the refusal list at once (the alternation lesson: narrowing one branch proves nothing). After a read-back the list is now the only thing that stops a write, so 'maybe', 'let me think', 'tal vez' and 'how about Thursday' would all book.",
     file: "lib/transcriptUtils.js",
-    find: "|let\\s+me\\s+(?:think|check|see|ask)|think\\s+about\\s+it|maybe|one\\s+(?:sec|second|moment|minute)|just\\s+a\\s+(?:sec|second|moment|minute)|how\\s+about|what\\s+about|quiz[aá]s?|tal\\s+vez|d[eé]jeme\\s+pensar|un\\s+segundo)\\b/i;",
+    // RE-ANCHORED in the final-review fix pass (I3): the WHOLE batch-2 addition,
+    // both rounds of it, removed at once.
+    find: "|let\\s+me\\s+(?:think|check|see|ask)|think\\s+about\\s+it|maybe|one\\s+(?:sec|second|moment|minute)|just\\s+a\\s+(?:sec|second|moment|minute)|how\\s+about|what\\s+about|quiz[aá]s?|tal\\s+vez|d[eé]jeme\\s+pensar|un\\s+segundo|can'?t|cannot|won'?t|doesn'?t|never|negative|stop|forget\\s+it|changed\\s+my\\s+mind|hold\\s+up|uh[\\s-]uh|give\\s+me\\s+a\\s+(?:sec|second|moment|minute)|think\\s+(?:it\\s+)?over|call\\s+(?:you\\s+)?back|get\\s+back\\s+to\\s+you|espera|esp[eé]rame|para\\s+nada|momentito)\\b/i;",
     replace: ")\\b/i; // SABOTAGE",
     red: [AFFIRM, ORDER],
   },
@@ -978,8 +983,9 @@ const SABOTAGES = [
     why:
       "the farewell door (a goodbye with no end_call, LVX146) ignores the caller's own close, so the line is held one more turn after 'That's all, thanks.' -- the two doors disagreeing about the same answer.",
     file: "lib/voice/live/index.js",
-    find: "        const callerClosed = callerClosesCall(turnUserText);",
-    replace: "        const callerClosed = false; // SABOTAGE",
+    // RE-ANCHORED in the final-review fix pass (I4).
+    find: "          callerClosesCall(turnUserText) &&\n          !actionToolSucceededThisTurn &&",
+    replace: "          false && // SABOTAGE\n          !actionToolSucceededThisTurn &&",
     red: [ASK],
   },
   {
@@ -1008,6 +1014,72 @@ const SABOTAGES = [
     find: "        : `The next step: ${GOAL_LINES[cfg.goal]}${bookingDiscipline}`",
     replace: "        : `The next step: ${GOAL_LINES[cfg.goal]}` // SABOTAGE",
     red: [OUTPROMPT],
+  },
+  // -------------------------------------------------------------------------
+  // 2026-10-02 batch 2 FINAL REVIEW fix pass (C1, C2, I1, I4, I5, I6).
+  // -------------------------------------------------------------------------
+  {
+    name: "strict-agreement-for-post-call",
+    why:
+      "records the owner's LOOSE agreement in the strict ledger too, so post-call bookingOwed (POSTCALL_VERIFY=send texts the caller and opens a staff task), the recovery gate and the silent-turn token all treat 'nada más' -- or 'I'll think about the price' -- as the caller having agreed. Review C1.",
+    file: "lib/voice/live/index.js",
+    find: "        if (readBackThen && isAffirmative(said)) {",
+    replace: "        if (readBackThen && agreesAfterReadBack(said)) { // SABOTAGE",
+    red: [POSTCALLWIRE, LATCH],
+  },
+  {
+    name: "retry-spelling-only-for-spelling-stash",
+    why:
+      "lets the sticky spellingSettled re-issue a write held for AGREEMENT at every turn end once a name was spelled, so code writes a held booking on whatever the caller says next -- where the AI did not call the tool. Review C2.",
+    file: "lib/voice/live/index.js",
+    find: "      if ((spellingSettled(state) && retryReason == null) || heldForAgreement) {",
+    replace: "      if (spellingSettled(state) || heldForAgreement) { // SABOTAGE",
+    red: [RETRY],
+  },
+  {
+    name: "loose-readback-tied-to-slot",
+    why:
+      "drops the slot tie from the loose half: the model reads back B and writes B in one breath (CA6b662e's shape) and the caller's answer to A -- 'earlier would be better' -- authorises B. Review I1.",
+    file: "services/tools.js",
+    find: "              writeSlot &&\n              readBackMentionsSlot(probeReply, writeSlot) &&\n              agreesAfterReadBack(lastCallerText)",
+    replace: "              agreesAfterReadBack(lastCallerText) // SABOTAGE",
+    red: [ORDER],
+  },
+  {
+    name: "latch-withdrawal-veto",
+    why:
+      "lets a standing agreement survive the caller withdrawing it on the turn the write arrives: 'No, forget it, I don't want it' in answer to the spelling question still books. Review I6.",
+    file: "services/tools.js",
+    find: "                !withdrawsAgreement(lastCallerText)\n            );",
+    replace: "                true // SABOTAGE\n            );",
+    red: [LATCH],
+  },
+  {
+    name: "close-not-answer-to-readback",
+    why:
+      "counts 'Yes, that's it.' answering a READ-BACK as the caller closing the call, so a model that books and hangs up in that turn skips 'anything else?' -- the CAb08e4e shape the ask gate exists for. Review I4.",
+    file: "services/tools.js",
+    find: "        !closeAnswersReadBack &&\n",
+    replace: "        // SABOTAGE\n",
+    red: [ASK],
+  },
+  {
+    name: "claim-guard-old-readback",
+    why:
+      "lets the write gate's 'does that work for you?' widening silence the claim guard: O2's 'Great, I have you booked ... Does that work for you?', said before any write, loses its correction note. Review I5.",
+    file: "lib/voice/live/index.js",
+    find: "      replyText && (S.readBackNotClaimRe ?? S.confirmReadBackRe)?.test(replyText)",
+    replace: "      replyText && S.confirmReadBackRe?.test(replyText) // SABOTAGE",
+    red: [CLAIM],
+  },
+  {
+    name: "readback-one-slot-only",
+    why:
+      "restores the first 'does that work' alternative: two times ('Tuesday at nine or Wednesday at ten -- does that work?') and 'does that still work?' about an existing appointment read as a read-back of one slot. Review I5.",
+    file: "lib/voice/strings.js",
+    find: "const READ_BACK_DOES_THAT_WORK = String.raw`^(?![\\s\\S]*${READ_BACK_SLOT_TIME}[\\s\\S]*${READ_BACK_SLOT_TIME})[\\s\\S]*?${READ_BACK_SLOT_TIME}(?:(?!\\bor\\b)[\\s\\S])*?\\bdoes\\s+that\\s+work(?:\\s+for\\s+you)?\\s*\\?\\s*$`;",
+    replace: "const READ_BACK_DOES_THAT_WORK = String.raw`${READ_BACK_SLOT_TIME}[\\s\\S]*\\bdoes\\s+that\\s+(?:still\\s+)?work(?:\\s+for\\s+you)?\\s*\\?\\s*$`; // SABOTAGE",
+    red: [READBACKRE],
   },
 ];
 

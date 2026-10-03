@@ -563,6 +563,9 @@ describe("name on file (2026-10-02)", () => {
     const text = renderBlock(WITH_FIRST_NAME);
     expect(text).toContain(`Their first name on file is ${firstName}`);
     expect(text).toMatch(/do not ask for their name, their surname or how to spell it/);
+    // Final review (M7): the shared booking rule says "if a booking needs their
+    // full name, ask for it once" -- this line must say it wins over that.
+    expect(text).toMatch(/instead of the booking rule about asking for a full name/);
   });
 
   it("first name only: absent in clip mode, and when this call cannot book", () => {

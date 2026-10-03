@@ -582,6 +582,18 @@ describe("a read-back is not a claim", () => {
     expect(getLatencyStats().turnTaking.live_claim_readback_not_claim).toBe(1);
   });
 
+  // Final review 2026-10-02 (batch 2, I5). "Does that work for you?" became a
+  // read-back for the WRITE gate; the claim guard must not inherit it, or O2's
+  // own false claim ("Great, I have you booked ... Does that work for you?",
+  // said before any write) loses the correction note it got on the day.
+  it("STILL fires on O2's 'I have you booked ... Does that work for you?'", async () => {
+    const s = await boot();
+    s.say("Great, I have you booked for a strategy call on Tuesday, October sixth, at nine AM. Does that work for you?");
+    s.endTurn();
+    await s.settle();
+    expect(JSON.stringify(notes(s.live))).toContain("no tool has run to make it so");
+  });
+
   it("STILL fires on a bare claim with no question attached", async () => {
     // The guard rail. Removing the question is what turns a read-back into an
     // assertion, and the assertion is the whole point of the guard.
