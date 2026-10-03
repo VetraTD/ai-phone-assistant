@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAffirmative } from "../lib/transcriptUtils.js";
+import { isAffirmative, withdrawsAgreement, agreesAfterReadBack, callerClosesCall } from "../lib/transcriptUtils.js";
 
 // ---------------------------------------------------------------------------
 // WHAT A CALLER SAYS WHEN THEY MEAN YES.
@@ -231,5 +231,127 @@ describe("isAffirmative — a whole-turn yes in a word the transcript chose", ()
     ["Gone."],
   ])("does not read %j as agreement", (text) => {
     expect(isAffirmative(text)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TRUST THE AI AFTER A PROPER READ-BACK. 2026-10-02, owner decision.
+//
+// CA9c2d26 (O3): "...Monday, October 5th at 4 30 PM. Shall we go ahead and book
+// that?" was answered with a yes the transcript wrote as "nada más". The gate
+// refused, the model said "I'm sorry, I cannot secure that time right now" and
+// booked a callback instead. The model receives the AUDIO; the transcript is a
+// degraded copy. So after a read-back, an answer that is not a clear refusal,
+// not a question and not a bare "um" is the caller agreeing -- the AI heard it
+// and chose to write.
+//
+// ONE refusal list for every call, English and Spanish (we support both, and a
+// caller's input language cannot be pinned). Ambiguous words stay OFF it:
+// "nada más" ("nothing more") and "Nein" (O2's "nine") are not refusals.
+// ---------------------------------------------------------------------------
+describe("the refusal list: clear hedges in English and Spanish", () => {
+  it.each([
+    ["Maybe."],
+    ["Let me think about it."],
+    ["Let me check my calendar."],
+    ["I need to think about it."],
+    ["Not sure."],
+    ["Not yet."],
+    ["One second."],
+    ["Just a sec."],
+    ["How about Thursday"],
+    ["What about five"],
+    ["Quizás."],
+    ["Tal vez."],
+    ["Déjeme pensar."],
+    ["Un segundo."],
+    ["Mejor no."],
+    ["Todavía no."],
+  ])("reads %j as taking the read-back back", (text) => {
+    expect(withdrawsAgreement(text)).toBe(true);
+    expect(agreesAfterReadBack(text)).toBe(false);
+  });
+
+  it.each([["nada más"], ["Nein, muss die nein."], ["Yeah, no worries."], ["Now works."]])(
+    "keeps the ambiguous %j off the list",
+    (text) => {
+      expect(withdrawsAgreement(text)).toBe(false);
+    }
+  );
+});
+
+describe("agreesAfterReadBack — what the gate accepts once a read-back was made", () => {
+  // Every case is a real caller turn that answered a read-back (call-corpus,
+  // fixtures, the 2026-10-02 round). The model wrote on most of them.
+  it.each([
+    ["nada más", "CA9c2d26 O3, 2026-10-02 -- the call this exists for"],
+    ["A la works.", "CA00649d"],
+    ["nada works", "CA954592"],
+    ["gone", "CA9c8e42 ('go on')"],
+    ["da, ja, das", "CA299f23"],
+    ["I love it.", "CAd97855"],
+    ["Aia Towers", "CA239c7c"],
+    ["guard", "CA7a381d I2 ('Mm-hm')"],
+    ["Now works.", "CA577db9 O2"],
+    ["Yes.", "plain yes"],
+  ])("accepts %j (%s)", (text) => {
+    expect(agreesAfterReadBack(text)).toBe(true);
+  });
+
+  it.each([
+    [""],
+    ["   "],
+    [null],
+    ["Um."],
+    ["Uhh"],
+    ["Hmm."],
+    ["When was that telling you?"],
+    ["¿qué?"],
+    ["No."],
+    ["Wait."],
+    ["Yes. Wait, actually, sorry, say the time again."],
+    ["No, yes yes ma'am, go ahead."],
+    ["Can I reschedule it?"],
+    ["Eleven a.m."],
+    ["Make it Friday"],
+    ["Actually, let's cancel the Tuesday one."],
+  ])("does not accept %j", (text) => {
+    expect(agreesAfterReadBack(text)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// callerClosesCall -- the caller's own "I'm done" (owner, 2026-10-02). Real
+// turns from the corpus and the 2026-10-02 round; thanks ALONE is not a close.
+// ---------------------------------------------------------------------------
+describe("callerClosesCall", () => {
+  it.each([
+    ["A nice day. That's all. Thanks.", "smoke CAfd993a"],
+    ["That's all. I just wanted to know what Digital Media actually does.", "I3 CA1198b0"],
+    ["No, that's all. Thank you.", "CAec2309"],
+    ["No. No nothing else.", "CA239046"],
+    ["No, there's nothing else.", "CA94817d"],
+    ["No, thanks.", "CAb4c0eb"],
+    ["Okay, bye bye.", "close"],
+    ["I'm good, thanks.", "close"],
+    ["Eso es todo, gracias.", "es"],
+    ["No, gracias.", "es"],
+  ])("reads %j as a close (%s)", (text) => {
+    expect(callerClosesCall(text)).toBe(true);
+  });
+
+  it.each([
+    ["Thank you."],
+    ["All right, no worries. Thank you."],
+    ["Thank you very much."],
+    ["That's all, but can I ask one more thing"],
+    ["That's it, and also my wife wants one."],
+    ["That's all for now?"],
+    ["Yes, please."],
+    ["Ya???l? hava ne yapay?m?"],
+    [""],
+    [null],
+  ])("does not read %j as a close", (text) => {
+    expect(callerClosesCall(text)).toBe(false);
   });
 });

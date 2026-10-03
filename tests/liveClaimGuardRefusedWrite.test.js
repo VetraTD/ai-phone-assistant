@@ -135,11 +135,15 @@ async function boot() {
 
 const unbacked = () => counters().live_claim_unbacked_by_action || 0;
 
+// The refused answer was CAd97855's "I love it." -- a mangled agreement that,
+// since 2026-10-02 (owner, batch 2), writes at once after a read-back
+// (agreesAfterReadBack). These cases need a write the gate REFUSES, so the
+// caller now hedges ("Hmm, maybe."), which the refusal list still stops.
 describe("a write the gate refused cannot back the claim that follows it", () => {
   it("refuses the reschedule, because that is the premise of everything below", async () => {
     const s = await boot();
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("I love it.");
+    await s.callerSays("Hmm, maybe.");
     const [res] = await s.callTool("reschedule_appointment_db", {
       appointment_id: SEED_ID,
       new_scheduled_at: NEW_AT,
@@ -157,7 +161,7 @@ describe("a write the gate refused cannot back the claim that follows it", () =>
   it("counts the claim that follows a refused write in the SAME turn", async () => {
     const s = await boot();
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("I love it.");
+    await s.callerSays("Hmm, maybe.");
     await s.callTool("reschedule_appointment_db", {
       appointment_id: SEED_ID,
       new_scheduled_at: NEW_AT,
@@ -174,7 +178,7 @@ describe("a write the gate refused cannot back the claim that follows it", () =>
     // previous turn's tally rather than this one's.
     const s = await boot();
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("I love it.");
+    await s.callerSays("Hmm, maybe.");
     await s.callTool("reschedule_appointment_db", {
       appointment_id: SEED_ID,
       new_scheduled_at: NEW_AT,
@@ -232,7 +236,7 @@ describe("a write the gate refused cannot back the claim that follows it", () =>
   it("counts the claim when the turn ends while the refusal is still in flight", async () => {
     const s = await boot();
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("I love it.");
+    await s.callerSays("Hmm, maybe.");
 
     // The tool round and the turn boundary, in the order the vendor delivers
     // them and with NO settle between: this is the only way to put the

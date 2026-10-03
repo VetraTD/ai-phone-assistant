@@ -202,3 +202,50 @@ describe("the call record", () => {
     expect(summaries[0].end_call_refusals.generic).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE CALLER'S OWN "I'M DONE" ANSWERS "ANYTHING ELSE?" -- owner, 2026-10-02.
+//
+// Smoke CAfd993a ("A nice day. That's all. Thanks."), I3 CA1198b0 ("That's all.
+// I just wanted to know what Digital Media actually does."): end_call refused
+// by this gate, the model asked "Is there anything else...?", the caller said
+// "No." and was thanked a second time. A clear close is the answer the ask is
+// fishing for. A bare "Thank you." is NOT one -- it is as often thanks for what
+// the AI just did, before the caller's next question -- so it keeps the ask.
+// ---------------------------------------------------------------------------
+describe("a caller who closed the call themselves", () => {
+  it.each([["That's all. Thanks."], ["A nice day. That's all. Thanks."], ["No, thanks."], ["Okay, bye."], ["Eso es todo, gracias."]])(
+    "is not asked 'anything else?' after %j",
+    async (said) => {
+      const s = await bookedCall("CA_close_" + said.length);
+      await s.assistantTurn("You're all booked for Friday at three thirty.");
+      await s.callerSays(said);
+      const res = await s.callTool("end_call", {});
+      expect(ok(res)).toBe(true);
+      expect(counters().end_call_refused_no_ask).toBe(0);
+      expect(counters().end_call_ask_satisfied_by_caller_close).toBe(1);
+    }
+  );
+
+  it.each([["Thank you."], ["That's all, but can I ask one more thing"], ["That's it, and also my wife wants one."], ["That's all for now?"]])(
+    "is still asked after %j",
+    async (said) => {
+      const s = await bookedCall("CA_noclose_" + said.length);
+      await s.assistantTurn("You're all booked for Friday at three thirty.");
+      await s.callerSays(said);
+      const [res] = await s.callTool("end_call", {});
+      expect(res.response.success).toBe(false);
+      expect(counters().end_call_refused_no_ask).toBe(1);
+      expect(counters().end_call_ask_satisfied_by_caller_close).toBeFalsy();
+    }
+  );
+
+  it("the farewell door (no end_call) closes on it too, instead of holding the line a turn", async () => {
+    const s = await bookedCall("CA_close_door");
+    await s.assistantTurn("You're all booked for Friday at three thirty.");
+    await s.callerSays("That's all, thanks.");
+    await s.assistantTurn("Thank you for calling Brightwork, and have a great day.");
+    expect(counters().live_goodbye_exit_held_no_ask || 0).toBe(0);
+    expect(counters().live_goodbye_exit_caller_closed).toBe(1);
+  });
+});

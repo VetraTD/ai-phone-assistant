@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createLiveFirstLine, LIVE_FIRST_LINE_DEFAULTS } from "../lib/outbound/liveFirstLine.js";
+import { createLiveFirstLine, LIVE_FIRST_LINE_DEFAULTS, isCleanHoldAck } from "../lib/outbound/liveFirstLine.js";
 
 // Pure controller tests (spec 2026-10-01 §2/§4/§5, plan Task 2). Fake clock:
 // every method takes the session time explicitly; stream start is t=0.
@@ -688,5 +688,29 @@ describe("onExchange: the AI's turn was heard and the person answered it (audio,
     ctl.onTurnComplete(3000);
     run(ctl, 3000, 4000, (t) => t >= 3200 && t < 3300); // a blip
     expect(exchanges).toEqual([]);
+  });
+});
+
+describe("isCleanHoldAck (batch 2, O1 CA591a92)", () => {
+  it.each([["Sure, thank you."], ["Sure. Thank you."], ["Of course, I'll wait."], ["No problem, I'll hold."]])(
+    "a short clean ack %j may play",
+    (text) => {
+      expect(isCleanHoldAck(text)).toBe(true);
+    }
+  );
+
+  it.each([
+    ["<no speech>{pause}"],
+    ["Sure, thank you.<no speech>{pause}"],
+    ["[silence]"],
+    ["Sure, thank you.Hi, it's Ava, an AI assistant from Digile Media."],
+    [
+      "Sure, thank you.That documentation I watched last night was surprisingly gripping, you know. It really made me think about the whole situation from a completely different perspective.",
+    ],
+    ["Sure. Thank you. I will wait right here."],
+    [""],
+    [null],
+  ])("%j keeps the hold silent", (text) => {
+    expect(isCleanHoldAck(text)).toBe(false);
   });
 });

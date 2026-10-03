@@ -32,6 +32,8 @@ import {
   isUnusableTranscript,
   isAffirmative,
   withdrawsAgreement,
+  agreesAfterReadBack,
+  callerClosesCall,
   textFingerprint,
   asksMoreThanOneThing,
 } from "../lib/transcriptUtils.js";
@@ -674,7 +676,16 @@ export async function executeToolCall(fc, ctx) {
       const askWireLive =
         typeof ctx?.askedAnythingElse === "boolean" &&
         typeof ctx?.anythingElseRefusalSpent === "boolean";
-      const askedAnythingElse = ctx?.askedAnythingElse === true;
+      // Owner, 2026-10-02 (smoke CAfd993a, I3 CA1198b0): the caller's own clear
+      // close -- "that's all, thanks", "no thanks", "bye" -- answers the
+      // question this gate would make the model ask. Thanks alone does not
+      // (lib/transcriptUtils.js callerClosesCall). Folded into the asked flag
+      // so the gate line below stays the hangup-without-asking anchor.
+      const callerClosedCall = askWireLive && callerClosesCall(lastCallerText);
+      if (callerClosedCall && ctx?.askedAnythingElse !== true) {
+        bumpCounter("end_call_ask_satisfied_by_caller_close");
+      }
+      const askedAnythingElse = ctx?.askedAnythingElse === true || callerClosedCall;
       const noAskRefusalSpent = ctx?.anythingElseRefusalSpent === true;
       const allowedByExistingGates =
         askWireLive && !heardOnlyHesitation && (wrappingUp || didSomething || hadConversation);
@@ -1155,6 +1166,12 @@ export async function executeToolCall(fc, ctx) {
               !/\?\s*$/.test(lastCallerText.trim()) &&
               readBackMentionsSlot(lastCallerText, writeSlot)
           );
+          // TRUST THE AI AFTER A PROPER READ-BACK (owner, 2026-10-02, O3
+          // CA9c2d26 "nada más"). Derived here beside LVX144's fact for the same
+          // reason: the probe logs it and the gate consumes it, from one copy.
+          // `probeReadBack` is the gate's own readBackMade (same reply, same
+          // regex). See agreesAfterReadBack for what it accepts and why.
+          const callerAgreedAfterReadBack = Boolean(probeReadBack && agreesAfterReadBack(lastCallerText));
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
           // services/gemini.js never mentions callerSaidThisCall; Live
@@ -1239,6 +1256,11 @@ export async function executeToolCall(fc, ctx) {
               // gone through anyway". Without both on the line the counter
               // cannot say which.
               restated_slot: callerRestatedSlot,
+              // 2026-10-02. True when a read-back was made and the answer is
+              // not a refusal, a question, a bare "um" or a different time --
+              // `agreed_now=false, agreed_after_readback=true` is a write the
+              // new rule carried.
+              agreed_after_readback: callerAgreedAfterReadBack,
               token_present: Boolean(probeToken),
               // Does the durable token refer to the read-back still standing? If
               // this is true on attempts where gate_ran is false, the token would
@@ -1589,7 +1611,13 @@ export async function executeToolCall(fc, ctx) {
             if (callerRestatedSlot && !isAffirmative(lastCallerText)) {
               bumpCounter("write_consent_restated_slot");
             }
-            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot;
+            // The positive twin of the owner's 2026-10-02 rule: counted only when
+            // it CHANGES the outcome, so the number is "writes a mangled yes would
+            // have lost", readable per call beside agreed_after_readback.
+            if (callerAgreedAfterReadBack && !isAffirmative(lastCallerText) && !callerRestatedSlot) {
+              bumpCounter("write_order_released_unreadable_after_readback");
+            }
+            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot || callerAgreedAfterReadBack;
 
             // -----------------------------------------------------------------
             // THE CONSENT LATCH. CAf1d6447d34, 2026-09-13.

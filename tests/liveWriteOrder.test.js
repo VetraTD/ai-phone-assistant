@@ -246,7 +246,10 @@ describe("LVX95 — the three bounds, each of which is load-bearing", () => {
     // the old third-attempt ceiling fired zero times in 33 calls: the model
     // gives up after two. The property this test exists for is unchanged and is
     // the release itself; only which attempt carries it has moved.
-    const unchanged = { said: "Cancel all three", replied: READ_BACK };
+    // A HEDGE since 2026-10-02: after a read-back an unreadable answer is now
+    // agreement (agreesAfterReadBack), so the ceiling is reached only by answers
+    // the refusal list still stops. "Cancel all three" used to stand in here.
+    const unchanged = { said: "Hmm, maybe.", replied: READ_BACK };
 
     const first = await book(ctx(unchanged));
     expect(first.functionResponse.response.success).toBe(false);
@@ -727,9 +730,11 @@ describe("a refusal that only lacks the yes", () => {
         callerTurnCount: 4,
         // Non-empty and non-affirmative: the whole write-order block is skipped
         // when lastCallerText is empty (that is what keeps the cascade
-        // byte-identical), so an empty fixture tests nothing. This is what the
-        // caller had actually last said on CA6b662e — spelling their name.
-        lastCallerText: "N I T H I N D O D L A",
+        // byte-identical), so an empty fixture tests nothing. CA6b662e's caller
+        // had last spelled their name ("N I T H I N D O D L A"); since
+        // 2026-10-02 that reads as agreement after a read-back (the AI heard
+        // it), so the still-missing yes is now a hedge.
+        lastCallerText: "Let me think about it.",
         lastReplyText: READ_BACK,
         ...over,
       }
@@ -894,12 +899,21 @@ describe("LVX144 — the caller restates the time instead of saying yes", () => 
     expect(res.functionResponse.response.success).toBe(false);
   });
 
-  it("REFUSES when the caller says something that names no time at all", async () => {
-    // "I love it." from CAd97855 -- a real agreement this still cannot read.
-    // Recorded rather than fixed: it names nothing, so there is no slot to
-    // compare, and the honest answer is a refusal the caller clears by
-    // answering again.
+  it("WRITES when the caller says something that names no time at all — the 2026-10-02 rule", async () => {
+    // "I love it." from CAd97855 -- a real agreement LVX144 could not read: it
+    // names nothing, so there is no slot to compare. It was recorded here as a
+    // refusal the caller clears by answering again. Since 2026-10-02 the owner's
+    // rule carries it: a read-back was made, and the answer is not a refusal,
+    // a question or a time.
     const res = await book(ctx({ said: "I love it.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_released_unreadable_after_readback).toBe(1);
+  });
+
+  it("REFUSES when the caller names a DIFFERENT time and says nothing else", async () => {
+    // The loose rule must not carry an amendment: "Eleven a.m." answering a
+    // ten o'clock read-back is a change, not consent.
+    const res = await book(ctx({ said: "Eleven a.m.", replied: SLOT_READ_BACK }));
     expect(res.functionResponse.response.success).toBe(false);
   });
 
@@ -1122,18 +1136,19 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
     // Identical args every time -- one appointment, one action. Only the
     // sentence moves, which is what the model does naturally and what the
     // caller cannot influence.
+    // HEDGES since 2026-10-02 (batch 2): CA00649d's "A la works." and
+    // CA954592's "nada works" are mangled yeses, and after a read-back they
+    // now write at once (agreesAfterReadBack). The ceiling is reached only by
+    // answers the refusal list still stops, so that is what drives it here.
     const first = await book(
-      ctx({ said: "A la works.", replied: "Would you like me to book that for you?" })
+      ctx({ said: "Hmm, maybe.", replied: "Would you like me to book that for you?" })
     );
     expect(first.functionResponse.response.success).toBe(false);
 
     clearStats();
     const second = await book(
       ctx({
-        // Was CA00649d's "Ah, ya.", which isAffirmative reads as a whole-turn
-        // yes since 2026-10-02. This needs an answer that is STILL unreadable,
-        // so it uses CA954592's "nada works" -- the same kind of mangled yes.
-        said: "nada works",
+        said: "Let me think.",
         replied: "Just to confirm, are you asking me to go ahead and book the strategy call?",
         capabilityState: first.stateEffects.capabilityState,
         turn: 5,
@@ -1229,15 +1244,18 @@ describe("LVX153 — a rephrased read-back is the same proposal", () => {
 // ---------------------------------------------------------------------------
 describe("LVX156 — asked twice and unreadable is not the same as never asked", () => {
   it("releases on the SECOND refusal once the details have been read back", async () => {
-    // Both turns carry a real read-back; the answers are the ones this corpus
-    // actually produced, and neither survives isAffirmative.
-    const first = await book(ctx({ said: "gone", replied: READ_BACK }));
+    // Both turns carry a real read-back. The corpus answers this was written
+    // with ("gone", "nada works") are mangled yeses that write at once since
+    // 2026-10-02; the ceiling now exists for answers that stay refused after a
+    // read-back -- hedges, and mixed turns like O1's "No, yes yes ma'am, go
+    // ahead."
+    const first = await book(ctx({ said: "No, yes yes ma'am, go ahead.", replied: READ_BACK }));
     expect(first.functionResponse.response.success).toBe(false);
 
     clearStats();
     const second = await book(
       ctx({
-        said: "nada works",
+        said: "Maybe.",
         replied: "Just to confirm, shall I book that for you?",
         capabilityState: first.stateEffects.capabilityState,
         turn: 5,
@@ -1301,9 +1319,10 @@ describe("a ceiling release survives a later gate's refusal — CA1ff2c6", () =>
     expect(first.functionResponse.response.success).toBe(false);
     expect(counters().write_order_refused).toBe(1);
 
-    // Unreadable, read back: the ceiling releases and the spelling gate holds.
+    // A hedge after the read-back (an unreadable yes now writes at once,
+    // 2026-10-02): the ceiling releases and the spelling gate holds.
     const second = await book({
-      ...ctx({ said: "nada works", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
+      ...ctx({ said: "Maybe.", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
       spellingSettled: false,
     });
     expect(counters().write_order_gate_ceiling).toBe(1);
@@ -1327,7 +1346,7 @@ describe("a ceiling release survives a later gate's refusal — CA1ff2c6", () =>
   it("still gives a DIFFERENT proposal its own budget after the release", async () => {
     const first = await book({ ...ctx({ said: "4:30", replied: OFFER, turn: 4 }), spellingSettled: false });
     const second = await book({
-      ...ctx({ said: "nada works", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
+      ...ctx({ said: "Maybe.", replied: READ_BACK_A, capabilityState: first.stateEffects.capabilityState, turn: 5 }),
       spellingSettled: false,
     });
     clearStats();
@@ -1342,5 +1361,66 @@ describe("a ceiling release survives a later gate's refusal — CA1ff2c6", () =>
     );
     expect(other.functionResponse.response.success).toBe(false);
     expect(counters().write_order_refused).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TRUST THE AI AFTER A PROPER READ-BACK — O3, CA9c2d26, 2026-10-02.
+//
+//   73.9 s  A: "Just to confirm, I've scheduled your discovery call for Monday,
+//              October 5th at 4 30 PM. Shall we go ahead and book that?"
+//   76.6 s  C: "nada más"  -> write_order_refused {readBackMade:true,
+//                                                  callerAgreed:false}
+//   83.3 s  A: "I'm sorry, I cannot secure that time right now. May I call you
+//              back at a later time?"  -> callback booked, no appointment.
+//
+// Owner decision: when the read-back was made and the model chose to write, an
+// answer that is not a clear refusal, a question or a bare "um" is agreement.
+// ---------------------------------------------------------------------------
+describe("trust the AI after a proper read-back — O3 CA9c2d26", () => {
+  const O3_READ_BACK =
+    "Just to confirm, I've scheduled your discovery call for Monday, October 5th at 4 30 PM. Shall we go ahead and book that?";
+  const probes = () =>
+    log.info.mock.calls.filter((c) => c[0] === "write_consent_probe").map((c) => c[1]);
+
+  it("writes on the unreadable answer, and counts that it was the new rule that carried it", async () => {
+    const { functionResponse } = await book(ctx({ said: "nada más", replied: O3_READ_BACK }));
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+    expect(counters().write_order_refused).toBeFalsy();
+    expect(counters().write_order_released_unreadable_after_readback).toBe(1);
+    const p = probes().at(-1);
+    expect(p.agreed_now).toBe(false);
+    expect(p.agreed_after_readback).toBe(true);
+  });
+
+  it("does not count a plain yes as the new rule", async () => {
+    await book(ctx({ said: "Yes, please.", replied: O3_READ_BACK }));
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+    expect(counters().write_order_released_unreadable_after_readback).toBeFalsy();
+  });
+
+  it.each([["Maybe."], ["Let me think about it."], ["When was that?"], ["Tal vez."], ["Make it Friday"]])(
+    "still refuses %j after the read-back",
+    async (said) => {
+      const { functionResponse } = await book(ctx({ said, replied: O3_READ_BACK }));
+      expect(functionResponse.response.success).toBe(false);
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+      expect(counters().write_order_refused).toBe(1);
+    }
+  );
+
+  it("still refuses a bare 'Um.' (the hesitation gate, ahead of this one)", async () => {
+    const { functionResponse } = await book(ctx({ said: "Um.", replied: O3_READ_BACK }));
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("still refuses the same answer when nothing was read back", async () => {
+    const { functionResponse } = await book(ctx({ said: "nada más", replied: "What's the clinic called?" }));
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(counters().write_order_released_unreadable_after_readback).toBeFalsy();
   });
 });

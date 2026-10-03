@@ -100,9 +100,11 @@ describe("an apology must not buy the gate another refusal", () => {
     // The read-back is made and the caller's yes is NOT heard -- the shape
     // 40% of all write-order refusals actually have, because the model is its
     // own recogniser and the transcript is a degraded copy. "gone" is a real
-    // one from the corpus: the caller said "go on".
+    // one from the corpus: the caller said "go on". Since 2026-10-02 (owner,
+    // batch 2) a mangled yes after a read-back writes at once, so the ceiling
+    // this test certifies is now reached by a HEDGE instead.
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("gone");
+    await s.callerSays("Hmm, maybe.");
     expect(ok(await s.callTool("book_appointment", bookArgs()))).toBe(false);
 
     // The model apologises instead of re-reading it back. Two turns, exactly as

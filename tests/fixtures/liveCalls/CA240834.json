@@ -177,8 +177,8 @@
       ],
       "target_from": "Just to confirm, I'll move your appointment to Wednesday, September 23rd at 12:30 PM. Shall I go ahead with that?",
       "target_derived": true,
-      "caller_text": "go on",
-      "caller_text_source": "logged"
+      "caller_text": "Let me think about that.",
+      "caller_text_source": "substituted"
     }
   ]
 }

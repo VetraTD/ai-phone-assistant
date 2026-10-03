@@ -130,6 +130,9 @@ const PROMPTS = "tests/promptSnapshot.test.js";
 // mark-echo confirmation has no wire into any OTHER suite, so this is the
 // only place a broken re-arm can be seen at all.
 const FIRSTSECONDS = "tests/outboundFirstSeconds.test.js";
+// 2026-10-02 batch 2 rows.
+const RETRY = "tests/liveWriteRetry.test.js";
+const LIVEMODE = "tests/liveOutboundLiveMode.test.js";
 
 const SABOTAGES = [
   {
@@ -644,8 +647,10 @@ const SABOTAGES = [
     why:
       "removes LVX144 entirely: the caller answering 'Shall we reschedule to Thursday, September 24 at 2:00 PM?' with 'the Thursday 2 p.m.' goes back to reading as no answer at all. That is CA239c7c, changed_rows 0, and a caller told it had been done. Red in the corpus too, because the fixture for that call expects the write.",
     file: "services/tools.js",
-    find: "            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot;",
-    replace: "            const callerAgreed = isAffirmative(lastCallerText); // SABOTAGE",
+    // RE-ANCHORED 2026-10-02 (batch 2): the line gained the owner's
+    // trust-after-read-back disjunct. The sabotage still removes ONLY LVX144.
+    find: "            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot || callerAgreedAfterReadBack;",
+    replace: "            const callerAgreed = isAffirmative(lastCallerText) || callerAgreedAfterReadBack; // SABOTAGE",
     red: [ORDER, REPLAY],
   },
   {
@@ -890,6 +895,90 @@ const SABOTAGES = [
     find: "        extras.callbackOutreach = callbackOutreachForCall(callbackOutreach, extras.callerContext);",
     replace: "        extras.callbackOutreach = callbackOutreach; // SABOTAGE",
     red: [CALLBACKLIVE],
+  },
+  // -------------------------------------------------------------------------
+  // 2026-10-02 batch 2 (O3 CA9c2d26, O1 CA591a92, smoke/I3, O1/O2).
+  // -------------------------------------------------------------------------
+  {
+    name: "unreadable-after-readback",
+    why:
+      "drops the owner's trust-after-read-back rule from the gate. O3 CA9c2d26: 'Shall we go ahead and book that?' answered with a yes the transcript wrote as 'nada más' -> refused -> 'I cannot secure that time right now' -> a callback instead of the booking the caller had just agreed to.",
+    file: "services/tools.js",
+    find: "            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot || callerAgreedAfterReadBack;",
+    replace: "            const callerAgreed = isAffirmative(lastCallerText) || callerRestatedSlot; // SABOTAGE",
+    red: [ORDER],
+  },
+  {
+    name: "ledger-reads-loose-agreement",
+    why:
+      "puts the agreement ledger back on the word-level yes while the gate trusts a loose one. The gate then accepts 'nada más' on the turn, and the consent latch forgets it the moment a spelling question comes between -- the gate and the ledger disagreeing about the same answer, which is the CAf1d6447d34 shape.",
+    file: "lib/voice/live/index.js",
+    find: "        const agreedNow = agreesAfterReadBack(turnUserText.trim());",
+    replace: "        const agreedNow = isAffirmative(turnUserText.trim()); // SABOTAGE",
+    red: [LATCH],
+  },
+  {
+    name: "retry-stays-clear-yes",
+    why:
+      "lets the engine's OWN retry fire on a loose answer. The owner's rule trusts the AI because the model heard the audio and chose to write; this retry is code writing when the model did NOT call the tool, so on this row 'nada más' or 'my wife is coming too' would book a held write nobody re-requested.",
+    file: "lib/voice/live/index.js",
+    find: '        (retryReason === "write_order" || retryReason === "in_addition") &&\n        isAffirmative(turnUserText);',
+    replace: '        (retryReason === "write_order" || retryReason === "in_addition") &&\n        agreesAfterReadBack(turnUserText); // SABOTAGE',
+    red: [RETRY],
+  },
+  {
+    name: "noncommittal-is-a-withdrawal",
+    why:
+      "removes the whole 2026-10-02 hedge addition from the refusal list at once (the alternation lesson: narrowing one branch proves nothing). After a read-back the list is now the only thing that stops a write, so 'maybe', 'let me think', 'tal vez' and 'how about Thursday' would all book.",
+    file: "lib/transcriptUtils.js",
+    find: "|let\\s+me\\s+(?:think|check|see|ask)|think\\s+about\\s+it|maybe|one\\s+(?:sec|second|moment|minute)|just\\s+a\\s+(?:sec|second|moment|minute)|how\\s+about|what\\s+about|quiz[aá]s?|tal\\s+vez|d[eé]jeme\\s+pensar|un\\s+segundo)\\b/i;",
+    replace: ")\\b/i; // SABOTAGE",
+    red: [AFFIRM, ORDER],
+  },
+  {
+    name: "names-a-time-is-not-a-loose-yes",
+    why:
+      "lets a caller who names a DIFFERENT time count as agreeing. 'Eleven a.m.' answering a ten o'clock read-back is a change of proposal without the word no; the same slot is carried by LVX144, which can compare against what is written.",
+    file: "lib/transcriptUtils.js",
+    find: "  if (NAMES_TIME_RE.test(trimmed)) return false;\n",
+    replace: "  // SABOTAGE\n",
+    red: [AFFIRM, ORDER],
+  },
+  {
+    name: "hold-post-tool-audio",
+    why:
+      "plays the model's audio after wait_on_hold again. O1 CA591a92: the turn read 'Sure, thank you.<no speech>{pause}' and the owner heard 'no speech' -- Live continues the generation after a tool reply and the hold only engages at its close. Sims hf2/hf3 did the same, once as a ten-second ramble.",
+    file: "lib/voice/live/index.js",
+    find: "    if (holdRequestedAt !== null) {\n      if (holdAckBytes + mulaw.length <= HOLD_MUTED_AUDIO_MAX_BYTES) {",
+    replace: "    if (false) { // SABOTAGE\n      if (holdAckBytes + mulaw.length <= HOLD_MUTED_AUDIO_MAX_BYTES) {",
+    red: [LIVEMODE],
+  },
+  {
+    name: "hold-ack-clean-check",
+    why:
+      "plays whatever the model said after a tool-first wait_on_hold, markup and all. With nothing said before the call, only one short clean line ('Sure, thank you.') may play; '<no speech>{pause}' or a re-introduction must leave the hold silent.",
+    file: "lib/voice/live/index.js",
+    find: '    else if (!isCleanHoldAck(turnReplyText)) reason = "not_clean";\n',
+    replace: "    // SABOTAGE\n",
+    red: [LIVEMODE],
+  },
+  {
+    name: "caller-close-satisfies-ask",
+    why:
+      "makes the end_call ask gate ignore the caller's own close again. Smoke CAfd993a ('A nice day. That's all. Thanks.') and I3 CA1198b0: the hang-up was refused, the model asked 'Is there anything else...?', the caller said 'No.' and was thanked twice.",
+    file: "services/tools.js",
+    find: "      const askedAnythingElse = ctx?.askedAnythingElse === true || callerClosedCall;",
+    replace: "      const askedAnythingElse = ctx?.askedAnythingElse === true; // SABOTAGE",
+    red: [ASK],
+  },
+  {
+    name: "caller-close-door",
+    why:
+      "the farewell door (a goodbye with no end_call, LVX146) ignores the caller's own close, so the line is held one more turn after 'That's all, thanks.' -- the two doors disagreeing about the same answer.",
+    file: "lib/voice/live/index.js",
+    find: "        const callerClosed = callerClosesCall(turnUserText);",
+    replace: "        const callerClosed = false; // SABOTAGE",
+    red: [ASK],
   },
 ];
 

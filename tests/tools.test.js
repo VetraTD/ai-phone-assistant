@@ -2133,7 +2133,10 @@ describe("end_call refuses while the caller is still thinking", () => {
         ...baseCtx,
         step: "confirm",
         callerTurnCount: 4,
-        lastCallerText: "no thanks",
+        // Was "no thanks", which since 2026-10-02 is the caller closing the
+        // call themselves and satisfies this gate (callerClosesCall). Thanks
+        // ALONE is not a close (owner decision), so it still refuses here.
+        lastCallerText: "Great, thank you.",
         askedAnythingElse: false,
         anythingElseRefusalSpent: false,
       }

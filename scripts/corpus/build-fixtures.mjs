@@ -526,9 +526,9 @@ const EXPECTATIONS = {
     note: "3.8, the immediate repeat of CA64a36c with no code change between them. A refused reschedule was followed by 'I have successfully rescheduled...' and the claim guard stayed silent -- LVX140 -- and the fiction then took the caller's consent to cancel an appointment that did not exist.",
     attempts: [
       {
-        expect: "refuse",
+        expect: "write",
         why:
-          "'That time is available. Would you like me to reschedule your appointment to Tuesday, September 22, at 3:00 PM?' and the tool fired three seconds later, before any answer. readback_now=true, agreed_now=FALSE -- the model asked and did not wait. Refusing is right; what happened next is the item.",
+          "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). 'That time is available. Would you like me to reschedule your appointment to Tuesday, September 22, at 3:00 PM?' and the tool fired three seconds later. The gate ran (gate_ran=true), so the caller had spoken, and the turn transcribed 'I love it.' -- the model then said 'I have successfully rescheduled'. It was refused as 'did not wait'; it is a yes the transcript kept, and the reschedule lands here.",
       },
       {
         expect: "refuse",
@@ -686,7 +686,10 @@ const EXPECTATIONS = {
           "IN PRODUCTION this was the SILENT-TURN gate: the caller's turn carried no speech at all, so there was nothing that could be consent, and that gate refused it before the write-order gate ever ran. The harness does not reproduce a silent turn, so the write-order gate answers instead and releases. NOT a bypass, and the ordering is a code-level guarantee rather than an assumption: the silent-turn refusal returns at services/tools.js:1081 and the ceiling is at :1671, so a genuinely silent turn can never reach it.",
       },
       { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
-      { expect: "refuse", why: "cancel read back, caller had not answered yet." },
+      {
+        expect: "write",
+        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). 'To confirm, you would like to cancel your appointment on Tuesday, September 22nd at 2 30 PM?' answered 'all? la' -- not a refusal, not a question -- and the model reported the cancellation next. It lands here instead of on the ceiling one attempt later.",
+      },
       {
         expect: "write",
         why:
@@ -822,8 +825,8 @@ const EXPECTATIONS = {
       "3.8, rev 00088. A cancellation that needed no hatch: refused once for a question that was not agreement, asked again, and got a readable answer. The gate working as designed rather than being rescued.",
     attempts: [
       {
-        expect: "refuse",
-        why: "'Yeah, can I cancel that?' is a question, not consent. Refusing is right and the model's response -- asking once more, plainly -- is what the refusal asks for.",
+        expect: "write",
+        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). The read-back ('To confirm, you'd like to cancel your appointment on Wednesday, September 23rd at 12:30 PM?') was answered 'dora' -- the earlier 'Yeah, can I cancel that?' was the REQUEST, not the answer. The caller confirmed the same cancellation on the next ask, so this writes one turn earlier.",
       },
       { expect: "write", why: "asked again, answered readably, written." },
     ],
@@ -903,8 +906,8 @@ const EXPECTATIONS = {
       "3.8, rev 00085, AND THE CALL THAT FOUND LVX153. A caller asked to cancel, was refused three times, was told twice 'I'm unable to process the cancellation right now', was offered a callback, and hung up with the appointment still standing. The trigger was a mangled yes -- 'A la works.' -- which isAffirmative cannot read and neither can a human.",
     attempts: [
       {
-        expect: "refuse",
-        why: "the appointment was read back and the caller had not answered yet. Correct.",
+        expect: "write",
+        why: "CHANGED refuse -> write on 2026-10-02 (batch 2, owner decision: trust the AI after a proper read-back -- lib/transcriptUtils.js agreesAfterReadBack). The read-back was answered 'A la works.' -- the mangled yes this call is famous for. The model called the tool on it; the cancellation lands on the first attempt instead of after three refusals and a callback offer.",
       },
       {
         expect: "write",

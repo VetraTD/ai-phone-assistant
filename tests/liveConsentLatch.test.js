@@ -248,6 +248,39 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     expect(s.store.scheduled()[0].scheduled_at).toContain("2026-09-07");
   });
 
+  // 2026-10-02 (owner, O3 CA9c2d26). The ledger reads agreement with the SAME
+  // rule as the gate: after a read-back, an answer that is not a refusal, a
+  // question, a bare "um" or another time is agreement. Without that the gate
+  // would accept "nada más" on the turn itself and the latch would forget it the
+  // moment a spelling question came in between -- the two disagreeing.
+  it("carries a LOOSE agreement across an interposed caller turn, like a clear one", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("nada más");
+    await s.assistantTurn(SPELL_ASK);
+    await s.callerSays("n i t h i n d o d l a");
+    await s.book();
+
+    expect(c().consent_agreement_recorded).toBe(1);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
+  it("does not record a hedge as agreement", async () => {
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Maybe, let me think.");
+    await s.assistantTurn(SPELL_ASK);
+    await s.callerSays("n i t h i n d o d l a");
+    await s.book();
+
+    expect(c().consent_agreement_recorded).toBeFalsy();
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
   // THE SAFETY HALF, and the reason the latch stores the args rather than a
   // bare flag. CA8c019c spent a cancellation's consent on a booking; this is
   // the same failure in the form this fixture can express -- consent given for

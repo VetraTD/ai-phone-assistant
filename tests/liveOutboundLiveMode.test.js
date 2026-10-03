@@ -354,8 +354,17 @@ describe("read-back of a confirm answer, through the running session (spec §5b;
   });
 });
 
-describe("wait_on_hold (spec §4; ruling R3)", () => {
-  it("answers 'wait quietly', and the hold engages at the END of the generation that called it -- its 'Sure, thank you' is heard", async () => {
+describe("wait_on_hold (spec §4; ruling R3, batch 2 2026-10-02)", () => {
+  // O1 CA591a92, 2026-10-02: the turn read "Sure, thank you.<no speech>{pause}"
+  // and the owner HEARD "no speech". Live continues the SAME generation after a
+  // tool reply, and the hold only engages at that generation's close -- so the
+  // continuation played. Paid sims hf2 (same text) and hf3 (a ten-second ramble
+  // about "documentation I watched last night") show it is systematic. Whether
+  // the ack comes before or after the tool call is not visible in the logs, so
+  // both orders are pinned: an ack spoken BEFORE the call plays and everything
+  // after the call is dropped; with no ack before the call, the post-call audio
+  // is held back and played at the close only if it is one short clean line.
+  async function untilHoldAsk() {
     const call = await bootLiveMode();
     await call.feed(500, { voiced: true });
     await call.feed(1000);
@@ -364,22 +373,96 @@ describe("wait_on_hold (spec §4; ruling R3)", () => {
     await call.assistantTurn(INTRO);
     await call.feed(400, { voiced: true }); // "Hold on, I'll get him."
     await call.feed(800);
-    call.live.push(modelAudioMsg()); // "Sure, thank you."
-    await call.settle();
+    return call;
+  }
+  const ackEvent = () => events("outbound_hold_ack_audio").at(-1);
+
+  it("answers 'wait quietly' -- nothing about later (R31 reverted)", async () => {
+    const call = await untilHoldAsk();
     const [r] = await call.callTool("wait_on_hold", {});
     // Real Hold call 2026-10-01 (defect A, R31 reverted): Live continues the SAME turn after a tool
     // reply, so a restart instruction here was executed at once ("Sure, thank you.Hi, it's Ava ...").
-    // The reply says only what to do NOW; the restart rule rides on the release note instead.
     expect(r.response).toEqual({ success: true, message: "Wait quietly. Say nothing until a person speaks." });
     expect(r.response.message).not.toMatch(/who you are|intro|AI assistant|start your reply/i);
-    expect(call.ws.liveFirstLine.onHold()).toBe(false); // the ack's own generation still plays
+    await call.hangUp();
+  });
+
+  it("ack BEFORE the call: the ack plays, everything after the call is dropped -- O1's '<no speech>{pause}'", async () => {
+    const call = await untilHoldAsk();
     const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
-    call.live.push(modelAudioMsg());
+    call.live.push(modelAudioMsg()); // "Sure, thank you."
     await call.settle();
     expect(enqueue).toHaveBeenCalled();
-    await call.assistantTurn("Sure, thank you.");
+    await call.callTool("wait_on_hold", {});
+    expect(call.ws.liveFirstLine.onHold()).toBe(false); // engages at the close, as before
+    enqueue.mockClear();
+    call.live.push(modelAudioMsg()); // "<no speech>{pause}"
+    await call.settle();
+    expect(enqueue).not.toHaveBeenCalled();
+    await call.assistantTurn("Sure, thank you.<no speech>{pause}");
+    expect(enqueue).not.toHaveBeenCalled();
     expect(call.ws.liveFirstLine.onHold()).toBe(true);
     expect(events("outbound_hold_entered")).toHaveLength(1);
+    expect(ackEvent()).toMatchObject({ played: false, reason: "ack_before_tool", post_tool_chunks: 1 });
+    expect(ackEvent().pre_tool_chunks).toBeGreaterThan(0);
+    await call.hangUp();
+  });
+
+  it("call FIRST, then a clean ack: held back and played at the generation's close", async () => {
+    const call = await untilHoldAsk();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.callTool("wait_on_hold", {});
+    call.live.push(modelAudioMsg()); // "Sure, thank you."
+    await call.settle();
+    expect(enqueue).not.toHaveBeenCalled();
+    await call.assistantTurn("Sure, thank you.");
+    expect(enqueue).toHaveBeenCalled();
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    expect(ackEvent()).toMatchObject({ played: true, reason: "clean_ack_after_tool", pre_tool_chunks: 0 });
+    await call.hangUp();
+  });
+
+  it.each([
+    ["<no speech>{pause}"],
+    ["Sure, thank you.<no speech>{pause}"],
+    [
+      "Sure, thank you.That documentation I watched last night was surprisingly gripping, you know. It really made me think about the whole situation from a completely different perspective.",
+    ],
+    ["Sure, thank you.Hi, it's Ava, an AI assistant from Digile Media."],
+  ])("call FIRST, then %j: nothing plays, the hold starts silent", async (text) => {
+    const call = await untilHoldAsk();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.callTool("wait_on_hold", {});
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.assistantTurn(text);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    expect(ackEvent()).toMatchObject({ played: false, reason: "not_clean" });
+    await call.hangUp();
+  });
+
+  it("an interrupted generation drops the held audio", async () => {
+    const call = await untilHoldAsk();
+    const enqueue = vi.spyOn(call.ws.liveAudioOut, "enqueue");
+    await call.callTool("wait_on_hold", {});
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    call.live.push({ serverContent: { interrupted: true } });
+    await call.settle();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(ackEvent()).toMatchObject({ played: false, reason: "interrupted" });
+    await call.hangUp();
+  });
+
+  it("logs nothing when the model said nothing after the call", async () => {
+    const call = await untilHoldAsk();
+    call.live.push(modelAudioMsg());
+    await call.settle();
+    await call.callTool("wait_on_hold", {});
+    await call.assistantTurn("Sure, thank you.");
+    expect(call.ws.liveFirstLine.onHold()).toBe(true);
+    expect(ackEvent()).toMatchObject({ played: false, reason: "none_after_tool", post_tool_chunks: 0 });
     await call.hangUp();
   });
 });

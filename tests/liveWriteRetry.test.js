@@ -543,6 +543,20 @@ describe("the refused write is re-issued when the caller agrees", () => {
     expect(s.bookCalls()).toHaveLength(1);
     expect(c().write_retry_attempted).toBeFalsy();
   });
+
+  it("does not re-issue on a LOOSE answer — that rule is for writes the AI chose (owner, 2026-10-02)", async () => {
+    // The gate now trusts an unreadable answer after a read-back, because the
+    // MODEL heard the audio and called the tool. This retry is code writing
+    // when the model did NOT call it, so it keeps the clear-yes rule: "nada
+    // más" (O3's mangled yes) or "my wife's coming too" must not fire it.
+    const s = await boot({ reason: "write_order" });
+    await s.book();
+    await s.spell("nada más");
+    await s.spell("My wife is coming too.");
+
+    expect(s.bookCalls()).toHaveLength(1);
+    expect(c().write_retry_attempted).toBeFalsy();
+  });
 });
 
 // ---------------------------------------------------------------------------
