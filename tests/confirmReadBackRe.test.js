@@ -344,3 +344,49 @@ describe("confirmReadBackRe — first person plural", () => {
     it(`ignores: ${said.slice(0, 46)}`, () => expect(en.test(said)).toBe(false));
   }
 });
+
+// ---------------------------------------------------------------------------
+// "DOES THAT WORK FOR YOU?" AFTER A SLOT -- batch 2, 2026-10-02 (O2 CA577db9).
+//
+// 109.4 s: "Great, I have you booked for a strategy call on Tuesday, October
+// sixth, at nine AM. Does that work for you?" -> the caller said "Now works."
+// ("that works") -> book_appointment refused readBackMade:false, because this
+// question was not a read-back. It IS one when it closes a turn that names a
+// clock time: the caller has heard the slot and is asked to approve it.
+//
+// Certified both ways against all 477 assistant turns on disk: three new
+// matches, all single-slot proposals. NOT a read-back: the multi-slot "which /
+// any of those works", a question that goes on ("..., or would you prefer"),
+// one stacked with another ask, a day with no time, or no time at all.
+// ---------------------------------------------------------------------------
+describe("confirmReadBackRe — 'does that work for you?' closing a turn that names a time", () => {
+  const READ_BACKS = [
+    "Great, I have you booked for a strategy call on Tuesday, October sixth, at nine AM. Does that work for you?",
+    "We can now book your free strategy call, and I have availability on Monday, September 21st at 9:00 AM. Does that work for you?",
+    "I have a free strategy call available for you on Monday, October 5th at 9 AM. Does that work for you?",
+    "That would be Friday at four thirty PM. Does that work?",
+    "So that's Thursday at 2 p.m. Does that still work for you?",
+  ];
+  for (const said of READ_BACKS) {
+    it(`recognises: ${said.slice(-60)}`, () => expect(en.test(said)).toBe(true));
+  }
+
+  const NOT_READ_BACKS = [
+    "Do any of those times work for you?",
+    "We have 9 AM, 1 PM or 4:30 PM. Which of those works for you?",
+    "would another day work for you?",
+    "Would 4 30 p m on Friday work for you? Or are there other times you'd prefer?",
+    "I have 9 AM on Monday. Does that work for you, or would you prefer the afternoon?",
+    "I have 9 AM on Monday. Does that work for you? And can I take your email?",
+    "Does Tuesday work for you?",
+    "The call takes about thirty minutes. Does that work for you?",
+    "Does that work for you?",
+  ];
+  for (const said of NOT_READ_BACKS) {
+    it(`ignores: ${said.slice(-60)}`, () => expect(en.test(said)).toBe(false));
+  }
+
+  it("Spanish is untouched", () => {
+    expect(es.test("Tengo el lunes a las 9 de la mañana. ¿Le funciona?")).toBe(false);
+  });
+});

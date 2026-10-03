@@ -574,3 +574,25 @@ describe("name on file (2026-10-02)", () => {
     expect(renderBlock(WITH_FULL_NAME)).not.toContain("first name on file");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Batch 2 (4a), 2026-10-02. O2 CA577db9 109.4 s: "Great, I have you booked for a
+// strategy call on Tuesday, October sixth, at nine AM. Does that work for
+// you?" -- said before any write; O3 CA9c2d26 read back "I've scheduled your
+// discovery call ... Shall we go ahead and book that?". The booking step now
+// says: read the time back as a question, and call it booked only after
+// book_appointment has succeeded. Live mode only (clip rollback byte-identical),
+// and only where this call can book.
+// ---------------------------------------------------------------------------
+describe("booking step: no 'booked' before the booking tool succeeds (4a)", () => {
+  it("is in the live-mode booking step", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).toMatch(/never say it is booked or scheduled until book_appointment has succeeded/i);
+    expect(text).toMatch(/Shall I book/);
+  });
+
+  it("is absent in clip mode and when this call cannot book", () => {
+    expect(renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" })).not.toMatch(/until book_appointment has succeeded/i);
+    expect(renderBlock({ ...WITH_FIRST_NAME, canBook: false })).not.toMatch(/until book_appointment has succeeded/i);
+  });
+});

@@ -133,6 +133,8 @@ const FIRSTSECONDS = "tests/outboundFirstSeconds.test.js";
 // 2026-10-02 batch 2 rows.
 const RETRY = "tests/liveWriteRetry.test.js";
 const LIVEMODE = "tests/liveOutboundLiveMode.test.js";
+const READBACKRE = "tests/confirmReadBackRe.test.js";
+const OUTPROMPT = "tests/outboundPrompt.test.js";
 
 const SABOTAGES = [
   {
@@ -988,6 +990,24 @@ const SABOTAGES = [
     find: "            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile",
     replace: "            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile?.fullName // SABOTAGE",
     red: [NAMEFILE],
+  },
+  {
+    name: "readback-does-that-work",
+    why:
+      "drops the whole 'does that work for you?' read-back alternative. O2 CA577db9 112.4 s: '...Tuesday, October sixth, at nine AM. Does that work for you?' answered 'Now works.' was refused readBackMade:false, so the booking waited another full read-back.",
+    file: "lib/voice/strings.js",
+    find: "        `|${READ_BACK_DOES_THAT_WORK}`,",
+    replace: "        ``, // SABOTAGE",
+    red: [READBACKRE],
+  },
+  {
+    name: "outbound-booking-discipline",
+    why:
+      "drops the live-mode booking-step sentence (read the time back as a question; never 'booked' before book_appointment succeeds). O2 said 'Great, I have you booked ...' before any write; O3 read back 'I've scheduled your discovery call ...'.",
+    file: "lib/outbound/prompt.js",
+    find: "        : `The next step: ${GOAL_LINES[cfg.goal]}${bookingDiscipline}`",
+    replace: "        : `The next step: ${GOAL_LINES[cfg.goal]}` // SABOTAGE",
+    red: [OUTPROMPT],
   },
 ];
 
