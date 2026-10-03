@@ -49,3 +49,22 @@ image, which is the first image with `--last-name`.
 
 Logs: `bash .superpowers/sdd/2026-09-24-outbound-part1/r1-read.sh <since-UTC>` per call, plus a by-callSid query for
 `write_*`, `spelling_*`, `outbound_*`.
+
+## Results: run early, 2026-10-02 17:25-19:42 CDT, on 00099-lkq
+
+| # | Call | Result | What mattered |
+|---|---|---|---|
+| I1 | Inbound book (CA47e105) | PASS | "Yeah" transcribed **"Ya."** -> read as yes, booked on the first read-back (new rule, live) |
+| I2 | Inbound reschedule (CA7a381d) | PASS, not clean | "Yes. Wait, actually, sorry..." correctly NOT a yes; the time restated as a statement, so a yes after it was refused; "Mm-hm" transcribed "guard"; re-ask + silence nudge; moved |
+| I3 | Inbound question (CA1198b0) | PASS | transcript garbled, answer right |
+| I4 | Inbound wrong number (CA71b437) | PASS, awkward | goodbye + "anything else?" in one breath, then goodbye again (ask gate) |
+| O3 | Outbound S23 -> became a booking call (CA9c2d26) | **FAIL** | read-back answered yes, transcribed "nada más" -> one refusal -> the model said "I cannot secure that time" and booked a callback instead. No booking |
+| I5 | Inbound cancel (CA7201a6) | PASS | returned call, no question, cancelled first try (S23 had no question left to suppress) |
+| O1 | Outbound S21 Hold + first name only (CA591a92) | PASS, slow | "Sure, thank you." + 36 s hold + intro after; surname-only ask; booked "Nithin Dodla". **"no speech" spoken aloud** at the hold; 31 s read-back -> booked (pre-answer attempt, "No, yes yes" negated, new name = new proposal, spelling confirm) |
+| GK | Outbound S20 Gatekeeper (CAf74d13) | PASS, notes | no confirm/offer, callback booked, late AMD ignored; said "returning Nithin's enquiry"; "tomorrow" became Monday |
+| I6 | Inbound check + cancel (CA8731d8) | PASS | returned call WITH unanswered question + upcoming booking -> **no question asked**; yes transcribed **"Ja."** -> cancelled first try |
+| O2 | Outbound S22 full name on file (CA577db9) | PASS, notes | **no name/spelling ask, booked "Nithin Dodla"**; said "I have you booked ... 9 AM" before writing and picked the time itself; "Does that work for you?" not a read-back; first reply 2.3 s -> silent flag |
+| O4 | Outbound S24 voicemail (CAe5e72b) | PASS | machine_end_beep at 10.5 s, voicemail left, retry parked |
+
+Open after the round: O2's booking (Tue 6 Oct 9 AM, "Nithin Dodla") still stands; S20-S24 paused (S20/S23 hold parked callbacks);
+the contact now has last_name "Dodla" (permanent).
