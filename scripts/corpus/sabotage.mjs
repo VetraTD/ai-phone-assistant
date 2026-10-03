@@ -1068,8 +1068,8 @@ const SABOTAGES = [
     why:
       "lets the write gate's 'does that work for you?' widening silence the claim guard: O2's 'Great, I have you booked ... Does that work for you?', said before any write, loses its correction note. Review I5.",
     file: "lib/voice/live/index.js",
-    find: "      replyText && (S.readBackNotClaimRe ?? S.confirmReadBackRe)?.test(replyText)",
-    replace: "      replyText && S.confirmReadBackRe?.test(replyText) // SABOTAGE",
+    find: "    const readBackNotClaim = Boolean(replyText && S.readBackNotClaimRe?.test(replyText));",
+    replace: "    const readBackNotClaim = Boolean(replyText && S.confirmReadBackRe?.test(replyText)); // SABOTAGE",
     red: [CLAIM],
   },
   {
