@@ -53,3 +53,16 @@ How I fire each outbound call: `status active` (dry run, then `--confirm`), `r1-
 
 Logs: `bash .superpowers/sdd/2026-09-24-outbound-part1/r1-read.sh <since-UTC>` per call, plus a by-callSid query for
 `write_*`, `end_call*`, `outbound_*`.
+
+## Results: run 2026-10-03 12:40-13:20 CDT on 00100-nzn @c755f56
+
+| # | Call | Result | What mattered |
+|---|---|---|---|
+| 1 | Inbound question (CA5fa38e) | PASS, garbled | "All right, that's it." -> straight to goodbye, **no "anything else?"**, no_ask 0. Your first "that's all" arrived as unreadable script; you heard audio cut out (our side: no barge/clear, inbound gap max 0.4 s -> likely the line) |
+| 2 | Inbound cancel Tue 6 Oct 9 AM (CAac5430) | PASS | "Yeah, go on." arrived as "miya go"; cancel is slotless -> strict rule refused once, ceiling released 1 s later in the same breath; cancelled first time from the caller's side |
+| 3 | Outbound booking S23 (CA29ca43) | **PASS -- fix 1 live** | first reply 1,178 ms; read-back as a question ("Shall I book ... Monday at four thirty PM, Nithin?"), no "booked" before the write; your answer arrived as just "works" -> `agreed_after_readback` carried it, booked on the first answer; no name/spelling ask |
+| 4 | Outbound Hold S21 (CAf4aa42) | PASS -- fix 2 live | "Sure, thank you." before the hold call (pre 6 chunks), the continuation dropped (`ack_before_tool`); 76 s silent hold; intro after; Monday 9 AM callback. Your "hold on" arrived as Turkish -> it first asked when to call back |
+| 5 | Inbound reschedule (CA07f56c) | PASS (partial script) | premature reschedule on "maybe Tuesday" refused (no read-back) -- correct; read back 9 AM as a question; "Yeah, no worries." -> moved to **Tue 6 Oct 9 AM (still open)**; "anything else?" -> "no, that's it" -> goodbye. "Say the time again" + cancel not exercised |
+
+Parked (pre-existing, not batch 2): "Your strategy call is currently scheduled for ..." read as an unbacked claim (silent note, 5 at 47.7 s) -- existingAppointmentReportRe misses that phrasing. Caller audio badly garbled on every call (Turkish/Portuguese/unreadable) -- the connection, not the gate.
+Open: Tue 6 Oct 9 AM booking from call 5 (cancel it); S21 holds a Monday 9 AM callback, S23 a Monday 10 AM callback -- both campaigns PAUSED, so neither dials.
