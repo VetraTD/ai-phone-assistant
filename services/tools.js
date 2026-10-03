@@ -1008,11 +1008,16 @@ export async function executeToolCall(fc, ctx) {
           if (nameOnFile?.fullName) {
             fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.fullName } };
             bumpCounter("outbound_name_from_file");
-          } else if (nameOnFile?.surnameNeeded && !callerNameFromArgs(fc.args)) {
-            // No name sent at all: the first name on file is the name, so the
-            // spelling gate below asks for the surname only -- not the
-            // requirements check's "ask for their full name" (final review I3).
-            fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.firstName } };
+          } else if (nameOnFile?.firstOnly) {
+            // Owner, 2026-10-02 night (batch 2): first name only on file -> no
+            // spelling question at all. The row takes the model's client_name
+            // (the first name plus any surname it heard) or, with none sent,
+            // the first name on file -- never the requirements check's "ask for
+            // their full name" (final review I3).
+            if (!callerNameFromArgs(fc.args)) {
+              fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.firstName } };
+            }
+            bumpCounter("outbound_name_first_only_used");
           }
 
           // DID THE CALLER ACTUALLY AGREE TO THIS, AND DID WE HEAR THEM?
@@ -2165,10 +2170,11 @@ export async function executeToolCall(fc, ctx) {
           // made rather than an oversight: a callback from "Nathan Dasler" on the
           // right number reaches the right person, and a callback that does not
           // exist reaches nobody.
-          // A full name on file is the spelling (outboundNameOnFile), so there
-          // is nothing to ask.
+          // A name on file is the spelling (outboundNameOnFile), so there is
+          // nothing to ask -- the full name, or (owner, 2026-10-02 night) the
+          // first name with whatever surname the model heard.
           const pendingName =
-            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile?.fullName
+            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile
               ? callerNameFromArgs(fc.args)
               : null;
           // How many times has this gate refused on this call?
@@ -2260,19 +2266,7 @@ export async function executeToolCall(fc, ctx) {
             // Every constraint the old wording carried is kept: not caller
             // speech, the name quoted, one attempt per caller turn, and the
             // decline escape hatch that stops a caller being asked forever.
-            // FIRST NAME ON FILE, SURNAME NOT (outboundNameOnFile): the lead
-            // typed their first name, so only the surname is asked for.
-            const message = nameOnFile?.surnameNeeded
-              ? heldWritePreamble(fc.name) +
-                `this booking is still going ahead, it just needs one more thing first. Their first ` +
-                `name "${nameOnFile.firstName}" is already on file, spelled correctly -- do not ask for it ` +
-                `or how to spell it. Ask the caller to spell their SURNAME only, and read the letters back. ` +
-                `Do not tell the caller anything went wrong, do not offer a callback, and do not take a ` +
-                `message instead. Ask them now and wait for their answer; do not call this function again ` +
-                `until they have replied, then call it again with "${nameOnFile.firstName}" and the surname ` +
-                `they spelled. If they decline or tell you it is spelled how it sounds, accept that and ` +
-                `record the name exactly as you heard it.`
-              :
+            const message =
               heldWritePreamble(fc.name) +
               `this booking is still going ahead, it just needs one ` +
               `more thing first. Before recording "${pendingName}", get the spelling: ask the caller to ` +
@@ -2295,7 +2289,6 @@ export async function executeToolCall(fc, ctx) {
             // fired or how often it ran out. The cap is the interesting half:
             // the refusal AFTER the last one writes the name as heard.
             bumpCounter("spelling_gate_refusals");
-            if (nameOnFile?.surnameNeeded) bumpCounter("outbound_surname_spell_asked");
             if (refusalIsNew && gateRefusals + 1 >= spellMissCap()) {
               bumpCounter("spelling_gate_cap_reached");
             }
@@ -2574,8 +2567,11 @@ function callerNameFromArgs(args) {
  * you have on file?", heard "I cannot share the details on file", and three
  * turns went on a name the business already had.
  *
- * Owner rule, 2026-10-02: full name on file -> use it and ask nothing; first
- * name only -> ask for the SURNAME spelling only; no name -> the ordinary ask.
+ * Owner rule, 2026-10-02: full name on file -> use it and ask nothing; no name
+ * -> the ordinary ask. CHANGED 2026-10-02 night (batch 2, O1 CA591a92: read-back
+ * to booked took 31 s, most of it spelling a surname): first name only -> ask
+ * nothing either; the row takes the model's client_name (first name + the
+ * surname it heard) or the first name alone.
  *
  * Returns null -- the ordinary gate, unchanged -- unless ALL of: an outbound
  * call, the party verified by confirm_identity (O-12 refuses earlier otherwise,
@@ -2590,10 +2586,11 @@ function callerNameFromArgs(args) {
  * first name, the rest of client_name must be the surname on file within a
  * small edit distance ("Dadla" for "Dodla"). "Nithin's wife", "Nithin and Priya
  * Dodla" or a new surname are a different name, and the ordinary gate asks.
- * With only a first name on file, the surname ask applies to a single further
- * word at most, for the same reason.
+ * With only a first name on file, the model's name is used only when it is
+ * that first name plus a single further word at most (the surname it heard),
+ * for the same reason.
  *
- * @returns {null | {fullName: string} | {firstName: string, surnameNeeded: true}}
+ * @returns {null | {fullName: string} | {firstName: string, firstOnly: true}}
  */
 export function outboundNameOnFile(fc, ctx) {
   if (fc?.name !== "book_appointment") return null;
@@ -2609,13 +2606,13 @@ export function outboundNameOnFile(fc, ctx) {
     if (!words.length || words[0] !== fileFirst) return null;
     const rest = words.slice(1);
     if (rest.length) {
-      if (!last) return rest.length === 1 && rest[0].length >= 2 ? { firstName: first, surnameNeeded: true } : null;
+      if (!last) return rest.length === 1 && rest[0].length >= 2 ? { firstName: first, firstOnly: true } : null;
       const fileLast = normalizeName(last);
       const allowed = fileLast.length >= 6 ? 2 : fileLast.length >= 4 ? 1 : 0;
       if (editDistanceWithin(rest.join(" "), fileLast, allowed) === false) return null;
     }
   }
-  return last ? { fullName: `${first} ${last}` } : { firstName: first, surnameNeeded: true };
+  return last ? { fullName: `${first} ${last}` } : { firstName: first, firstOnly: true };
 }
 
 /** Levenshtein distance <= max, bounded (names are short). */

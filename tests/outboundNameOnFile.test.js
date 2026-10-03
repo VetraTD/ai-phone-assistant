@@ -8,9 +8,15 @@
 // and three turns went on a name the business already had, typed by the lead.
 //
 // Owner rule (2026-10-02): full name on file -> no name or spelling question,
-// and the booking uses the name on file; first name only -> ask them to spell
-// the SURNAME only; no name -> the ordinary full ask. Only for a booking made
-// FOR the contact, on an outbound call, once confirm_identity has verified them.
+// and the booking uses the name on file; no name -> the ordinary full ask. Only
+// for a booking made FOR the contact, on an outbound call, once confirm_identity
+// has verified them.
+//
+// CHANGED 2026-10-02 night (owner, batch 2): first name only on file -> NO
+// surname ask either. O1 CA591a92 showed the cost -- read-back to booked took
+// 31 s, most of it the surname being spelled. The booking goes under the
+// model's client_name (the first name plus the surname it heard), or the first
+// name alone if it heard none.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -117,15 +123,20 @@ describe("outbound: a full name on file is used, never asked for", () => {
   });
 });
 
-describe("outbound: first name only on file -> ask for the surname only", () => {
-  it("asks for the surname, not the first name", async () => {
+describe("outbound: first name only on file -> no spelling question at all (owner, 2026-10-02 night)", () => {
+  it("books under the model's name -- the first name plus the surname it heard", async () => {
     const res = await bookAs("Nithin Dodla", outboundCtx({ lastName: null }));
-    expect(res.functionResponse.response.success).toBe(false);
-    expect(counters().outbound_surname_spell_asked).toBe(1);
-    const msg = res.functionResponse.response.message;
-    expect(msg).toContain("SURNAME");
-    expect(msg).toContain('"Nithin"');
-    expect(msg).not.toContain("FULL name");
+    expect(res.functionResponse.response.success).toBe(true);
+    expect(counters().spelling_gate_refusals).toBeFalsy();
+    expect(counters().outbound_name_first_only_used).toBe(1);
+    expect(writtenName()).toContain("Nithin Dodla");
+  });
+
+  it("books under the first name alone when the model heard no surname", async () => {
+    const res = await bookAs("Nithin", outboundCtx({ lastName: null }));
+    expect(res.functionResponse.response.success).toBe(true);
+    expect(counters().spelling_gate_refusals).toBeFalsy();
+    expect(writtenName()).toContain('"Nithin"');
   });
 });
 
@@ -163,19 +174,22 @@ describe("only a misheard SURNAME is replaced; a different name goes to the ordi
     }
   );
 
-  it("first name only on file, and the model sent no name: the SURNAME is asked for, not the full name", async () => {
+  it("first name only on file, and the model sent no name: booked under the first name, nothing asked", async () => {
     const res = await bookAs(null, outboundCtx({ lastName: null }));
-    expect(res.functionResponse.response.success).toBe(false);
-    expect(counters().outbound_surname_spell_asked).toBe(1);
-    expect(res.functionResponse.response.message).toContain("SURNAME");
-    expect(res.functionResponse.response.message).toContain('"Nithin"');
+    expect(res.functionResponse.response.success).toBe(true);
+    expect(counters().spelling_gate_refusals).toBeFalsy();
+    expect(writtenName()).toContain('"Nithin"');
   });
 
-  it("first name only on file, a possessive or a second person: the ordinary full-name ask", async () => {
-    const res = await bookAs("Nithin's wife", outboundCtx({ lastName: null }));
-    expect(counters().outbound_surname_spell_asked).toBeFalsy();
-    expect(res.functionResponse.response.message).toContain("FULL name");
-  });
+  it.each([["Nithin's wife"], ["Nithin and Priya"], ["Nithin Dodla Reddy"], ["Priya Shah"]])(
+    "first name only on file, %j: someone else's name -> the ordinary full-name ask",
+    async (said) => {
+      const res = await bookAs(said, outboundCtx({ lastName: null }));
+      expect(res.functionResponse.response.success).toBe(false);
+      expect(counters().outbound_name_first_only_used).toBeFalsy();
+      expect(res.functionResponse.response.message).toContain("FULL name");
+    }
+  );
 
   it("a name-on-file booking does not trip the never-spoken screen", async () => {
     const res = await bookAs("Nithin", outboundCtx());

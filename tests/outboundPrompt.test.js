@@ -557,4 +557,20 @@ describe("name on file (2026-10-02)", () => {
   it("is absent when this call cannot book", () => {
     expect(renderBlock({ ...WITH_FULL_NAME, canBook: false })).not.toContain("full name on file");
   });
+  // Batch 2 (owner, 2026-10-02 night): first name only -> no surname ask either.
+  // Live mode only: the clip rollback's prompt stays byte-identical.
+  it("first name only (live mode): says not to ask for the name, the surname or a spelling", () => {
+    const text = renderBlock(WITH_FIRST_NAME);
+    expect(text).toContain(`Their first name on file is ${firstName}`);
+    expect(text).toMatch(/do not ask for their name, their surname or how to spell it/);
+  });
+
+  it("first name only: absent in clip mode, and when this call cannot book", () => {
+    expect(renderBlock({ ...WITH_FIRST_NAME, firstSpeaker: "clip" })).not.toContain("first name on file");
+    expect(renderBlock({ ...WITH_FIRST_NAME, canBook: false })).not.toContain("first name on file");
+  });
+
+  it("a full name on file keeps its own line, not the first-name one", () => {
+    expect(renderBlock(WITH_FULL_NAME)).not.toContain("first name on file");
+  });
 });

@@ -980,6 +980,15 @@ const SABOTAGES = [
     replace: "        const callerClosed = false; // SABOTAGE",
     red: [ASK],
   },
+  {
+    name: "first-name-only-no-spelling-ask",
+    why:
+      "puts the spelling question back for a lead with only a first name on file. O1 CA591a92: read-back to booked took 31 s, most of it a surname being spelled for a booking the lead had already agreed to; owner rule 2026-10-02: any name on file -> no spelling question.",
+    file: "services/tools.js",
+    find: "            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile",
+    replace: "            CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile?.fullName // SABOTAGE",
+    red: [NAMEFILE],
+  },
 ];
 
 const only = process.argv.includes("--only")
