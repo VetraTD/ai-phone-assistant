@@ -1036,6 +1036,66 @@ if an outreach is waiting for the handset, expect the returned-call line).
 --region=$R --project=$P`. No migration to undo. A surname set with `--last-name` stays on the contact and is
 inert to the old image.
 
+## Section H: batch-2 receptionist fixes from the 2026-10-02 evening round (deploy 7, owner YES for an unattended run)
+
+**Status: DRAFT 2026-10-02 ~23:40 CDT.** Owner YES (opening batch, ~21:30 CDT): deploy unattended IF the gate is clean
+(census all land; corpus:sabotage = only the 3 baseline x; root + test:db green apart from the known worktree-only
+fail) AND the final review has no Critical left after the fix pass; any failed step -> roll back to
+`voice-uk-prod-00099-lkq` and verify. The smoke call (H4) waits for the owner.
+
+`SHA` = b2a7082 (code head of `feat/outbound-stage4`; later commits must be docs/spend/ledger only --
+`git log --oneline b2a7082..HEAD -- . ':!docs' ':!scripts/probes/spend-gptlive.json' ':!.superpowers'` prints
+nothing). Production today: `voice-uk-prod-00099-lkq` @b772acb, `OUTBOUND_ENABLED=false`. Rollback target:
+`voice-uk-prod-00099-lkq`. Ledger: the "Batch 2 2026-10-02 night" block in
+`.superpowers/sdd/2026-10-01-outbound-live-first-line/progress.md`.
+
+**What changes for callers (inbound and outbound).**
+- **Mangled yes after a proper read-back (O3 CA9c2d26 "nada más").** When the assistant's previous turn read the
+  details back and the model then writes, a caller answer that is not a clear refusal (one en+es list: no, wait,
+  maybe, let me think, can't, never, forget it, espere, tal vez, para nada ...), not a question, not a bare "um",
+  not unreadable, and not a different time counts as agreement -- but only if that read-back NAMED the slot being
+  written. Cancellations (no slot) keep the strict rule; the existing ceiling still releases them on the next
+  attempt. Post-call messages, the recovery gate and the silent-turn token still need a clear yes; the engine's
+  own retry still needs a clear yes. Counter `write_order_released_unreadable_after_readback`, probe field
+  `agreed_after_readback`.
+- **"no speech" at a hold (O1 CA591a92).** Nothing the model says after its `wait_on_hold` call is played: the ack
+  ("Sure, thank you.") is spoken before the call (3 paid sims), and the continuation is dropped. Log
+  `outbound_hold_ack_audio {pre_tool_chunks, post_tool_chunks, played, reason}`.
+- **Goodbye.** The caller's own clear close ("that's all, thanks", "no thanks", "bye", "eso es todo") answers
+  "anything else?"; a bare "thank you" does not, and neither does a close that is really the answer to a read-back.
+  Counters `end_call_ask_satisfied_by_caller_close`, `live_goodbye_exit_caller_closed`.
+- **Outbound, any name on file -> no spelling question.** First name only: booked under the model's name (first +
+  the surname it heard) or the first name alone (`outbound_name_first_only_used`); full name and no name unchanged.
+- **Booking polish (outbound live mode).** "Does that work for you?" closing a turn that names exactly one time is a
+  read-back; the booking step says to read the time back as a question and never say "booked" before the tool
+  succeeds. 4c (restating a requested time as the question) NOT done -- revisit after Monday.
+
+**Inputs checked.** No migration. No new env var or secret. New counters and one INFO log only (no new ERROR events;
+alert policy unchanged). Paid sims P1-SIM-S9 3 x Hold $0.1236 (probe ledger cap 25.50, owner-approved). Gate at
+b2a7082: see [AS RUN].
+
+```bash
+export CLOUDSDK_CONFIG=~/.gcloud-vetra2
+export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE=~/.gcloud-vetra2/ca-bundle.pem
+P=vetra-uk-edc8ca; R=europe-west2; SHA=b2a7082
+BASE_URL=https://voice-uk-prod-462445274080.europe-west2.run.app
+IMG=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:$SHA
+```
+
+**H0. Preflight (read)** as G0: `voice-uk-prod-00099-lkq` at 100%; `OUTBOUND_FIRST_SPEAKER` absent,
+`OUTBOUND_ENABLED=false`, `DEEPGRAM_REGION=eu`; export `stageH-before.yaml` (session scratchpad).
+**H1. Build from the MAIN checkout** (E1's command, `_TAG=$SHA`; CRLF migration checksums). The main tree must equal
+HEAD apart from the untracked `.impeccable/` and `docs/VetraTD-Pricing-Model.xlsx`.
+**H2. Migrate job image + `--status`** (expect pending: none; STOP otherwise -- nothing to roll back yet).
+**H3. New revision**, only `GIT_COMMIT_SHA` changes; verify Ready, 100%, `Build: $SHA` from `GET /`, env diff
+against `stageH-before.yaml` = image + `GIT_COMMIT_SHA` + nonce only, and 0 ERROR on the new revision over ~5 min.
+**Any failure after traffic moved -> H6 at once, then verify `00099-lkq` 100% and `Build: b772acb`.**
+**H4. Smoke** (owner, morning) = one inbound call from the owner's handset to +1 817 601 1171 (`direction:"inbound"`,
+no ERROR; if an outreach is waiting for the handset, expect the returned-call line).
+**H5. Re-test round** = `docs/superpowers/plans/2026-10-03-retest-round.md`.
+**H6. Rollback**: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00099-lkq=100
+--region=$R --project=$P`. No migration to undo; the migrate job image can stay (no pending migrations either way).
+
 ## What this build still carries (half-1 deferred Minors + parked, plus half-2's own; not fixed by
 this deploy)
 

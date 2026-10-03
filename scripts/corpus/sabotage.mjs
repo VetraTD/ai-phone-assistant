@@ -1077,8 +1077,12 @@ const SABOTAGES = [
     why:
       "restores the first 'does that work' alternative: two times ('Tuesday at nine or Wednesday at ten -- does that work?') and 'does that still work?' about an existing appointment read as a read-back of one slot. Review I5.",
     file: "lib/voice/strings.js",
-    find: "const READ_BACK_DOES_THAT_WORK = String.raw`^(?![\\s\\S]*${READ_BACK_SLOT_TIME}[\\s\\S]*${READ_BACK_SLOT_TIME})[\\s\\S]*?${READ_BACK_SLOT_TIME}(?:(?!\\bor\\b)[\\s\\S])*?\\bdoes\\s+that\\s+work(?:\\s+for\\s+you)?\\s*\\?\\s*$`;",
-    replace: "const READ_BACK_DOES_THAT_WORK = String.raw`${READ_BACK_SLOT_TIME}[\\s\\S]*\\bdoes\\s+that\\s+(?:still\\s+)?work(?:\\s+for\\s+you)?\\s*\\?\\s*$`; // SABOTAGE",
+    // The anchor stops BEFORE the closing "$`": the runner applies rows with
+    // String.prototype.replace, where "$`" in a replacement means "the text
+    // before the match" -- the first version of this row wrote a corrupt file
+    // and read as "could not be READ".
+    find: "const READ_BACK_DOES_THAT_WORK = String.raw`^(?![\\s\\S]*${READ_BACK_SLOT_TIME}[\\s\\S]*${READ_BACK_SLOT_TIME})[\\s\\S]*?${READ_BACK_SLOT_TIME}(?:(?!\\bor\\b)[\\s\\S])*?\\bdoes\\s+that\\s+work",
+    replace: "const READ_BACK_DOES_THAT_WORK = /* SABOTAGE */ String.raw`${READ_BACK_SLOT_TIME}[\\s\\S]*\\bdoes\\s+that\\s+(?:still\\s+)?work",
     red: [READBACKRE],
   },
 ];
