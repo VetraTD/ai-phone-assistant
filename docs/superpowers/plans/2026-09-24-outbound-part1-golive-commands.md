@@ -1038,7 +1038,18 @@ inert to the old image.
 
 ## Section H: batch-2 receptionist fixes from the 2026-10-02 evening round (deploy 7, owner YES for an unattended run)
 
-**Status: DRAFT 2026-10-02 ~23:40 CDT.** Owner YES (opening batch, ~21:30 CDT): deploy unattended IF the gate is clean
+**Status: H0-H3 RUN 2026-10-03 ~01:35-01:44 CDT, unattended under the owner's YES.**
+
+**[AS RUN] 2026-10-03.** H0 PASS (00099-lkq 100%, `OUTBOUND_FIRST_SPEAKER` absent, `OUTBOUND_ENABLED=false`,
+`DEEPGRAM_REGION=eu`, `Build: b772acb`; stageH-before.yaml in the session scratchpad). H1 build `bbfcf2bb` SUCCESS
+(42 s), `voice:c755f56` digest `sha256:9b99e188...`. H2 migrate job -> c755f56, execution `gjp5s`: pending none /
+applied 50. H3 **`voice-uk-prod-00100-nzn`** 100%, Ready, `GET /` -> `Build: c755f56`, env diff = image +
+`GIT_COMMIT_SHA` + nonce only, 0 ERROR over the first ~5 min (boot events only). No rollback needed. H4 smoke and
+H5 re-test round wait for the owner. Gate at c755f56: census 86/86; corpus:sabotage 83 v + the 3 baseline x;
+root 7,123 passed (2 failed: outboundHarnessLive worktree-only + webhookSsrf loopback-TLS flake that passes alone);
+test:db 43/629. Rollback target `voice-uk-prod-00099-lkq`.
+
+Owner YES (opening batch, ~21:30 CDT): deploy unattended IF the gate is clean
 (census all land; corpus:sabotage = only the 3 baseline x; root + test:db green apart from the known worktree-only
 fail) AND the final review has no Critical left after the fix pass; any failed step -> roll back to
 `voice-uk-prod-00099-lkq` and verify. The smoke call (H4) waits for the owner.
