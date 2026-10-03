@@ -4,7 +4,8 @@ Real calls to check the five batch-2 fixes on the deployed build. **5 calls, ~40
 your US handset **+1 469 933 8887**; the business line is **+1 817 601 1171** (Digile US test tenant `2083c6a4`).
 I send this script in its OWN message and fire nothing until you say **"ready"**.
 
-**Build:** the Section H revision (see `2026-09-24-outbound-part1-golive-commands.md`, Section H [AS RUN]).
+**Build:** `voice-uk-prod-00100-nzn` @ `c755f56` (Section H [AS RUN] of `2026-09-24-outbound-part1-golive-commands.md`,
+deployed 2026-10-03 01:44 CDT). Rollback `voice-uk-prod-00099-lkq`.
 `OUTBOUND_ENABLED` stays false; only the test campaigns dial, and only your number.
 
 ## When
@@ -12,7 +13,8 @@ I send this script in its OWN message and fire nothing until you say **"ready"**
 - **Outbound (R3, R4):** **10:00-16:00 CDT** (the campaign's Saturday window, on your clock).
 
 ## Before the first call (me, ~10 min, nothing dials)
-1. Production is the Section H revision at 100%, `OUTBOUND_ENABLED=false`, 0 ERROR since the deploy.
+1. Production is `00100-nzn` at 100%, `OUTBOUND_ENABLED=false`, 0 ERROR since the deploy. **The smoke call (Section H4)
+   comes first** -- R2 below doubles as it if nothing else has called the line since the deploy.
 2. **Which campaigns can fire today.** One outreach per contact per campaign per UTC day, and the UTC day 2026-10-03
    began at 19:00 CDT on Friday. Last night's S20 (`c488edd2`, 00:08Z), S22 (`ba18bc95`, 00:30Z) and S24 (`7cb62d32`,
    00:39Z) triggers already used today's key. **Free today: S21 (`d7766147`) and S23 (`09f175e1`)**, both able to book.
