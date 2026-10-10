@@ -1,5 +1,9 @@
 # What we are doing, and in what order
 
+> **2026-10-09: next is the first paying clients.** The current checklist, with
+> hours, is at the top of `docs/readiness.md` ("Launch checklist"). The phases
+> below are the September plan.
+
 **Written 2026-09-04**, at the close of the session that made the Live
 front-end demonstrable. It exists because `readiness.md` answers *"what does it
 take to sell this"* and `receptionist-backlog.md` answers *"what is broken and

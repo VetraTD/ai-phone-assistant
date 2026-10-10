@@ -1,7 +1,7 @@
 # What it takes to sell this
 
-> **For what we are doing next and in what order, see `docs/roadmap.md`.** This
-> page is the honest list of what selling requires; the roadmap is the sequence.
+> **Start with the Launch checklist below (2026-10-09).** It is the current list
+> for the first paying clients. For the older phase order, see `docs/roadmap.md`.
 
 
 **Written 2026-09-03**, at the close of a sitting that put ten real calls
@@ -11,6 +11,237 @@ getting answered about the wrong product.
 **This is not legal advice.** The compliance section names questions, not
 answers, and `docs/speech-to-speech-handoff.md` §10 is explicit that a
 professional is required. Nothing here substitutes for that.
+
+---
+
+## Launch checklist — first paying clients (2026-10-09, current)
+
+> **Start here.** The sections below this one were written 2026-09-03 for the
+> demo stage; where they disagree with this list, this list wins. Hours marked
+> *rough* are new estimates; the rest come from the finance guide (OneDrive
+> `VetraTD - Documents\Finance\VetraTD_Financial_Master_Guide`, Parts 7 and 13)
+> and `docs/superpowers/plans/2026-10-08-abuse-guards.md`.
+
+Checked in the code on 2026-10-09 (`feat/outbound-stage4`): no billing code,
+`users.role` never read, no deletion job, no Gemini Live reconnect (no
+`goAway` / `sessionResumption` handling), no Twilio fallback URL. Live calls do
+write transcripts now. Last real test round (2026-10-03, 5 calls): 5/5 pass.
+
+### 1. Code before the first paying client (~18–27 h)
+
+**Batch 3** = the first six items below (~15–22 h), built together, in that
+order. Plan first (~1 h, owner reviews it), in a fresh session; the plan splits
+the build into sessions of ~3–5 h (likely 5: number block; 10-min end; overflow
+guard + transfer stopgap; Twilio fallback + repeat callers; one deploy + live
+test calls last), each ending with tests passing, a commit and a starting
+message for the next. **Owner decisions 2026-10-09:**
+end calls before Google's 10-minute limit instead of reconnecting; repeat
+callers are WATCHED (alerts + block list), not automatically limited; ONE rule
+for every call the AI can't or shouldn't take: business's backup number, then
+voicemail.
+
+- [ ] **Block premium-rate and foreign numbers** for transfers, outbound and
+  texts (abuse guards task 1, ~3 h). Today any valid number is accepted as a
+  transfer number (`settingsValidation.js`) and outbound accepts any `+44`,
+  including 09 and 070. That costs $0.30 to several dollars a minute, and abuse
+  can get the one shared Twilio account suspended, which takes every client's
+  phones down. Allow `+447624` (Isle of Man mobiles). The transfer destination
+  is only ever the business's own setting (checked: never a number a caller
+  says).
+- [ ] **End calls before Google's 10-minute limit; never leave a line silent**
+  (~5–8 h incl. tests, ~$2 of test calls, ask first). Wrap-up at ~8½ min, end at
+  ~9½ (Google closed a real call at 9m49s). If the AI drops or will not start:
+  apologise, take a message, hang up. Transferred calls end after 60 min.
+  Replaces the 15-minute cap + reconnect (4–8 h, parked until long calls prove
+  common). Evidence: call CAdfeb9d sat silent for 50 minutes after Gemini closed,
+  and those minutes count toward the client's usage. Customers are told "calls
+  end at 10 minutes".
+- [ ] **Gemini overflow guard + alert** (2–3 h, rough; added 2026-10-09, owner
+  approved for batch 3). Count the Live calls in progress across all clients;
+  near the Gemini limit (~6 on Tier 2, see section 2), a new caller is forwarded
+  to the business's own number, or voicemail if nobody answers, instead of
+  risking every call in progress. Alert the owner when Gemini refuses a session.
+  Why: over the per-minute token limit Google refuses work for that minute.
+  Checked in code: a refused connect hangs up after a second or two with no
+  message (`live_connect_failed` → `finish()` closes the Twilio socket, and
+  nothing follows `<Connect>`); a call cut mid-way sits silent (`onclose` only
+  logs). Which shape Google uses is unknown — never hit.
+- [ ] **Twilio fallback on every number** (2–3 h, rough): if our server is down,
+  ring the business's own phone, then take a voicemail if nobody answers — never
+  Twilio's "application error" message, which is what a caller hears today. It
+  must be hosted by Twilio (a fallback URL to a TwiML Bin or Twilio Function), not
+  by our server, or it dies with it. **Loop trap:** it must NOT ring the line the
+  business forwards to us (forward-all bounces straight back; forward-on-no-answer
+  bounces back after the rings). Onboarding asks for a "number to ring if we're
+  down" that does not forward to us (owner's mobile, a direct line); the transfer
+  number has the same rule. Nothing in the code sets a fallback URL; check the
+  Twilio console too.
+- [ ] **Watch repeat callers, don't block them** (~1 h). Alert us when one caller
+  uses more than 30 AI minutes at one business in a day, or one number calls more
+  than 30 times a day across all clients. A block list we control: a blocked
+  number is refused before Twilio picks up (`<Reject>`, $0). Automatic limits
+  (designed 2026-10-09: 30 AI min per caller per business per day, adjustable,
+  trusted numbers; ~30 calls/day platform-wide; over a limit → business, then
+  voicemail; never count the business's own number) only if the alerts show
+  real abuse. Worst case without them: a prankster ~$40/day; a bot ~$80/hour
+  while it lasts (bounded by the 10-minute end and the overflow guard).
+- [ ] **Transfer loop guard + unanswered-transfer stopgap** (~2–3 h; owner
+  approved both 2026-10-10). Loop: if the transfer number forwards back to us,
+  the AI answers its own transfer, transfers again, and so on until the caller
+  hangs up (exists today). A call that reaches the business from the same caller
+  *while our transfer of that caller is still ringing* is our own transfer
+  bouncing back: refuse it. Stopgap: today the inbound transfer is a bare `<Dial>`
+  (`lib/voice/live/index.js` `redialForTransfer`, ~7332): no `timeout`, no
+  `action`, nothing after it, so an unanswered transfer rings ~30 s and the call
+  just ends (or lands in the staff phone's own voicemail). Stopgap: `timeout="20"`
+  + an `action` that, unless the dial completed, plays "Sorry, nobody could get to
+  the phone, please leave a message after the tone" and reuses the existing
+  `/twilio/voicemail` recording path; a bounced transfer is refused, so it lands
+  here too. The full warm transfer (section 3) reuses this `action`.
+- [ ] **Deploy the current dashboard** (2–3 h, rough). The live dashboard backend
+  is from 2026-09-08. Hide the outbound-only setting cards first.
+- [ ] **Merge `feat/outbound-stage4` into `main`, then shut down Railway and
+  Supabase** once nothing points at them (1–2 h, rough). Production is built
+  from this branch, 283 commits ahead of `main`. `main` still has backlog O1
+  (unauthenticated endpoints that spend money); if Railway still runs `main`,
+  they are open on the internet.
+- [ ] Before outbound is switched on: **outbound daily cap, pacing and spike
+  alert** (abuse guards task 3, ~3 h).
+
+### 2. Owner actions before the first paying client (some take weeks; start now)
+
+- [ ] **The Google Cloud free trial ends 2026-11-18.** Check in the Console that
+  billing is a full paid account; a trial ending suspends the projects and every
+  call. ~15 min. The most urgent date on this list.
+- [ ] Twilio country limits (voice and SMS) on both accounts. ~10 min.
+- [ ] **Daily spend alert on the Gemini project** (AI Studio "VetraTD"; ~10 min).
+  The safety net for a bot attack, since repeat callers are watched, not blocked.
+- [x] **Gemini Live limit — read 2026-10-09: about 6 calls at once.** Production
+  uses AI Studio (`LIVE_SURFACE=aistudio`, `gemini-3.8-live`, secret `gemini-api-key`);
+  the key's project is AI Studio project **"VetraTD", Tier 2**, outside every GCP
+  project `vetratd@gmail.com` can see. Gemini 3.8 Live limits there: requests/min and
+  /day Unlimited, **tokens/min 400K**; peak in 28 days 68.29K. One call uses ~68K
+  tokens a minute, because the ~12.4K-token instructions are re-sent ~5.5 times a
+  minute (measured on 97 real calls; see the finance guide). **400K ÷ 68K ≈ 6 calls at
+  once across ALL clients**, inbound and outbound together; the 7th gets refused,
+  and today a refusal is silence (see the long-call fix above). Our own Cloud Run
+  cap (maxScale 2 × concurrency 10 ≈ 20 calls) is not the binding one. Rough fit:
+  the first ~10–15 clients with margin (25 clients ≈ 5–7 at the busy hour).
+- [ ] **Raise the Gemini ceiling before ~10 clients.** Tier 3 (read 2026-10-09 via
+  "Compare tiers") lifts Gemini 3.8 Live to **10M tokens/min ≈ 147 calls at once**,
+  so Tier 3 is the real fix. It is spend-based (check the Docs link on the Rate
+  Limit page for the current rule; the AI Studio Spend page shows the total so far).
+  At ~$79 of Gemini per client a month (250 calls × $0.32), it arrives roughly as
+  clients do. Until then: (a) watch for more than ~8–10 clients before Tier 3;
+  (b) if that happens first, trim the instructions (savings #1, 8–12 h; ~12.4K →
+  ~6K tokens doubles the Tier 2 ceiling to ~12 calls) or ask Google for a higher
+  limit. After Tier 3 the binding cap becomes our Cloud Run setting (~20 calls),
+  a settings change plus database connections. (c) Optional: move the key into
+  `vetra-uk-edc8ca` (~30 min) so production does not depend on a personal account.
+  Last 30 days: 0 Live connection failures or quota refusals (calls ran one at a
+  time); 2 Vertex 429s on 2026-09-12 cost one call its post-call summary.
+- [ ] Form VetraTD LLC → EIN → business bank account → Stripe (invoice by hand at
+  first) with Stripe Tax. Accountant: UK reverse-charge VAT, and a Texas sales
+  tax permit before the first Texas client.
+- [ ] Insurance quotes: professional indemnity and cyber. ~$500 cash buffer.
+- [ ] Legal pack: terms (drafted in guide Part 7); DPA template (Claude drafts,
+  2–3 h); accept Google Cloud, Twilio and Deepgram data processing terms; a DPIA
+  template for clinic clients (health data); ask a lawyer whether a UK Art. 27
+  representative is needed.
+- [ ] support@vetratd.com as a real inbox someone reads, and a written "when it
+  breaks" plan: who answers, how fast, and how a client forwards their line
+  back to themselves.
+- [ ] UK numbers need Twilio regulatory approval (business details and proof of
+  address), which can take days.
+- [ ] Digile: sign the pilot agreement; ask which booking systems their clinics
+  use.
+
+### 3. First month — before about 5–10 clients (~37–54 h)
+
+- [ ] **Owner/Staff roles** (8–12 h) before any business gets a second login.
+  Today every login can change the transfer number.
+- [ ] **Deletion job** (3–4 h) before the privacy page promises retention
+  periods.
+- [ ] **"Going nowhere" and sales-call handling** — first item after batch 3
+  (~4–6 h + ~$1–3 of test calls; owner approved 2026-10-09). The receptionist may
+  politely end sales pitches, abuse/pranks and recordings/bots; per-business
+  sales-call setting (decline politely, or take a message); tests must show real
+  callers (confused, elderly, bad line, long genuine problem) are never cut off.
+  Add the free US caller-ID verification signal at the same time.
+- [ ] **Warm transfer** (~10–14 h, rough, + ~$3 of test calls, ask first; owner
+  approved 2026-10-10), right after "going nowhere"; builds on the batch 3 stopgap. (1) The receptionist
+  writes a one-line summary as part of the transfer; staff hear it before the
+  caller is connected ("Call from Jane about moving Thursday's appointment. Press
+  1 to take it.") and it is saved on the call. Pressing 1 proves a person
+  answered, not a voicemail; a business may turn it off. (2) Nobody presses 1
+  within ~20 s (no answer, busy, voicemail, bounced) → the caller returns to a
+  new receptionist session that knows what was said and why it transferred:
+  asked for a person → "nobody's free, I may be able to help, or take a
+  message"; task it couldn't do → takes a message for a callback; urgent → the
+  business's urgent rules. (3) Messages go through the existing take-a-message
+  path (`capabilities/messages.js`: dashboard + email to the business + text to
+  the caller), not voicemail. Outbound already has a basic whisper and
+  `<Dial action>` (`lib/outbound/doorRoutes.js`) to reuse.
+- [ ] **Billing basics** (5–7 h, rough): a plan per business, minutes used vs
+  included in the dashboard, and a stored `billable_seconds` that leaves out
+  spam (`/api/usage` sums every call today). Until then, invoice by hand from
+  the dashboard's usage figure. **Minutes rule (owner 2026-10-10, replaces the
+  10-09 free allowance and the 10-08 "transfers count"):** calls that never
+  reached the receptionist (our outage, Gemini busy, blocked) don't count;
+  transferred talk time counts at a third (3 min with staff = 1 plan minute).
+  Needs the transfer start time recorded (~1 h). Why a third: a transferred
+  minute costs ~3–5¢; beyond the plan it earns overage ÷ 3 (25¢/18¢/13¢/10¢), so
+  never below cost; inside the plan a switchboard client (~1 min receptionist +
+  ~5 min staff) costs ≤ the 13¢/min the prices assume. Only a whole plan of long
+  (10+ min) transfers to mobiles costs more: at most ~$7 Core, $24 Pro, $60 Scale
+  a month. A half was rejected: it costs a client at their limit up to ~$19/month
+  to guard against that rare case.
+- [ ] **30-day cancelled mode + setup question** (1–2 h; owner approved
+  2026-10-09). At setup record how the business connects (A: AI as backup on no
+  answer; B: AI answers everything; C: our number published) and a backup number
+  that does not forward to us. On cancel, AI off for 30 days: A → voicemail
+  emailed to them; B → forward to their backup number; C → forward to their new
+  number or help them move it; plus "turn off forwarding" instructions and a test
+  call. Release the number after 30 days or once forwarding is proven off; never
+  release a number calls still forward to.
+- [ ] **Website** (4–6 h, rough), after the pilot passes: `feat/site-overhaul`
+  live with prices (its copy tests refuse prices today), the contact form fixed
+  (it posts to a dead Railway host), a registered address added.
+- [ ] **Load test** (2–3 h, ~$2–5, ask first): how many calls it takes at once
+  has never been measured (backlog O7).
+
+### 4. Not blockers — after the first clients
+
+- **Gemini cost savings** (~25–40 h including a test round, ~$15): trim the
+  prompt, cut wasted turns, shorter replies, screen junk calls, Deepgram shadow.
+  Margin 81% → ~85%. Do it once real calls show the real mix. It comes after
+  the long-call fix: the savings are ~$0.05–0.11 a call, while the bug can bill
+  50 silent minutes on one call. (The finance guide's Part 13 still lists the
+  savings as stage 1.)
+- **Booking-system connections** (Google Calendar, Cliniko, Pabau, Dentally…):
+  the most common sales objection, not a launch blocker. Build the one Digile
+  and the first clients ask for; Google Calendar needs Google's review (weeks),
+  so start that clock once it is picked.
+- **Self-serve setup:** after ~10 setups by hand; their questions become the
+  questionnaire. Includes (added 2026-10-09, owner approved):
+  - **Guided forwarding page** (part of ~6–10 h, rough): a Twilio number lookup
+    (~1 cent) names their phone company, and the page shows that company's exact
+    steps (e.g. BT desk phone: dial `*61*<our number>#` for "when unanswered").
+    We cannot set forwarding for them: it is a code dialled from their own phone
+    or a setting behind their phone company's login.
+  - **"Test my forwarding" button** (same estimate): we ring their public number
+    from one of ours and check it reaches their receptionist (a few cents). Used
+    at setup (forwarding works), at cancellation (forwarding is off), and as a
+    monitor: a business that forwards every call but gets none for ~2 days →
+    alert us.
+  - Until then (first ~10 clients): set forwarding up together on a ~10-minute
+    call, send written steps, make a test call.
+- **Moving a client's number to us (porting), later:** their public number moves
+  to our Twilio account, so we route everything (ring staff first, then the AI;
+  pause; out-of-hours) with no forwarding codes and no loop trap. Costs: paperwork,
+  1–4 weeks, a small risk of a gap while it moves, and moving it back out on
+  cancellation. Kept off the website until built.
+- **US clients:** A2P 10DLC registration before texting US callers (weeks).
 
 ---
 
