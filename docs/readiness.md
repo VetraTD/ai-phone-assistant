@@ -27,9 +27,9 @@ Checked in the code on 2026-10-09 (`feat/outbound-stage4`): no billing code,
 `goAway` / `sessionResumption` handling), no Twilio fallback URL. Live calls do
 write transcripts now. Last real test round (2026-10-03, 5 calls): 5/5 pass.
 
-### 1. Code before the first paying client (~18–27 h)
+### 1. Code before the first paying client (~19–28 h)
 
-**Batch 3** = the first six items below (~15–22 h), built together, in that
+**Batch 3** = the first six items below (~16–23 h), built together, in that
 order. Plan first (~1 h, owner reviews it), in a fresh session; the plan splits
 the build into sessions of ~3–5 h (likely 5: number block; 10-min end; overflow
 guard + transfer stopgap; Twilio fallback + repeat callers; one deploy + live
@@ -85,7 +85,7 @@ voicemail.
   voicemail; never count the business's own number) only if the alerts show
   real abuse. Worst case without them: a prankster ~$40/day; a bot ~$80/hour
   while it lasts (bounded by the 10-minute end and the overflow guard).
-- [ ] **Transfer loop guard + unanswered-transfer stopgap** (~2–3 h; owner
+- [ ] **Transfer loop guard + unanswered-transfer stopgap** (~3–4 h; owner
   approved both 2026-10-10). Loop: if the transfer number forwards back to us,
   the AI answers its own transfer, transfers again, and so on until the caller
   hangs up (exists today). A call that reaches the business from the same caller
@@ -97,7 +97,17 @@ voicemail.
   + an `action` that, unless the dial completed, plays "Sorry, nobody could get to
   the phone, please leave a message after the tone" and reuses the existing
   `/twilio/voicemail` recording path; a bounced transfer is refused, so it lands
-  here too. The full warm transfer (section 3) reuses this `action`.
+  here too. The full warm transfer (section 3) reuses this `action`. That path
+  (`lib/degradedVoicemail.js`) files a dashboard message with the recording link,
+  emails the business and texts the caller; the line is spoken in Twilio's voice
+  (Polly Amy UK / Joanna US), not the receptionist's (owner accepted 2026-10-10;
+  a pre-recorded clip in the receptionist's voice, ~1 h, was skipped because the
+  warm transfer replaces it). **Per-business choice (owner approved 2026-10-10,
+  +~1 h):** "if nobody picks up a transferred call": *take a message for us*
+  (default, the above) or *send it to our own voicemail* (ring ~45 s so their
+  voicemail answers; if nothing answers, fall back to the message). Set by us at
+  onboarding with the setup questions; no dashboard screen yet. Option 2 means no
+  dashboard record, no caller text, and (in the warm transfer) "press 1" off.
 - [ ] **Deploy the current dashboard** (2–3 h, rough). The live dashboard backend
   is from 2026-09-08. Hide the outbound-only setting cards first.
 - [ ] **Merge `feat/outbound-stage4` into `main`, then shut down Railway and
