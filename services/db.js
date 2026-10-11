@@ -1898,7 +1898,7 @@ export async function exportCallerData(businessId, phone) {
     `SELECT id, twilio_call_sid, caller_number, twilio_number, status, started_at, ended_at,
             duration_seconds, summary, sentiment, outcome,
             direction, campaign_id, campaign_version, outreach_id, attempt_id, contact_id,
-            answered_by, outcome_code, answers
+            answered_by, outcome_code, answers, transferred_at
        FROM calls
       WHERE business_id = $1 AND ${phoneMatch("caller_number", 2)}
       ORDER BY started_at ASC`,

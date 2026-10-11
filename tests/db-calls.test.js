@@ -37,13 +37,13 @@ afterEach(() => {
 });
 
 describe("markCallTransferred", () => {
-  it("issues one unconditional update keyed by the call sid", async () => {
+  it("issues one update keyed by the call sid, stamping transferred_at = COALESCE(transferred_at, now())", async () => {
     const { markCallTransferred } = await import("../services/db.js");
 
     await markCallTransferred("CA123");
 
     expect(allSql()).toEqual([
-      "UPDATE calls SET status = 'transferred' WHERE twilio_call_sid = $1",
+      "UPDATE calls SET status = 'transferred', transferred_at = COALESCE(transferred_at, now()) WHERE twilio_call_sid = $1",
     ]);
     expect(params()).toEqual(["CA123"]);
   });
