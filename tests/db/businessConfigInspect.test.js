@@ -16,9 +16,10 @@ const ADMIN_URL = process.env.DATABASE_URL;
 const PROBE_ROLE = "bci_probe";
 const PROBE_PASS = "probe_only";
 
-const FULL = { id: "6b6b0000-0000-4000-8000-000000000001", phone: "+441372880001" };
-const BARE = { id: "6b6b0000-0000-4000-8000-000000000002", phone: "+441372880002" };
+const FULL = { id: "6c6c0000-0000-4000-8000-000000000001", phone: "+441372880001" };
+const BARE = { id: "6c6c0000-0000-4000-8000-000000000002", phone: "+441372880002" };
 const OURS = [FULL.phone, BARE.phone];
+const OUR_IDS = [FULL.id, BARE.id];
 
 let admin;
 let probeUrl;
@@ -39,7 +40,7 @@ beforeAll(async () => {
   await admin.query(`GRANT USAGE ON SCHEMA public TO ${PROBE_ROLE}`);
   await admin.query(`ALTER FUNCTION app_lookup_business_by_phone(text) OWNER TO ${PROBE_ROLE}`);
 
-  await admin.query(`DELETE FROM businesses WHERE phone_number = ANY($1)`, [OURS]);
+  await admin.query(`DELETE FROM businesses WHERE phone_number = ANY($1) OR id = ANY($2)`, [OURS, OUR_IDS]);
   await admin.query(
     `INSERT INTO businesses (id, name, phone_number, transfer_phone_number, main_phone, transfer_policy,
                              live_voice, locale, outbound_enabled, transfer_no_answer)
@@ -60,7 +61,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!admin) return;
-  await admin.query(`DELETE FROM businesses WHERE phone_number = ANY($1)`, [OURS]).catch(() => {});
+  await admin.query(`DELETE FROM businesses WHERE phone_number = ANY($1) OR id = ANY($2)`, [OURS, OUR_IDS]).catch(() => {});
   await admin.query(`ALTER FUNCTION app_lookup_business_by_phone(text) OWNER TO vetra`).catch(() => {});
   await admin.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${PROBE_ROLE}`).catch(() => {});
   await admin.query(`REVOKE ALL ON SCHEMA public FROM ${PROBE_ROLE}`).catch(() => {});
@@ -107,11 +108,14 @@ d("db-inspect --business config read-back", () => {
     const [row] = await inspect(FULL.phone);
     expect(row.id).toBe(FULL.id);
     expect(row.name).toBe("Full Config Co");
-    expect(row).toHaveProperty("timezone");
-    expect(row).toHaveProperty("has_general_info");
-    expect(row).toHaveProperty("notifications_enabled");
-    expect(row).toHaveProperty("general_info_mentions_price");
-    expect(row).toHaveProperty("has_notification_phone");
+    expect(row.phone_number).toBe(FULL.phone);
+    expect(row.timezone).toBe("America/Chicago");
+    expect(row.has_general_info).toBe(false);
+    expect(row.general_info_chars).toBe(0);
+    expect(row.general_info_mentions_price).toBeNull();
+    expect(row.notifications_enabled).toBe(true);
+    expect(row.has_notification_email).toBe(false);
+    expect(row.has_notification_phone).toBe(false);
   });
 
   it("never lets a whole number leave the database", async () => {
