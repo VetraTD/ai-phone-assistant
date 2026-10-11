@@ -42,7 +42,24 @@ export class FakeSocket extends EventEmitter {
   }
 }
 
-export function fakeLive({ connectGate } = {}) {
+/**
+ * A Twilio REST client stand-in: `client.calls(sid).update({ twiml })`. Every
+ * call is recorded in `updates` BEFORE any rejection, so a test can see the
+ * attempt even when `failWith` makes it fail.
+ */
+export function fakeTwilioClient({ failWith } = {}) {
+  const updates = [];
+  const calls = vi.fn((sid) => ({
+    update: async (params = {}) => {
+      updates.push({ sid, twiml: params.twiml });
+      if (failWith) throw failWith;
+      return {};
+    },
+  }));
+  return { calls, updates };
+}
+
+export function fakeLive({ connectGate, connectError } = {}) {
   // C1 (checkpoint-A review). `audioIn` records every caller-audio realtime
   // input, in call order -- the only way to prove "caller audio reaches Live
   // AFTER the seed" from outside index.js: `sendRealtimeInput` used to be a
@@ -53,6 +70,7 @@ export function fakeLive({ connectGate } = {}) {
   // after a `sent.clientContent` push proves ordering directly.
   const sent = { clientContent: [], toolResponses: [], audioIn: [] };
   let onmessage = null;
+  let onclose = null;
   const session = {
     sendRealtimeInput: (m) => {
       if (m?.audio) sent.audioIn.push(m.audio);
@@ -65,11 +83,19 @@ export function fakeLive({ connectGate } = {}) {
     sent,
     connect: vi.fn(async ({ callbacks }) => {
       // Final fix wave I1: a test can hold the vendor connect open (cold connect).
+      if (connectGate === "reject" || connectError) {
+        // The "AI won't start" case.
+        throw connectError ?? new Error("connect refused");
+      }
       if (connectGate) await connectGate;
       onmessage = callbacks.onmessage;
+      onclose = callbacks.onclose;
       return { session, languagePinned: true, surface: "aistudio", model: "m" };
     }),
     push: (msg) => onmessage?.(msg),
+    // Vendor closes the Live socket: reaches the session's own onclose with the
+    // shape classifyClose(e) reads.
+    close: ({ code = 1011, reason = "" } = {}) => onclose?.({ code, reason }),
   };
 }
 
@@ -173,10 +199,19 @@ export async function bootLive({
   // deps.judge), passed through only when a test sets them.
   verify,
   judge,
+  // Batch-3 S2: connect rejects (connectGate "reject" or a connectError); a
+  // Twilio client recording calls(sid).update({twiml}); the call clock's timer
+  // source; the account SID on the start frame.
+  connectError,
+  twilioClient,
+  twilioClientForAccountSid,
+  setTimer,
+  clearTimer,
+  accountSid,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
-  const live = fakeLive({ connectGate });
+  const live = fakeLive({ connectGate, connectError });
   const { deps, store } = makeFakeDeps({ seedAppointments, slotCapacity });
 
   // A MUTABLE CLOCK, not the frozen `() => 0` this helper used to inject.
@@ -201,6 +236,10 @@ export async function bootLive({
     ...(clipHoldSttTimeoutMs !== undefined ? { clipHoldSttTimeoutMs } : {}),
     ...(verify ? { verify } : {}),
     ...(judge ? { judge } : {}),
+    ...(twilioClient !== undefined ? { twilioClient } : {}),
+    ...(twilioClientForAccountSid !== undefined ? { twilioClientForAccountSid } : {}),
+    ...(setTimer !== undefined ? { setTimer } : {}),
+    ...(clearTimer !== undefined ? { clearTimer } : {}),
   });
 
   ws.deliver({
@@ -208,6 +247,7 @@ export async function bootLive({
     start: {
       callSid,
       streamSid: "MZ1",
+      ...(accountSid !== undefined ? { accountSid } : {}),
       customParameters: customParameters ?? {
         businessPhone: businessPhone || config.mainPhone,
         callerPhone,
