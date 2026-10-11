@@ -1160,15 +1160,10 @@ const SABOTAGES = [
     replace: "null; /* SABOTAGE */",
     red: [CLOCK],
   },
-  {
-    name: "hard-end-checks-closed",
-    why:
-      "The hard end stops checking whether the call is already over, so a timer that fires after finish() redirects a call that has ended (batch-3 S2).",
-    file: "lib/voice/live/index.js",
-    find: "async function onHardEnd() {\n    if (closed) return;",
-    replace: "async function onHardEnd() {\n    /* SABOTAGE */",
-    red: [CLOCK],
-  },
+  // NO row for onHardEnd's own `if (closed) return;`: it is the second layer
+  // behind callClock.stop(), and a sabotage of it alone stays green because the
+  // clock's `stopped` flag silences the timer first (hand-verified 2026-10-11,
+  // Task B). Sabotaging both needs two spans, which a row cannot hold.
   {
     name: "clock-config-under-google-limit",
     why:
