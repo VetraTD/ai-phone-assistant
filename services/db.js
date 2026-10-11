@@ -376,6 +376,7 @@ const AFTER_HOURS_POLICIES = ["take_message", "offer_callback", "book_later", "t
 
 /** Valid transfer policy values. */
 const TRANSFER_POLICIES = ["always", "business_hours_only", "never"];
+const TRANSFER_NO_ANSWER = ["take_message", "own_voicemail"];
 
 /**
  * Build a normalised config object from a business row.
@@ -505,6 +506,7 @@ export function loadConfig(business, capabilityRows = null) {
       recordingDisclosureText: null,
       afterHoursPolicy: "take_message",
       transferPolicy: "always",
+      transferNoAnswer: "take_message",
       languagesSpoken: ["en"],
       customInstructions: null,
       voiceProvider: "elevenlabs",
@@ -553,6 +555,9 @@ export function loadConfig(business, capabilityRows = null) {
     recordingDisclosureText: business.recording_disclosure_text || null,
     afterHoursPolicy,
     transferPolicy,
+    transferNoAnswer: TRANSFER_NO_ANSWER.includes(business.transfer_no_answer)
+      ? business.transfer_no_answer
+      : "take_message",
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     customInstructions: business.custom_instructions || null,
     voiceProvider: business.voice_provider || "elevenlabs",
@@ -903,7 +908,7 @@ export async function completeCall(callSid, status, durationSeconds) {
  */
 export async function markCallTransferred(callSid) {
   if (!pool) return;
-  const res = await q(`UPDATE calls SET status = 'transferred' WHERE twilio_call_sid = $1`, [callSid]);
+  const res = await q(`UPDATE calls SET status = 'transferred', transferred_at = COALESCE(transferred_at, now()) WHERE twilio_call_sid = $1`, [callSid]);
   if (res.error) {
     log.error("db_error", { callSid, operation: "markCallTransferred", error: res.error.message });
     captureException(new Error(res.error.message), { table: "calls", op: "update_transferred" });

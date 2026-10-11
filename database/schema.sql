@@ -56,6 +56,9 @@ CREATE TABLE businesses (
   recording_disclosure_text    text,
   after_hours_policy           text DEFAULT 'take_message',
   transfer_policy              text DEFAULT 'always',
+  -- What happens when nobody answers a transfer (migration 052).
+  transfer_no_answer           text NOT NULL DEFAULT 'take_message'
+    CHECK (transfer_no_answer IN ('take_message', 'own_voicemail')),
   languages_spoken             jsonb DEFAULT '["en"]',
   custom_instructions          text,
   -- Notification settings (migration 006) — read/written by
@@ -140,7 +143,9 @@ CREATE TABLE calls (
   contact_id       uuid,
   answered_by      text,
   outcome_code     text,
-  answers          jsonb
+  answers          jsonb,
+  -- When the call was first transferred to a person (migration 052).
+  transferred_at   timestamptz
 );
 
 -- 4. Call transcripts (conversation turns)

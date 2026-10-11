@@ -282,3 +282,16 @@ describe("validateCapabilityConfig", () => {
     }
   });
 });
+
+describe("loadConfig — transferNoAnswer (migration 052)", () => {
+  it("passes own_voicemail through", () => {
+    expect(loadConfig({ ...BUSINESS, transfer_no_answer: "own_voicemail" }, []).transferNoAnswer).toBe("own_voicemail");
+  });
+  it("unknown or missing falls back to take_message", () => {
+    expect(loadConfig({ ...BUSINESS, transfer_no_answer: "maybe" }, []).transferNoAnswer).toBe("take_message");
+    expect(loadConfig(BUSINESS, []).transferNoAnswer).toBe("take_message");
+  });
+  it("null business defaults to take_message", () => {
+    expect(loadConfig(null).transferNoAnswer).toBe("take_message");
+  });
+});

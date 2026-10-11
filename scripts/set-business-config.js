@@ -88,14 +88,39 @@ const FIELDS = [
   // untyped and is cast to the column, and the read-back compares String() on both
   // sides, so a stored `true` matches a written "true".
   "sms_followup_enabled",
+  // What happens when nobody picks up a transfer: take_message (default, ring 20 s)
+  // or own_voicemail (ring 45 s, message as the fallback). Migration 052.
+  "transfer_no_answer",
+  // The ONE number used for transfers (and later overflow / server-down fallback).
+  // Must reach a person directly; the dial-time price check is a later session.
+  "transfer_phone_number",
 ];
+
+/**
+ * Per-field value checks, run BEFORE any write. field -> (value) => error | null.
+ * Messages name the field and the allowed shape and never echo a whole number.
+ */
+const E164 = /^\+[1-9]\d{6,14}$/;
+const last4 = (v) => {
+  const d = String(v).replace(/\D/g, "");
+  return d.length >= 4 ? `...${d.slice(-4)}` : "(too short)";
+};
+const VALIDATORS = {
+  transfer_no_answer: (v) =>
+    v === "take_message" || v === "own_voicemail" ? null : "must be exactly take_message or own_voicemail",
+  transfer_phone_number: (v) =>
+    E164.test(v) ? null : `must be E.164, + then 7-15 digits, no spaces or formatting (got a value ending ${last4(v)})`,
+};
+function refusal(field, value, flag) {
+  const err = VALIDATORS[field]?.(value);
+  return err ? `Refusing: ${flag} ${field} ${err}.` : null;
+}
 
 const TO = argOf("to");
 const FROM = argOf("from");
 const COPY = (argOf("copy") || "").split(",").map((s) => s.trim()).filter(Boolean);
 const CONFIRM = has("confirm");
 
-const E164 = /^\+[1-9]\d{6,14}$/;
 if (!TO || !E164.test(TO)) {
   console.error("Refusing: --to must be an E.164 business phone number.");
   process.exit(1);
@@ -134,6 +159,11 @@ for (let i = 0; i < argv.length; i += 1) {
   }
   if (!decoded) {
     console.error(`Refusing: --set ${field} decoded to an empty string.`);
+    process.exit(1);
+  }
+  const bad = refusal(field, decoded, "--set");
+  if (bad) {
+    console.error(bad);
     process.exit(1);
   }
   SETS[field] = decoded;
@@ -216,6 +246,11 @@ try {
       // caller hears it.
       if (f in changes) continue;
       changes[f] = source[f] === null || source[f] === undefined ? null : String(source[f]);
+      const bad = changes[f] === null ? null : refusal(f, changes[f], "--copy");
+      if (bad) {
+        console.error(bad);
+        process.exit(1);
+      }
     }
   }
 
