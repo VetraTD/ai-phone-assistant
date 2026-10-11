@@ -1154,7 +1154,7 @@ const SABOTAGES = [
   {
     name: "clock-stopped-in-finish",
     why:
-      "finish() stops stopping the call clock. A call that ended at 9:20 (a transfer, a hang-up) keeps its 9:30 timer, and the hard end overwrites the finished call's TwiML (batch-3 S2, review focus 1).",
+      "finish() stops stopping the call clock. The finished call's wrap-up, goodbye and hard-end timers stay armed (and their handles uncleared) after a transfer or hang-up. With onHardEnd's closed check in place nothing visible leaks, so the test that goes red is the structural one: the clock's timers must be cleared once the call is over (batch-3 S2, review focus 1).",
     file: "lib/voice/live/index.js",
     find: "callClock?.stop();",
     replace: "null; /* SABOTAGE */",
@@ -1163,7 +1163,27 @@ const SABOTAGES = [
   // NO row for onHardEnd's own `if (closed) return;`: it is the second layer
   // behind callClock.stop(), and a sabotage of it alone stays green because the
   // clock's `stopped` flag silences the timer first (hand-verified 2026-10-11,
-  // Task B). Sabotaging both needs two spans, which a row cannot hold.
+  // Task B). It is the ONLY guard when finish() throws part-way (closed is set
+  // before the stop() line, so a throw in between leaves the clock running).
+  // Sabotaging both needs two spans, which a row cannot hold.
+  {
+    name: "time-note-waits-for-tool-continuation",
+    why:
+      "The turn end that follows a tool call stops deferring a due time note. Gemini sends turnComplete ~17 ms after the call, after a fast tool's response, so the note lands while Live is generating the continuation and chops it (batch-3 S2, review I1).",
+    file: "lib/voice/live/index.js",
+    find: "    toolCallSinceTurnEnd = true;",
+    replace: "    toolCallSinceTurnEnd = false; /* SABOTAGE */",
+    red: [CLOCK],
+  },
+  {
+    name: "wrap-note-respects-question-hold",
+    why:
+      "The wrap-up note stops waiting while an end_call is armed-but-held behind a question. The note provokes a reply that spends the hold, and a reply that ends without a question arms the hang-up under the unanswered one (batch-3 S2, review I2; CA2556d43d).",
+    file: "lib/voice/live/index.js",
+    find: '      if (note.kind === "wrap" && endCallArmed) return;',
+    replace: "      /* SABOTAGE */",
+    red: [CLOCK],
+  },
   {
     name: "clock-config-under-google-limit",
     why:

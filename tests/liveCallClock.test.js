@@ -8,10 +8,11 @@ import {
   WRAP_UP_NOTE,
   GOODBYE_NOTE,
   NOTE_FORCE_AFTER_MS,
+  HARD_END_REDIRECT_TIMEOUT_MS,
   resolveClockConfig,
   createCallClock,
 } from "../lib/voice/live/callClock.js";
-import { bootLive, counters, fakeLive, fakeTwilioClient } from "./helpers/liveBoot.js";
+import { bootLive, counters, fakeDb, fakeLive, fakeTwilioClient } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
 
 const DEFAULTS = { wrapUpSec: 510, goodbyeSec: 540, hardEndSec: 570 };
@@ -611,14 +612,261 @@ describe("the call clock inside a Live session", () => {
     expect(c.s.ws.readyState).toBe(3);
   });
 
-  it("12. an end_call the LVX132 ask-gate refused after the goodbye does not stop the hard end", async () => {
-    const { s, sch, tw } = await bookedCall();
+  it("12. (S1/I3) an end_call the ask-gate refused AFTER the goodbye was delivered still ends the call", async () => {
+    const c = await bookedCall();
+    const { s, sch, tw, timeNotes } = c;
+    await s.assistantTurn("You're all set for Friday at three thirty.");
+    await s.assistantSays("Our office is closed on weekends");
+    await fire(s, sch, T.GOODBYE);
+    await s.turnEnds();
+    expect(timeNotes(GOODBYE_NOTE)).toHaveLength(1);
+
     const [res] = await s.callTool("end_call", {});
     expect(res.response.success).toBe(false);
     expect(res.response.message).toMatch(/anything else/i);
+    await s.assistantTurn("Is there anything else I can help with?");
+
+    await fire(s, sch, T.HARD);
+    // Either the armed exit (still waiting on its mark) was left alone and then
+    // finished the call, or the hard end did: never two updates, always closed.
+    echo(c, "live-exit-end_call");
+    await vi.advanceTimersByTimeAsync(3000);
+    await s.settle();
+    expect(tw.updates.length).toBeLessThanOrEqual(1);
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("12b. a refused end_call with the goodbye never delivered: the hard end still ends the call", async () => {
+    const { s, sch, tw } = await bookedCall();
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
     await fire(s, sch, T.HARD);
     expect(tw.updates).toHaveLength(1);
     expect(tw.updates[0].twiml).toContain("<Hangup/>");
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("I1. a fast tool's continuation is not cut: the turn end that follows a tool call defers the wrap-up", async () => {
+    const { s, sch, timeNotes } = await bootClock();
+    await s.assistantSays("Our office opens at nine tomorrow");
+    await fire(s, sch, T.WRAP);
+    // The tool finishes and its response is sent BEFORE the model's turnComplete
+    // arrives (3.8: ~17 ms after the call). Live is already generating the
+    // continuation, so a note now would chop it.
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    const cap = captureEvents("live_time_note_deferred");
+    try {
+      await s.turnEnds();
+    } finally {
+      cap.restore();
+    }
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(0);
+    expect(cap.lines[0]).toMatchObject({ kind: "wrap", reason: "tool_continuation" });
+
+    // The continuation's own turn end is a real pause.
+    await s.assistantTurn("That day is fully open.");
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(1);
+  });
+
+  it("I1b. the latch is spent at every turn end: a tool call two turns ago defers nothing", async () => {
+    const { s, sch, timeNotes } = await bootClock();
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn("That day is fully open.");
+    await s.assistantTurn("Anything else I can do?");
+    await fire(s, sch, T.WRAP);
+    await s.turnEnds();
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(1);
+  });
+
+  it("I2. the wrap-up does not spend a 'question outranks a hang-up' hold", async () => {
+    const c = await bookedCall();
+    const { s, sch, marks, timeNotes } = c;
+    await s.assistantSays(ASKED);
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(true);
+    await fire(s, sch, T.WRAP);
+    await s.turnEnds();
+    // The hold is in force (the model just asked the caller a question): no
+    // exit, and no wrap-up note to provoke a reply that could end without one.
+    expect(marks).not.toContain("live-exit-end_call");
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(0);
+  });
+
+  it("I2b. a forced wrap-up is dropped, with a reason, while a hang-up is armed-but-held", async () => {
+    const c = await bookedCall();
+    const { s, sch, timeNotes } = c;
+    await s.assistantSays(ASKED);
+    await s.callTool("end_call", {});
+    await fire(s, sch, T.WRAP);
+    const cap = captureEvents("live_time_note_skipped");
+    try {
+      sch.timers.filter((t) => t.ms === T.FORCE && !t.cleared).forEach((t) => t.fn());
+    } finally {
+      cap.restore();
+    }
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(0);
+    expect(cap.lines[0]).toMatchObject({ kind: "wrap", reason: "end_call_armed" });
+  });
+
+  it("S2. the goodbye is skipped when the SILENCE LADDER already said its goodbye", async () => {
+    const { s, sch, timeNotes } = await bootClock();
+    const audio = Buffer.alloc(24000 * 0.4 * 2);
+    for (let i = 0; i < audio.length / 2; i++) audio.writeInt16LE(i % 2 ? 8000 : -8000, i * 2);
+    // The greeting reaching the caller arms the ladder; then 21 s of silence.
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: audio.toString("base64") } }] } } });
+    await s.feed(21_000);
+    expect(counters().silence_hangups).toBe(1);
+
+    const cap = captureEvents("live_time_note_skipped");
+    try {
+      await fire(s, sch, T.GOODBYE);
+    } finally {
+      cap.restore();
+    }
+    expect(timeNotes(GOODBYE_NOTE)).toHaveLength(0);
+    expect(cap.lines[0]).toMatchObject({ kind: "goodbye", reason: "exit_after_turn" });
+  });
+
+  it("M6. a goodbye skipped at set time takes the pending wrap-up and its force timer with it", async () => {
+    const c = await bookedCall();
+    const { s, sch, timeNotes } = c;
+    await s.assistantTurn(ASKED);
+    await s.callerSays("No, that's everything.");
+    await s.assistantSays("Mid sentence");
+    await s.callTool("end_call", {});
+    await fire(s, sch, T.WRAP); // pending, with a force timer
+    await s.turnEnds(); // the exit arms; the wrap stays pending behind it
+    expect(sch.timers.filter((t) => t.ms === T.FORCE && !t.cleared)).toHaveLength(1);
+    await fire(s, sch, T.GOODBYE); // skipped: an exit is queued
+    expect(sch.timers.filter((t) => t.ms === T.FORCE && !t.cleared)).toHaveLength(0);
+    await s.assistantTurn("Goodbye.");
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(0);
+  });
+
+  it("M2. a redirect that never answers is abandoned after the bound, and the call still ends", async () => {
+    const hung = {
+      updates: [],
+      calls: (sid) => ({
+        update: (p) => {
+          hung.updates.push({ sid, twiml: p.twiml });
+          return new Promise(() => {});
+        },
+      }),
+    };
+    const { s, sch } = await bootClock({ twilioClient: hung });
+    const cap = captureEvents("live_max_duration_redirect_failed");
+    try {
+      await fire(s, sch, T.HARD);
+      expect(s.ws.readyState).toBe(1);
+      const bound = sch.timers.filter((t) => t.ms === HARD_END_REDIRECT_TIMEOUT_MS && !t.cleared);
+      expect(bound).toHaveLength(1);
+      bound[0].fn();
+      await s.settle();
+    } finally {
+      cap.restore();
+    }
+    expect(cap.lines).toHaveLength(1);
+    expect(cap.lines[0].message).toMatch(/timed out/);
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("M3. a transfer cannot start while the hard end's redirect is in flight", async () => {
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const slow = {
+      updates: [],
+      calls: (sid) => ({
+        update: async (p) => {
+          slow.updates.push({ sid, twiml: p.twiml });
+          await gate;
+          return {};
+        },
+      }),
+    };
+    const c = await bootClock({ twilioClient: slow });
+    await fire(c.s, c.sch, T.HARD);
+    expect(slow.updates).toHaveLength(1);
+
+    const cap = captureEvents("live_exit_refused_hard_end");
+    try {
+      await c.s.callTool("request_transfer", { reason: "billing" });
+      await c.s.assistantTurn("Putting you through now.");
+    } finally {
+      cap.restore();
+    }
+    expect(c.marks).not.toContain("live-exit-transfer");
+    expect(cap.lines.length).toBeGreaterThan(0);
+    release();
+    await c.s.settle();
+    expect(slow.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(3);
+  });
+
+  it("M5. the clock also runs on an OUTBOUND call (hard end fires, account via twilioClientFor)", async () => {
+    const BIZ = "biz-clock-out";
+    const SID = "CAclockoutbound1";
+    const CALLER_ID = "+441372656055";
+    const OUT_CONFIG = {
+      businessId: BIZ,
+      businessName: "Digile Media",
+      mainPhone: CALLER_ID,
+      timezone: "Europe/London",
+      businessHours: {},
+      locale: null,
+      liveVoice: null,
+      allowedTasks: ["general_question"],
+      capabilities: {},
+    };
+    const base = fakeDb(OUT_CONFIG, BIZ);
+    const database = {
+      ...base,
+      withTenant: async (_id, fn) => fn(),
+      outboundAttemptByCallSid: async (sid) =>
+        sid === SID
+          ? { businessId: BIZ, attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
+          : null,
+      outboundCallContext: async () => ({
+        attemptNo: 1,
+        openerAudio: null,
+        toNumber: "+15559876543",
+        outreachId: "out-1",
+        campaignId: "camp-1",
+        campaignVersion: 1,
+        contactId: "contact-1",
+        trigger: {},
+        templateKey: "speed_to_lead",
+        complianceClass: "solicited",
+        audience: "business",
+        config: { persona_name: "Ava", caller_id: CALLER_ID, capabilities: [] },
+        firstName: "Priya",
+        contactTimezone: "America/Chicago",
+      }),
+      fetchBusinessById: async () => ({
+        id: BIZ,
+        name: "Digile Media",
+        timezone: "Europe/London",
+        phone_number: CALLER_ID,
+      }),
+      fetchBusinessCapabilities: async () => [],
+    };
+    const outClient = fakeTwilioClient();
+    const twilioClientFor = vi.fn(async () => outClient);
+    const sch = fakeScheduler();
+    const s = await bootLive({
+      config: OUT_CONFIG,
+      callSid: SID,
+      customParameters: { direction: "outbound" },
+      authorizedCallSid: SID,
+      database,
+      setTimer: sch.setTimer,
+      clearTimer: sch.clearTimer,
+      twilioClientFor,
+    });
+    expect(sch.timers.map((t) => t.ms)).toEqual([T.WRAP, T.GOODBYE, T.HARD]);
+    await fire(s, sch, T.HARD);
+    expect(twilioClientFor).toHaveBeenCalledWith(CALLER_ID);
+    expect(outClient.updates).toHaveLength(1);
+    expect(outClient.updates[0].twiml).toContain("<Hangup/>");
     expect(s.ws.readyState).toBe(3);
   });
 

@@ -205,6 +205,7 @@ export async function bootLive({
   connectError,
   twilioClient,
   twilioClientForAccountSid,
+  twilioClientFor,
   setTimer,
   clearTimer,
   accountSid,
@@ -238,6 +239,7 @@ export async function bootLive({
     ...(judge ? { judge } : {}),
     ...(twilioClient !== undefined ? { twilioClient } : {}),
     ...(twilioClientForAccountSid !== undefined ? { twilioClientForAccountSid } : {}),
+    ...(twilioClientFor !== undefined ? { twilioClientFor } : {}),
     ...(setTimer !== undefined ? { setTimer } : {}),
     ...(clearTimer !== undefined ? { clearTimer } : {}),
   });
