@@ -684,10 +684,15 @@ describe("the call clock inside a Live session", () => {
     await s.assistantSays(ASKED);
     const [res] = await s.callTool("end_call", {});
     expect(res.response.success).toBe(true);
+    await s.turnEnds(); // held: the model asked the caller a question
+    expect(marks).not.toContain("live-exit-end_call");
+
+    // The wrap-up falls due, and the NEXT turn end is held again (the model asks
+    // again, with no tool call in between to defer the note by itself).
     await fire(s, sch, T.WRAP);
-    await s.turnEnds();
-    // The hold is in force (the model just asked the caller a question): no
-    // exit, and no wrap-up note to provoke a reply that could end without one.
+    await s.assistantTurn("Is there anything else I can help you with today?");
+    // No exit, and no wrap-up note to provoke a reply that could end without a
+    // question and arm the exit under the unanswered one.
     expect(marks).not.toContain("live-exit-end_call");
     expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(0);
   });
