@@ -93,6 +93,9 @@ const FIELDS = [
   "transfer_no_answer",
   // The ONE number used for transfers (and later overflow / server-down fallback).
   // Must reach a person directly; the dial-time price check is a later session.
+  // dump() prints this in full (base64) in BEFORE/AFTER ON PURPOSE: the backup
+  // must be restorable, and it is business configuration, like the
+  // `phone_number b64` line above. Not a caller number.
   "transfer_phone_number",
 ];
 
@@ -245,6 +248,8 @@ try {
       // point: a transcription error in operator prose is invisible until a
       // caller hears it.
       if (f in changes) continue;
+      // Copying NULL clears the target's field, and that is allowed on purpose
+      // (transfer_no_answer cannot be NULL -- it is a NOT NULL column).
       changes[f] = source[f] === null || source[f] === undefined ? null : String(source[f]);
       const bad = changes[f] === null ? null : refusal(f, changes[f], "--copy");
       if (bad) {

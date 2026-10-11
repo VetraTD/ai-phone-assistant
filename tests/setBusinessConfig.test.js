@@ -31,7 +31,10 @@ describe("set-business-config validation (before any connect)", () => {
   it("lets valid values past validation", () => {
     for (const [f, v] of [["transfer_no_answer", "own_voicemail"], ["transfer_no_answer", "take_message"], ["transfer_phone_number", "+441372656055"]]) {
       const r = run(f, v);
-      expect(r.stderr).not.toContain("Refusing: --set");
+      expect(r.stderr).not.toContain("Refusing");
+      // Got PAST validation to the connect stage (not a crash at import): with
+      // no instance and no URL, cloudSqlPoolConfig fails to connect.
+      expect(r.stderr).toContain("Missing instance connection name");
     }
   });
 });

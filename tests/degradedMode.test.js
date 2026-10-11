@@ -53,6 +53,7 @@ vi.mock("../lib/outbound/twilioAccounts.js", async (importOriginal) => {
 
 import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";
 import { setDegraded, clearDegraded, isDegraded } from "../lib/voice/health.js";
+import { log } from "../lib/logger.js";
 
 // server.js's cold import pulls in a large dependency graph (express, twilio,
 // ws, gemini/mediaStream/session, etc.) — ~2s+ even outside vitest, more
@@ -407,6 +408,73 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
       expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
         expect.objectContaining({ businessId: "biz-123", callbackNumber: null })
       );
+    });
+
+    it("(f) a THROWING account getter still files the message, with no caller", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      mockClientForAccountSid.mockImplementation(() => {
+        throw new Error("malformed account sid");
+      });
+      const errSpy = vi.spyOn(log, "error");
+
+      const res = await request(app).post("/twilio/voicemail?to=%2B441372656055").type("form").send(body);
+
+      expect(res.status).toBe(200);
+      expect(errSpy).toHaveBeenCalledWith(
+        "voicemail_caller_lookup_failed",
+        expect.objectContaining({ callSid: "CA_vm_rs", reason: "malformed account sid" })
+      );
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: "biz-123", callbackNumber: null })
+      );
+      errSpy.mockRestore();
+      mockClientForAccountSid.mockReset();
+    });
+
+    it("(g) a fetch that never resolves times out at 5000 ms and still files with no caller", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      const f = fakeClient(() => new Promise(() => {}));
+      mockClientForAccountSid.mockReturnValue(f.client);
+      const errSpy = vi.spyOn(log, "error");
+
+      // Fake only the timer the route uses; supertest's own I/O stays real.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const pending = request(app).post("/twilio/voicemail?to=%2B441372656055").type("form").send(body).then((r) => r);
+        // Let the request reach the route and arm the 5 s timer.
+        // Real I/O: poll with setImmediate against the (unfaked) wall clock.
+        const t0 = Date.now();
+        while (f.fetch.mock.calls.length === 0 && Date.now() - t0 < 4000) {
+          await new Promise((r) => setImmediate(r));
+        }
+        expect(f.fetch).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(5000);
+        const res = await pending;
+        expect(res.status).toBe(200);
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(errSpy).toHaveBeenCalledWith(
+        "voicemail_caller_lookup_failed",
+        expect.objectContaining({ callSid: "CA_vm_rs", reason: "timeout" })
+      );
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: "biz-123", callbackNumber: null })
+      );
+      errSpy.mockRestore();
+    });
+
+    it("(h) an array ?to= is treated as empty: no business lookup, no write, 200", async () => {
+      const res = await request(app)
+        .post("/twilio/voicemail?to=%2B441372656055&to=%2B15550001111")
+        .type("form")
+        .send({ CallSid: "CA_vm_arr", AccountSid: "AC_acct", RecordingUrl: "https://api.twilio.com/recordings/RE9" });
+
+      expect(res.status).toBe(200);
+      expect(mockLookupBusinessByPhone).not.toHaveBeenCalled();
+      expect(mockCreateCustomerRequest).not.toHaveBeenCalled();
     });
   });
 });

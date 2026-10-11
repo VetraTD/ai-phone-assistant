@@ -1499,7 +1499,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
   // U4: the transfer rings with a timeout + action (so a no-answer leads to a
   // message) and the REST update uses the call's OWN Twilio account.
-  async function runCascadeTransfer({ accountSid, config } = {}) {
+  async function runCascadeTransfer({ accountSid, config, callerPhone } = {}) {
     H.llmFactory = () => makeGen([
       {
         type: "done",
@@ -1513,7 +1513,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     if (config) db.loadConfig.mockReturnValueOnce({ ...db.loadConfig(), ...config });
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);
-    await startCall(ws, newSid(), { accountSid });
+    await startCall(ws, newSid(), { accountSid, ...(callerPhone !== undefined ? { callerPhone } : {}) });
     await flush();
     H.turnManagerInstances[0].opts.onTurnEnd("quiero hablar con una persona.");
     await flush();
@@ -1532,6 +1532,12 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
   it("9a-ii-b. a config without transferNoAnswer rings 20 s", async () => {
     expect(await runCascadeTransfer()).toMatch(/timeout="20"/);
+  });
+
+  it("9a-ii-c. an anonymous caller (no number) -> the transfer TwiML has no callerId attribute", async () => {
+    const twiml = await runCascadeTransfer({ callerPhone: "" });
+    expect(twiml).toContain("<Dial ");
+    expect(twiml).not.toContain("callerId");
   });
 
   describe("9a-iii. transfer REST update uses the call's own Twilio account", () => {
@@ -1563,6 +1569,28 @@ describe("session.js — v2 pipeline orchestrator", () => {
       twilioCtor.mockClear();
       await runCascadeTransfer({ accountSid: "ACzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" });
       expect(twilioCtor).toHaveBeenCalledWith("ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokA");
+    });
+
+    it("a THROWING account getter fails OPEN: the transfer still goes out on account A", async () => {
+      const twilioCtor = (await import("twilio")).default;
+      twilioCtor.mockClear();
+      // runCascadeTransfer waits for the first update call; a stale one from an
+      // earlier test would end that wait before this redial reaches account A.
+      mockTwilioCallsUpdate.mockClear();
+      // A distinct ALT token gives a fresh router (clients are memoised per
+      // router), so the ALT constructor really runs -- and throws (malformed SID).
+      process.env.TWILIO_AUTH_TOKEN_ALT = "tokB-throwing";
+      twilioCtor.mockImplementationOnce(() => {
+        throw new Error("malformed alt sid");
+      });
+      await runCascadeTransfer({ accountSid: "ACbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
+      // The redial is fire-and-forget and the fallback is after an await, so
+      // wait for it instead of trusting the first update call to be ours.
+      await vi.waitFor(() =>
+        expect(twilioCtor).toHaveBeenCalledWith("ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokA")
+      );
+      await vi.waitFor(() => expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1));
+      expect(mockTwilioCallsUpdate.mock.calls[0][0].twiml).toContain("<Dial ");
     });
   });
 

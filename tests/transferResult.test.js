@@ -10,12 +10,31 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "not-a-real-key";
 const mockIsEnabled = vi.fn(() => true);
 const mockLookup = vi.fn(async () => null);
 
-vi.mock("../services/db.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  isEnabled: (...a) => mockIsEnabled(...a),
-  lookupBusinessByPhone: (...a) => mockLookup(...a),
-  loadConfig: (business) => (business ? { locale: business.locale, businessName: business.name } : null),
-}));
+// loadConfig is the REAL implementation (delegated), so the
+// db.loadConfig -> resolveProfile wire is exercised: a rename or shape change
+// in either would fail here instead of hiding behind a hand-written stub.
+vi.mock("../services/db.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    isEnabled: (...a) => mockIsEnabled(...a),
+    lookupBusinessByPhone: (...a) => mockLookup(...a),
+    loadConfig: (...a) => actual.loadConfig(...a),
+  };
+});
+
+// Every export real; only buildMessageTwiml can be made to throw (M13).
+const twimlState = vi.hoisted(() => ({ throws: false }));
+vi.mock("../lib/twiml.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    buildMessageTwiml: (...a) => {
+      if (twimlState.throws) throw new Error("twiml builder exploded");
+      return actual.buildMessageTwiml(...a);
+    },
+  };
+});
 
 import { CALL_LINES, buildMessageTwiml } from "../lib/twiml.js";
 
@@ -38,6 +57,7 @@ beforeAll(async () => {
 }, 30000);
 
 beforeEach(() => {
+  twimlState.throws = false;
   mockIsEnabled.mockReset().mockReturnValue(true);
   mockLookup.mockReset().mockResolvedValue(null);
 });
@@ -104,5 +124,14 @@ describe("POST /twilio/transfer-result", () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Record");
     expect(mockLookup).not.toHaveBeenCalled();
+  });
+
+  it("last resort: even the guess message throwing sends a constant Say+Hangup, 200 text/xml", async () => {
+    twimlState.throws = true;
+    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "no-answer" });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/xml/);
+    expect(res.text).toBe("<Response><Say>Sorry, nobody could get to the phone. Goodbye.</Say><Hangup/></Response>");
+    expect(res.text).not.toContain("<Record");
   });
 });

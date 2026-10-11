@@ -845,13 +845,14 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
  * only -- never the number.
  */
 async function resolveVoicemailCaller({ callSid, accountSid }) {
-  const client = outboundTwilioAccounts.twilioClientForAccountSid(accountSid);
-  if (!client) {
-    log.error("voicemail_caller_lookup_failed", { callSid, reason: "unknown_account", severity: "warn" });
-    return null;
-  }
   let timer;
   try {
+    // Inside the try: a throwing account getter must not skip filing the message.
+    const client = outboundTwilioAccounts.twilioClientForAccountSid(accountSid);
+    if (!client) {
+      log.error("voicemail_caller_lookup_failed", { callSid, reason: "unknown_account", severity: "warn" });
+      return null;
+    }
     const call = await Promise.race([
       client.calls(callSid).fetch(),
       new Promise((_, reject) => {
@@ -976,7 +977,14 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
     return res.send(messageTwiml(sayVoice || guessVoice()));
   } catch (err) {
     log.error("transfer_result_failed", { callSid, message: err?.message, severity: "warn" });
-    return res.send(messageTwiml(guessVoice()));
+    // Last resort, unconditional: if even building the guess message throws,
+    // send a constant (no Record -- a Record needs URLs). Never an empty body.
+    try {
+      return res.send(messageTwiml(guessVoice()));
+    } catch (err2) {
+      log.error("transfer_result_last_resort", { callSid, message: err2?.message, severity: "warn" });
+      return res.send("<Response><Say>Sorry, nobody could get to the phone. Goodbye.</Say><Hangup/></Response>");
+    }
   }
 });
 

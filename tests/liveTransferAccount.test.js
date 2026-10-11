@@ -133,8 +133,37 @@ describe("Live inbound transfer: which Twilio account", () => {
   });
 
   it("an unknown account SID falls back to account A, exactly as before", async () => {
-    await transferWith({ accountSid: "ACzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" });
+    // BOTH accounts configured, so the router is live and the null comes from
+    // the SID matching neither -- not from an empty router.
+    await transferWith({
+      accountSid: "ACzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      env: {
+        TWILIO_ACCOUNT_SID: SID_A,
+        TWILIO_AUTH_TOKEN: "tokA",
+        TWILIO_ACCOUNT_SID_ALT: SID_B,
+        TWILIO_AUTH_TOKEN_ALT: "tokB",
+      },
+    });
     expect(twilio).toHaveBeenCalledWith(SID_A, "tokA");
+    expect(twilio).not.toHaveBeenCalledWith(SID_B, "tokB");
+  });
+
+  it("a THROWING account getter fails OPEN: the transfer still goes out on account A", async () => {
+    // The matching ALT account's client constructor throws (malformed SID).
+    twilio.mockImplementationOnce(() => {
+      throw new Error("malformed alt sid");
+    });
+    await transferWith({
+      accountSid: SID_B,
+      env: {
+        TWILIO_ACCOUNT_SID: SID_A,
+        TWILIO_AUTH_TOKEN: "tokA",
+        TWILIO_ACCOUNT_SID_ALT: SID_B,
+        TWILIO_AUTH_TOKEN_ALT: "tokB",
+      },
+    });
+    expect(twilio).toHaveBeenCalledWith(SID_A, "tokA");
+    expect(mockUpdate).toHaveBeenCalled();
   });
 
   it("no account SID on the start event falls back to account A", async () => {

@@ -122,3 +122,11 @@ describe("buildUnroutedTransferTwiml", () => {
     expect(x).toContain('<Dial ringTone="us" timeLimit="3600" callerId="+1666">+1555</Dial>');
   });
 });
+
+describe("buildUnroutedTransferTwiml voice escaping", () => {
+  it("escapes a quote in the Say voice", () => {
+    const x = buildUnroutedTransferTwiml("+1555", "+1666", "us", 'Polly."Amy');
+    expect(x).toContain('<Say voice="Polly.&quot;Amy">');
+    expect(x).not.toContain('voice="Polly."Amy"');
+  });
+});
