@@ -137,3 +137,51 @@ describe("createTwilioAccountRouter: the env-based production factory", () => {
     expect(r.configured).toEqual({ A: true, B: false });
   });
 });
+
+describe("twilioClientForAccountSid: exact SID match, never a fallback to account A", () => {
+  const SID_A = "AC" + "a".repeat(32);
+  const SID_B = "AC" + "b".repeat(32);
+  const build = (accounts = "both") => {
+    const clientA = fakeClient(() => false);
+    const clientB = fakeClient(() => false);
+    const r = createAccountRouter({
+      accounts: { A: () => clientA, B: accounts === "both" ? () => clientB : null },
+      sids: { A: SID_A, B: SID_B },
+    });
+    return { r, clientA, clientB };
+  };
+
+  it("A's SID -> A's client", () => {
+    const { r, clientA } = build();
+    expect(r.twilioClientForAccountSid(SID_A)).toBe(clientA);
+  });
+  it("B's SID -> B's client", () => {
+    const { r, clientB } = build();
+    expect(r.twilioClientForAccountSid(SID_B)).toBe(clientB);
+  });
+  it("an unknown SID -> null (no fallback to A)", () => {
+    const { r } = build();
+    expect(r.twilioClientForAccountSid("AC" + "c".repeat(32))).toBeNull();
+  });
+  it("B's SID when B is not configured -> null", () => {
+    const { r } = build("onlyA");
+    expect(r.twilioClientForAccountSid(SID_B)).toBeNull();
+  });
+  it("empty / undefined / non-string -> null", () => {
+    const { r } = build();
+    expect(r.twilioClientForAccountSid("")).toBeNull();
+    expect(r.twilioClientForAccountSid(undefined)).toBeNull();
+    expect(r.twilioClientForAccountSid(null)).toBeNull();
+  });
+  it("no sids supplied at all -> null for everything", () => {
+    const r = createAccountRouter({ accounts: { A: () => fakeClient(() => false) } });
+    expect(r.twilioClientForAccountSid(SID_A)).toBeNull();
+  });
+  it("the env factory wires the SIDs", () => {
+    const r = createTwilioAccountRouter({ TWILIO_ACCOUNT_SID: SID_A, TWILIO_AUTH_TOKEN: "t", TWILIO_ACCOUNT_SID_ALT: SID_B, TWILIO_AUTH_TOKEN_ALT: "t2" });
+    expect(r.twilioClientForAccountSid(SID_A)).toBeTruthy();
+    expect(r.twilioClientForAccountSid(SID_B)).toBeTruthy();
+    expect(r.twilioClientForAccountSid(SID_A)).not.toBe(r.twilioClientForAccountSid(SID_B));
+    expect(r.twilioClientForAccountSid("AC" + "d".repeat(32))).toBeNull();
+  });
+});

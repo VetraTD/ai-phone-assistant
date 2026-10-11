@@ -90,6 +90,26 @@ describeDb("degraded voicemail — files against its tenant as the unprivileged 
     expect(rows[0].message).toBe(`Voicemail recording: ${RECORDING}`);
   });
 
+  // The recording callback cannot always resolve the caller (REST fetch fails,
+  // unknown account); the message must still be filed, with no callback number.
+  it("files the message with no caller number when none could be resolved", async () => {
+    const id = await fileDegradedVoicemail({
+      deps: deps(),
+      business: { id: TENANT },
+      callerNumber: null,
+      recordingUrl: RECORDING,
+      callSid: "CA-vm-null",
+    });
+
+    expect(id).toBeTruthy();
+    const { rows } = await admin.query(
+      `SELECT (callback_number IS NULL) AS no_caller FROM customer_requests WHERE business_id = $1`,
+      [TENANT]
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].no_caller).toBe(true);
+  });
+
   it("records ONE audit row for the unit of work", async () => {
     await fileDegradedVoicemail({
       deps: deps(),

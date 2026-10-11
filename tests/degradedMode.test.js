@@ -36,6 +36,21 @@ vi.mock("../services/notifications.js", () => ({
   MESSAGE_SLA_TEXT: "as soon as possible",
 }));
 
+// The recording callback resolves the caller through the router's
+// twilioClientForAccountSid. Keep every other export (and the rest of the real
+// router) real; only the account-SID lookup is replaced with a fake.
+const mockClientForAccountSid = vi.fn();
+vi.mock("../lib/outbound/twilioAccounts.js", async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    createTwilioAccountRouter: (...args) => ({
+      ...original.createTwilioAccountRouter(...args),
+      twilioClientForAccountSid: (...a) => mockClientForAccountSid(...a),
+    }),
+  };
+});
+
 import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";
 import { setDegraded, clearDegraded, isDegraded } from "../lib/voice/health.js";
 
@@ -303,5 +318,95 @@ describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
     expect(res.status).toBe(200);
     expect(mockCreateCustomerRequest).not.toHaveBeenCalled();
     expect(mockNotifyCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  describe("recording-status callback shape (no To/From, business in ?to=)", () => {
+    const REC = "https://api.twilio.com/recordings/RE9";
+    const body = { CallSid: "CA_vm_rs", AccountSid: "AC_acct", RecordingUrl: REC };
+    const fakeClient = (fetchImpl) => {
+      const fetch = vi.fn(fetchImpl);
+      const calls = vi.fn(() => ({ fetch }));
+      return { client: { calls }, calls, fetch };
+    };
+
+    it("(a) finds the business from ?to= and the caller from a REST fetch", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      const f = fakeClient(async () => ({ from: "+447700900123" }));
+      mockClientForAccountSid.mockReturnValue(f.client);
+
+      const res = await request(app).post("/twilio/voicemail?to=%2B441372656055").type("form").send(body);
+
+      expect(res.status).toBe(200);
+      expect(mockLookupBusinessByPhone).toHaveBeenCalledWith("+441372656055");
+      expect(mockClientForAccountSid).toHaveBeenCalledWith("AC_acct");
+      expect(f.calls).toHaveBeenCalledWith("CA_vm_rs");
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: "biz-123", callbackNumber: "+447700900123" })
+      );
+    });
+
+    it("(b) a throwing fetch still files the message, with no caller", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      const f = fakeClient(async () => {
+        throw new Error("twilio 404");
+      });
+      mockClientForAccountSid.mockReturnValue(f.client);
+
+      const res = await request(app).post("/twilio/voicemail?to=%2B441372656055").type("form").send(body);
+
+      expect(res.status).toBe(200);
+      expect(f.fetch).toHaveBeenCalledTimes(1);
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: "biz-123", callbackNumber: null })
+      );
+    });
+
+    it("(c) the old shape (To and From in the body) is unchanged and makes NO fetch", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      const f = fakeClient(async () => ({ from: "+447700900123" }));
+      mockClientForAccountSid.mockReturnValue(f.client);
+
+      const res = await request(app)
+        .post("/twilio/voicemail")
+        .type("form")
+        .send({ ...body, To: "+15550001111", From: "+15559998888" });
+
+      expect(res.status).toBe(200);
+      expect(mockLookupBusinessByPhone).toHaveBeenCalledWith("+15550001111");
+      expect(mockClientForAccountSid).not.toHaveBeenCalled();
+      expect(f.fetch).not.toHaveBeenCalled();
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ callbackNumber: "+15559998888" })
+      );
+    });
+
+    it("(d) an unknown ?to= writes nothing, makes no fetch, and still answers 200", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue(null);
+      const f = fakeClient(async () => ({ from: "+447700900123" }));
+      mockClientForAccountSid.mockReturnValue(f.client);
+
+      const res = await request(app).post("/twilio/voicemail?to=%2B15550009999").type("form").send(body);
+
+      expect(res.status).toBe(200);
+      expect(mockCreateCustomerRequest).not.toHaveBeenCalled();
+      expect(f.fetch).not.toHaveBeenCalled();
+    });
+
+    it("(e) an unknown AccountSid files with no caller and makes no fetch", async () => {
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+      mockCreateCustomerRequest.mockResolvedValue("req-1");
+      mockClientForAccountSid.mockReturnValue(null);
+
+      const res = await request(app).post("/twilio/voicemail?to=%2B441372656055").type("form").send(body);
+
+      expect(res.status).toBe(200);
+      expect(mockClientForAccountSid).toHaveBeenCalledWith("AC_acct");
+      expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: "biz-123", callbackNumber: null })
+      );
+    });
   });
 });

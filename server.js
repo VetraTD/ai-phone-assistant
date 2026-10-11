@@ -827,16 +827,47 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Degraded-mode voicemail recording callback
 //
-// Twilio POSTs here (recordingStatusCallback) once the Record verb from
-// buildDegradedVoicemailTwiml finishes. We can't rely on callState/DB call
-// rows here — degraded mode skips that setup entirely — so the business is
-// looked up fresh from the dialed (To) number.
+// Twilio POSTs here (recordingStatusCallback) once a Record verb finishes. That
+// callback carries only AccountSid/CallSid/Recording* -- no To/From -- so the
+// business comes from `?to=` (voicemailCallbackUrl) and the caller from a REST
+// fetch of the call on the account named by AccountSid (either of ours). Both
+// accounts' signatures are accepted. A failed caller lookup still files the
+// message, with no callback number; the route always answers 200.
 // ---------------------------------------------------------------------------
 
-app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
+/**
+ * The caller of `callSid`, fetched from the Twilio account that owns the call.
+ * Never throws; resolves null on any failure. Logs the call SID and the reason
+ * only -- never the number.
+ */
+async function resolveVoicemailCaller({ callSid, accountSid }) {
+  const client = outboundTwilioAccounts.twilioClientForAccountSid(accountSid);
+  if (!client) {
+    log.error("voicemail_caller_lookup_failed", { callSid, reason: "unknown_account", severity: "warn" });
+    return null;
+  }
+  let timer;
+  try {
+    const call = await Promise.race([
+      client.calls(callSid).fetch(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), 5000);
+      }),
+    ]);
+    return call?.from || null;
+  } catch (err) {
+    log.error("voicemail_caller_lookup_failed", { callSid, reason: err?.message || "error", severity: "warn" });
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.post("/twilio/voicemail", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body.CallSid;
-  const callerNumber = req.body.From || null;
-  const twilioNumber = req.body.To || "";
+  let callerNumber = req.body.From || null;
+  const queryTo = typeof req.query.to === "string" ? req.query.to : "";
+  const twilioNumber = req.body.To || queryTo;
   const recordingUrl = req.body.RecordingUrl || "";
 
   log.info("degraded_voicemail_received", { callSid });
@@ -847,6 +878,9 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
       : null;
 
     if (business) {
+      if (!callerNumber && callSid) {
+        callerNumber = await resolveVoicemailCaller({ callSid, accountSid: req.body.AccountSid });
+      }
       // Extracted to lib/degradedVoicemail.js (ledger O32). It was inline, and
       // that is how it stayed the LAST unscoped PHI write in the system after
       // every other one had been wrapped: `createCustomerRequest` ran with no

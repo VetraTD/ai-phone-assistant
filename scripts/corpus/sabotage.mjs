@@ -136,6 +136,7 @@ const LIVEMODE = "tests/liveOutboundLiveMode.test.js";
 const READBACKRE = "tests/confirmReadBackRe.test.js";
 const OUTPROMPT = "tests/outboundPrompt.test.js";
 const TWIML = "tests/twiml.test.js";
+const DEGRADED = "tests/degradedMode.test.js";
 
 const SABOTAGES = [
   {
@@ -1096,6 +1097,15 @@ const SABOTAGES = [
     find: 'playBeep="true" action="${escapeXml(actionUrl)}" ',
     replace: 'playBeep="true" ',
     red: [TWIML],
+  },
+  {
+    name: "vm-callback-to-param",
+    why:
+      "/twilio/voicemail stops reading the business from ?to= and goes back to req.body.To, which Twilio's recording-status callback never carries. Every voicemail then lands in degraded_voicemail_no_business and nothing is filed.",
+    file: "server.js",
+    find: "const twilioNumber = req.body.To || queryTo;",
+    replace: "const twilioNumber = req.body.To; // SABOTAGE",
+    red: [DEGRADED],
   },
 ];
 
