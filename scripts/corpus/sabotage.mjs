@@ -143,6 +143,8 @@ const TRANSFERACCT = "tests/liveTransferAccount.test.js";
 const TRANSFEROUTCOME = "tests/transferOutcome.test.js";
 const TRANSFERRESULT = "tests/transferResult.test.js";
 const SESSION_CASCADE = "tests/session.test.js";
+// Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
+const CLOCK = "tests/liveCallClock.test.js";
 
 const SABOTAGES = [
   {
@@ -1148,6 +1150,60 @@ const SABOTAGES = [
     find: 'body?.DialCallStatus === "completed"',
     replace: "false /* SABOTAGE */",
     red: [TRANSFEROUTCOME, TRANSFERRESULT],
+  },
+  {
+    name: "clock-stopped-in-finish",
+    why:
+      "finish() stops stopping the call clock. A call that ended at 9:20 (a transfer, a hang-up) keeps its 9:30 timer, and the hard end overwrites the finished call's TwiML (batch-3 S2, review focus 1).",
+    file: "lib/voice/live/index.js",
+    find: "callClock?.stop();",
+    replace: "null; /* SABOTAGE */",
+    red: [CLOCK],
+  },
+  {
+    name: "hard-end-checks-closed",
+    why:
+      "The hard end stops checking whether the call is already over, so a timer that fires after finish() redirects a call that has ended (batch-3 S2).",
+    file: "lib/voice/live/index.js",
+    find: "async function onHardEnd() {\n    if (closed) return;",
+    replace: "async function onHardEnd() {\n    /* SABOTAGE */",
+    red: [CLOCK],
+  },
+  {
+    name: "clock-config-under-google-limit",
+    why:
+      "resolveClockConfig stops bounding the hard end below Google's 9m49s cut. LIVE_CALL_HARD_END_SEC=600 is then accepted and the hard end is scheduled after Google has already closed the session (batch-3 S2).",
+    file: "lib/voice/live/callClock.js",
+    find: "    hardEndSec < GOOGLE_LIMIT_SEC;",
+    replace: "    true; /* SABOTAGE */",
+    red: [CLOCK],
+  },
+  {
+    name: "hard-end-stands-down-for-exit",
+    why:
+      "The hard end stops standing down for an exit already under way (owner ruling O1). A transfer's <Dial> is overwritten with the time-up line, and an armed goodbye is talked over (batch-3 S2).",
+    file: "lib/voice/live/index.js",
+    find: "return Boolean(pendingExit) || transferInFlight;",
+    replace: "return false /* SABOTAGE */;",
+    red: [CLOCK],
+  },
+  {
+    name: "deferred-end-fires-on-cancel",
+    why:
+      "cancelPendingExit stops releasing a deferred ending. The caller talks a hang-up back off at 9:29, the hard end that stood down for it never comes back, and the call runs into Google's cut with an open silent line (batch-3 S2).",
+    file: "lib/voice/live/index.js",
+    find: "    if (deferredEnd) {",
+    replace: "    if (false /* SABOTAGE */) {",
+    red: [CLOCK],
+  },
+  {
+    name: "goodbye-note-waits-for-turn-end",
+    why:
+      "The goodbye sets exitAfterTurn when it is DUE rather than when it is sent. The turn that was already generating arms the exit and the call hangs up before the goodbye is ever said (batch-3 S2, owner ruling O2).",
+    file: "lib/voice/live/index.js",
+    find: "    pendingTimeNote = { kind, text };",
+    replace: '    if (kind === "goodbye") exitAfterTurn = true; /* SABOTAGE */\n    pendingTimeNote = { kind, text };',
+    red: [CLOCK],
   },
 ];
 
