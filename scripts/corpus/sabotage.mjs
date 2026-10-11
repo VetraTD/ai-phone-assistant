@@ -137,6 +137,10 @@ const READBACKRE = "tests/confirmReadBackRe.test.js";
 const OUTPROMPT = "tests/outboundPrompt.test.js";
 const TWIML = "tests/twiml.test.js";
 const DEGRADED = "tests/degradedMode.test.js";
+// U4: the transfer Dial's action/timeout, and which Twilio account the REST update uses.
+const TRANSFERLIVE = "tests/outboundTransfer.test.js";
+const TRANSFERACCT = "tests/liveTransferAccount.test.js";
+const SESSION_CASCADE = "tests/session.test.js";
 
 const SABOTAGES = [
   {
@@ -1106,6 +1110,33 @@ const SABOTAGES = [
     find: "const twilioNumber = req.body.To || queryTo;",
     replace: "const twilioNumber = req.body.To; // SABOTAGE",
     red: [DEGRADED],
+  },
+  {
+    name: "transfer-has-action",
+    why:
+      "The Live inbound transfer Dial loses its action URL. A no-answer then ends the call with nothing said and no message taken (batch-3 U4).",
+    file: "lib/voice/live/index.js",
+    find: "        actionUrl: `${outboundBaseUrl(env)}/twilio/transfer-result`,",
+    replace: "        // SABOTAGE: no actionUrl",
+    red: [TRANSFERLIVE],
+  },
+  {
+    name: "cascade-transfer-has-action",
+    why:
+      "The cascade transfer Dial loses its action URL. A no-answer then ends the call with nothing said and no message taken (batch-3 U4).",
+    file: "lib/voice/session.js",
+    find: "          actionUrl: `${outboundBaseUrl(process.env)}/twilio/transfer-result`,",
+    replace: "          // SABOTAGE: no actionUrl",
+    red: [SESSION_CASCADE],
+  },
+  {
+    name: "transfer-client-by-account",
+    why:
+      "The Live inbound transfer stops looking up the call's own Twilio account and always uses account A. On an account-B number the REST update 404s and the caller is hung up in silence (batch-3 U4, finding B).",
+    file: "lib/voice/live/index.js",
+    find: "await twilioClientForAccountSid(callAccountSid)",
+    replace: "null /* SABOTAGE */",
+    red: [TRANSFERACCT, TRANSFERLIVE],
   },
 ];
 

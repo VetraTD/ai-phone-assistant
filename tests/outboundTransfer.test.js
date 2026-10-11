@@ -237,6 +237,8 @@ async function boot({
   db,
   twilioClient,
   twilioClientFor,
+  twilioClientForAccountSid,
+  accountSid,
   exitFallbackMs,
   callSid = OUT_SID,
   customParameters,
@@ -254,6 +256,7 @@ async function boot({
     postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },
     ...(twilioClient ? { twilioClient } : {}),
     ...(twilioClientFor ? { twilioClientFor } : {}),
+    ...(twilioClientForAccountSid ? { twilioClientForAccountSid } : {}),
     ...(exitFallbackMs !== undefined ? { exitFallbackMs } : {}),
   });
   ws.deliver({
@@ -261,6 +264,7 @@ async function boot({
     start: {
       callSid,
       streamSid: "MZ1",
+      ...(accountSid ? { accountSid } : {}),
       customParameters: customParameters ?? { direction: "outbound" },
     },
   });
@@ -304,8 +308,8 @@ async function driveTransfer(ws, live, updates) {
   await vi.waitFor(() => expect(updates.length).toBeGreaterThan(0));
 }
 
-describe("redialForTransfer — inbound is byte-for-byte unchanged", () => {
-  it("same client resolution path, same TwiML string as before this task", async () => {
+describe("redialForTransfer — inbound TwiML (shared builder)", () => {
+  it("pins the inbound TwiML: ring timeout, time limit, action URL, callerId", async () => {
     const updates = [];
     const twilioClient = { calls: () => ({ update: async (opts) => updates.push(opts) }) };
     const live = fakeLive();
@@ -319,12 +323,86 @@ describe("redialForTransfer — inbound is byte-for-byte unchanged", () => {
     await driveTransfer(ws, live, updates);
 
     expect(updates).toHaveLength(1);
-    // Captured exactly: lib/voice/live/index.js's inbound branch, byte for
-    // byte -- resolveRingTone("Europe/London") is "uk", callerId is the
-    // CALLER's number (state.callerNumber), never the campaign's.
+    // DELIBERATE CHANGE (U4): the string used to be
+    // <Dial ringTone="uk" callerId="+15559990000">...</Dial>; it now comes from
+    // buildTransferTwiml. resolveRingTone("Europe/London") is "uk", callerId is
+    // the CALLER's number (state.callerNumber), never the campaign's.
     expect(updates[0].twiml).toBe(
-      '<Response><Dial ringTone="uk" callerId="+15559990000">+441111222333</Dial></Response>'
+      '<Response><Dial ringTone="uk" timeout="20" timeLimit="3600" action="https://voice.example.com/twilio/transfer-result" method="POST" callerId="+15559990000">+441111222333</Dial></Response>'
     );
+  });
+
+  async function inboundTwiml({ config, callerPhone = "+15559990000" } = {}) {
+    const updates = [];
+    const twilioClient = { calls: () => ({ update: async (opts) => updates.push(opts) }) };
+    const live = fakeLive();
+    const db = fakeDb();
+    if (config) db.loadConfig = () => ({ ...CONFIG, ...config });
+    const { ws } = await boot({
+      live,
+      db,
+      twilioClient,
+      customParameters: { businessPhone: "+441372656055", ...(callerPhone ? { callerPhone } : {}) },
+    });
+    await callTool(live, "request_transfer");
+    await driveTransfer(ws, live, updates);
+    return updates[0].twiml;
+  }
+
+  it("own_voicemail rings 45 seconds", async () => {
+    expect(await inboundTwiml({ config: { transferNoAnswer: "own_voicemail" } })).toContain('timeout="45"');
+  });
+
+  it("a config without transferNoAnswer rings 20 seconds", async () => {
+    expect(await inboundTwiml()).toContain('timeout="20"');
+  });
+
+  it("an anonymous caller gets no callerId attribute at all", async () => {
+    const twiml = await inboundTwiml({ callerPhone: null });
+    expect(twiml).not.toContain("callerId");
+  });
+
+  it("the action URL is the transfer-result route on BASE_URL", async () => {
+    expect(await inboundTwiml()).toContain('action="https://voice.example.com/twilio/transfer-result"');
+  });
+
+  describe("finding B: the REST update uses the call's own Twilio account", () => {
+    const SID_B = "ACbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    it("lands on the client for the start event's accountSid", async () => {
+      const updatesB = [];
+      const fakeB = { calls: () => ({ update: async (opts) => updatesB.push(opts) }) };
+      const live = fakeLive();
+      const { ws } = await boot({
+        live,
+        db: fakeDb(),
+        accountSid: SID_B,
+        twilioClientForAccountSid: (sid) => (sid === SID_B ? fakeB : null),
+        customParameters: { businessPhone: "+441372656055", callerPhone: "+15559990000" },
+      });
+      await callTool(live, "request_transfer");
+      await driveTransfer(ws, live, updatesB);
+      expect(updatesB).toHaveLength(1);
+      expect(updatesB[0].twiml).toContain("<Dial");
+    });
+
+    it("an injected twilioClient still wins over the account lookup", async () => {
+      const updates = [];
+      const twilioClient = { calls: () => ({ update: async (opts) => updates.push(opts) }) };
+      const lookup = vi.fn(() => ({ calls: () => ({ update: async () => { throw new Error("wrong client"); } }) }));
+      const live = fakeLive();
+      const { ws } = await boot({
+        live,
+        db: fakeDb(),
+        twilioClient,
+        accountSid: SID_B,
+        twilioClientForAccountSid: lookup,
+        customParameters: { businessPhone: "+441372656055", callerPhone: "+15559990000" },
+      });
+      await callTool(live, "request_transfer");
+      await driveTransfer(ws, live, updates);
+      expect(updates).toHaveLength(1);
+      expect(lookup).not.toHaveBeenCalled();
+    });
   });
 
   it("does not transfer a business whose policy forbids it (inbound rule untouched)", async () => {
@@ -357,7 +435,7 @@ describe("redialForTransfer — outbound variant (spec §9.7)", () => {
       expect(updates[0].twiml).toBe(
         // O-14 (fix round 1): ringTone, resolved from CONFIG.timezone
         // (Europe/London) exactly as the inbound branch resolves it -- "uk".
-        '<Response><Dial ringTone="uk" timeout="20" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
+        '<Response><Dial ringTone="uk" timeout="20" timeLimit="3600" callerId="+441372656055" action="https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1">' +
           '<Number url="https://voice.example.com/twilio/outbound-whisper?attempt=att-transfer-1">+15550001111</Number></Dial></Response>'
       );
       // C17 seam: the client came from twilioClientFor(campaign caller_id), not

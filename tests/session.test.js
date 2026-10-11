@@ -594,8 +594,8 @@ const afterHangupGrace = () => new Promise((r) => setTimeout(r, HANGUP_GRACE_MS 
 let sidCounter = 0;
 function newSid() { return `CA-session-${++sidCounter}`; }
 
-async function startCall(ws, callSid, { streamSid = "MZ1", businessPhone = "+15550000000", callerPhone = "+15559999999" } = {}) {
-  ws.emit({ event: "start", start: { callSid, streamSid, customParameters: { businessPhone, callerPhone } } });
+async function startCall(ws, callSid, { streamSid = "MZ1", businessPhone = "+15550000000", callerPhone = "+15559999999", accountSid } = {}) {
+  ws.emit({ event: "start", start: { callSid, streamSid, ...(accountSid ? { accountSid } : {}), customParameters: { businessPhone, callerPhone } } });
   await flush();
 }
 
@@ -1486,7 +1486,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(mockTwilioCallsUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         twiml: expect.stringMatching(
-          /<Dial ringTone="us" callerId="\+15559999999">\+15551234567<\/Dial>/
+          /<Dial ringTone="us" timeout="20" timeLimit="3600" action="[^"]*\/twilio\/transfer-result" method="POST" callerId="\+15559999999">\+15551234567<\/Dial>/
         ),
       })
     );
@@ -1495,6 +1495,75 @@ describe("session.js — v2 pipeline orchestrator", () => {
     // "twilio" above), so the call must be marked transferred in the DB.
     const db = await import("../services/db.js");
     expect(db.markCallTransferred).toHaveBeenCalledWith(sid);
+  });
+
+  // U4: the transfer rings with a timeout + action (so a no-answer leads to a
+  // message) and the REST update uses the call's OWN Twilio account.
+  async function runCascadeTransfer({ accountSid, config } = {}) {
+    H.llmFactory = () => makeGen([
+      {
+        type: "done",
+        reply: {
+          text: "",
+          transferRequested: { reason: "caller asked for a person" },
+          toolResults: [{ name: "request_transfer", success: true, message: "ok" }],
+        },
+      },
+    ]);
+    if (config) db.loadConfig.mockReturnValueOnce({ ...db.loadConfig(), ...config });
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid(), { accountSid });
+    await flush();
+    H.turnManagerInstances[0].opts.onTurnEnd("quiero hablar con una persona.");
+    await flush();
+    await flush();
+    await flush();
+    ws.emit({ event: "mark", mark: { name: "transfer-done" } });
+    await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0);
+    return mockTwilioCallsUpdate.mock.calls[0][0].twiml;
+  }
+
+  it("9a-ii. own_voicemail rings 45 s; action URL ends in /twilio/transfer-result", async () => {
+    const own = await runCascadeTransfer({ config: { transferNoAnswer: "own_voicemail" } });
+    expect(own).toMatch(/timeout="45"/);
+    expect(own).toMatch(/action="[^"]*\/twilio\/transfer-result"/);
+  });
+
+  it("9a-ii-b. a config without transferNoAnswer rings 20 s", async () => {
+    expect(await runCascadeTransfer()).toMatch(/timeout="20"/);
+  });
+
+  describe("9a-iii. transfer REST update uses the call's own Twilio account", () => {
+    const ENV_KEYS = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID_ALT", "TWILIO_AUTH_TOKEN_ALT"];
+    let saved;
+    beforeEach(() => {
+      saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+      process.env.TWILIO_ACCOUNT_SID = "ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      process.env.TWILIO_AUTH_TOKEN = "tokA";
+      process.env.TWILIO_ACCOUNT_SID_ALT = "ACbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+      process.env.TWILIO_AUTH_TOKEN_ALT = "tokB";
+    });
+    afterEach(() => {
+      for (const k of ENV_KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    });
+
+    it("account B's SID on the start event builds the client with account B's credentials", async () => {
+      const twilioCtor = (await import("twilio")).default;
+      twilioCtor.mockClear();
+      await runCascadeTransfer({ accountSid: "ACbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
+      expect(twilioCtor).toHaveBeenCalledWith("ACbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "tokB");
+    });
+
+    it("an unknown account SID falls back to account A, exactly as before", async () => {
+      const twilioCtor = (await import("twilio")).default;
+      twilioCtor.mockClear();
+      await runCascadeTransfer({ accountSid: "ACzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" });
+      expect(twilioCtor).toHaveBeenCalledWith("ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokA");
+    });
   });
 
   it("9c. transfer redials on the CLOSE_FALLBACK_MS backstop if the playback mark never echoes back", async () => {
