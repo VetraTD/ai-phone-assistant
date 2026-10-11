@@ -1180,8 +1180,8 @@ const SABOTAGES = [
     why:
       "The wrap-up note stops waiting while an end_call is armed-but-held behind a question. The note provokes a reply that spends the hold, and a reply that ends without a question arms the hang-up under the unanswered one (batch-3 S2, review I2; CA2556d43d).",
     file: "lib/voice/live/index.js",
-    find: '      if (note.kind === "wrap" && endCallArmed) return;',
-    replace: "      /* SABOTAGE */",
+    find: '        : note.kind === "wrap" && endCallArmed',
+    replace: "        : false /* SABOTAGE */",
     red: [CLOCK],
   },
   {
