@@ -1176,6 +1176,15 @@ const SABOTAGES = [
     red: [CLOCK],
   },
   {
+    name: "forced-goodbye-waits-for-next-turn",
+    why:
+      "A FORCED goodbye sets exitAfterTurn directly instead of waiting for the next turn boundary. The open turn it cut ends with turnComplete, arms the exit, and the call hangs up before any goodbye was spoken (batch-3 S2, review M1).",
+    file: "lib/voice/live/index.js",
+    find: '      if (forced && (modelSpeaking || String(turnReplyText || "").trim())) goodbyeExitPending = true;',
+    replace: "      if (false /* SABOTAGE */) goodbyeExitPending = true;",
+    red: [CLOCK],
+  },
+  {
     name: "wrap-note-respects-question-hold",
     why:
       "The wrap-up note stops waiting while an end_call is armed-but-held behind a question. The note provokes a reply that spends the hold, and a reply that ends without a question arms the hang-up under the unanswered one (batch-3 S2, review I2; CA2556d43d).",

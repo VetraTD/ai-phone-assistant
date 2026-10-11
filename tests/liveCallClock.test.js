@@ -678,6 +678,44 @@ describe("the call clock inside a Live session", () => {
     expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(1);
   });
 
+  it("I1c. a tool turn that is interrupted (no turnComplete) does not defer the next real pause", async () => {
+    const { s, sch, timeNotes } = await bootClock();
+    await s.assistantSays("Our office opens at nine tomorrow");
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    s.live.push({ serverContent: { interrupted: true } });
+    await s.settle();
+    await fire(s, sch, T.WRAP);
+    const cap = captureEvents("live_time_note_deferred");
+    try {
+      await s.assistantTurn("That day is fully open.");
+    } finally {
+      cap.restore();
+    }
+    expect(cap.lines).toHaveLength(0);
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(1);
+  });
+
+  it("M1. a FORCED goodbye into an open turn does not let that turn's own turnComplete arm the exit", async () => {
+    const c = await bootClock();
+    const { s, sch, marks, timeNotes } = c;
+    await s.assistantSays("Our office opens at nine tomorrow");
+    await fire(s, sch, T.GOODBYE);
+    sch.timers.filter((t) => t.ms === T.FORCE && !t.cleared).forEach((t) => t.fn());
+    expect(timeNotes(GOODBYE_NOTE)).toHaveLength(1);
+
+    // The cut turn ends with turnComplete (not interrupted): no exit.
+    await s.turnEnds();
+    expect(marks).not.toContain("live-exit-end_call");
+    expect(s.ws.readyState).toBe(1);
+
+    // The goodbye's own turn arms it, and the call ends.
+    await s.assistantTurn("Thank you for calling Digile Media. Goodbye.");
+    expect(marks).toContain("live-exit-end_call");
+    echo(c, "live-exit-end_call");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(s.ws.readyState).toBe(3);
+  });
+
   it("I2. the wrap-up does not spend a 'question outranks a hang-up' hold", async () => {
     const c = await bookedCall();
     const { s, sch, marks, timeNotes } = c;
