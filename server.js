@@ -42,9 +42,13 @@ import {
   voicemailCallbackUrl,
   messageDoneUrl,
   escapeXml,
+  buildMessageTwiml,
+  CALL_LINES,
 } from "./lib/twiml.js";
+import { transferOutcome } from "./lib/transferOutcome.js";
 import { countryFromE164 } from "./lib/phone.js";
 import { getProfile } from "./lib/voice/localeProfiles.js";
+import { resolveProfile } from "./lib/voice/voiceLocale.js";
 import {
   isValidUUID,
   isValidE164,
@@ -928,6 +932,52 @@ app.post("/twilio/voicemail", twilioValidationAnyAccount, async (req, res) => {
 // this just ends the call. No DB, no failure path.
 app.post("/twilio/message-done", twilioValidationAnyAccount, (req, res) => {
   res.type("text/xml").send("<Response><Hangup/></Response>");
+});
+
+// The transfer <Dial>'s action. Twilio calls it when the dialled leg ends and
+// plays our answer to the CALLER. DialCallStatus=completed means the staff
+// member picked up and the bridged call then ended: hang up, because "leave a
+// message" after a real conversation is wrong. Anything else means nobody
+// spoke to the caller, so they get the message prompt in the business's own
+// voice instead of silence. Never a 500 and never an empty body: this is
+// the caller's last audio. (Batch-3 S4 adds "end the pending dial for this
+// CallSid" here, and the warm transfer adds a case to transferOutcome.)
+app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res) => {
+  const callSid = req.body?.CallSid;
+  const dialStatus = req.body?.DialCallStatus || null;
+  const to = req.body?.To || "";
+  const from = req.body?.From || "";
+  res.type("text/xml");
+
+  const guessVoice = () =>
+    getProfile(countryFromE164(to) === "GB" || countryFromE164(from) === "GB" ? "en-GB" : "en-US").twimlSayVoice;
+  const messageTwiml = (sayVoice) =>
+    buildMessageTwiml({
+      line: CALL_LINES.noAnswer,
+      sayVoice,
+      callbackUrl: voicemailCallbackUrl(BASE_URL, to),
+      actionUrl: messageDoneUrl(BASE_URL),
+    });
+
+  try {
+    const outcome = transferOutcome(req.body);
+    log.info("transfer_result", { callSid, dialStatus, outcome });
+    if (outcome === "hangup") return res.send("<Response><Hangup/></Response>");
+
+    let sayVoice = null;
+    if (to && db.isEnabled()) {
+      try {
+        const business = await db.lookupBusinessByPhone(to);
+        if (business) sayVoice = resolveProfile(db.loadConfig(business)).twimlSayVoice;
+      } catch (err) {
+        log.error("transfer_result_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+      }
+    }
+    return res.send(messageTwiml(sayVoice || guessVoice()));
+  } catch (err) {
+    log.error("transfer_result_failed", { callSid, message: err?.message, severity: "warn" });
+    return res.send(messageTwiml(guessVoice()));
+  }
 });
 
 // ---------------------------------------------------------------------------

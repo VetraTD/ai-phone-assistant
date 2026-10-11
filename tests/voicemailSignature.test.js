@@ -76,3 +76,22 @@ describe("POST /twilio/message-done sits behind the validator", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("POST /twilio/transfer-result sits behind the validator", () => {
+  const TR = "/twilio/transfer-result";
+  const TR_PARAMS = {
+    CallSid: "CA00000000000000000000000000000001",
+    AccountSid: "AC00000000000000000000000000000001",
+    To: "+441372656055",
+    From: "+447700900123",
+    DialCallStatus: "completed",
+  };
+  it("ACCEPTS a signature from account B and hangs up", async () => {
+    const res = await request(app).post(TR).type("form").set("X-Twilio-Signature", sign(TOKEN_B, TR, TR_PARAMS)).send(TR_PARAMS);
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("<Response><Hangup/></Response>");
+  });
+  it("REFUSES unsigned", async () => {
+    expect((await request(app).post(TR).type("form").send(TR_PARAMS)).status).toBe(403);
+  });
+});

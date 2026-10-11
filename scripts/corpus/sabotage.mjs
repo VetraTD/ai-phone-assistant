@@ -140,6 +140,8 @@ const DEGRADED = "tests/degradedMode.test.js";
 // U4: the transfer Dial's action/timeout, and which Twilio account the REST update uses.
 const TRANSFERLIVE = "tests/outboundTransfer.test.js";
 const TRANSFERACCT = "tests/liveTransferAccount.test.js";
+const TRANSFEROUTCOME = "tests/transferOutcome.test.js";
+const TRANSFERRESULT = "tests/transferResult.test.js";
 const SESSION_CASCADE = "tests/session.test.js";
 
 const SABOTAGES = [
@@ -1137,6 +1139,15 @@ const SABOTAGES = [
     find: "await twilioClientForAccountSid(callAccountSid)",
     replace: "null /* SABOTAGE */",
     red: [TRANSFERACCT, TRANSFERLIVE],
+  },
+  {
+    name: "transfer-result-completed-hangs-up",
+    why:
+      "/twilio/transfer-result stops hanging up when the staff member answered and the call ended. The caller who just had a real conversation is then told to leave a message (batch-3 U5).",
+    file: "lib/transferOutcome.js",
+    find: 'body?.DialCallStatus === "completed"',
+    replace: "false /* SABOTAGE */",
+    red: [TRANSFEROUTCOME, TRANSFERRESULT],
   },
 ];
 
