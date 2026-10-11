@@ -135,6 +135,7 @@ const RETRY = "tests/liveWriteRetry.test.js";
 const LIVEMODE = "tests/liveOutboundLiveMode.test.js";
 const READBACKRE = "tests/confirmReadBackRe.test.js";
 const OUTPROMPT = "tests/outboundPrompt.test.js";
+const TWIML = "tests/twiml.test.js";
 
 const SABOTAGES = [
   {
@@ -1084,6 +1085,17 @@ const SABOTAGES = [
     find: "const READ_BACK_DOES_THAT_WORK = String.raw`^(?![\\s\\S]*${READ_BACK_SLOT_TIME}[\\s\\S]*${READ_BACK_SLOT_TIME})[\\s\\S]*?${READ_BACK_SLOT_TIME}(?:(?!\\bor\\b)[\\s\\S])*?\\bdoes\\s+that\\s+work",
     replace: "const READ_BACK_DOES_THAT_WORK = /* SABOTAGE */ String.raw`${READ_BACK_SLOT_TIME}[\\s\\S]*\\bdoes\\s+that\\s+(?:still\\s+)?work",
     red: [READBACKRE],
+  },
+  {
+    name: "record-has-action",
+    why:
+      "buildMessageTwiml's Record tag loses its action attribute. Twilio then re-requests the document that served it when the recording ends, so the voicemail apology replays and records again in a loop (batch-3 finding A).",
+    file: "lib/twiml.js",
+    // The anchor includes the playBeep attribute before it: the transfer
+    // builder carries the same action fragment and must not match.
+    find: 'playBeep="true" action="${escapeXml(actionUrl)}" ',
+    replace: 'playBeep="true" ',
+    red: [TWIML],
   },
 ];
 

@@ -65,12 +65,14 @@ describe("lib/voice/health.js — degraded-mode flag", () => {
 
 describe("buildDegradedVoicemailTwiml", () => {
   it("shapes: apology <Say>, <Record> with the callback URL, then <Hangup/>", () => {
-    const twiml = buildDegradedVoicemailTwiml("https://example.com/twilio/voicemail");
+    const twiml = buildDegradedVoicemailTwiml("https://example.com/twilio/voicemail", "https://example.com/twilio/message-done");
 
     expect(twiml).toContain("<Response>");
     expect(twiml).toContain("<Say");
     expect(twiml).toContain("leave your name, number, and a brief message");
     expect(twiml).toContain('<Record maxLength="120"');
+    // A Record verb with no action re-requests this very document when it ends.
+    expect(twiml).toContain('action="https://example.com/twilio/message-done"');
     expect(twiml).toContain('recordingStatusCallback="https://example.com/twilio/voicemail"');
     expect(twiml).toContain("<Hangup/>");
     // Record must come after the apology and before Hangup.
@@ -79,7 +81,7 @@ describe("buildDegradedVoicemailTwiml", () => {
   });
 
   it("escapes the callback URL for XML safety", () => {
-    const twiml = buildDegradedVoicemailTwiml("https://example.com/x?a=1&b=2");
+    const twiml = buildDegradedVoicemailTwiml("https://example.com/x?a=1&b=2", "https://example.com/done");
     expect(twiml).toContain("a=1&amp;b=2");
     expect(twiml).not.toContain("a=1&b=2");
   });
@@ -101,7 +103,8 @@ describe("POST /twilio/voice — degraded mode", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Record");
-    expect(res.text).toContain("/twilio/voicemail");
+    expect(res.text).toContain("/twilio/voicemail?to=%2B15550001111");
+    expect(res.text).toContain('action="https://test.example.com/twilio/message-done"');
     expect(res.text).not.toContain("<Connect>");
   });
 
@@ -163,7 +166,8 @@ describe("POST /twilio/voice — no business matches the dialed number", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Record");
-    expect(res.text).toContain("/twilio/voicemail");
+    expect(res.text).toContain("/twilio/voicemail?to=%2B15550002222");
+    expect(res.text).toContain('action="https://test.example.com/twilio/message-done"');
     // The caller must never reach the assistant with no business context.
     expect(res.text).not.toContain("<Connect>");
     // …and must not be promised a callback from a business we cannot identify.
@@ -217,6 +221,18 @@ describe("POST /twilio/voice — no business matches the dialed number", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Connect><Stream");
+  });
+});
+
+describe("POST /twilio/message-done — the Record verb's action", () => {
+  it("always hangs up", async () => {
+    const res = await request(app)
+      .post("/twilio/message-done")
+      .type("form")
+      .send({ CallSid: "CA_done_1", RecordingUrl: "https://api.twilio.com/x" });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/xml/);
+    expect(res.text).toBe("<Response><Hangup/></Response>");
   });
 });
 

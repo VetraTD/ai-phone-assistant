@@ -21,7 +21,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWED = new Map([
   [
     path.join("lib", "twiml.js"),
-    "buildDegradedVoicemailTwiml and buildUnroutedVoicemailTwiml — the two voicemail fallbacks. Their recordingStatusCallback is /twilio/voicemail, which files the URL into customer_requests.message, which is what erasure reads.",
+    "buildMessageTwiml (and its wrappers buildDegradedVoicemailTwiml / buildUnroutedVoicemailTwiml) — the only Record verb in the system. Their recordingStatusCallback is /twilio/voicemail, which files the URL into customer_requests.message, which is what erasure reads.",
   ],
 ]);
 
@@ -89,6 +89,9 @@ describe("only the voicemail path records audio at Twilio", () => {
     expect(records.length).toBeGreaterThan(0);
     for (const tag of records) {
       expect(tag).toContain("recordingStatusCallback");
+      // Without an action, Twilio re-requests the current document when the
+      // recording ends, and the voicemail plays again in a loop.
+      expect(tag).toContain("action=");
     }
   });
 });

@@ -133,6 +133,8 @@ describe("a Live failure is no longer silence", () => {
     // minted the cascade's cannot either -- routing there would only move the
     // silent 403 to a different socket. Voicemail is the honest floor.
     expect(res.text).toContain("<Record");
+    expect(res.text).toContain(`action="${BASE}/twilio/message-done"`);
+    expect(res.text).toContain("/twilio/voicemail?to=%2B18176011171");
     expect(counters().live_connect_fallback).toBe(1);
     expect(counters().live_connect_ok).toBe(0);
   });
@@ -185,6 +187,8 @@ describe("a Live failure is no longer silence", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toContain("<Record");
+    expect(res.text).toContain(`action="${BASE}/twilio/message-done"`);
+    expect(res.text).toContain("/twilio/voicemail?to=%2B18176011171");
     expect(counters().live_connect_fallback).toBe(1);
   });
 

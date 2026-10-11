@@ -39,6 +39,8 @@ import {
   buildDegradedVoicemailTwiml,
   buildUnroutedTransferTwiml,
   buildUnroutedVoicemailTwiml,
+  voicemailCallbackUrl,
+  messageDoneUrl,
   escapeXml,
 } from "./lib/twiml.js";
 import { countryFromE164 } from "./lib/phone.js";
@@ -590,7 +592,7 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
         // Also a DECISION. This number routes nowhere on either front-end, so
         // handing it to the cascade would answer it with the same generic
         // assistant the check exists to prevent.
-        return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
+        return res.send(buildUnroutedVoicemailTwiml(voicemailCallbackUrl(BASE_URL, businessPhone), profile.twimlSayVoice, messageDoneUrl(BASE_URL)));
       }
     }
 
@@ -633,7 +635,7 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
         severity: "error",
       });
       return res.send(
-        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, getProfile("en-US").twimlSayVoice)
+        buildUnroutedVoicemailTwiml(voicemailCallbackUrl(BASE_URL, businessPhone), getProfile("en-US").twimlSayVoice, messageDoneUrl(BASE_URL))
       );
     }
   }
@@ -724,7 +726,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       reason: voiceHealth.getDegradedReason(),
       severity: "warn",
     });
-    return res.send(buildDegradedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+    return res.send(buildDegradedVoicemailTwiml(voicemailCallbackUrl(BASE_URL, req.body.To || ""), messageDoneUrl(BASE_URL)));
   }
 
   // The staging caller allowlist, checked BEFORE anything looks up a business
@@ -800,7 +802,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
         );
       }
       return res.send(
-        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, unroutedProfile.twimlSayVoice)
+        buildUnroutedVoicemailTwiml(voicemailCallbackUrl(BASE_URL, businessPhone), unroutedProfile.twimlSayVoice, messageDoneUrl(BASE_URL))
       );
     }
 
@@ -884,6 +886,14 @@ app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
   }
 
   res.status(200).end();
+});
+
+// The Record verb's action. Without one, Twilio re-requests the document that
+// served the Record verb when the recording ends, which replays the apology and
+// records again in a loop. The recording callback above files the message;
+// this just ends the call. No DB, no failure path.
+app.post("/twilio/message-done", twilioValidationAnyAccount, (req, res) => {
+  res.type("text/xml").send("<Response><Hangup/></Response>");
 });
 
 // ---------------------------------------------------------------------------
