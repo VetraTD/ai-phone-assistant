@@ -145,6 +145,7 @@ const TRANSFERRESULT = "tests/transferResult.test.js";
 const SESSION_CASCADE = "tests/session.test.js";
 // Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
 const CLOCK = "tests/liveCallClock.test.js";
+const POLITE = "tests/livePoliteFailure.test.js";
 
 const SABOTAGES = [
   {
@@ -1228,6 +1229,51 @@ const SABOTAGES = [
     find: "    pendingTimeNote = { kind, text };",
     replace: '    if (kind === "goodbye") exitAfterTurn = true; /* SABOTAGE */\n    pendingTimeNote = { kind, text };',
     red: [CLOCK],
+  },
+  {
+    name: "polite-failure-on-drop",
+    why:
+      "The Live socket's onclose stops calling the polite failure. Gemini drops (any code) and the caller is left on a silent open line until the media watchdog or Twilio gives up (batch-3 S2, Task C).",
+    file: "lib/voice/live/index.js",
+    find: '            endWithPoliteFailure("live_dropped").catch((err) => {',
+    replace: "            Promise.resolve().catch((err) => { /* SABOTAGE */",
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-not-after-close",
+    why:
+      "politeFailure stops standing down on a call that is already closed. After a normal end_call or a transfer our OWN close reaches onclose, and the caller who just said goodbye (or was put through) gets a stray apology and a recording prompt over the top (batch-3 S2, Task C, review focus 2).",
+    file: "lib/voice/live/index.js",
+    find: "if (closed || politeFailureSent) return false;",
+    replace: "if (politeFailureSent) return false; /* SABOTAGE */",
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-on-connect-failed",
+    why:
+      "The connect catch stops calling the polite failure. The AI never starts and the caller hears nothing, then the call is finished with no message and no recording prompt (batch-3 S2, Task C).",
+    file: "lib/voice/live/index.js",
+    find: 'if (callSid) await politeFailure("connect_failed");',
+    replace: "/* SABOTAGE */",
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-stands-down-for-exit",
+    why:
+      "politeFailure stops standing down for an exit already under way (owner ruling O1). A drop during a goodbye or a transfer overwrites the <Dial> or talks over the goodbye with an apology (batch-3 S2, Task C).",
+    file: "lib/voice/live/index.js",
+    find: "    if (exitUnderway()) {\n      deferredEnd = () => endWithPoliteFailure(reason);",
+    replace: "    if (false /* SABOTAGE */) {\n      deferredEnd = () => endWithPoliteFailure(reason);",
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-blocks-transfer",
+    why:
+      "armExit stops refusing once the polite failure has committed. A transfer started while the message TwiML is in flight races it and the caller is put through to a number after being told to leave a message (batch-3 S2, Task C).",
+    file: "lib/voice/live/index.js",
+    find: '    if (politeFailureSent) {\n      log.info("live_exit_refused_polite_failure"',
+    replace: '    if (false /* SABOTAGE */) {\n      log.info("live_exit_refused_polite_failure"',
+    red: [POLITE],
   },
 ];
 
