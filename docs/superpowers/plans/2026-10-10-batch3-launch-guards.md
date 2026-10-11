@@ -24,7 +24,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 
 | Session | Content | Hours | Status |
 |---|---|---|---|
-| S1 | Voicemail fix + transfer stopgap + per-business choice + 60-min transfer limit | 4–5 | not started |
+| S1 | Voicemail fix + transfer stopgap + per-business choice + 60-min transfer limit (+ db-inspect add-on, findings A/B) | 4–5 | **done 2026-10-11** in ≈1.7 h actual (≈0.4 h planning + ≈1.3 h execution); code head `618742c` — see "S1 as built" |
 | S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | not started |
 | S3 | Number block (price check at every dial and text) | 3.5–4 | not started |
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | not started |
@@ -40,6 +40,50 @@ quoted code, not the number.
 
 Each session ends with: tests passing in the gate worktree, a commit, this table updated, and the next
 session's starting message (bottom of this file) refreshed with anything that changed.
+
+### S1 as built (2026-10-11) — what later sessions must know
+
+Commits on `feat/outbound-stage4`: `c656d08` plan · `28ae1ce` builders + Record action · `bbe8faf` migration 052 ·
+`7267b84` voicemail route · `3680ede` lint wording · `05e9474` transfers via builder + per-account client · `82f407b`
+`/twilio/transfer-result` · `7431d09` 052 test pin + export · `80b21e9` db-inspect add-on · `e810057` test ids ·
+`618742c` review Minors M1–M14. Final gate at `618742c` (gate worktree): root 294 files / 7221 tests green, test:db
+45 files / 642 tests green, census 92 rows clean, all six S1 sabotage rows red-on-sabotage.
+
+Two findings the plan did not have (owner approved both 2026-10-11):
+- **A. A `<Record>` with no `action` re-requests the current document** (Twilio docs) — the plan's message TwiML would
+  loop ("leave a message" → silence 5 s → the same line again). Now `buildMessageTwiml({ line, sayVoice, callbackUrl,
+  actionUrl, maxLengthSec })` REQUIRES `actionUrl` (throws without it); every Record points `action` at
+  `messageDoneUrl(BASE_URL)` = `/twilio/message-done`, which always answers `<Hangup/>`. `tests/recordingPathLint.test.js`
+  now requires `action=` on every Record tag. **S2's `politeFailure` must pass `actionUrl: messageDoneUrl(base)`; S5's
+  Twilio Function `<Record>` needs an `action` too** (e.g. `fallback?step=done` → Hangup) — the lint cannot see it.
+- **B. Inbound transfers always used account A's REST client** → on an account-B number the redial 404'd and the caller
+  was hung up in silence. Now Live resolves the client as: injected `twilioClient` → `twilioClientForAccountSid(
+  callAccountSid)` (deps; `server.js` passes `outboundTwilioAccounts.twilioClientForAccountSid`; the SID comes from the
+  media-stream `start.accountSid`) → account A; a throwing lookup also falls back to A (fail open). Cascade: same, via a
+  lazy module-level router. **S2's `redirectCall` must extract THIS resolution (not the old A-only one)**, so the hard
+  end and polite failure work on account-B numbers too.
+
+New names: `lib/twiml.js` `CALL_LINES`, `buildTransferTwiml`, `buildMessageTwiml`, `buildHangupLineTwiml`,
+`voicemailCallbackUrl`, `messageDoneUrl`; `lib/transferOutcome.js` `transferOutcome(body)` (no `business` param until
+warm transfer needs it); `lib/outbound/twilioAccounts.js` router method `twilioClientForAccountSid` (null for an
+unknown SID, never falls back); `lib/db/businessConfigInspect.js` (db-inspect `--business` now also prints
+`transfer_phone_last4`, `transfer_policy`, `main_phone_last4`, `live_voice`, `locale`, `outbound_enabled`,
+`transfer_no_answer` — numbers masked in SQL); routes `/twilio/message-done`, `/twilio/transfer-result`;
+`/twilio/voicemail` now `twilioValidationAnyAccount`, business from `?to=`, caller from a 5 s-bounded REST fetch on the
+call's own account. `calls.transferred_at` is exported by `exportCallerData` (Art. 15 drift guard). Sabotage rows added:
+`record-has-action`, `vm-callback-to-param`, `transfer-has-action`, `cascade-transfer-has-action`,
+`transfer-client-by-account`, `transfer-result-completed-hangs-up`.
+
+Parked (record-and-park, not fixed): an unanswered transfer still leaves `calls.status = 'transferred'` (S4/billing
+should decide); the unrouted-number transfer (`UNROUTED_TRANSFER_NUMBER`) has `timeLimit` but no `timeout`/`action`, so an
+unanswered one ends the call with no message; `set-business-config.js` backup dump prints `transfer_phone_number` as
+base64 (kept on purpose — the backup must restore).
+
+Environment notes: local Postgres (`vetra-pg16`, :55432) has 052 applied. The gate worktree needs the gitignored
+`test-audio/` copied from the main checkout (`tests/outboundHarnessLive.test.js`; copied 2026-10-11). Gate script:
+`.superpowers/sdd/2026-10-10-batch3-launch-guards/gate-v3.sh <sha> <label> [db] [dbfirst] [only:<row>]...` — never edit a
+gate script while it runs (bash reads it as it goes). Load flakes seen once each under parallel runs: vitest worker
+"Timeout calling onTaskUpdate", `tests/outboundEuFloor.test.js` 20 ms perf bound.
 
 ---
 
@@ -361,8 +405,10 @@ Wiring in `index.js`:
   `exitAfterTurn = true` (the existing turn-boundary exit, `:2618` pattern) so the normal closing path hangs up.
 - **Hard end (9:30):** `if (!closed)` → `redirectCall(buildHangupLineTwiml({ line: CALL_LINES.timeUp,
   sayVoice }))`, log `live_max_duration_hard_end`, then `finish("max_duration")`.
-- New helper `redirectCall(twiml)`: the client resolution now inside `redialForTransfer` (`:7299-7303`)
-  extracted unchanged; `redialForTransfer` calls it. Outbound uses `twilioClientFor(dial.config?.caller_id)`.
+- New helper `redirectCall(twiml)`: the client resolution now inside `redialForTransfer` extracted unchanged;
+  `redialForTransfer` calls it. Outbound uses `twilioClientFor(dial.config?.caller_id)`. [S1: that resolution is now
+  injected `twilioClient` → `twilioClientForAccountSid(callAccountSid)` → account A, with a throwing lookup falling back
+  to A — keep all of it; line numbers moved, locate by `async function redialForTransfer`.]
 - Applies to inbound AND outbound Live sessions.
 
 - [ ] Tests (fake clock): wrap note sent once, at a turn boundary; goodbye note + exit armed; hard end updates
@@ -389,7 +435,8 @@ async function politeFailure(reason) {           // at most once per call (latch
   const twiml = state.outboundCall
     ? buildHangupLineTwiml({ line: CALL_LINES.technicalOutbound, sayVoice })
     : buildMessageTwiml({ line: CALL_LINES.technical, sayVoice,
-        callbackUrl: voicemailCallbackUrl(base, state.twilioNumber) });
+        callbackUrl: voicemailCallbackUrl(base, state.twilioNumber),
+        actionUrl: messageDoneUrl(base) });   // [S1] actionUrl is REQUIRED (finding A)
   try { await redirectCall(twiml); log.error("live_polite_failure", { callSid, reason, severity: "warn" }); }
   catch (err) { log.error("live_polite_failure_failed", { callSid, reason, message: err?.message }); }
 }
@@ -571,7 +618,8 @@ Function environment variable: `VOICEMAIL_URL` = `https://<prod base>/twilio/voi
 2. **Bounce:** `From === To` or `From === n` → `<Reject reason="busy"/>`.
 3. First request → `<Dial timeout=t timeLimit=3600 callerId=event.To action="fallback?step=after&n=…&t=…&v=…">n`.
 4. `step=after`: `DialCallStatus === "completed"` → `<Hangup/>`; else Say(no-answer line) +
-   `<Record maxLength=120 recordingStatusCallback=VOICEMAIL_URL?to=<event.To>/>` + Hangup.
+   `<Record maxLength=120 action="fallback?step=done" recordingStatusCallback=VOICEMAIL_URL?to=<event.To>/>` + Hangup;
+   `step=done` → `<Hangup/>`. [S1 finding A: a Record with no `action` re-requests this Function and loops.]
    The callback files the message automatically once our server is reachable; during an outage the recording
    stays in Twilio (manual check — catch-up job deferred).
 - [ ] Tests for each branch; `callerId` is OUR number (caller-ID trick); `t` other than 20/45 → 20; XML
@@ -697,11 +745,29 @@ open Minors, commit sha).
 
 ### S2
 > Execute session S2 of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` (10-minute end + polite
-> failure) on `feat/outbound-stage4`, continuing from S1's commit <sha>. Read the plan's top sections, S1's
-> Status notes, and memory live-instruction-timing, live-session-dies-at-ten-minutes,
-> sdd-gates-and-memory-limits. Method: subagent-driven faster variant, but OPUS reviews Tasks 2.1 and 2.2
-> (timing/close code). Census after every index.js edit. No paid calls, no production. End: gate green,
-> commit, Status, S3 message refreshed. Estimate 4.5–5.5 h.
+> failure) on `feat/outbound-stage4`, continuing from S1 (code head `618742c`, plus the plan-doc commit on top).
+> Do only S2. First read the plan's Status table, "S1 as built (2026-10-11)", Owner decisions, What the code
+> shows, Global constraints, Review focus, and Session 2 in full; then memory live-instruction-timing,
+> live-session-dies-at-ten-minutes, sdd-gates-and-memory-limits, never-git-checkout-uncommitted-work,
+> a-fix-can-be-the-next-defect, owner-wants-speed-and-low-usage. Line numbers in the plan are at `a238b80` and
+> S1 moved `lib/voice/live/index.js`, `lib/voice/session.js` and `server.js` — locate code by quoted text.
+> S1 changes S2 must build on: `buildMessageTwiml` REQUIRES `actionUrl: messageDoneUrl(base)` (finding A — the
+> polite-failure message TwiML must pass it); `redirectCall` must extract the NEW per-account client resolution
+> in Live `redialForTransfer` (injected `twilioClient` → `twilioClientForAccountSid(callAccountSid)` → account A,
+> throw → A), so hard end and polite failure work on account-B numbers (finding B); `CALL_LINES`,
+> `buildHangupLineTwiml`, `voicemailCallbackUrl` already exist in `lib/twiml.js`.
+> Setup: gate worktree `C:/Users/nithi/VetraTD/ai-phone-gate` (junction to main `node_modules`, check ~269;
+> gitignored `test-audio/` already copied in); gate script `.superpowers/sdd/2026-10-10-batch3-launch-guards/gate-v3.sh
+> <sha> <label> [db] [only:<row>]...` (copy it into S2's own workspace; never edit a gate script while it runs);
+> local Postgres :55432 is at migration 052. Method: subagent-driven faster variant — sonnet implementers and
+> reviewers, but OPUS reviews Tasks 2.1 and 2.2 (timing/close code); full gate per task (one combined gate may
+> cover consecutive tasks); census after every index.js/tools.js/strings.js edit; Critical/Important fixed in-task
+> with re-review; Minors in ONE wave at the end; pipeline task N's gate with task N+1's implementer when files are
+> disjoint; cheap tier (haiku) only for one-line fix re-reviews. Stop and ask if a decision isn't covered by the
+> plan, the code contradicts it, the session passes 7 h, or anything needs production, a paid API or a real call.
+> No paid calls, no real calls, no production, no deploy, no push; never git checkout/restore over uncommitted
+> work. End: gate green, commit, Status table with actual hours, S3 message refreshed, 5-line report. Plan
+> estimate 4.5–5.5 h; S1 ran at ~40% of its estimate, but S2 has harness work and opus reviews — expect ~3–4 h.
 
 ### S3
 > Execute session S3 (number block) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` from
