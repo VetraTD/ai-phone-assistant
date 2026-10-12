@@ -129,6 +129,17 @@ describe("maskReason: spaced, dashed and bracketed numbers", () => {
     expect(out).toContain("…" + digits.slice(-4));
   });
 
+  it.each([
+    ["en dash 415–555–0123 rang", "4155550123"],
+    ["underscore 415_555_0123 rang", "4155550123"],
+    ["comma 415,555,0123 rang", "4155550123"],
+    ["full-width ４１５５５５０１２３ rang", "4155550123"],
+  ])("%s is masked to the last four", (reason, digits) => {
+    const out = maskReason(reason);
+    expect(out).toContain("…" + digits.slice(-4));
+    expect(out.replace(/\P{Nd}/gu, "")).toBe(digits.slice(-4));
+  });
+
   it("leaves short numbers and dates as typed", () => {
     expect(maskReason("rang 3 times")).toBe("rang 3 times");
     expect(maskReason("on 3 May, 2 calls")).toBe("on 3 May, 2 calls");

@@ -233,7 +233,7 @@ describe("inboundGuardTwiml: bounded at 2 s (fails open on timeout)", () => {
     expect(ev[0]).toMatchObject({ message: "timeout", severity: "warn" });
   });
 
-  it("a fast answer clears the timer (no timer left pending) and a late rejection is not unhandled", async () => {
+  it("a fast answer clears the timer (no timer left pending)", async () => {
     vi.useFakeTimers();
     const out = await run(fakeDatabase({ blocked: true }));
     expect(out).toContain("<Reject");

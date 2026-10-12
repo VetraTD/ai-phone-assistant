@@ -27,7 +27,7 @@
 // DRY RUN BY DEFAULT. Without --confirm, --add and --remove say what they WOULD
 // do and write nothing (no write transaction is opened). Nothing prints a
 // caller number whole: only its last four digits. The reason is stored as the
-// operator typed it but printed with any run of 5+ digits masked to its last four.
+// operator typed it but printed with any number-like span of 5+ digits masked to its last four.
 //
 // The migrate job connects as Cloud SQL `postgres`, which owns these tables
 // and has no BYPASSRLS; business_directory is a platform table, so the
@@ -142,12 +142,13 @@ function expiryText(row) {
 }
 
 /**
- * A reason is stored as typed but printed masked: any run of 5+ digits (a number
- * typed into it) becomes an ellipsis and its last four digits.
+ * A reason is stored as typed but printed masked: any number-like span with 5+
+ * digits (a number typed into it, with any short non-letter separators, any
+ * Unicode digits) becomes an ellipsis and its last four digits.
  */
 export function maskReason(reason) {
-  return String(reason ?? "").replace(/\+?\d[\d\s().\/-]{3,}\d/g, (span) => {
-    const digits = span.replace(/\D/g, "");
+  return String(reason ?? "").replace(/\+?\p{Nd}(?:[^\p{L}\p{Nd}\n]{0,3}\p{Nd})+/gu, (span) => {
+    const digits = span.normalize("NFKC").replace(/\P{Nd}/gu, "");
     return digits.length >= 5 ? `…${digits.slice(-4)}` : span;
   });
 }

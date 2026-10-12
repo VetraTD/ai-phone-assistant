@@ -1934,8 +1934,9 @@ function attachWebSocket(httpServer) {
         // Task 19, C17 seam: the per-caller-ID router (account A or B) the
         // outbound door routes and dispatcher share (outboundTwilioClientFor
         // above), plus twilioClientForAccountSid for a call's own account,
-        // rather than a second instance -- so an outbound transfer redial
-        // uses these too.
+        // rather than a second instance. The outbound transfer redial uses only
+        // the per-caller-ID router; twilioClientForAccountSid serves inbound
+        // redirects.
         handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor, twilioClientForAccountSid: outboundTwilioAccounts.twilioClientForAccountSid, postCall: outboundPostCall }).catch((err) => {
           log.error("live_connection_failed", { reason: err?.message });
           try {

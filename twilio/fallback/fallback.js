@@ -73,8 +73,9 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
     };
     if (voicemailUrl) {
       // With no valid To the callback is kept without ?to=: /twilio/voicemail
-      // falls back to the To in the callback body, and if no business is found
-      // it still logs the recording URL so the message can be recovered.
+      // has no business to resolve (Twilio's recording-status callback carries
+      // no To), so it takes the degraded_voicemail_no_business branch and logs
+      // the recording URL; the after-outage check in the runbook finds it.
       attrs.recordingStatusCallback = voicemailUrl + (to ? "?to=" + encodeURIComponent(to) : "");
     }
     response.record(attrs);

@@ -1501,7 +1501,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
   // U4: the transfer rings with a timeout + action (so a no-answer leads to a
   // message) and the REST update uses the call's OWN Twilio account.
-  async function runCascadeTransfer({ accountSid, config, callerPhone, webhookBusiness } = {}) {
+  async function runCascadeTransfer({ accountSid, config, callerPhone, webhookBusiness, budgetMs } = {}) {
     H.llmFactory = () => makeGen([
       {
         type: "done",
@@ -1525,7 +1525,8 @@ describe("session.js — v2 pipeline orchestrator", () => {
     await flush();
     await flush();
     ws.emit({ event: "mark", mark: { name: "transfer-done" } });
-    await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0);
+    await flushUntil(() => mockTwilioCallsUpdate.mock.calls.length > 0, budgetMs);
+    expect(mockTwilioCallsUpdate.mock.calls.length).toBeGreaterThan(0);
     return mockTwilioCallsUpdate.mock.calls[0][0].twiml;
   }
 
@@ -1610,13 +1611,14 @@ describe("session.js — v2 pipeline orchestrator", () => {
       db.recordPendingDial.mockImplementationOnce(() => new Promise(() => {}));
       log.error.mockClear();
       const started = Date.now();
-      const twiml = await runCascadeTransfer();
+      // The real 2 s wait is spent inside flushUntil's budget; give it headroom for gate load.
+      const twiml = await runCascadeTransfer({ budgetMs: 10000 });
       expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
       expect(twiml).toContain("<Dial");
       const failed = log.error.mock.calls.filter((c) => c[0] === "pending_dial_write_failed");
       expect(failed).toHaveLength(1);
       expect(failed[0][1]).toMatchObject({ site: "cascade_transfer", reason: "timeout", severity: "warn" });
-    }, 10000);
+    }, 20000);
 
     it("a write that throws still sends the transfer TwiML and logs pending_dial_write_failed", async () => {
       db.recordPendingDial.mockClear();
