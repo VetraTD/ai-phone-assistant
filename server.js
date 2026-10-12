@@ -20,6 +20,7 @@ import { normalizePhoneNumber } from "./lib/phone.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
+import { tableAgeDays } from "./lib/dialCost.js"; // importing validates the price table: a bad one fails boot
 import { assertBootConfig } from "./lib/bootChecks.js";
 import {
   mintMediaStreamToken,
@@ -113,6 +114,9 @@ if (BASE_URL.includes("example.ngrok") || BASE_URL === "https://example.ngrok.io
       "Set BASE_URL in .env to the exact HTTPS URL shown when you run 'ngrok http 3000', then restart."
   );
   process.exit(1);
+}
+if (tableAgeDays() > 120) {
+  log.error("dial_cost_table_stale", { ageDays: tableAgeDays() });
 }
 // DEEPGRAM_API_KEY is deliberately NOT required here any more.
 //

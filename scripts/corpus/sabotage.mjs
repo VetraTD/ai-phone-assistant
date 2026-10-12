@@ -146,6 +146,9 @@ const SESSION_CASCADE = "tests/session.test.js";
 // Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
 const CLOCK = "tests/liveCallClock.test.js";
 const POLITE = "tests/livePoliteFailure.test.js";
+// Batch-3 S3: the number block (price table + checkDial/checkText).
+const DIALCOST = "tests/dialCost.test.js";
+const DIALPARITY = "tests/dialCostVendorParity.test.js";
 
 const SABOTAGES = [
   {
@@ -1328,6 +1331,60 @@ const SABOTAGES = [
     find: "      toolCallSinceTurnEnd = false;\n      // LVX70: an episode the strategy never opened",
     replace: "      /* SABOTAGE */\n      // LVX70: an episode the strategy never opened",
     red: [CLOCK],
+  },
+  {
+    name: "dialcost-unknown-refuses",
+    why:
+      "A number with no price-table match is allowed instead of refused. Then any prefix Twilio does not list would be dialled at an unknown price (batch-3 S3).",
+    file: "lib/dialCost.js",
+    find: '    if (!cost) return { refuse: { ok: false, reason: "unknown" } };\n',
+    replace: '    if (!cost) return { refuse: { ok: true, perMin: 0, iso: "XX" } };\n',
+    red: [DIALCOST],
+  },
+  {
+    name: "dialcost-never-category",
+    why:
+      "The premium / personal / satellite / pager / shared refusal is removed, so a premium-rate number priced under the ceiling can be dialled (batch-3 S3).",
+    file: "lib/dialCost.js",
+    find: '    if (NEVER_CATEGORIES.has(category)) return { refuse: { ok: false, reason: "never", perMin, iso } };\n',
+    replace: "    /* SABOTAGE */\n",
+    red: [DIALCOST],
+  },
+  {
+    name: "dialcost-auto-max",
+    why:
+      "The automatic ceiling moves from 10 cents to a dollar a minute, so every number up to 60 cents is dialled without anyone switching it on (batch-3 S3).",
+    file: "lib/dialCost.js",
+    find: "export const AUTO_MAX_PER_MIN = 0.10;",
+    replace: "export const AUTO_MAX_PER_MIN = 1;",
+    red: [DIALCOST],
+  },
+  {
+    name: "dialcost-nanp-never",
+    why:
+      "The North American premium-area list is neutralised. Twilio prices US 900/976 under plain +1 at about 1.4 cents, so the table alone would let them through (batch-3 S3).",
+    file: "lib/dialCost.js",
+    find: '    if (NANP_NEVER.test(e164)) return { refuse: { ok: false, reason: "never" } };\n',
+    replace: "    /* SABOTAGE */\n",
+    red: [DIALCOST],
+  },
+  {
+    name: "dialcost-malformed-throws",
+    why:
+      "parseTable stops throwing on a bad price entry, so a garbled table boots and quietly prices numbers wrongly instead of failing loudly (batch-3 S3).",
+    file: "lib/dialCost.js",
+    find: "      throw new Error(`dialCost table: bad voice entry for prefix ${prefix}`);\n",
+    replace: "      /* SABOTAGE */\n",
+    red: [DIALCOST],
+  },
+  {
+    name: "dialcost-vendor-parity",
+    why:
+      "The dashboard's copy of dialCost drifts by one character from lib/dialCost.js, so the dashboard and the voice server could judge the same number differently (batch-3 S3).",
+    file: "AI-phone-dashboard/backend/src/dialCost.mjs",
+    find: "export const TEXT_MAX_EACH = 0.25;",
+    replace: "export const TEXT_MAX_EACH = 0.26;",
+    red: [DIALPARITY],
   },
 ];
 
