@@ -28,7 +28,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 | S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | **done 2026-10-11** in ≈4.1 h actual (≈0.4 h planning + ≈3.7 h execution); code head `41847f9` — see "S2 as built" |
 | S3 | Number block (price check at every dial and text) | 3.5–4 | **done 2026-10-11** in ≈2.2 h active (≈0.45 h planning + ≈1.75 h execution; plus ≈1.3 h waiting for an owner reply after a memory-killed gate); code head `12bdaf4` — see "S3 as built" |
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | **done 2026-10-12** in ≈3.2 h actual (≈0.55 h planning incl. 3 owner answers + ≈2.6 h execution); code head `8d66ff4` — see "S4 as built" |
-| S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | not started |
+| S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | **done 2026-10-12** in ≈3.5 h actual (≈0.4 h planning incl. 3 owner answers + ≈3.1 h execution, of which ≈1.8 h was the full sabotage + gate at the final sha); code head `c185ff5` — see "S5 as built" |
 | S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | not started |
 | | **Total** | **21.5–27** | |
 
@@ -416,6 +416,123 @@ Environment notes:
   and no reset.
 - An implementer's root suite in the MAIN tree needs `NODE_EXTRA_CA_CERTS=<norton-roots.pem>`, or 15 loopback-TLS
   tests fail. The gate script sets it.
+
+### S5 as built (2026-10-12) — what S6 must know
+
+Commits on `feat/outbound-stage4` (code `43f78cd..c185ff5`):
+- `b5f6cbf` Task 5.0: the missed-call text skips blocked and bounced callers
+- `82efbef` Task 5.1: Twilio fallback Function
+- `8361459` Tasks 5.2 + 5.3: `fallback-urls.js`, its DB read, and the runbook
+- `c9c8733` wave W1: final-review F1/F2/F3/F6 plus test nits
+- `b066b64` wave W2: Function F7–F9 and runbook F10/F12
+- `c185ff5` wave W3: re-review polish
+
+FINAL gate at `c185ff5` (gate worktree), all green:
+- root: 309 files / 7618 tests (1 file skipped: no `.env` in the gate worktree);
+- test:db: 49 files / 682 tests;
+- dashboard backend vitest: 16 files / 159 tests;
+- census: 152 rows clean;
+- ONE full `sabotage.mjs` at `c185ff5` (13:02–14:49): 152 rows = 149 red + exactly the 3 known baseline x (below);
+  all 9 new S5 rows red; the tree was left clean.
+
+**Owner answers while planning and running S5 (2026-10-12):**
+- The full sabotage overlaps the build. Ruled during the run: because W1 touched `index.js`/`session.js` (79 of 152
+  rows), ONE full run at the final sha replaced "full at `8d66ff4` + re-run touched rows". The partial run at `8d66ff4`
+  was stopped after 20 rows, all as expected.
+- `fallback-urls.js` price-checks the transfer number (the Function dials it straight from Twilio).
+- Final review F3 (pre-existing outbound code) was fixed in the wave.
+
+**Final review (opus, S1–S5, in two parts):** 0 Critical, 0 Important, 13 Minor.
+- Fixed in the waves: F1–F3, F6–F10, and F12's runbook line.
+- Of the 42 deferred lines from the S1–S4 ledgers, 27 were already fixed, and the rest are parked with rulings.
+- The report is at `.superpowers/sdd/2026-10-10-batch3-launch-guards-s5/final-review-part1.md`.
+- Re-reviews: W1 by opus, W2 and W3 by sonnet, all approved. Their Minors were fixed in W3.
+
+What S5 built:
+- **Task 5.0** (`server.js` `/twilio/status`): before the missed-call text, it calls `db.inboundGuardFacts({ businessId,
+  from, countCalls: false })`.
+  - Blocked, bounced, or no guard answer → no text, and it logs `missed_call_sms_skipped {callSid, reason}` with reason
+    `blocked`, `bounced` or `guard_unavailable`.
+  - A DB error goes to the existing `missed_call_sms_failed`. It fails closed: no text.
+- **`twilio/fallback/fallback.js`** (CommonJS, `twilio/fallback/package.json` `{"type":"commonjs"}`). Exports
+  `buildFallbackTwiml(event, context, VoiceResponse)`, `handler` and `LINES` (byte-equal to `CALL_LINES`, with a parity
+  test). In order:
+  - `step=done` → Hangup.
+  - `step=after` → Hangup only on `DialCallStatus=completed`; anything else → noAnswer line + Record + Hangup.
+  - First request:
+    - `To` that is not E.164 → technical-line message (W2 F8: no Dial without our own caller ID);
+    - `From===To` or `From===n` → `<Reject reason="busy"/>`;
+    - `n` missing or invalid → technical-line message;
+    - otherwise `<Dial timeout=t timeLimit=3600 callerId=To action=…?step=after&n&t&v>`.
+  - Action URLs are absolute, from `context.DOMAIN_NAME` + `context.PATH` (W2 F7; default `/fallback`).
+  - Every Record has `action=?step=done`. The `recordingStatusCallback` is `VOICEMAIL_URL?to=<To>`, and is omitted
+    when `VOICEMAIL_URL` is unset.
+  - `t`: `"45"` → 45, anything else → 20. `v` must match `^Polly\.[A-Za-z]+(-Neural)?$`, otherwise there is no voice
+    attribute. In `n`, a leading space (an unencoded `+`) is read as `+`.
+  - `handler` never errors. On a throw it sends a static Say + Hangup as a `Twilio.Response` with `text/xml` (W2 F9).
+- **`scripts/fallback-urls.js --base <https Function URL>`** (`parseArgs`, `buildFallbackUrl`, `formatBlock`) and
+  **`lib/db/fallbackUrlRows.js` `listFallbackRows`**:
+  - The DB read takes the phones from `business_directory`, then does ONE autocommit `app_lookup_business_by_phone`
+    per phone. The definer adopts the first tenant per transaction, so one statement across tenants would return
+    tenant 1 only under Cloud SQL `postgres`. A NOBYPASSRLS two-tenant DB test proves the trap is real.
+  - `n` is printed only if it is E.164 AND passes `checkDial(n, { allowPricier })`. Otherwise the note gives the
+    reason (`no_transfer_number`, `not_e164`, `needs_switch_on`, `over_ceiling`, `never`, …).
+  - `t=45` for `own_voicemail`. `v` = `resolveProfile(loadConfig(row)).twimlSayVoice`.
+  - Packaged like `block-caller.js`: Dockerfile COPY, `.dockerignore` negation, cloudbuild smoke import.
+- **`docs/runbooks/twilio-fallback.md`**:
+  - buying a number by hand (incl. StatusCallback on BOTH accounts);
+  - creating the Function per account (Protected, `VOICEMAIL_URL`, Deploy All);
+  - printing the URLs via the migrate job, and pasting them per number into the SAME account;
+  - re-print triggers;
+  - the after-outage Recordings check;
+  - `block-caller.js` (dry run, then `--confirm`);
+  - the quick test (call from a phone that is NOT the transfer number; the spare number must be a test tenant).
+- **Wave W1:**
+  - `lib/inboundGuards.js` `withTimeout`, `INBOUND_GUARD_TIMEOUT_MS` / `PENDING_DIAL_WRITE_TIMEOUT_MS` = 2000. The
+    inbound guard (both webhooks) and the pending-dial write (Live via injected timers, cascade) give up after 2 s:
+    the guard fails OPEN (`inbound_guard_failed` message `timeout`) and the transfer dials anyway
+    (`pending_dial_write_failed` reason `timeout`).
+  - `block-caller.js` `maskReason` masks any number-like span with 5+ digits (Unicode separators, full-width digits).
+  - The outbound `/twilio/outbound-transfer-result` with `completed` always hangs up silently. The outcome is written
+    only for a resolved attempt; otherwise it logs `outbound_transfer_completed_unresolved`.
+
+New sabotage rows (9; 152 in all):
+- `missed-call-text-skips-refused`;
+- `fallback-bounce-rejects`, `fallback-record-has-action`, `fallback-callerid-ours`, `fallback-requires-to`;
+- `fallback-url-encodes-number`;
+- `inbound-guard-timeout-fails-open`, `pending-dial-write-bounded`, `outbound-completed-transfer-hangs-up`.
+
+Re-anchored: `pending-dial-recorded-cascade` (now on the `db.recordPendingDial({` line) and `fallback-callerid-ours`
+(`callerId: to,`).
+
+**Known baseline, not batch 3:** `ask-branch-latch`, `ask-branch-in-turn` and `ask-latch-per-action` stay green when
+sabotaged. They have done so in every full run since 2026-09-28 (stage-3/4 logs), so the suite does not watch those
+three halves of the end-call ask gate. This is the only "x" in the run. Still parked.
+
+Parked (record-and-park, not fixed):
+- **F11:** the missed-call re-check's accepted gap is a two-callback race, not only "an old transfer". The bounced
+  call's own busy status and the original Dial's action arrive together. Closing it needs migration 055 (match dials
+  ended in the last minutes).
+- **F12:** `import-tenant.js` saves transfer/notification numbers with no price check. The runbook says to run
+  `fallback-urls.js` after an import. Dial- and send-time checks still refuse.
+- **F13:** the Function cannot see a loop through a business's OTHER number. No business has two today.
+- **F4:** the pre-config polite-failure / hard-end line uses the US voice.
+- **F5:** `pending_dials.caller_number` (≤1 day) is outside the Art. 15/17 export and erasure. It joins the open
+  `blocked_callers` erasure question for the owner.
+- **Fallback ringback.** The fallback Dial has no `ringTone`/`answerOnBridge`, so L7 checks that the caller hears
+  ringing.
+- `maskReason` over-masks chained times and dates ("at …0102") and leaves "(…0123". It errs toward masking.
+- The unreachable `PATH="/"`; an unmapped `checkDial` reason printed raw.
+
+**None of this is live-tested.** S6 L6 (block → no text) and L7 (fallback) are the first real checks. The Function
+must be pasted from the branch head's `twilio/fallback/fallback.js` (W2 changed it after the first review).
+
+Environment notes:
+- S5's workspace is `.superpowers/sdd/2026-10-10-batch3-launch-guards-s5/` (ledger, briefs, reports, `gate-s5.sh`,
+  `sab-full-s5.sh`).
+- Local Postgres :55432 is still at **054** (S5 added no migration).
+- Stopping a full sabotage mid-row: `taskkill /F /T` on the script's bash PID, then in the (clean, detached) gate
+  worktree `git checkout -- <file named in scripts/corpus/.sabotage-in-progress>` and `rm` the journal.
 
 ---
 
@@ -1017,8 +1134,11 @@ Pre-flight (read-only): `gcloud run services describe voice-uk-prod` → note th
    `sms_destination_refused`, `transfer_loop_refused`, `pending_dial_write_failed`, `inbound_guard_failed`,
    `repeat_caller_calls`, `repeat_caller_minutes`, `degraded_voicemail_no_business`, `dial_cost_table_stale`
    (describe → edit OR-list → update → describe).
-5. Owner: create the Function in each Twilio account (runbook) and send the URLs; we run
-   `scripts/fallback-urls.js` in the job; owner pastes each number's fallback URL.
+5. Owner: create the Function in each Twilio account (`docs/runbooks/twilio-fallback.md` §3; paste
+   `twilio/fallback/fallback.js` from the branch head) and send the URLs; we run
+   `scripts/fallback-urls.js --base <url>` in the migrate job (its image must be the new build — step 2); owner
+   pastes each number's fallback URL into a number on the SAME account (runbook §4–5). Read any "no transfer number
+   in this URL" note (`needs_switch_on` etc.) before pasting.
 6. Test tenant config via `set-business-config.js` (transfer number = owner's mobile; then `own_voicemail` for
    L4; then the loop number for L5) — restore afterwards from the script's base64 backup. S3: if the owner's mobile
    or the L5 loop number checks `needs_switch_on`, the script refuses it unless the SAME command also sets
@@ -1034,8 +1154,8 @@ Pre-flight (read-only): `gcloud run services describe voice-uk-prod` → note th
 | L3 | Ask for a person; answer; talk 30 s; staff hangs up | nothing played after; call ends | ~$0.35 |
 | L4 | Business set to `own_voicemail`; don't answer | the mobile's own voicemail answers (~25–30 s) | ~$0.35 |
 | L5 | Transfer number = a spare Twilio number whose TwiML Bin dials back to the business line | bounce refused, `transfer_loop_refused` logged, no-answer line on the original call | ~$0.45 |
-| L6 | Block a second handset; call; unblock; call | first rejected ($0), second answered | ~$0.05 |
-| L7 | A spare/test number whose primary URL points at a dead URL; call twice (answer / don't) | Twilio fallback rings the mobile showing OUR number; no answer → message → filed by callback | ~$0.20 |
+| L6 | Block a second handset; call; unblock; call (test tenant with `sms_followup_enabled` on, so the S5 Task 5.0 skip is exercised) | first rejected ($0) and **no "missed call" text** (`missed_call_sms_skipped` reason `blocked` in the log); second answered. Record the real `/twilio/status` payload for the rejected call (`CallStatus`, `CallDuration` — S4 assumed busy/no-answer with 0) | ~$0.05 |
+| L7 | A spare number, configured as a TEST TENANT (runbook §9), whose primary URL points at a dead URL; call twice from a phone that is NOT the transfer number (answer / don't) | the caller **hears ringing** during the fallback Dial (else add `ringTone`, parked F-ringback); the mobile shows OUR number; no answer → message → filed by the callback (server up) | ~$0.20 |
 | | **Total** | | **~$3.85 (+ ~20% margin ≈ $4–5)** |
 
 Not tested live (offline proof only): a Gemini refusal/drop (cannot be forced in production safely) and the
@@ -1068,6 +1188,17 @@ number block (pure table + per-site tests).
 - **Extensions by digits** (~0.5 h): `<Number sendDigits>`. Build when a client needs it.
 - **Allow-and-charge pricier numbers** (daily pricier-minute caps per client and platform-wide, pass-through
   at cost, under-$10/month free, per-client "included up to" price for EU clients): with billing/self-serve.
+- **Missed-call text race (S5 F11)** (~1 h + migration 055): the re-check also matches pending dials ended in the
+  last couple of minutes (`ended_at` window). Build if a client turns `sms_followup_enabled` on and L5-style bounces
+  happen in production.
+- **Importer price check (S5 F12)** (~0.5 h): `checkDial` / `checkText` in `scripts/import-tenant.js`. Build before
+  onboarding goes through the importer at volume.
+- **Multi-number loop in the fallback (S5 F13)** (~0.5 h): `fallback-urls.js` adds a business's other numbers (`o=`)
+  and the Function rejects them. Build when any business gets a second number.
+- **Erasure of platform tables (S4 + S5 F5)**: owner decides whether `blocked_callers` and `pending_dials.caller_number`
+  join `exportCallerData` / `eraseCallerData`. Before the first erasure request.
+- **End-call ask-gate rows (pre-existing)**: `ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action` stay
+  green under sabotage — give `tests/liveEndCallAsk.test.js` a test for each half. Next receptionist-fixes batch.
 - **Fallback URL drift check** (`fallback-urls.js --verify` against Twilio): with self-serve, when clients
   change their own transfer number.
 
@@ -1283,9 +1414,28 @@ open Minors, commit sha).
 > nothing breaks. Use every cost-, time- and usage-saving measure you can, without compromising quality.
 
 ### S6
-> Execute session S6 (deploy + live calls) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` at
-> sha <sha>. Follow the plan's S6 steps and memory terraform-broken-deploy-route,
-> prod-migration-checksums-crlf, reading-production-data, outbound-calling-plan (alert policy bare id). Build
-> ONLY from the main checkout with a clean tracked tree. I approve the live calls L1–L7 at ~$4–5: <yes/no>.
-> I will create the Twilio Functions during the session. Rollback target = the revision live before deploy.
-> Estimate 3–4 h.
+> Execute session S6 (deploy + live calls) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md`.
+> **Build sha: `c185ff5`** (S5 code head, gated: see "S5 as built"). Everything after it on `feat/outbound-stage4`
+> is plan/docs only — verify first: `git diff --stat c185ff5 HEAD -- . ':!docs'` must print nothing; then build from
+> the main checkout at the branch head with `_TAG=c185ff5` and a clean tracked tree.
+>
+> STEP 0: read the plan's Status table, "S1 as built" … "S5 as built", Owner actions, Session 6 in full, and memory
+> terraform-broken-deploy-route, prod-migration-checksums-crlf, reading-production-data, outbound-calling-plan (alert
+> policy bare id), twilio-account-topology, ask-before-spending-api-money.
+>
+> Follow the S6 steps in order. Notes from S5:
+> - Pre-flight (read-only): `TWILIO_ACCOUNT_SID_ALT` / `TWILIO_AUTH_TOKEN_ALT` env NAMES on the live revision; every
+>   Live number on BOTH accounts has Voice StatusCallback `https://<prod base>/twilio/status` POST.
+> - Step 2: the migrate job image must be the new build (it ships `fallback-urls.js` and `block-caller.js`); expect
+>   052–054 pending.
+> - Step 5: the owner creates the Function per account from `docs/runbooks/twilio-fallback.md` (paste
+>   `twilio/fallback/fallback.js` from the branch head); we run `fallback-urls.js --base <url>` per account in the
+>   migrate job; paste each URL only into numbers on the SAME account.
+> - L6: tenant with `sms_followup_enabled` on; the blocked call must get NO text; record the rejected call's real
+>   `/twilio/status` payload (`CallStatus`, `CallDuration`).
+> - L7: spare number set up as a test tenant; call from a phone that is NOT the transfer number; the caller must hear
+>   ringing during the fallback Dial.
+>
+> I approve the live calls L1–L7 at ~$4–5: <yes/no>. I will create the Twilio Functions during the session.
+> Rollback target = the revision live before deploy (expected `00100-nzn` @ `c755f56`; verify). Stop and ask before
+> anything not in the S6 steps. Estimate 3–4 h.
