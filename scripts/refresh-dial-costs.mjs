@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseTable, assertCompleteTable } from "../lib/dialCost.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const TABLE_PATHS = [
@@ -65,11 +66,13 @@ export function transform(raw) {
     collisions += 1;
     const differs = list.some((e) => e.price !== list[0].price || e.category !== list[0].category);
     if (differs) collisionsDiffering += 1;
-    // Fail closed: a never-category beats any other, then the highest price, then alphabetical ISO.
+    // Fail closed: a never-category beats any other, then the highest price, then
+    // special (so a tie never loses the stricter rule), then alphabetical ISO.
     const sorted = [...list].sort(
       (a, b) =>
         Number(NEVER_CATEGORIES.has(b.category)) - Number(NEVER_CATEGORIES.has(a.category)) ||
         b.price - a.price ||
+        Number(b.category === "special") - Number(a.category === "special") ||
         (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0)
     );
     const win = sorted[0];
@@ -131,6 +134,17 @@ export function serialize(table) {
   block("sms", table.sms, true);
   lines.push("}");
   return lines.join("\n") + "\n";
+}
+
+// Pure: would this serialized table boot? Throws if not. Used before ANY write.
+export function assertBootable(text) {
+  return assertCompleteTable(parseTable(text));
+}
+
+function writeAtomic(target, text) {
+  const tmp = `${target}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, target);
 }
 
 function parseEnv(file) {
@@ -202,7 +216,12 @@ async function main() {
   assertCompletePull(raw);
   const table = transform(raw);
   const text = serialize(table);
-  for (const p of TABLE_PATHS) fs.writeFileSync(p, text);
+  assertBootable(text); // nothing is written unless the result would boot
+  for (const p of TABLE_PATHS) writeAtomic(p, text);
+  const [a, b] = TABLE_PATHS.map((p) => fs.readFileSync(p));
+  if (Buffer.compare(a, b) !== 0 || Buffer.compare(a, Buffer.from(text)) !== 0) {
+    throw new Error("the two table copies are not byte-identical after writing");
+  }
   const perCat = {};
   for (const v of Object.values(table.voice)) perCat[v[2]] = (perCat[v[2]] || 0) + 1;
   console.log(`voice countries ${raw.voice.filter(Boolean).length}, sms countries ${raw.sms.filter(Boolean).length}`);

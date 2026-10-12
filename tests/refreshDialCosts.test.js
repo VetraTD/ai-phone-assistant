@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { categoryOf, transform, assertCompletePull, serialize } from "../scripts/refresh-dial-costs.mjs";
+import { readFileSync } from "node:fs";
+import { categoryOf, transform, assertCompletePull, serialize, assertBootable } from "../scripts/refresh-dial-costs.mjs";
 
 const P = "Programmable Outbound Minute - ";
 const pp = (name, price, prefixes) => ({ base_price: String(price), current_price: String(price), friendly_name: P + name, prefixes });
@@ -29,6 +30,10 @@ const fixture = () => ({
       iso_country: "NL",
       outbound_prefix_prices: [pp("Newland - Mobile", 0.1, ["999"]), pp("Newland - Fixed", 0.3, ["998"])],
     },
+    { country: "Tieland", iso_country: "AA", outbound_prefix_prices: [pp("Tieland - Fixed", 0.2, ["997"])] },
+    { country: "Zedland", iso_country: "ZZ", outbound_prefix_prices: [pp("Zedland - Special Services", 0.2, ["997"])] },
+    { country: "Tieland", iso_country: "AA", outbound_prefix_prices: [pp("Tieland - Fixed", 0.2, ["997"])] },
+    { country: "Zedland", iso_country: "ZZ", outbound_prefix_prices: [pp("Zedland - Special Services", 0.2, ["997"])] },
     { country: "Otherland", iso_country: "OL", outbound_prefix_prices: [pp("Otherland - Mobile", 0.05, ["999"]), pp("Otherland - Premium", 0.01, ["998"])] },
   ],
   sms: [
@@ -94,8 +99,14 @@ describe("transform", () => {
     expect(t.voice["998"][1]).toBe("OL");
     expect(t.voice["999"][0]).toBe(0.1);
   });
+  it("on an equal-price tie, special is kept over fixed (not lost to alphabetical ISO)", () => {
+    expect(t.voice["997"]).toEqual([0.2, "ZZ", "special"]);
+  });
+  it("on an equal-price tie, special is kept over fixed (not lost to alphabetical ISO)", () => {
+    expect(t.voice["997"]).toEqual([0.2, "ZZ", "special"]);
+  });
   it("counts collisions and differing ones", () => {
-    expect(t.stats).toEqual({ collisions: 3, collisionsDiffering: 2 });
+    expect(t.stats).toEqual({ collisions: 4, collisionsDiffering: 3 });
   });
   it("sms: max mobile, else max overall, else omitted", () => {
     expect(t.sms.GB).toBe(0.06);
@@ -130,5 +141,35 @@ describe("serialize", () => {
     expect(text).toContain('\n"44740":[0.0305,"GB","mobile"],\n');
     expect(text.endsWith("}\n")).toBe(true);
     expect(text).not.toContain("\r");
+  });
+});
+
+describe("assertBootable (the pre-write check)", () => {
+  it("accepts the committed table text", () => {
+    const text = readFileSync(new URL("../lib/dialCostTable.json", import.meta.url), "utf8");
+    expect(() => assertBootable(text)).not.toThrow();
+  });
+  it("refuses a NaN price, an empty sms side, and a small table, without touching disk", () => {
+    const t = transform(fixture());
+    expect(() => assertBootable(serialize(t))).toThrow(); // too small to boot
+    const nan = { ...t, voice: { ...t.voice, "44": [NaN, "GB", "fixed"] } };
+    expect(() => assertBootable(serialize(nan))).toThrow();
+    const noSms = { ...t, sms: {} };
+    expect(() => assertBootable(serialize(noSms))).toThrow();
+  });
+});
+
+describe("assertBootable (the pre-write check)", () => {
+  it("accepts the committed table text", () => {
+    const text = readFileSync(new URL("../lib/dialCostTable.json", import.meta.url), "utf8");
+    expect(() => assertBootable(text)).not.toThrow();
+  });
+  it("refuses a NaN price, an empty sms side, and a small table, without touching disk", () => {
+    const t = transform(fixture());
+    expect(() => assertBootable(serialize(t))).toThrow();
+    const nan = { ...t, voice: { ...t.voice, "44": [NaN, "GB", "fixed"] } };
+    expect(() => assertBootable(serialize(nan))).toThrow();
+    const noSms = { ...t, sms: {} };
+    expect(() => assertBootable(serialize(noSms))).toThrow();
   });
 });
