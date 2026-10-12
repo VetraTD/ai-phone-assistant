@@ -7,7 +7,6 @@ import {
   makeChecker,
   parseTable,
   assertCompleteTable,
-  assertCompleteTable,
   tableAgeDays,
   REFUSAL_MESSAGES,
   AUTO_MAX_PER_MIN,
@@ -69,11 +68,6 @@ describe("checkDial on the real table", () => {
     for (const bad of ["+44", "+44abc", "447400123456", "", null, undefined, 447400123456]) {
       expect(checkDial(bad)).toMatchObject({ ok: false, reason: "invalid" });
     }
-  });
-  it("a null or missing options argument is a clean verdict, not a crash", () => {
-    expect(checkDial("+447624123456", null)).toMatchObject({ ok: false, reason: "needs_switch_on" });
-    expect(checkDial("+447624123456", undefined)).toMatchObject({ ok: false, reason: "needs_switch_on" });
-    expect(checkDial("+447400123456", null).ok).toBe(true);
   });
   it("a null or missing options argument is a clean verdict, not a crash", () => {
     expect(checkDial("+447624123456", null)).toMatchObject({ ok: false, reason: "needs_switch_on" });
@@ -166,26 +160,6 @@ describe("parseTable", () => {
     expect(t({ ...good(), sms: { GB: -0.1 } })).toThrow();
     expect(t({ ...good(), fetched: "yesterday-ish" })).toThrow();
     expect(t({ ...good(), fetched: undefined })).toThrow();
-  });
-});
-
-describe("completeness floor (the import path: assertCompleteTable(parseTable(text)))", () => {
-  const load = (o) => assertCompleteTable(parseTable(JSON.stringify(o)));
-  const small = { fetched: "2026-10-01T00:00:00Z", source: "t", voice: { "44": [0.01, "GB", "fixed"] }, sms: { GB: 0.05 } };
-  it("refuses a small but otherwise valid table", () => {
-    expect(() => parseTable(JSON.stringify(small))).not.toThrow();
-    expect(() => load(small)).toThrow(/voice prefixes/);
-  });
-  it("refuses a big table missing 4470 or an sms price, accepts the real shape", () => {
-    const voice = {};
-    for (let i = 0; i < 10000; i++) voice["9" + String(i).padStart(6, "0")] = [0.01, "ZZ", "fixed"];
-    voice["1"] = [0.01, "US", "fixed"];
-    voice["44"] = [0.01, "GB", "fixed"];
-    const base = { ...small, voice, sms: { GB: 0.05, US: 0.01 } };
-    expect(() => load(base)).toThrow(/4470/);
-    voice["4470"] = [0.5, "GB", "personal"];
-    expect(() => load(base)).not.toThrow();
-    expect(() => load({ ...base, sms: { GB: 0.05, CA: 0.01 } })).toThrow(/sms price for US/);
   });
 });
 

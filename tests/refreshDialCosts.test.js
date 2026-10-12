@@ -32,8 +32,6 @@ const fixture = () => ({
     },
     { country: "Tieland", iso_country: "AA", outbound_prefix_prices: [pp("Tieland - Fixed", 0.2, ["997"])] },
     { country: "Zedland", iso_country: "ZZ", outbound_prefix_prices: [pp("Zedland - Special Services", 0.2, ["997"])] },
-    { country: "Tieland", iso_country: "AA", outbound_prefix_prices: [pp("Tieland - Fixed", 0.2, ["997"])] },
-    { country: "Zedland", iso_country: "ZZ", outbound_prefix_prices: [pp("Zedland - Special Services", 0.2, ["997"])] },
     { country: "Otherland", iso_country: "OL", outbound_prefix_prices: [pp("Otherland - Mobile", 0.05, ["999"]), pp("Otherland - Premium", 0.01, ["998"])] },
   ],
   sms: [
@@ -102,9 +100,6 @@ describe("transform", () => {
   it("on an equal-price tie, special is kept over fixed (not lost to alphabetical ISO)", () => {
     expect(t.voice["997"]).toEqual([0.2, "ZZ", "special"]);
   });
-  it("on an equal-price tie, special is kept over fixed (not lost to alphabetical ISO)", () => {
-    expect(t.voice["997"]).toEqual([0.2, "ZZ", "special"]);
-  });
   it("counts collisions and differing ones", () => {
     expect(t.stats).toEqual({ collisions: 4, collisionsDiffering: 3 });
   });
@@ -152,21 +147,6 @@ describe("assertBootable (the pre-write check)", () => {
   it("refuses a NaN price, an empty sms side, and a small table, without touching disk", () => {
     const t = transform(fixture());
     expect(() => assertBootable(serialize(t))).toThrow(); // too small to boot
-    const nan = { ...t, voice: { ...t.voice, "44": [NaN, "GB", "fixed"] } };
-    expect(() => assertBootable(serialize(nan))).toThrow();
-    const noSms = { ...t, sms: {} };
-    expect(() => assertBootable(serialize(noSms))).toThrow();
-  });
-});
-
-describe("assertBootable (the pre-write check)", () => {
-  it("accepts the committed table text", () => {
-    const text = readFileSync(new URL("../lib/dialCostTable.json", import.meta.url), "utf8");
-    expect(() => assertBootable(text)).not.toThrow();
-  });
-  it("refuses a NaN price, an empty sms side, and a small table, without touching disk", () => {
-    const t = transform(fixture());
-    expect(() => assertBootable(serialize(t))).toThrow();
     const nan = { ...t, voice: { ...t.voice, "44": [NaN, "GB", "fixed"] } };
     expect(() => assertBootable(serialize(nan))).toThrow();
     const noSms = { ...t, sms: {} };
