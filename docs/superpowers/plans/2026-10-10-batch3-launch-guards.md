@@ -385,6 +385,8 @@ Parked (record-and-park, not fixed):
     held.
   - A fix needs either a `call_state` marker column or a narrower status predicate, and the second needs real Twilio
     status data.
+  - **Decided 2026-10-12: "re-check first".** Before the text, re-check blocked/bounced through
+    `inboundGuardFacts`, with no migration. It is S5 Task 5.0 (see the S5 message).
 - A redelivered completed status callback can repeat `repeat_caller_minutes` (comment only, no dedupe).
 - The calls/day alert can miss or double under simultaneous calls (by construction, not locked).
 - A bounce that presents "anonymous" is not caught: the loop continues until the caller hangs up.
@@ -1205,7 +1207,7 @@ open Minors, commit sha).
 ### S5
 > Execute session S5 (Twilio fallback Function, fallback-URL script, runbook, checkpoint) of
 > `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` on `feat/outbound-stage4`, continuing from S4 (code
-> head `8d66ff4`, plus the plan-doc commit on top). Do only S5.
+> head `8d66ff4`, plus the plan-doc commits on top). Do only S5 (including Task 5.0 below).
 >
 > STEP 0, before anything else:
 > - Read the plan's Status table, "S1 as built" … "S4 as built", Owner decisions (decision 3: the caller-ID trick
@@ -1235,10 +1237,27 @@ open Minors, commit sha).
 >   triage. S4's are in `.superpowers/sdd/2026-10-10-batch3-launch-guards-s4/progress.md`.
 > - One Minor fix wave, a re-review, a gate and a commit.
 >
-> **OPEN OWNER QUESTION carried from S4:** a `<Reject>` (blocked number or bounced transfer) reaches `/twilio/status`
-> as busy/no-answer with duration 0. That is the "missed call" shape, so a business with `sms_followup_enabled` can
-> text a blocked caller, or a caller whose transfer bounced (consent permitting). Fix in S5, or leave it parked? See
-> "S4 as built".
+> **TASK 5.0 (owner decision 2026-10-12, "re-check first"; do it before 5.1, ~30 min).** Background: a `<Reject>`
+> (blocked number or bounced transfer) reaches `/twilio/status` as busy/no-answer with duration 0. That is the
+> "missed call" shape, so a business with `sms_followup_enabled` could text a blocked caller, or a caller whose
+> transfer bounced. See "S4 as built". The fix:
+> - In `server.js`, find the missed-call text-back (`sendCallerSms(config, callContext.callerNumber, "missed_call"`).
+>   After `lookupBusinessByPhone` and before the send, call
+>   `db.inboundGuardFacts({ businessId: business.id, from: callContext.callerNumber, countCalls: false })`.
+>   If `blocked || bounced`, skip the text and log `missed_call_sms_skipped` with `{ callSid, reason }`. Use no
+>   whole number in the log.
+> - On a DB error, skip the text. Let it reach the existing `missed_call_sms_failed` catch. A missed courtesy text
+>   costs less than texting a blocked number. This is not an inbound-answer guard, so fail-open does not apply.
+> - Accepted gap: if the bounce's transfer has already ended before the check runs, the text still goes.
+> - Tests (real `server.js` + supertest):
+>   - blocked → no SMS;
+>   - bounced → no SMS;
+>   - neither → SMS sent;
+>   - DB throws → no SMS + `missed_call_sms_failed`.
+> - One sabotage row, `missed-call-text-skips-refused`. Sonnet implementer + sonnet review. It is covered by the
+>   checkpoint gate.
+> - Add to the S6 message's L6 row: the blocked call gets no text, and record the real `/twilio/status` payload
+>   (`CallStatus`, `CallDuration`) for the rejected call.
 >
 > METHOD: superpowers:subagent-driven-development, faster variant.
 > - Sonnet implementers and reviewers. Opus does the final review only.
@@ -1258,7 +1277,7 @@ open Minors, commit sha).
 > - S6 message with the exact build sha;
 > - 5-line report.
 >
-> Plan estimate 3–4 h (the full sabotage run dominates). S1 1.7 h, S2 4.1 h, S3 ≈2.2 h, S4 ≈3.2 h.
+> Plan estimate 3–4 h (the full sabotage run dominates) + ~0.5 h for Task 5.0. S1 1.7 h, S2 4.1 h, S3 ≈2.2 h, S4 ≈3.2 h.
 
 ### S6
 > Execute session S6 (deploy + live calls) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` at
