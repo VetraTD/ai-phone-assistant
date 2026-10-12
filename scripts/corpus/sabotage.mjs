@@ -161,6 +161,8 @@ const GUARDROUTES = "tests/inboundGuardRoutes.test.js";
 const GUARDROUTESCASCADE = "tests/inboundGuardRoutesCascade.test.js";
 // Batch-3 S4 Task 4.3: the repeat-caller AI-minutes alert.
 const STATUS = "tests/twilioStatus.test.js";
+// Batch-3 S5 Task 5.1: the Twilio fallback Function.
+const FALLBACK = "tests/twilioFallback.test.js";
 
 const SABOTAGES = [
   {
@@ -1623,6 +1625,30 @@ const SABOTAGES = [
     find: "        if (skipReason) {",
     replace: "        if (false /* SABOTAGE */) {",
     red: [STATUS],
+  },
+  {
+    name: "fallback-bounce-rejects",
+    why: "the bounce check never rejects, so a call that comes back to a number from itself or from the transfer number is dialled out again and the forward-back loop runs (batch-3 S5 Task 5.1). The caller-ID trick only works if the bounce is turned away.",
+    file: "twilio/fallback/fallback.js",
+    find: "  if (event.From === event.To || (n && event.From === n)) {",
+    replace: "  if (false /* SABOTAGE */) {",
+    red: [FALLBACK],
+  },
+  {
+    name: "fallback-record-has-action",
+    why: "the Record loses its action, so Twilio re-requests the current document when the recording ends: the apology replays and a second message is filed (batch-3 S5 Task 5.1). recordingPathLint cannot see this file, so only this test pins it.",
+    file: "twilio/fallback/fallback.js",
+    find: '      action: base + "?step=done",',
+    replace: "      action: undefined, /* SABOTAGE */",
+    red: [FALLBACK],
+  },
+  {
+    name: "fallback-callerid-ours",
+    why: "the Dial shows the caller's number instead of ours, so the business's phone forwards the call straight back to us as a new call from a stranger and the loop guard cannot recognise it (batch-3 S5 Task 5.1).",
+    file: "twilio/fallback/fallback.js",
+    find: "    callerId: event.To,",
+    replace: "    callerId: event.From, /* SABOTAGE */",
+    red: [FALLBACK],
   },
 ];
 
