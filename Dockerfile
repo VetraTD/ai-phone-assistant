@@ -148,6 +148,8 @@ COPY scripts/outbound-admin.js ./scripts/outbound-admin.js
 # Batch-3 S4. The inbound block list: add, remove or list a blocked number. Dry
 # run by default, same migrate-job route as the scripts above.
 COPY scripts/block-caller.js ./scripts/block-caller.js
+# Batch-3 S5. Prints each number's Twilio fallback URL (read-only), same migrate-job route.
+COPY scripts/fallback-urls.js ./scripts/fallback-urls.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:

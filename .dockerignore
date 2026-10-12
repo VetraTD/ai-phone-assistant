@@ -48,6 +48,7 @@ scripts
 !scripts/set-business-config.js
 !scripts/outbound-admin.js
 !scripts/block-caller.js
+!scripts/fallback-urls.js
 docs
 latency-runs
 infra

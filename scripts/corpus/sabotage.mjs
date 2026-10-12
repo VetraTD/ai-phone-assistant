@@ -163,6 +163,7 @@ const GUARDROUTESCASCADE = "tests/inboundGuardRoutesCascade.test.js";
 const STATUS = "tests/twilioStatus.test.js";
 // Batch-3 S5 Task 5.1: the Twilio fallback Function.
 const FALLBACK = "tests/twilioFallback.test.js";
+const FALLBACK_URLS = "tests/fallbackUrls.test.js";
 
 const SABOTAGES = [
   {
@@ -1649,6 +1650,14 @@ const SABOTAGES = [
     find: "    callerId: event.To,",
     replace: "    callerId: event.From, /* SABOTAGE */",
     red: [FALLBACK],
+  },
+  {
+    name: "fallback-url-encodes-number",
+    why: "the URL carries the transfer number with a raw + instead of %2B, so Twilio reads the + as a space and the Function's n is mangled; every pasted URL would dial nothing and take a message (batch-3 S5 Task 5.2).",
+    file: "scripts/fallback-urls.js",
+    find: "  return { url: `${base}?${params.toString()}`, omitted };",
+    replace: '  return { url: `${base}?${params.toString().replace(/%2B/g, "+")}`, omitted }; /* SABOTAGE */',
+    red: [FALLBACK_URLS],
   },
 ];
 
