@@ -155,6 +155,7 @@ async function boot({
   twilioClient,
   twilioClientFor,
   customParameters,
+  timers,
 } = {}) {
   const ws = new FakeSocket();
   let clock = 0;
@@ -168,6 +169,7 @@ async function boot({
     postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },
     ...(twilioClient ? { twilioClient } : {}),
     ...(twilioClientFor ? { twilioClientFor } : {}),
+    ...(timers ? { setTimer: timers.setTimer, clearTimer: timers.clearTimer } : {}),
   });
   ws.deliver({
     event: "start",
@@ -380,6 +382,53 @@ describe("Live inbound transfer: pending dial", () => {
     cap.restore();
     expect(updates[0].twiml).toContain("<Dial");
     expect(cap.of("pending_dial_write_failed")).toHaveLength(1);
+  });
+});
+
+describe("Live inbound transfer: pending dial write is bounded at 2 s", () => {
+  it("a write that never settles times out after 2 s: logged once as 'timeout', the transfer still dials, timer cleared", async () => {
+    // Injected timers: only the 2 s bound is ever fired, by hand.
+    const timers = [];
+    const fake = {
+      setTimer: (fn, ms) => {
+        timers.push({ fn, ms, cleared: false });
+        return timers.length - 1;
+      },
+      clearTimer: (id) => {
+        if (timers[id]) timers[id].cleared = true;
+      },
+    };
+    const cap = captureEvents("pending_dial_write_failed");
+    const updates = [];
+    const live = fakeLive();
+    const db = fakeDb();
+    db.markCallTransferred = vi.fn(async () => {});
+    db.recordPendingDial = vi.fn(() => new Promise(() => {}));
+    db.loadConfig = () => ({ ...CONFIG, transferPhoneNumber: NORMAL });
+    const { ws } = await boot({
+      live,
+      db,
+      twilioClient: { calls: () => ({ update: async (o) => updates.push(o) }) },
+      customParameters: { businessPhone: "+441372656055", callerPhone: CALLER },
+      timers: fake,
+    });
+    await callTool(live, "request_transfer");
+    live.push({ serverContent: { outputTranscription: { text: "Putting you through now." }, turnComplete: true } });
+    await new Promise((r) => setImmediate(r));
+    ws.deliver({ event: "mark", mark: { name: ws.marks().at(-1) } });
+    await vi.waitFor(() => expect(db.recordPendingDial).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setImmediate(r));
+    expect(updates).toHaveLength(0); // still waiting on the write
+    const bound = timers.filter((t) => t.ms === 2000 && !t.cleared);
+    expect(bound).toHaveLength(1);
+    bound[0].fn();
+    await vi.waitFor(() => expect(updates).toHaveLength(1));
+    cap.restore();
+    expect(updates[0].twiml).toContain("<Dial");
+    const ev = cap.of("pending_dial_write_failed");
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ site: "live_inbound_transfer", reason: "timeout", severity: "warn" });
+    expect(bound[0].cleared).toBe(true);
   });
 });
 

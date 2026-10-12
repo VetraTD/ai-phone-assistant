@@ -1551,8 +1551,8 @@ const SABOTAGES = [
     name: "pending-dial-recorded-cascade",
     why: "the cascade transfer stops recording its dial. A forward-all bounce of the transfer then reaches the assistant as a fresh call and loops the business's own phone (batch-3 S4).",
     file: "lib/voice/session.js",
-    find: "            const id = await db.recordPendingDial({",
-    replace: '            const id = await (async () => "SABOTAGE")({',
+    find: "              db.recordPendingDial({",
+    replace: '              (async () => "SABOTAGE")({',
     red: [SESSION_CASCADE],
   },
   {
@@ -1658,6 +1658,30 @@ const SABOTAGES = [
     find: "  return { url: `${base}?${params.toString()}`, omitted };",
     replace: '  return { url: `${base}?${params.toString().replace(/%2B/g, "+")}`, omitted }; /* SABOTAGE */',
     red: [FALLBACK_URLS],
+  },
+  {
+    name: "inbound-guard-timeout-fails-open",
+    why: "the inbound guard lookup is no longer bounded: a slow database holds /twilio/live-voice and /twilio/voice for up to ~11 s, past Twilio's 15 s webhook timeout, and the caller hears 'application error' (batch-3 S5 final review F2).",
+    file: "lib/inboundGuards.js",
+    find: "    facts = await withTimeout(\n      database.inboundGuardFacts({ businessId, from, countCalls: countable }),\n      INBOUND_GUARD_TIMEOUT_MS\n    );",
+    replace: "    facts = await database.inboundGuardFacts({ businessId, from, countCalls: countable }); // SABOTAGE",
+    red: [GUARDS],
+  },
+  {
+    name: "pending-dial-write-bounded",
+    why: "the Live pending-dial write is no longer bounded at 2 s: a slow database leaves the caller in dead air for up to ~11 s after 'let me put you through' (batch-3 S5 final review F2).",
+    file: "lib/voice/live/index.js",
+    find: "      const id = await withTimeout(\n        database.recordPendingDial({",
+    replace: "      const id = await Promise.resolve(\n        database.recordPendingDial({",
+    red: [PENDINGLIVE],
+  },
+  {
+    name: "outbound-completed-transfer-hangs-up",
+    why: "a completed transfer whose attempt lookup failed (or whose ?attempt= mismatched) falls through to the 'we'll call you back' line, said to a person who just spoke to a human (batch-3 S5 final review F3).",
+    file: "lib/outbound/doorRoutes.js",
+    find: '    if (dialCallStatus === "completed") {\n      if (resolved) {',
+    replace: '    if (dialCallStatus === "completed" && resolved) {\n      if (resolved) {',
+    red: [TRANSFERLIVE],
   },
 ];
 

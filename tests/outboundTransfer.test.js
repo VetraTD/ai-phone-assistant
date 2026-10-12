@@ -742,6 +742,35 @@ describe("POST /twilio/outbound-transfer-result", () => {
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "transferred");
   });
 
+  // Final review F3: a real conversation happened; a failed or mismatched
+  // attempt lookup must not make the person hear "we'll call you back".
+  it("completed + throwing attempt lookup: silent hang-up, no callback Say, no outcome write", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = doorFakeDb({ outboundAttemptByCallSid: vi.fn(async () => { throw new Error("db down"); }) });
+    const res = await request(doorApp(db, {}, log))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+    expect(res.text).toBe("<Response></Response>");
+    expect(res.text).not.toContain("call you back");
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith("outbound_transfer_completed_unresolved", expect.objectContaining({ callSid: PARENT_SID }));
+  });
+
+  it("completed + mismatched ?attempt=: the same silent hang-up, nothing written", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = doorFakeDb();
+    const res = await request(doorApp(db, {}, log))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: "some-other-attempt" })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+    expect(res.text).toBe("<Response></Response>");
+    expect(db.setCallOutcomeCode).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith("outbound_transfer_completed_unresolved", expect.objectContaining({ callSid: PARENT_SID }));
+  });
+
   // I7 (Controller Ruling, OVERNIGHT, fix wave checkpoint 2b): the line no
   // longer promises a callback from "someone at the business" -- Part 1 has
   // no owner-notification wiring, so the only follow-up that actually
@@ -925,7 +954,7 @@ describe("POST /twilio/outbound-transfer-result", () => {
       .post("/twilio/outbound-transfer-result")
       .query({ attempt: "not-the-real-attempt-id" })
       .type("form")
-      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+      .send({ CallSid: PARENT_SID, DialCallStatus: "no-answer" });
 
     expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
     expect(db.setCallOutcomeCode).not.toHaveBeenCalled();

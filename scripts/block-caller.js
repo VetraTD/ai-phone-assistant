@@ -146,7 +146,10 @@ function expiryText(row) {
  * typed into it) becomes an ellipsis and its last four digits.
  */
 export function maskReason(reason) {
-  return String(reason ?? "").replace(/\d{5,}/g, (run) => `…${run.slice(-4)}`);
+  return String(reason ?? "").replace(/\+?\d[\d\s().\/-]{3,}\d/g, (span) => {
+    const digits = span.replace(/\D/g, "");
+    return digits.length >= 5 ? `…${digits.slice(-4)}` : span;
+  });
 }
 
 /** One masked line per row. Never the whole number. */

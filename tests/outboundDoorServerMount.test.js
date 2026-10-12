@@ -202,7 +202,7 @@ describe("server.js's real mount: /twilio/status keeps its missed-call path; /tw
     const sig = twilioSignature(BASE + "/twilio/status", busyBody);
     const res = await request(app).post("/twilio/status").type("form").set("X-Twilio-Signature", sig).send(busyBody);
     expect(res.status).toBe(200);
-    await new Promise((r) => setImmediate(r));
+    await vi.waitFor(() => expect(mockSendCallerSms).toHaveBeenCalled());
 
     expect(mockNotifyCallMissed).toHaveBeenCalledWith(
       expect.objectContaining({

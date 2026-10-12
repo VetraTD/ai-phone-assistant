@@ -3,7 +3,7 @@
 // and nothing it prints may carry a whole phone number.
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { parseArgs, formatRow } from "../scripts/block-caller.js";
+import { parseArgs, formatRow, maskReason } from "../scripts/block-caller.js";
 
 const NUM = "+15559990000";
 const WHOLE_NUMBER = /\+?\d{7,}/; // a whole phone number anywhere in the output
@@ -88,7 +88,7 @@ describe("formatRow", () => {
 
   it("masks a number typed into the reason down to its last four digits", () => {
     const line = formatRow({ phone: NUM, business_id: null, reason: "caller +447700900123 again, 12 calls", expires_at: null });
-    expect(line).toContain("reason: caller +…0123 again, 12 calls");
+    expect(line).toContain("reason: caller …0123 again, 12 calls");
     expect(line).not.toContain("7700900");
     expect(line).not.toMatch(WHOLE_NUMBER);
   });
@@ -112,5 +112,25 @@ describe("the script, run with no database configured", () => {
     const r = run(["--list"]);
     expect(r.status).toBe(1);
     expect(r.stderr + r.stdout).toMatch(/Neither DATABASE_URL nor CLOUD_SQL_INSTANCE is set/);
+  });
+});
+
+describe("maskReason: spaced, dashed and bracketed numbers", () => {
+  it.each([
+    ["caller +1 415 555 0123 harassing", "14155550123"],
+    ["+1-415-555-0123 again", "14155550123"],
+    ["(415) 555-0123 rang", "4155550123"],
+    ["+44 7700 900123 abusive", "447700900123"],
+  ])("%s keeps only the last four digits", (reason, digits) => {
+    const out = maskReason(reason);
+    const outDigits = out.replace(/\D/g, "");
+    expect(outDigits).toBe(digits.slice(-4));
+    for (let i = 0; i + 5 <= digits.length; i++) expect(outDigits).not.toContain(digits.slice(i, i + 5));
+    expect(out).toContain("…" + digits.slice(-4));
+  });
+
+  it("leaves short numbers and dates as typed", () => {
+    expect(maskReason("rang 3 times")).toBe("rang 3 times");
+    expect(maskReason("on 3 May, 2 calls")).toBe("on 3 May, 2 calls");
   });
 });

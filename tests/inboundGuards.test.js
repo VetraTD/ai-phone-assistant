@@ -7,6 +7,7 @@ import {
   isRealCallerNumber,
   isOwnNumber,
   REPEAT_CALLS_ALERT_AT,
+  INBOUND_GUARD_TIMEOUT_MS,
 } from "../lib/inboundGuards.js";
 import { last4 } from "../lib/phone.js";
 
@@ -208,5 +209,48 @@ describe("last4", () => {
     expect(last4("123")).toBe("");
     expect(last4(null)).toBe("");
     expect(last4("anonymous")).toBe("");
+  });
+});
+
+describe("inboundGuardTwiml: bounded at 2 s (fails open on timeout)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("a lookup that never settles answers the call after 2 s and logs inbound_guard_failed 'timeout'", async () => {
+    vi.useFakeTimers();
+    const cap = capture("inbound_guard_failed");
+    const database = { inboundGuardFacts: vi.fn(() => new Promise(() => {})) };
+    const pending = run(database);
+    let settled = false;
+    pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(INBOUND_GUARD_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toBeNull();
+    cap.restore();
+    expect(INBOUND_GUARD_TIMEOUT_MS).toBe(2000);
+    const ev = cap.of("inbound_guard_failed");
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ message: "timeout", severity: "warn" });
+  });
+
+  it("a fast answer clears the timer (no timer left pending) and a late rejection is not unhandled", async () => {
+    vi.useFakeTimers();
+    const out = await run(fakeDatabase({ blocked: true }));
+    expect(out).toContain("<Reject");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a lookup that rejects AFTER the timeout raises no unhandled rejection and logs once", async () => {
+    vi.useFakeTimers();
+    const cap = capture("inbound_guard_failed");
+    let rejectLate;
+    const database = { inboundGuardFacts: vi.fn(() => new Promise((_, rej) => { rejectLate = rej; })) };
+    const pending = run(database);
+    await vi.advanceTimersByTimeAsync(INBOUND_GUARD_TIMEOUT_MS);
+    expect(await pending).toBeNull();
+    rejectLate(new Error("late"));
+    await vi.advanceTimersByTimeAsync(10);
+    cap.restore();
+    expect(cap.of("inbound_guard_failed")).toHaveLength(1);
   });
 });

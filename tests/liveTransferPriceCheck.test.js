@@ -165,7 +165,7 @@ async function boot({
     now: () => clock,
     connect: live.connect,
     database: db,
-    env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com", },
+    env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com" },
     // Task 20: never the REAL, wired-up singleton (it would try services/
     // db.js's real pool -- unconfigured in every test here).
     postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },

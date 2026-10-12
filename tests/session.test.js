@@ -1605,6 +1605,19 @@ describe("session.js — v2 pipeline orchestrator", () => {
       expect(db.recordPendingDial).not.toHaveBeenCalled();
     });
 
+    it("a write that never settles is cut off at 2 s: the transfer TwiML is still sent and 'timeout' is logged once", async () => {
+      db.recordPendingDial.mockClear();
+      db.recordPendingDial.mockImplementationOnce(() => new Promise(() => {}));
+      log.error.mockClear();
+      const started = Date.now();
+      const twiml = await runCascadeTransfer();
+      expect(Date.now() - started).toBeGreaterThanOrEqual(1900);
+      expect(twiml).toContain("<Dial");
+      const failed = log.error.mock.calls.filter((c) => c[0] === "pending_dial_write_failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0][1]).toMatchObject({ site: "cascade_transfer", reason: "timeout", severity: "warn" });
+    }, 10000);
+
     it("a write that throws still sends the transfer TwiML and logs pending_dial_write_failed", async () => {
       db.recordPendingDial.mockClear();
       db.recordPendingDial.mockRejectedValueOnce(new Error("db down"));
