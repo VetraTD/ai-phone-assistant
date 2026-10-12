@@ -28,6 +28,7 @@
 // ---------------------------------------------------------------------------
 
 import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -1462,6 +1463,64 @@ const SABOTAGES = [
     replace: "    allowPricierNumbers: Boolean(business.allow_pricier_numbers) /* SABOTAGE */,",
     red: [CAPCONFIG],
   },
+  {
+    name: "gate-blocked-destination",
+    why: "evaluateGate stops closing an outreach whose number failed the price check: a never or pricier number is dialled (batch-3 S3).",
+    file: "lib/outbound/gate.js",
+    find: '  if (!f.destination.ok) return never("blocked_destination");',
+    replace: '  if (!f.destination.ok && false /* SABOTAGE */) return never("blocked_destination");',
+    red: ["tests/outboundGate.test.js"],
+  },
+  {
+    name: "gate-destination-fact-required",
+    why: "assertGateFacts stops requiring the destination fact: a wiring bug that drops it reads as fine to dial instead of throwing (batch-3 S3).",
+    file: "lib/outbound/gate.js",
+    find: '  if (typeof dest !== "object" || dest === null || typeof dest.ok !== "boolean") fail("destination", "must be an object with a boolean ok");',
+    replace: "  /* SABOTAGE: destination shape check removed */",
+    red: ["tests/outboundGate.test.js"],
+  },
+  {
+    name: "dispatch-destination-switch-on-strict",
+    why: "dispatch treats every business as having pricier numbers switched on: the 10-60 cent band is dialled without our say-so (batch-3 S3).",
+    file: "lib/outbound/dispatch.js",
+    find: "checkDial(r.phone_e164, { allowPricier: r.allow_pricier_numbers === true })",
+    replace: "checkDial(r.phone_e164, { allowPricier: true /* SABOTAGE */ })",
+    red: ["tests/outboundDispatch.test.js"],
+  },
+  {
+    name: "lead-intake-price-checked",
+    why: "the lead-intake route stops price-checking the phone: a public form can make us call an expensive number (batch-3 S3).",
+    file: "lib/outbound/triggerRoute.js",
+    find: "const dest = checkDial(phone, { allowPricier: campaign.allowPricierNumbers === true });",
+    replace: "const dest = { ok: true } /* SABOTAGE */;",
+    red: ["tests/outboundTriggerRoute.test.js"],
+  },
+  {
+    name: "campaign-transfer-price-checked",
+    why: "saving a campaign stops price-checking transfer.to: an expensive or premium transfer target is saved (batch-3 S3).",
+    file: "lib/outbound/campaignSchema.js",
+    find: "const dest = checkDial(transfer.to);",
+    replace: "const dest = { ok: true } /* SABOTAGE */;",
+    red: ["tests/outboundCampaignSchema.test.js"],
+  },
+  {
+    name: "dashboard-transfer-price-checked",
+    why: "the dashboard settings save stops price-checking the transfer number: a customer can point transfers at an expensive number (batch-3 S3).",
+    file: "AI-phone-dashboard/backend/src/routes/settings.js",
+    find: "const dest = checkDial(transferTo, { allowPricier });",
+    replace: "const dest = { ok: true } /* SABOTAGE */;",
+    cwd: "AI-phone-dashboard/backend",
+    red: ["src/__tests__/settings.test.js"],
+  },
+  {
+    name: "dashboard-notification-text-checked",
+    why: "the dashboard settings save stops price-checking the notification number we text: a customer can make us text an expensive number (batch-3 S3).",
+    file: "AI-phone-dashboard/backend/src/routes/settings.js",
+    find: "const dest = checkText(notifyTo);",
+    replace: "const dest = { ok: true } /* SABOTAGE */;",
+    cwd: "AI-phone-dashboard/backend",
+    red: ["src/__tests__/settings.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
@@ -1499,7 +1558,7 @@ let reached = !from;
 // tests print, and an UNREADABLE verdict distinct from both red and green.
 // Neither caller is allowed to guess.
 // ---------------------------------------------------------------------------
-function runSuites(files) {
+function runSuites(files, cwd) {
   // `--silent=true`, not a bare `--silent`: this vitest's CLI parser folds the
   // next positional into the flag and dies with
   //   Unexpected value "--silent=tests/postCallVerify.test.js"
@@ -1524,6 +1583,9 @@ function runSuites(files) {
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 256 * 1024 * 1024,
+    // Optional per-row working directory (relative to the repo root, where this
+    // runs). undefined for every row without `cwd`, which is spawnSync's default.
+    cwd,
   });
   // Strip ANSI before matching. vitest colours the numbers, so a pattern
   // written against the visible text silently misses and reports "?" -- a tally
@@ -1582,7 +1644,7 @@ if (process.argv.includes("--census")) {
       continue;
     }
     for (const suite of s.red) {
-      if (!fs.existsSync(suite)) {
+      if (!fs.existsSync(path.join(s.cwd || ".", suite))) {
         console.error(`x ${s.name}: names a red suite that does not exist -- ${suite}`);
         drifted += 1;
       }
@@ -1607,19 +1669,29 @@ console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
 // A single row's baseline question is only ever "are the suites this row claims
 // to break green right now". The wider run is the right default when every row
 // is going to execute; it is pure waste when one is.
-const targets = only
-  ? [...new Set(SABOTAGES.filter((s) => s.name === only).flatMap((s) => s.red))]
-  : [...new Set(SABOTAGES.flatMap((s) => s.red))];
-const baseline = runSuites(targets);
-if (baseline.unreadable) {
-  console.error(`Baseline could not be READ: ${baseline.reason}.`);
-  console.error("That is not the same as red. Nothing was measured, so nothing below would mean");
-  console.error("anything -- fix the run before trusting a single row.");
-  process.exit(1);
+// Targets are grouped by the row's optional `cwd` (undefined = repo root, the
+// only group for every row that has no `cwd`); each group is one run.
+const targetsByCwd = new Map();
+for (const s of SABOTAGES) {
+  if (only && s.name !== only) continue;
+  if (!targetsByCwd.has(s.cwd)) targetsByCwd.set(s.cwd, new Set());
+  for (const suite of s.red) targetsByCwd.get(s.cwd).add(suite);
 }
-if (!baseline.ok) {
-  console.error("Baseline is RED. Fix the suite before asking whether it can fail.");
-  process.exit(1);
+const targets = [];
+for (const [cwd, suites] of targetsByCwd) {
+  const group = [...suites];
+  targets.push(...group.map((x) => (cwd ? `${cwd}/${x}` : x)));
+  const baseline = runSuites(group, cwd);
+  if (baseline.unreadable) {
+    console.error(`Baseline could not be READ${cwd ? ` in ${cwd}` : ""}: ${baseline.reason}.`);
+    console.error("That is not the same as red. Nothing was measured, so nothing below would mean");
+    console.error("anything -- fix the run before trusting a single row.");
+    process.exit(1);
+  }
+  if (!baseline.ok) {
+    console.error(`Baseline is RED${cwd ? ` in ${cwd}` : ""}. Fix the suite before asking whether it can fail.`);
+    process.exit(1);
+  }
 }
 console.log(`  green: ${targets.join(" ")}\n`);
 
@@ -1651,7 +1723,7 @@ for (const s of SABOTAGES) {
     if (fs.readFileSync(s.file, "utf8") === original) {
       throw new Error("the patch did not change the file");
     }
-    result = runSuites(s.red);
+    result = runSuites(s.red, s.cwd);
   } finally {
     fs.writeFileSync(s.file, original);
     if (fs.readFileSync(s.file, "utf8") !== original) {

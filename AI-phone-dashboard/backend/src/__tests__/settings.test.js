@@ -408,4 +408,74 @@ describe("PUT /api/business/:id/settings", () => {
     const res = await request(app).put(`/api/business/${BUSINESS_ID}/settings`).send({ name: "X" });
     expect(res.status).toBe(401);
   });
+
+  describe("number block: price check on numbers we dial or text", () => {
+    function mockWithFlag(flag) {
+      poolQueryMock.mockImplementation((sql, params) => {
+        if (sql.includes("app_lookup_user_by_auth_uid")) return Promise.resolve({ rows: [{ business_id: BUSINESS_ID }] });
+        if (sql.startsWith("SELECT allow_pricier_numbers FROM businesses")) return Promise.resolve({ rows: [{ allow_pricier_numbers: flag }] });
+        if (sql.startsWith("UPDATE businesses")) return Promise.resolve({ rows: [{ id: BUSINESS_ID, _params: params }] });
+        return Promise.reject(new Error("unexpected query: " + sql));
+      });
+    }
+    const put = (body) => request(app).put(`/api/business/${BUSINESS_ID}/settings`).set("Authorization", "Bearer test-token").send(body);
+    const updateCall = () => poolQueryMock.mock.calls.find(([sql]) => sql.startsWith("UPDATE businesses"));
+    const flagSelects = () => poolQueryMock.mock.calls.filter(([sql]) => sql.startsWith("SELECT allow_pricier_numbers"));
+
+    it("a never transfer number is refused with the field and message, and nothing is written", async () => {
+      mockWithFlag(false);
+      const res = await put({ transfer_phone_number: "+449090123456" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/^transfer_phone_number: .*premium-rate/);
+      expect(updateCall()).toBeUndefined();
+    });
+
+    it("a pricier mobile transfer number is refused while the flag is false and saved when true", async () => {
+      mockWithFlag(false);
+      const refused = await put({ transfer_phone_number: "+447624123456" });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/^transfer_phone_number: /);
+      expect(updateCall()).toBeUndefined();
+      mockWithFlag(true);
+      const ok = await put({ transfer_phone_number: "+447624123456" });
+      expect(ok.status).toBe(200);
+      expect(updateCall()).toBeTruthy();
+    });
+
+    it("a pricier-flag row that is not strictly true does not switch it on", async () => {
+      mockWithFlag("true");
+      const res = await put({ transfer_phone_number: "+447624123456" });
+      expect(res.status).toBe(400);
+    });
+
+    it("a Pakistan notification_phone is refused (texts cost more than 25 cents)", async () => {
+      mockWithFlag(true);
+      const res = await put({ notification_phone: "+923001234567" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/^notification_phone: /);
+      expect(updateCall()).toBeUndefined();
+    });
+
+    it("a UK landline transfer number is saved", async () => {
+      mockWithFlag(false);
+      const res = await put({ transfer_phone_number: "+442079460958" });
+      expect(res.status).toBe(200);
+      expect(updateCall()).toBeTruthy();
+    });
+
+    it("clearing the transfer number is always allowed and needs no flag lookup", async () => {
+      mockWithFlag(false);
+      const res = await put({ transfer_phone_number: null });
+      expect(res.status).toBe(200);
+      expect(updateCall()).toBeTruthy();
+      expect(flagSelects()).toHaveLength(0);
+    });
+
+    it("a body carrying allow_pricier_numbers never reaches the UPDATE", async () => {
+      mockWithFlag(false);
+      const res = await put({ allow_pricier_numbers: true, name: "Acme Dental" });
+      expect(res.status).toBe(200);
+      expect(updateCall()[0]).not.toContain("allow_pricier_numbers");
+    });
+  });
 });

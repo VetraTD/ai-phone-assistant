@@ -102,7 +102,7 @@ describe("dispatchLines equals what the REAL dispatcher hands renderAudio", () =
     next_attempt_at: NOW, campaign_id: "c1", campaign_version: 1, campaign_status: "active", compliance_class: "solicited", template_key: "speed_to_lead",
     config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+447700900101" },
     contact_id: "k1", phone_e164: "+447700900202", first_name: "Sam", contact_timezone: null,
-    outbound_enabled: true, outbound_max_concurrent: 2, business_timezone: "Europe/London", business_name: "Harness Test Clinic",
+    outbound_enabled: true, allow_pricier_numbers: true, outbound_max_concurrent: 2, business_timezone: "Europe/London", business_name: "Harness Test Clinic",
     ...over,
   });
   const fakeDb = (r) => ({

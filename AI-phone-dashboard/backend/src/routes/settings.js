@@ -8,6 +8,11 @@ const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { SETTINGS_FIELD_VALIDATORS } = require("../settingsValidation");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
 
+// dialCost.mjs is ESM (a byte-identical copy of the root repo's lib/dialCost.js);
+// this package is CommonJS, so it is loaded once with a cached dynamic import.
+let dialCostPromise;
+const loadDialCost = () => (dialCostPromise ??= import("../dialCost.mjs"));
+
 // Get a business by id (must match authenticated user's business)
 // /api/businesses/:id
 router.get("/api/businesses/:id", authenticate, withTenantHandler(async (req, res) => {
@@ -61,6 +66,33 @@ router.put("/api/business/:id/settings", authenticate, withTenantHandler(async (
     const built = buildUpdateFromWhitelist(SETTINGS_FIELD_VALIDATORS, req.body);
     if (built.error) {
       return res.status(400).json({ error: built.error });
+    }
+
+    // Number block: a number we will dial (transfer) or text (notification)
+    // must pass the price check. The NORMALISED value the whitelist produced
+    // is what is checked. Clearing a number is always allowed. Only VetraTD
+    // can switch pricier numbers on, so allow_pricier_numbers is deliberately
+    // NOT in SETTINGS_FIELD_VALIDATORS and is read here, never written.
+    const valueOf = (field) => {
+      const i = built.setClauses.findIndex((c) => c.startsWith(`${field} = `));
+      return i === -1 ? undefined : built.params[i];
+    };
+    const transferTo = valueOf("transfer_phone_number");
+    const notifyTo = valueOf("notification_phone");
+    const hasTransfer = typeof transferTo === "string" && transferTo !== "";
+    const hasNotify = typeof notifyTo === "string" && notifyTo !== "";
+    if (hasTransfer || hasNotify) {
+      const { checkDial, checkText, REFUSAL_MESSAGES } = await loadDialCost();
+      const flagRow = await pool.query(`SELECT allow_pricier_numbers FROM businesses WHERE id = $1`, [id]);
+      const allowPricier = flagRow.rows[0]?.allow_pricier_numbers === true;
+      if (hasTransfer) {
+        const dest = checkDial(transferTo, { allowPricier });
+        if (!dest.ok) return res.status(400).json({ error: `transfer_phone_number: ${REFUSAL_MESSAGES[dest.reason]}` });
+      }
+      if (hasNotify) {
+        const dest = checkText(notifyTo);
+        if (!dest.ok) return res.status(400).json({ error: `notification_phone: ${REFUSAL_MESSAGES[dest.reason]}` });
+      }
     }
 
     if (built.unknownKeys.length) {

@@ -2811,7 +2811,7 @@ export async function claimOutreachForDispatch(outreachId) {
     `SELECT o.id, o.business_id, o.state, o.attempts_made, o.created_at, o.hold_until, o.next_attempt_at,
             o.campaign_id, o.campaign_version, c.status AS campaign_status, c.compliance_class, c.template_key,
             v.config, k.id AS contact_id, k.phone_e164, k.first_name, k.timezone AS contact_timezone,
-            b.outbound_enabled, b.outbound_max_concurrent, b.timezone AS business_timezone, b.name AS business_name,
+            b.outbound_enabled, b.allow_pricier_numbers, b.outbound_max_concurrent, b.timezone AS business_timezone, b.name AS business_name,
             -- S3-6 (spec §19, S3-D4): the business's own number, for
             -- dispatch.js's caller_id default when the campaign sets none.
             b.phone_number AS business_phone_number
@@ -4476,9 +4476,10 @@ export async function campaignByTriggerHash(hash) {
 export async function campaignForTrigger(campaignId) {
   requireTenantScope("campaignForTrigger");
   const res = await q(
-    `SELECT c.compliance_class, c.status, c.current_version, v.config
+    `SELECT c.compliance_class, c.status, c.current_version, v.config, b.allow_pricier_numbers
        FROM campaigns c
        JOIN campaign_versions v ON v.campaign_id = c.id AND v.version = c.current_version
+       JOIN businesses b ON b.id = c.business_id
       WHERE c.id = $1`,
     [campaignId]
   );
@@ -4490,6 +4491,7 @@ export async function campaignForTrigger(campaignId) {
     complianceClass: row.compliance_class,
     status: row.status,
     currentVersion: row.current_version,
+    allowPricierNumbers: row.allow_pricier_numbers === true,
     detailsFields: fields.filter((f) => f && typeof f.key === "string" && typeof f.label === "string"),
   };
 }

@@ -13,7 +13,7 @@ function row(over = {}) {
     campaign_id: "c1", campaign_version: 1, campaign_status: "active", compliance_class: "solicited", template_key: "speed_to_lead",
     config: { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055" },
     contact_id: "k1", phone_e164: "+447700900001", first_name: "Sam", contact_timezone: null,
-    outbound_enabled: true, outbound_max_concurrent: 2, business_timezone: "Europe/London", business_name: "Digile Media",
+    outbound_enabled: true, allow_pricier_numbers: true, outbound_max_concurrent: 2, business_timezone: "Europe/London", business_name: "Digile Media",
     ...over,
   };
 }
@@ -41,7 +41,7 @@ function fakeDb(r = row()) {
     storeAttemptAudio: rec("storeAudio", undefined),
   };
 }
-const env = { enabled: false, allowlist: new Set(["+447700900001"]), maxConcurrent: 8, inboundReserve: 2, baseUrl: "https://svc.example" };
+const env = { enabled: false, allowlist: new Set(["+447700900001", "+449090123456", "+33612345678", "+442079460958"]), maxConcurrent: 8, inboundReserve: 2, baseUrl: "https://svc.example" };
 const mk = (db, twilio = { calls: { create: vi.fn(async () => ({ sid: "CA123" })) } }, extra = {}) => {
   const enqueue = vi.fn(async () => ({ created: true }));
   // 2026-10-01 (ruling R1): this file's tests assert the clip rollback's
@@ -78,6 +78,45 @@ describe("dispatch: the happy path", () => {
     const db = fakeDb(row({ attempts_made: 1 })); const { d, twilio } = mk(db);
     await d({ businessId: "b1", outreachId: "o1" });
     expect(twilio.calls.create.mock.calls[0][0].timeout).toBe(25);
+  });
+});
+
+describe("dispatch: the price check on the number", () => {
+  const go = async (over) => {
+    const db = fakeDb(row(over)); const { d, twilio } = mk(db);
+    const r = await d({ businessId: "b1", outreachId: "o1" });
+    return { db, twilio, r };
+  };
+  it("a never number is closed as blocked_destination and never dialled", async () => {
+    const { db, twilio, r } = await go({ phone_e164: "+449090123456", allow_pricier_numbers: true });
+    expect(r).toMatchObject({ status: "closed", reason: "blocked_destination" });
+    expect(db.closeOutreach).toHaveBeenCalledWith("o1", "blocked_destination");
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+    expect(db.insertCallAttempt).not.toHaveBeenCalled();
+  });
+  it("a pricier EU mobile is refused when allow_pricier_numbers is false", async () => {
+    const { db, twilio } = await go({ phone_e164: "+33612345678", allow_pricier_numbers: false });
+    expect(db.closeOutreach).toHaveBeenCalledWith("o1", "blocked_destination");
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+  it("a pricier EU mobile is refused when the column value is absent (fail closed)", async () => {
+    const { db, twilio } = await go({ phone_e164: "+33612345678", allow_pricier_numbers: undefined });
+    expect(db.closeOutreach).toHaveBeenCalledWith("o1", "blocked_destination");
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+  it("a pricier EU mobile is dialled when allow_pricier_numbers is true", async () => {
+    const { twilio, r } = await go({ phone_e164: "+33612345678", allow_pricier_numbers: true });
+    expect(r.status).toBe("dialed");
+    expect(twilio.calls.create).toHaveBeenCalled();
+  });
+  it("a truthy non-true column value does not count as switched on", async () => {
+    const { twilio } = await go({ phone_e164: "+33612345678", allow_pricier_numbers: "true" });
+    expect(twilio.calls.create).not.toHaveBeenCalled();
+  });
+  it("a UK landline is dialled (regression)", async () => {
+    const { twilio, r } = await go({ phone_e164: "+442079460958", allow_pricier_numbers: false });
+    expect(r.status).toBe("dialed");
+    expect(twilio.calls.create).toHaveBeenCalled();
   });
 });
 

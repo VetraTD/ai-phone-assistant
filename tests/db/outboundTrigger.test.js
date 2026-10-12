@@ -84,8 +84,8 @@ beforeAll(async () => {
 
   await admin.query(`DELETE FROM businesses WHERE id = $1`, [BIZ]);
   await admin.query(
-    `INSERT INTO businesses (id, name, phone_number, timezone, live_voice, allowed_tasks)
-     VALUES ($1, 'Trigger Route Co', $2, 'Europe/London', 'Aoede', '["general_question","book_appointment"]'::jsonb)`,
+    `INSERT INTO businesses (id, name, phone_number, timezone, live_voice, allowed_tasks, allow_pricier_numbers)
+     VALUES ($1, 'Trigger Route Co', $2, 'Europe/London', 'Aoede', '["general_question","book_appointment"]'::jsonb, true)`,
     [BIZ, BIZ_PHONE]
   );
 
@@ -166,6 +166,7 @@ d("app_campaign_by_trigger_hash, as vetra_app", () => {
       complianceClass: "solicited",
       status: "active",
       currentVersion: 1,
+      allowPricierNumbers: true,
       detailsFields: detailsFields,
     });
   });

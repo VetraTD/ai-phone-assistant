@@ -128,6 +128,7 @@ describe("a give_up_after_days breach closes the outreach early, ahead of the sc
       dialsToday: 0,
       active: { globalOutbound: 0, businessOutbound: 0 },
       callerIdValid: true,
+      destination: { ok: true, perMin: 0.0158, iso: "GB" },
       ...overrides,
     };
   }

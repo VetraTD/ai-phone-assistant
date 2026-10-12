@@ -19,7 +19,7 @@ beforeAll(async () => {
   await admin.connect();
   await admin.query(`ALTER ROLE vetra_app LOGIN PASSWORD 'probe_only'`);
   await admin.query(`DELETE FROM businesses WHERE id = $1`, [BIZ]);
-  await admin.query(`INSERT INTO businesses (id, name, timezone, outbound_enabled) VALUES ($1,'Race','Europe/London',true)`, [BIZ]);
+  await admin.query(`INSERT INTO businesses (id, name, timezone, outbound_enabled, allow_pricier_numbers) VALUES ($1,'Race','Europe/London',true,true)`, [BIZ]);
   ({ TEMPLATES } = await import("../../lib/outbound/templates.js"));
   const cfg = { ...structuredClone(TEMPLATES.speed_to_lead), caller_id: "+441372656055",
     calling_window: { mon_fri: "08:00-21:00", sat: "08:00-21:00", sun: "08:00-21:00", outside_window: "queue" } };
@@ -83,7 +83,7 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
   const PHONES = {
     never: "+447700900401", paused: "+447700900402", failed: "+447700900403",
     busy: "+447700900404", placed: "+447700900405", due: "+447700900406",
-    closedMid: "+447700900407", closedMid429: "+447700900408",
+    closedMid: "+447700900407", closedMid429: "+447700900408", blocked: "+449090123456",
   };
   const FIXED = new Date("2026-09-28T13:00:00Z");
   const DUE = new Date("2026-09-28T12:59:00Z"); // due on the FIXED clock, whatever the real date
@@ -129,6 +129,15 @@ d("the dispatcher's other paths land in real rows, as vetra_app", () => {
     const o = await outreachRow(id);
     expect(o).toMatchObject({ state: "closed", close_reason: "suppressed", attempts_made: 0 });
     expect(o.closed_at).toBeInstanceOf(Date);
+    expect(await attemptRows(id)).toEqual([]);
+  });
+
+  it("batch-3 S3: a number that fails the price check closes the outreach as blocked_destination (migration 053's CHECK allows it) and dials nothing", async () => {
+    const { outreachId: id } = await seed("blocked-1", PHONES.blocked);
+    const create = vi.fn();
+    expect(await dispatcher(create)({ businessId: BIZ, outreachId: id })).toEqual({ status: "closed", reason: "blocked_destination", source: "gate" });
+    expect(create).not.toHaveBeenCalled();
+    expect(await outreachRow(id)).toMatchObject({ state: "closed", close_reason: "blocked_destination", attempts_made: 0 });
     expect(await attemptRows(id)).toEqual([]);
   });
 

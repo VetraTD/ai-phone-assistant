@@ -18,6 +18,7 @@ const base = () => ({
   dialsToday: 0,
   active: { globalOutbound: 0, businessOutbound: 0 },
   callerIdValid: true,
+  destination: { ok: true, perMin: 0.0305, iso: "GB" },
 });
 const gate = (f) => evaluateGate(f, { rand: () => 0 });
 
@@ -39,10 +40,12 @@ describe("evaluateGate: each check refuses on its own (11 reasons)", () => {
     ["daily_contact_cap", "later", (f) => { f.env.enabled = true; f.dialsToday = 3; }],
     ["capacity", "later", (f) => { f.active.businessOutbound = 2; }],
     ["caller_id_invalid", "never", (f) => { f.callerIdValid = false; }],
+    ["blocked_destination (never number)", "never", (f) => { f.destination = { ok: false, reason: "never" }; }],
+    ["blocked_destination (needs switch-on)", "never", (f) => { f.destination = { ok: false, reason: "needs_switch_on" }; }],
   ];
   it.each(cases)("%s -> %s", (reason, verdict, mutate) => {
     const f = base(); mutate(f);
-    expect(gate(f)).toMatchObject({ verdict, reason });
+    expect(gate(f)).toMatchObject({ verdict, reason: reason.split(" ")[0] });
   });
 
   it("global capacity: outbound at max - reserve is refused even when the business has room", () => {
@@ -212,6 +215,11 @@ describe("evaluateGate: a missing or malformed fact throws, never allows", () =>
     // Same class: undefined here makes check 8b compare against NaN, so
     // give_up_window silently never fires.
     ["campaign.config.retries.give_up_after_days missing", (f) => { delete f.campaign.config.retries.give_up_after_days; }],
+    ["destination missing", (f) => { delete f.destination; }],
+    ["destination null", (f) => { f.destination = null; }],
+    ["destination empty object", (f) => { f.destination = {}; }],
+    ["destination.ok a string", (f) => { f.destination = { ok: "yes" }; }],
+    ["destination refused without a reason", (f) => { f.destination = { ok: false }; }],
     ["campaign.status undefined", (f) => { f.campaign.status = undefined; }],
     ["campaign.compliance_class undefined", (f) => { f.campaign.compliance_class = undefined; }],
     ["campaign.template_key undefined", (f) => { f.campaign.template_key = undefined; }],

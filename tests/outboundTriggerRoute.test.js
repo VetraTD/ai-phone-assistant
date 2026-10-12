@@ -66,6 +66,7 @@ function baseCampaignRow(overrides = {}) {
     complianceClass: "solicited",
     status: "active",
     currentVersion: 1,
+    allowPricierNumbers: true, // the fixture PHONE is a UK mobile (pricier band)
     detailsFields: [{ key: "topic_detail", label: "Regarding" }],
     ...overrides,
   };
@@ -154,6 +155,38 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "not-a-number" });
     expect(res.status).toBe(422);
     expect(res.body.field).toBe("phone");
+  });
+
+  it("a never number (UK premium) 422s with the exact price-check body and creates nothing", async () => {
+    const db = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: true }) });
+    const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+449090123456", consent: validConsent() });
+    expect(res.status).toBe(422);
+    expect(res.body).toEqual({ error: "We can't call this number for you — please ring this lead yourself.", field: "phone" });
+    expect(db.upsertContactForTrigger).not.toHaveBeenCalled();
+    expect(db.recordTriggerConsent).not.toHaveBeenCalled();
+    expect(db.createOutreachFromTrigger).not.toHaveBeenCalled();
+  });
+
+  it("a pricier EU mobile 422s while the business flag is off, and is accepted when it is on", async () => {
+    const off = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: false }) });
+    const r1 = await request(buildApp(off)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+33612345678", consent: validConsent() });
+    expect(r1.status).toBe(422);
+    expect(off.createOutreachFromTrigger).not.toHaveBeenCalled();
+    const on = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: true }) });
+    const r2 = await request(buildApp(on)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+33612345678", consent: validConsent() });
+    expect(r2.status).toBe(202);
+  });
+
+  it("a truthy non-true allowPricierNumbers does not switch pricier numbers on", async () => {
+    const db = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: "true" }) });
+    const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+33612345678", consent: validConsent() });
+    expect(res.status).toBe(422);
+  });
+
+  it("a UK landline is accepted (regression)", async () => {
+    const db = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: false }) });
+    const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+442079460958", consent: validConsent() });
+    expect(res.status).toBe(202);
   });
 
   it("an unrecognised timezone 422s with field:timezone", async () => {

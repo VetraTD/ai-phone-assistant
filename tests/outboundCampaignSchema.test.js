@@ -420,3 +420,24 @@ describe("questions[].confirm (read-back, spec §5b)", () => {
     expect(TEMPLATES.speed_to_lead.questions.some((q) => q.confirm === true)).toBe(false);
   });
 });
+
+describe("validateCampaign: transfer.to is price-checked at save", () => {
+  const withTransfer = (to) => ({ ...good(), transfer: { to, when: "Mon-Fri 09:00-17:00", whisper: true } });
+  const transferErrors = (to) => v(withTransfer(to)).errors?.filter((e) => e.path === "transfer.to") ?? [];
+  it("a never number (UK premium 090) is refused with the never message", () => {
+    const e = transferErrors("+449090123456");
+    expect(e).toHaveLength(1);
+    expect(e[0].message).toMatch(/premium-rate/);
+  });
+  it("a Tunisia mobile (over the ceiling) is refused", () => {
+    const e = transferErrors("+21650123456");
+    expect(e).toHaveLength(1);
+    expect(e[0].message).toMatch(/cost more than we allow/);
+  });
+  it("an EU mobile (needs switch-on) is accepted at save; the dial-time check decides", () => {
+    expect(v(withTransfer("+33612345678")).ok).toBe(true);
+  });
+  it("a UK landline is accepted", () => {
+    expect(v(withTransfer("+442079460958")).ok).toBe(true);
+  });
+});
