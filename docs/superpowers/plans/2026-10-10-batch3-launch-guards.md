@@ -27,7 +27,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 | S1 | Voicemail fix + transfer stopgap + per-business choice + 60-min transfer limit (+ db-inspect add-on, findings A/B) | 4–5 | **done 2026-10-11** in ≈1.7 h actual (≈0.4 h planning + ≈1.3 h execution); code head `618742c` — see "S1 as built" |
 | S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | **done 2026-10-11** in ≈4.1 h actual (≈0.4 h planning + ≈3.7 h execution); code head `41847f9` — see "S2 as built" |
 | S3 | Number block (price check at every dial and text) | 3.5–4 | **done 2026-10-11** in ≈2.2 h active (≈0.45 h planning + ≈1.75 h execution; plus ≈1.3 h waiting for an owner reply after a memory-killed gate); code head `12bdaf4` — see "S3 as built" |
-| S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | not started |
+| S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | **done 2026-10-12** in ≈3.2 h actual (≈0.55 h planning incl. 3 owner answers + ≈2.6 h execution); code head `8d66ff4` — see "S4 as built" |
 | S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | not started |
 | S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | not started |
 | | **Total** | **21.5–27** | |
@@ -295,6 +295,126 @@ Environment notes:
 - An implementer's "N tests passing" once came from a file that differed from the commit (doubled pastes). Ask for
   the real vitest summary lines and a `git diff` duplication check before commit.
 
+### S4 as built (2026-10-12) — what later sessions must know
+
+Commits on `feat/outbound-stage4`:
+- `35027d5` migration 054 + db wrappers
+- `e4feecd` pending dials + inbound guard
+- `c78fe31` 4.1 review fix
+- `8a6362c` AI-minutes alert + block-caller script
+- `8d66ff4` minor wave
+
+FINAL gate at `8d66ff4` (gate worktree), all green:
+- root: 307 files / 7527 tests;
+- test:db: 48 files / 679 tests;
+- dashboard backend vitest: 16 files / 159 tests;
+- census: 143 rows clean;
+- all 11 new S4 rows red-on-sabotage, plus 9 neighbour rows still red (`transfer-has-action`, `transfer-client-by-account`, `cascade-transfer-has-action`, `live-transfer-price-checked`, `live-outbound-transfer-price-checked`, `cascade-transfer-price-checked`, `transfer-result-completed-hangs-up`, `polite-failure-blocks-transfer`, `vm-callback-to-param`).
+
+**The plan's DB design could not work in production. Owner answers while planning S4 (2026-10-12):**
+- Cloud SQL `postgres` has NO BYPASSRLS. A SECURITY DEFINER function reading a FORCE-RLS table with no tenant set
+  sees 0 rows. As written, `app_dial_bounced` (tenant-RLS `pending_dials`) and `app_calls_from_today` (all-tenant
+  `calls`) would have answered "no" on every call in production while passing locally, where `vetra` is a superuser.
+- **Q1 → `pending_dials` is a PLATFORM table.** No RLS, REVOKE ALL from PUBLIC/vetra_app (the sequence too), the
+  `business_directory` shape. It is reachable only through definer functions, so `/twilio/transfer-result` and
+  `/twilio/status` need no tenant.
+- **Q2 → `app_calls_from_today` walks each tenant** of `business_directory`, setting `app.business_id` per tenant and
+  restoring the previous scope. It is O(tenants) per inbound call: revisit at a few hundred clients.
+  `app_ai_seconds_today` sets its own scope the same way and refuses a different already-set tenant.
+- **Q3 → every inbound guard error fails OPEN** (block list included) and logs `inbound_guard_failed`. A block-list
+  MATCH is the only refusal.
+- DB tests re-own the functions to a NOSUPERUSER NOBYPASSRLS role (`tests/db/loopGuard.test.js`). Without that
+  re-own they prove nothing locally.
+
+New names:
+- Migration `054_loop_guard_block_list.sql`:
+  - tables `pending_dials`, `blocked_callers` (both platform);
+  - functions:
+    - `app_record_pending_dial(p_business, p_call_sid, p_caller, p_dialled, p_timeout_sec)`. Expiry is
+      `now() + clamp(timeout, 5..120) + 15 s`. It also purges rows older than 1 day.
+    - `app_end_pending_dial(p_call_sid)`, which also purges.
+    - `app_dial_bounced(p_business, p_from)`.
+    - `app_caller_blocked(p_from, p_business)`.
+    - `app_calls_from_today(p_from)`.
+    - `app_ai_seconds_today(p_business, p_caller, p_exclude_call_sid DEFAULT NULL)`.
+  - Functions take `p_business` from the webhook's own lookup, not a Twilio number (one number-resolution path).
+- `services/db.js`: four wrappers, all `pool.query`, all THROW on a DB error and return null with no DB:
+  - `recordPendingDial`, `inboundGuardFacts` and `aiSecondsToday` are PHI_ACCESS with `noteAccess`;
+  - `endPendingDial` is non-PHI.
+- `lib/inboundGuards.js`:
+  - `inboundGuardTwiml({ database, business, from, callSid, route })` is one round trip and never throws. The order
+    is: blocked → `<Reject reason="rejected"/>`; bounced → `<Reject reason="busy"/>`; then the calls/day alert.
+  - Also exports `isRealCallerNumber` (E.164 and not a Twilio withheld placeholder), `isOwnNumber`,
+    `REPEAT_CALLS_ALERT_AT` (30) and `AI_MINUTES_ALERT_SEC` (1800).
+- `lib/phone.js` `last4`.
+- Both webhooks call the guard after the business lookup and before the stream token. `/twilio/voice` also removes
+  the callState entry. A Reject never creates a call row.
+- Pending dials:
+  - Recorded at Live inbound/outbound (`notePendingDial`) and at the cascade, after the price check and right before
+    the Dial starts.
+  - The outbound caller is the campaign `caller_id`. A withheld caller is stored as NULL. The dialled number is stored
+    normalised.
+  - Ended in `/twilio/transfer-result` (both outcomes), `/twilio/outbound-transfer-result` and terminal
+    `/twilio/status`.
+  - The env unrouted transfer is exempt.
+- `scripts/block-caller.js --add <e164> --reason "…" [--business <twilio e164>] [--days N] | --remove <e164> | --list
+  [--confirm]`:
+  - dry run by default;
+  - last 4 digits only, with digit runs in reasons masked;
+  - Dockerfile COPY + `.dockerignore` negation + cloudbuild smoke import;
+  - run it through the migrate job like `set-business-config.js`.
+
+Log events. S6 step 4 already lists the first five alerts:
+- `transfer_loop_refused` {callSid, businessId, route};
+- `pending_dial_write_failed` {callSid, businessId, site, reason};
+- `inbound_guard_failed` {callSid, businessId, route, message};
+- `repeat_caller_calls` {callSid, businessId, callerLast4, count: 31};
+- `repeat_caller_minutes` {callSid, businessId, callerLast4, aiMinutes};
+- not alerts: `inbound_caller_blocked`, `pending_dial_end_failed`, `repeat_caller_minutes_check_failed`.
+
+New sabotage rows (11): `pending-dial-expiry` (static pin on 054; the SQL predicates were hand-sabotaged red once,
+ledgered), `pending-dial-recorded-live`, `pending-dial-recorded-cascade`, `pending-dial-ended-on-result`,
+`loop-guard-refuses-bounce`, `block-list-refuses`, `repeat-calls-threshold`, `inbound-guards-live-route`,
+`inbound-guards-cascade-route`, `inbound-guard-fails-open`, `repeat-minutes-crossing`.
+
+Parked (record-and-park, not fixed):
+- **OWNER QUESTION — a `<Reject>` reaches the missed-call text-back.** Twilio reports a rejected call (blocked or
+  bounce) to `/twilio/status` as busy/no-answer with duration 0, which is the Part-2 "missed call" shape. So
+  `sendCallerSms("missed_call")` can text a blocked caller, or the caller whose transfer bounced.
+  - It only fires when the business has `sms_followup_enabled` (default off) and SMS consent; otherwise the text is
+    held.
+  - A fix needs either a `call_state` marker column or a narrower status predicate, and the second needs real Twilio
+    status data.
+- A redelivered completed status callback can repeat `repeat_caller_minutes` (comment only, no dedupe).
+- The calls/day alert can miss or double under simultaneous calls (by construction, not locked).
+- A bounce that presents "anonymous" is not caught: the loop continues until the caller hangs up.
+- The single guard round trip couples failures: a timeout in the cross-tenant count also drops that call's block and
+  bounce answers (it fails open).
+- `blocked_callers` is not touched by `eraseCallerData` (the block is a deliberate admin record). Decide if a blocked
+  caller asks for erasure.
+- `block-caller.js` masks runs of 5+ digits in a printed reason, so a spaced number typed into a reason
+  (`+44 7700 900123`) still prints one 4-digit group.
+- The `pending_dials` normalisation of the dialled number is a backstop nothing reaches today: `checkDial` refuses a
+  non-E.164 number first. Tests pin "formatted number → no Dial, no row".
+- Still parked from S1: an unanswered transfer leaves `calls.status = 'transferred'`. S4 did not need to decide it;
+  it now belongs to billing.
+
+**S5/S6 must know:**
+- Every hand-configured number on BOTH accounts needs StatusCallback = `/twilio/status`. The end-on-status and
+  `completeCall` depend on it, so add it to the S5 runbook + S6 pre-flight.
+- 054 applies through the migrate job; S6 step 2 expects 052–054 pending.
+- Add `transfer_loop_refused` etc. to the alert OR-list (already in step 4).
+- The L5/L6 live tests exercise exactly this session.
+
+**None of this is live-tested.** S6 L5 (bounce) and L6 (block) are the first real checks.
+
+Environment notes:
+- S4's workspace is `.superpowers/sdd/2026-10-10-batch3-launch-guards-s4/` (ledger, briefs, reports, `gate-s4.sh`).
+- Local Postgres :55432 is at **054**, with the post-review `app_end_pending_dial` applied and its checksum updated,
+  and no reset.
+- An implementer's root suite in the MAIN tree needs `NODE_EXTRA_CA_CERTS=<norton-roots.pem>`, or 15 loopback-TLS
+  tests fail. The gate script sets it.
+
 ---
 
 ## Owner decisions (planning session 2026-10-10) — final
@@ -396,7 +516,7 @@ caller's last 4 digits + call SID; the block list is a DB table set by an admin 
   replaced span.
 - Every migration is folded into `database/schema.sql` in the same commit (`tests/schema.test.js`,
   `tests/db/schemaParity.test.js`); `SET LOCAL lock_timeout = '5s'` in the migration, never in schema.sql
-  (`tests/outboundMigrationsStatic.test.js`). Next free number: **052**.
+  (`tests/outboundMigrationsStatic.test.js`). Next free number: **055** (S1–S4 used 052–054).
 - Every tenant write is scoped (`withTenant` / `withTenantSafe`); under FORCE RLS an unscoped write matches
   0 rows and "succeeds" (`memory: unscoped-writes-now-fail-closed`).
 - Caller numbers never appear whole in logs or URLs (Cloud Run request logs keep full URLs). Logs use
@@ -871,6 +991,8 @@ Pre-flight (read-only): `gcloud run services describe voice-uk-prod` → note th
 (expected `00100-nzn` @ `c755f56` — verify, don't assume) = rollback target; confirm env NAMES (not values)
 `TWILIO_ACCOUNT_SID_ALT` / `TWILIO_AUTH_TOKEN_ALT` exist on the revision (else account-B webhooks to
 `/twilio/voicemail` and `/twilio/transfer-result` 403); main checkout clean; `CLOUDSDK_CONFIG=~/.gcloud-vetra2`.
+(S4) In the Twilio console (read-only), every Live number on BOTH accounts has Voice StatusCallback
+`https://<prod base>/twilio/status` POST — pending dials end there and `completeCall` depends on it.
 
 1. `gcloud builds submit --config=cloudbuild.yaml --substitutions=_TAG=<sha> …` from the MAIN checkout
    (`memory: terraform-broken-deploy-route`).
@@ -1082,10 +1204,61 @@ open Minors, commit sha).
 
 ### S5
 > Execute session S5 (Twilio fallback Function, fallback-URL script, runbook, checkpoint) of
-> `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` from commit <sha>. Ends with ONE full
-> `sabotage.mjs` run in the gate worktree (~1.5 h; foreground wait loops), an opus final review of S1–S5, one
-> Minor fix wave. End: everything green, commit, Status, S6 message with the exact build sha. Estimate
-> 3–4 h.
+> `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` on `feat/outbound-stage4`, continuing from S4 (code
+> head `8d66ff4`, plus the plan-doc commit on top). Do only S5.
+>
+> STEP 0, before anything else:
+> - Read the plan's Status table, "S1 as built" … "S4 as built", Owner decisions (decision 3: the caller-ID trick
+>   in the Function), Global constraints, Review focus, File map and Session 5 in full.
+> - Read memory sdd-gates-and-memory-limits, never-git-checkout-uncommitted-work, owner-wants-speed-and-low-usage,
+>   plan-verbatim-code-fails-open, record-needs-action and twilio-account-topology.
+> - S1 finding A applies to the Function: every `<Record>` needs an `action` (`fallback?step=done` → Hangup). The
+>   lint can't see the Function's TwiML, so give it its own test.
+> - **Runbook additions from S4:**
+>   - every hand-configured number on BOTH accounts needs Voice StatusCallback = `https://<prod base>/twilio/status`
+>     (POST). Pending dials end there and `completeCall` depends on it.
+>   - Blocking a number = `scripts/block-caller.js` through the migrate job, the same way as `set-business-config`.
+>     It does a dry run first, then `--confirm`.
+> - Gate worktree `C:/Users/nithi/VetraTD/ai-phone-gate` has TWO junctions, root `node_modules` and
+>   `AI-phone-dashboard/backend/node_modules`. Check main's count is ~269. `test-audio/` is already copied in.
+> - Copy `.superpowers/sdd/2026-10-10-batch3-launch-guards-s4/gate-s4.sh` into S5's own workspace and change its
+>   `LOGDIR`. Never edit a gate script while it runs. Never stop a gate mid-rows.
+> - Local Postgres :55432 is at migration 054. S5 adds no migration.
+> - Root vitest in the MAIN tree needs `NODE_EXTRA_CA_CERTS=<.superpowers/sdd/2026-09-29-outbound-stage4/norton-roots.pem>`,
+>   or 15 loopback-TLS tests fail. The gate script sets it; implementers must too.
+>
+> CHECKPOINT (Task 5.4):
+> - ONE full `node scripts/corpus/sabotage.mjs` in the gate worktree. It has ~144 rows now (S4 added 11); allow
+>   ~1.5–2 h with foreground wait loops, and resume with `--from <row>`.
+> - Opus final review of S1–S5, source-only diff (exclude the 1 MB price tables). Give it the Review focus, the
+>   per-session named risks, and every ledger `minor (deferred)` / `parked` line from the S1–S4 workspaces to
+>   triage. S4's are in `.superpowers/sdd/2026-10-10-batch3-launch-guards-s4/progress.md`.
+> - One Minor fix wave, a re-review, a gate and a commit.
+>
+> **OPEN OWNER QUESTION carried from S4:** a `<Reject>` (blocked number or bounced transfer) reaches `/twilio/status`
+> as busy/no-answer with duration 0. That is the "missed call" shape, so a business with `sms_followup_enabled` can
+> text a blocked caller, or a caller whose transfer bounced (consent permitting). Fix in S5, or leave it parked? See
+> "S4 as built".
+>
+> METHOD: superpowers:subagent-driven-development, faster variant.
+> - Sonnet implementers and reviewers. Opus does the final review only.
+> - Census after any `index.js` / `tools.js` / `strings.js` edit.
+> - One implementer at a time. Ask implementers for the real vitest summary lines and a `git diff` duplication check
+>   before they commit.
+>
+> STOP AND ASK if a decision isn't covered by the plan, the code contradicts it, the session passes 6 h, or anything
+> needs production, a paid API or a real call. No paid calls, no real calls, no production, no deploy, no push. Never
+> git checkout/restore over uncommitted work; commit before any sabotage.
+>
+> END:
+> - everything green (root + db + dashboard + census + full sabotage);
+> - commit;
+> - Status table with actual hours;
+> - "S5 as built";
+> - S6 message with the exact build sha;
+> - 5-line report.
+>
+> Plan estimate 3–4 h (the full sabotage run dominates). S1 1.7 h, S2 4.1 h, S3 ≈2.2 h, S4 ≈3.2 h.
 
 ### S6
 > Execute session S6 (deploy + live calls) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` at
