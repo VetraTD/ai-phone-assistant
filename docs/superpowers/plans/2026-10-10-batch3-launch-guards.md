@@ -26,7 +26,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 |---|---|---|---|
 | S1 | Voicemail fix + transfer stopgap + per-business choice + 60-min transfer limit (+ db-inspect add-on, findings A/B) | 4–5 | **done 2026-10-11** in ≈1.7 h actual (≈0.4 h planning + ≈1.3 h execution); code head `618742c` — see "S1 as built" |
 | S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | **done 2026-10-11** in ≈4.1 h actual (≈0.4 h planning + ≈3.7 h execution); code head `41847f9` — see "S2 as built" |
-| S3 | Number block (price check at every dial and text) | 3.5–4 | not started |
+| S3 | Number block (price check at every dial and text) | 3.5–4 | **done 2026-10-11** in ≈2.2 h active (≈0.45 h planning + ≈1.75 h execution; plus ≈1.3 h waiting for an owner reply after a memory-killed gate); code head `12bdaf4` — see "S3 as built" |
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | not started |
 | S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | not started |
 | S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | not started |
@@ -176,6 +176,124 @@ Environment notes:
 - The skill's `review-package` script writes into the S1 folder (it maps the plan file there); move the file after.
 - The controller session restarted once mid-session. The stopped implementer left uncommitted work and an orphaned
   vitest. Back up the diff, kill the orphan, then resume the implementer with SendMessage; nothing was lost.
+
+### S3 as built (2026-10-11) — what later sessions must know
+
+Commits on `feat/outbound-stage4`:
+- `25fae73` snapshot + `lib/dialCost.js`
+- `909ad31` voice side + migration 053
+- `f81020f` 3.1 review fix
+- `83c4897` outbound + dashboard
+- `2926b31` dedupe of doubled test blocks
+- `12bdaf4` review wave
+
+FINAL gate at `12bdaf4` (gate worktree), all green:
+- root: 301 files / 7388 tests (re-run alone after Claude Code reaped the first run for low memory mid-suite);
+- test:db: 46 files / 645 tests;
+- dashboard backend vitest: 16 files / 159 tests;
+- census: 132 rows clean;
+- all 21 new S3 rows red-on-sabotage, plus 4 neighbour rows still red (`transfer-has-action`,
+  `transfer-client-by-account`, `cascade-transfer-has-action`, `sent-counts-attempts`).
+
+**Owner answers while planning S3 (2026-10-11):**
+- **Q1.** The dashboard backend is CommonJS, so it cannot `require` the root ESM module. The dashboard copy is a
+  byte-identical `AI-phone-dashboard/backend/src/dialCost.mjs` (+ `dialCostTable.json`). The settings route loads it
+  with a cached `await import()`, and a failed import is retried on the next save.
+  `tests/dialCostVendorParity.test.js` proves both pairs are byte-identical.
+- **Q2.** The Live no-number transfer path used to hang up silently. It now goes through the same refusal helper:
+  inbound says the cantTransfer line and takes a message; outbound gets the redirect. It logs
+  `live_transfer_no_number`, and the finish reason is still `transfer_no_number`. It is unreachable today (a
+  transfer is only armed when `transferAllowed()` finds a number), so it has no test and no sabotage row.
+
+Facts the plan did not have:
+- **Migration 053 also re-adds `outreach_close_reason_check` with `blocked_destination`.** The gate's new
+  never-reason is written into `close_reason`; without it every refusal would throw. Any later migration that
+  re-adds this CHECK must keep all 17 values.
+- **About 44% of UK 07100–07999 number blocks fall to Twilio's bare `447` "Mobile – Other" catch-all at 32¢**, not
+  "~36 ranges". Examples: +447911…, +447700 900…. So many UK mobiles are in the switch-on band (decision 1
+  unchanged). See S6 step 2b.
+- **The live pull on 2026-10-11 was identical to the 2026-10-10 one:** 233 voice countries, 232 SMS countries,
+  14,189 prefixes, 1,260 cross-country collisions (all the same price), 0 changes.
+  - IO, KP, SX and VA have no SMS price, so texts to them are refused as `unknown`.
+  - The table is committed as one entry per line (14,429 lines, sorted), so a refresh diff is readable.
+- The Live outbound refusal sends `<Redirect method="POST">` to the existing `/twilio/outbound-transfer-result`
+  URL. That handler treats the missing DialCallStatus as unanswered: it plays the miss clip / callback line and
+  writes `callback_requested` (pinned in `tests/outboundTransfer.test.js`).
+- **The dashboard checks only fields present in the body.** SettingsPage sends changed keys only, so unrelated saves
+  are never blocked. But `Onboarding.jsx` sends the transfer/notification numbers in its first PUT, while the flag is
+  still false, so a pricier number 400s the onboarding save. Parked: first clients are set by script.
+- `blocked_destination` closes are permanent. Switching the flag on later does not reopen those outreaches.
+
+New names:
+- `lib/dialCost.js` (byte-identical `.mjs` copy):
+  - constants `AUTO_MAX_PER_MIN` 0.10, `HARD_MAX_PER_MIN` 0.60, `TEXT_MAX_EACH` 0.25, `MIN_VOICE_PREFIXES` 10,000;
+  - `REFUSAL_MESSAGES`, `parseTable`, `assertCompleteTable`, `makeChecker`, `callCostOf`, `checkDial`, `checkText`,
+    `tableAgeDays`.
+  - The table loads at import and THROWS if missing, malformed or incomplete.
+  - `allowPricier` counts only when it is `=== true`.
+  - The NANP never-list is `+1(900|976|500|52[1-9]|533|544|566|577|588|700)`.
+- `scripts/refresh-dial-costs.mjs [--env] [--from-raw] [--save-raw]`:
+  - a free Pricing API read with account B credentials from `.env`; prints counts only;
+  - exports `categoryOf`, `transform`, `assertCompletePull`, `serialize`, `assertBootable`, `tmpPathFor`,
+    `cleanupTmp`;
+  - writes both copies only after the result proves bootable (temp file + rename, then a byte re-compare).
+- `businesses.allow_pricier_numbers`:
+  - read as `loadConfig().allowPricierNumbers`;
+  - set only through `set-business-config --set allow_pricier_numbers=<b64 true|false>`;
+  - never through the dashboard (not whitelisted);
+  - read by dispatch (`claimOutreachForDispatch`) and lead intake (`campaignForTrigger().allowPricierNumbers`).
+- The outbound gate has a new required fact `destination`: `assertGateFacts` throws if it is missing or malformed,
+  and a refusal gives `never("blocked_destination")` right after the legal-floor refusal.
+- Live: `endRefusedTransfer()`. The `redirectCall` purpose is `transfer_refused`.
+- `scripts/corpus/sabotage.mjs`: rows can carry an optional `cwd` (the red suites run there, with one baseline per
+  cwd group), and an unknown `--only` name is now refused.
+
+Log events (S6 step 4 already alerts on the first two and the last):
+- `dial_destination_refused` {site, reason, iso, perMin}. Sites: `live_inbound_transfer`,
+  `live_outbound_transfer`, `cascade_transfer`, `outbound_dial`, `lead_intake`;
+- `sms_destination_refused` {reason, iso};
+- `live_transfer_no_number`;
+- `dial_cost_table_stale` (boot, table older than 120 days).
+
+New sabotage rows (21):
+- module: `dialcost-unknown-refuses`, `dialcost-never-category`, `dialcost-auto-max`, `dialcost-nanp-never`,
+  `dialcost-malformed-throws`, `dialcost-vendor-parity`;
+- voice and texts: `live-transfer-price-checked`, `live-outbound-transfer-price-checked`,
+  `live-transfer-switch-on-respected`, `cascade-transfer-price-checked`, `sms-price-checked`,
+  `caller-sms-checked-before-hold`, `onboarding-transfer-price-checked`, `config-allow-pricier-strict`;
+- outbound and dashboard: `gate-blocked-destination`, `gate-destination-fact-required`,
+  `dispatch-destination-switch-on-strict`, `lead-intake-price-checked`, `campaign-transfer-price-checked`,
+  `dashboard-transfer-price-checked` and `dashboard-notification-text-checked` (both `cwd:
+  AI-phone-dashboard/backend`).
+
+Parked (record-and-park, not fixed):
+- the dashboard's price check finds values by parsing the whitelist's `"<field> = $N"` clause text (tests catch
+  drift);
+- no test for a failed dashboard import (a native `import()` from CJS cannot be faked without a test-only export);
+- the refresh script imports `lib/dialCost.js`, so a broken committed table must be git-restored before a refresh;
+  there is no rollback after a post-write mismatch (the parity test catches it);
+- one test writes the em dash as a literal, not `—`; a stray `, }` in `tests/liveTransferPriceCheck.test.js`;
+- pre-existing: `releaseHeldCallerSms` counts a send even when `sendSms` returns false;
+- the env-set `UNROUTED_TRANSFER_NUMBER` Dial is unchecked (operator-set, exempt by ruling).
+- A db-inspect mode that price-checks every prod number would make S6 step 2b one command; not built.
+
+**None of this is live-tested.** The dashboard's save-time check only takes effect when the separate "deploy the
+current dashboard" item runs (finding 8). The voice service's dial-time check is the real guard.
+
+Environment notes:
+- S3's workspace is `.superpowers/sdd/2026-10-10-batch3-launch-guards-s3/` (ledger, briefs, reports,
+  `gate-s3.sh` = gate-s2 + a `dash` stage, which is on by default; `nodash` skips it).
+- The gate worktree has TWO junctions: `node_modules` and `AI-phone-dashboard/backend/node_modules`. Delete both
+  before any `git worktree remove`.
+- Local Postgres :55432 is at **053**.
+- `TaskStop` on a background gate script did NOT stop its row loop (Git Bash on Windows), so rows kept launching.
+  Kill the `bash.exe` whose command line holds the gate script, then let the in-flight `sabotage.mjs` restore and
+  exit on its own.
+- `sabotage.mjs` reads and writes files as UTF-8. A file containing a non-UTF-8 byte comes back rewritten (0x97 →
+  EF BF BD) even though the restore check passes. The review caught one such byte (fixed); scan new files with
+  iconv.
+- An implementer's "N tests passing" once came from a file that differed from the commit (doubled pastes). Ask for
+  the real vitest summary lines and a `git diff` duplication check before commit.
 
 ---
 
@@ -758,6 +876,16 @@ Pre-flight (read-only): `gcloud run services describe voice-uk-prod` → note th
    (`memory: terraform-broken-deploy-route`).
 2. Update the migrate JOB image first → `migrate.js --status` (expect 052–054 pending, no "edited" error) →
    apply → `db-inspect --business +441372656055` reads back the new columns.
+   **2b (S3, before step 3): price-check every number already in production.** The deploy turns on the number
+   block. A number that is now `needs_switch_on` would make that client's transfers take a message, and their
+   texts or dashboard saves would be refused. The same applies to `never`/`over_ceiling`.
+   - Check: each tenant's `transfer_phone_number` and `notification_phone`, every campaign `transfer.to`, the
+     `TRANSFER_NUMBER` env, and every `OUTBOUND_TEST_ALLOWLIST` handset.
+   - How: run each through `checkDial` / `checkText` locally, e.g. `node -e "import('./lib/dialCost.js').then(m =>
+     console.log(m.checkDial('+44…'), m.checkText('+44…')))"`. Numbers come from the owner or a db-inspect read.
+   - About 44% of UK 07 blocks are Twilio's 32¢ catch-all, so expect some.
+   - `needs_switch_on` → owner decides → `set-business-config --set allow_pricier_numbers=<b64 true>` for that
+     client. `never` / `over_ceiling` → change the number.
 3. `gcloud run services update voice-uk-prod --image=…:<sha>` + `--update-env-vars
    CALL_MAX_DURATION_MINUTES=10`; read back env + image.
 4. Alert policy `15114942414748467079` (bare id): add `live_connect_failed`, `live_close_abnormal`,
@@ -768,7 +896,9 @@ Pre-flight (read-only): `gcloud run services describe voice-uk-prod` → note th
 5. Owner: create the Function in each Twilio account (runbook) and send the URLs; we run
    `scripts/fallback-urls.js` in the job; owner pastes each number's fallback URL.
 6. Test tenant config via `set-business-config.js` (transfer number = owner's mobile; then `own_voicemail` for
-   L4; then the loop number for L5) — restore afterwards from the script's base64 backup.
+   L4; then the loop number for L5) — restore afterwards from the script's base64 backup. S3: if the owner's mobile
+   or the L5 loop number checks `needs_switch_on`, the script refuses it unless the SAME command also sets
+   `allow_pricier_numbers=true` (and restores it after).
 7. Live calls (below, after approval). 8. Update `docs/readiness.md` §1, this Status table, memory.
 
 ### Live test calls (approve separately — ~$4–5 of our spend, plus the owner's own phone charges)
@@ -902,9 +1032,53 @@ open Minors, commit sha).
 
 ### S4
 > Execute session S4 (loop guard, block list, repeat-caller alerts) of
-> `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` from commit <sha>. Migration 054 adds SECURITY
-> DEFINER functions — DB tests run as `vetra_app` (local Postgres on 55432). Inbound guards fail OPEN except
-> the block list. Method: faster variant. End: gate green, commit, Status, S5 message. Estimate 3.5–4.5 h.
+> `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` on `feat/outbound-stage4`, continuing from S3 (code
+> head `12bdaf4`, plus the plan-doc commit on top). Do only S4.
+>
+> STEP 0, before anything else:
+> - Read the plan's Status table, "S1 as built", "S2 as built", "S3 as built", Owner decisions (decision 3 is the
+>   one-number rule), Global constraints, Review focus (item 5 is S4's), File map and Session 4 in full.
+> - Read memory sdd-gates-and-memory-limits, never-git-checkout-uncommitted-work, unscoped-writes-now-fail-closed,
+>   a-fix-can-be-the-next-defect, owner-wants-speed-and-low-usage and plan-verbatim-code-fails-open.
+> - Line numbers in the plan are at `a238b80`. S1–S3 moved `lib/voice/live/index.js`, `lib/voice/session.js`,
+>   `server.js`, `services/db.js` and `lib/outbound/*`, so locate code by quoted text.
+> - In Live, transfers now run `runExit` → `redialForTransfer`: S3's price check and `endRefusedTransfer` come first,
+>   then the TwiML, then `redirectCall`. S4's pending-dial row goes after the price check passes and before the
+>   redirect. A refused or no-number transfer must never write a pending-dial row.
+> - Gate worktree `C:/Users/nithi/VetraTD/ai-phone-gate` has TWO junctions, root `node_modules` and
+>   `AI-phone-dashboard/backend/node_modules`. Check main's count is ~269. `test-audio/` is already copied in.
+> - Copy `.superpowers/sdd/2026-10-10-batch3-launch-guards-s3/gate-s3.sh` (root + census + dashboard + db + `only:`
+>   rows) into S4's own workspace and change its `LOGDIR`. Never edit a gate script while it runs. Never stop a
+>   gate mid-rows: TaskStop does not stop its loop, so kill the gate's `bash.exe` and let the in-flight row
+>   restore itself.
+> - Local Postgres :55432 is at migration 053. S4 adds 054, folded into `schema.sql` in the same commit.
+>   - DB tests run as `vetra_app`.
+>   - 054 adds SECURITY DEFINER functions.
+>   - If 054 touches `outreach_close_reason_check`, keep all 17 values, `blocked_destination` included.
+>
+> Inbound guards fail OPEN, except the block list.
+>
+> METHOD: superpowers:subagent-driven-development, faster variant.
+> - Sonnet implementers and reviewers. Opus reviews Task 4.2 (pending dials: Review focus 5, stale rows must expire).
+> - Full gate per task, or one combined gate over consecutive tasks.
+> - Census after any `index.js` / `tools.js` / `strings.js` edit.
+> - Critical/Important fixed in-task with re-review; Minors in ONE wave at the end.
+> - One implementer at a time: two in one tree can commit each other's staged files.
+> - Ask implementers for the real vitest summary lines and a `git diff` duplication check before they commit.
+>
+> STOP AND ASK if a decision isn't covered by the plan, the code contradicts it, the session passes 6 h, or anything
+> needs production, a paid API or a real call. No paid calls, no real calls, no production, no deploy, no push. Never
+> git checkout/restore over uncommitted work; commit before any sabotage.
+>
+> END:
+> - gate green (root + db + dashboard + census + every new row red-on-sabotage);
+> - commit;
+> - Status table with actual hours;
+> - "S4 as built";
+> - S5 message refreshed;
+> - 5-line report.
+>
+> Plan estimate 3.5–4.5 h. S1 took 1.7 h, S2 4.1 h, S3 ≈2.2 h active.
 
 ### S5
 > Execute session S5 (Twilio fallback Function, fallback-URL script, runbook, checkpoint) of
