@@ -18,6 +18,7 @@ const mockAiSecondsToday = vi.fn(async () => ({ before: 0, after: 0 }));
 // null is a FAILED read and [] a genuinely empty one; the judge wire has to treat
 // them differently, so the fake keeps them apart the way services/db.js does.
 const mockListAppointmentsByCallId = vi.fn(async () => []);
+const mockInboundGuardFacts = vi.fn(async () => ({ blocked: false, bounced: false, callsToday: 0 }));
 
 vi.mock("../services/db.js", () => ({
   isEnabled: (...args) => mockIsEnabled(...args),
@@ -40,6 +41,7 @@ vi.mock("../services/db.js", () => ({
   updateCallSummary: (...args) => mockUpdateCallSummary(...args),
   updateCallLatency: (...args) => mockUpdateCallLatency(...args),
   listAppointmentsByCallId: (...args) => mockListAppointmentsByCallId(...args),
+  inboundGuardFacts: (...args) => mockInboundGuardFacts(...args),
   loadConfig: (business) =>
     business
       ? {
@@ -111,6 +113,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockIsEnabled.mockReturnValue(true);
   mockGetCallStats.mockReturnValue(null);
+  mockInboundGuardFacts.mockResolvedValue({ blocked: false, bounced: false, callsToday: 0 });
 });
 
 describe("POST /twilio/status", () => {
@@ -242,7 +245,7 @@ describe("POST /twilio/status", () => {
         .send({ CallSid: "CA_miss_1", CallStatus: "no-answer", To: "+15550001111", From: "+15559998888" });
 
       expect(res.status).toBe(200);
-      await new Promise((r) => setImmediate(r));
+      await vi.waitFor(() => expect(mockSendCallerSms).toHaveBeenCalled());
       expect(mockLookupBusinessByPhone).toHaveBeenCalledWith("+15550001111");
       expect(mockSendCallerSms).toHaveBeenCalledWith(
         expect.objectContaining({ smsFollowupEnabled: true }),
@@ -282,7 +285,7 @@ describe("POST /twilio/status", () => {
         .type("form")
         .send({ CallSid: "CA_miss_4", CallStatus: "busy", To: "+15550001111", From: "+15559998888" });
 
-      await new Promise((r) => setImmediate(r));
+      await vi.waitFor(() => expect(mockSendCallerSms).toHaveBeenCalled());
       // The handler always calls sendCallerSms (gating lives inside it, per
       // tests/notifications.sms.test.js) — assert it was invoked with the
       // disabled config rather than asserting a specific side effect here.
@@ -292,6 +295,103 @@ describe("POST /twilio/status", () => {
         "missed_call",
         expect.any(Object)
       );
+    });
+
+    describe("a caller our inbound guards refused", () => {
+      const CALLER = "+15559998888";
+      let infoSpy;
+      let errSpy;
+      const events = (spy, event) => spy.mock.calls.filter((c) => c[0] === event);
+      const missed = (sid) =>
+        request(app)
+          .post("/twilio/status")
+          .type("form")
+          .send({ CallSid: sid, CallStatus: "busy", To: "+15550001111", From: CALLER });
+      // Fire-and-forget: wait until the guard has run, then a further tick, so a
+      // negative assertion cannot pass merely because it ran before the code did.
+      const settle = async () => {
+        await vi.waitFor(() => expect(mockInboundGuardFacts).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 20));
+      };
+
+      beforeEach(() => {
+        infoSpy = vi.spyOn(log, "info").mockImplementation(() => {});
+        errSpy = vi.spyOn(log, "error").mockImplementation(() => {});
+        mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-1", name: "Test Biz", sms_followup_enabled: true });
+      });
+      afterEach(() => {
+        infoSpy.mockRestore();
+        errSpy.mockRestore();
+      });
+
+      it("blocked: no text, skip logged with callSid and reason", async () => {
+        mockInboundGuardFacts.mockResolvedValue({ blocked: true, bounced: false, callsToday: 0 });
+        await missed("CA_skip_1");
+        await settle();
+        expect(mockSendCallerSms).not.toHaveBeenCalled();
+        expect(events(infoSpy, "missed_call_sms_skipped")).toEqual([
+          ["missed_call_sms_skipped", { callSid: "CA_skip_1", reason: "blocked" }],
+        ]);
+      });
+
+      it("bounced: no text, reason bounced", async () => {
+        mockInboundGuardFacts.mockResolvedValue({ blocked: false, bounced: true, callsToday: 0 });
+        await missed("CA_skip_2");
+        await settle();
+        expect(mockSendCallerSms).not.toHaveBeenCalled();
+        expect(events(infoSpy, "missed_call_sms_skipped")).toEqual([
+          ["missed_call_sms_skipped", { callSid: "CA_skip_2", reason: "bounced" }],
+        ]);
+      });
+
+      it("both true: blocked wins", async () => {
+        mockInboundGuardFacts.mockResolvedValue({ blocked: true, bounced: true, callsToday: 0 });
+        await missed("CA_skip_3");
+        await settle();
+        expect(mockSendCallerSms).not.toHaveBeenCalled();
+        expect(events(infoSpy, "missed_call_sms_skipped")[0][1].reason).toBe("blocked");
+      });
+
+      it("neither: texts the caller, guard asked for exactly this business and caller without counting calls", async () => {
+        await missed("CA_skip_4");
+        await vi.waitFor(() => expect(mockSendCallerSms).toHaveBeenCalledTimes(1));
+        expect(mockInboundGuardFacts).toHaveBeenCalledWith({ businessId: "biz-1", from: CALLER, countCalls: false });
+        expect(events(infoSpy, "missed_call_sms_skipped")).toHaveLength(0);
+      });
+
+      it("guard throws: no text, missed_call_sms_failed logged", async () => {
+        mockInboundGuardFacts.mockRejectedValue(new Error("db down"));
+        await missed("CA_skip_5");
+        await settle();
+        await vi.waitFor(() => expect(events(errSpy, "missed_call_sms_failed")).toHaveLength(1));
+        expect(mockSendCallerSms).not.toHaveBeenCalled();
+      });
+
+      it("guard returns null (no database): fails closed, reason guard_unavailable", async () => {
+        mockInboundGuardFacts.mockResolvedValue(null);
+        await missed("CA_skip_6");
+        await settle();
+        expect(mockSendCallerSms).not.toHaveBeenCalled();
+        expect(events(infoSpy, "missed_call_sms_skipped")).toEqual([
+          ["missed_call_sms_skipped", { callSid: "CA_skip_6", reason: "guard_unavailable" }],
+        ]);
+      });
+
+      it("the skip log carries no caller digits", async () => {
+        mockInboundGuardFacts.mockResolvedValue({ blocked: true, bounced: false, callsToday: 0 });
+        await missed("CA_skip_7");
+        await settle();
+        expect(events(infoSpy, "missed_call_sms_skipped")).toHaveLength(1);
+        expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("9998888");
+      });
+
+      it("no business: the guard is never asked", async () => {
+        mockLookupBusinessByPhone.mockResolvedValue(null);
+        await missed("CA_skip_8");
+        await vi.waitFor(() => expect(mockLookupBusinessByPhone).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 20));
+        expect(mockInboundGuardFacts).not.toHaveBeenCalled();
+      });
     });
   });
 

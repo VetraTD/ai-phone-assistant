@@ -1616,6 +1616,14 @@ const SABOTAGES = [
     replace: "      if (false /* SABOTAGE */) {",
     red: [STATUS],
   },
+  {
+    name: "missed-call-text-skips-refused",
+    why: "the skip never fires, so a blocked caller or one whose transfer bounced (both reach /twilio/status as a zero-duration busy) is texted 'sorry we missed you' (batch-3 S5 Task 5.0). The re-check must stop the text.",
+    file: "server.js",
+    find: "        if (skipReason) {",
+    replace: "        if (false /* SABOTAGE */) {",
+    red: [STATUS],
+  },
 ];
 
 const only = process.argv.includes("--only")

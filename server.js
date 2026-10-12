@@ -1142,6 +1142,26 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
         if (!db.isEnabled() || !callContext.twilioNumber || !callContext.callerNumber) return;
         const business = await db.lookupBusinessByPhone(callContext.twilioNumber);
         if (!business) return;
+        // A <Reject> from our inbound guards (blocked number, or a transfer that
+        // bounced back to us) reaches this handler in exactly the missed-call
+        // shape (busy/no-answer, duration 0). Re-check right before texting so a
+        // blocked caller is never told "sorry we missed you", and neither is a
+        // caller whose transfer bounced (still on the original call hearing the
+        // no-answer line). Fails closed: this is a courtesy text, not an
+        // inbound-answer guard. A DB throw propagates to the .catch below.
+        // Accepted gap: if the original call's transfer has already ended (its
+        // pending dial closed) before this runs, a bounce is no longer visible
+        // and the text still goes.
+        const facts = await db.inboundGuardFacts({
+          businessId: business.id,
+          from: callContext.callerNumber,
+          countCalls: false,
+        });
+        const skipReason = !facts ? "guard_unavailable" : facts.blocked ? "blocked" : facts.bounced ? "bounced" : null;
+        if (skipReason) {
+          log.info("missed_call_sms_skipped", { callSid, reason: skipReason });
+          return;
+        }
         const config = db.loadConfig(business);
         await notifications.sendCallerSms(config, callContext.callerNumber, "missed_call", {
           business: config.businessName,
