@@ -788,7 +788,9 @@ export async function recordPendingDial({ businessId, callSid, callerNumber, dia
     dialledNumber,
     timeoutSec ?? null,
   ]);
-  return res.rows[0].id;
+  const id = res.rows[0].id;
+  noteAccess("recordPendingDial", { rowCount: 1 });
+  return id;
 }
 
 /**
@@ -815,6 +817,7 @@ export async function inboundGuardFacts({ businessId, from, countCalls }) {
     [businessId, from ?? null, countCalls ? (from ?? null) : null]
   );
   const row = res.rows[0];
+  noteAccess("inboundGuardFacts", { rowCount: res.rows.length });
   return { blocked: row.blocked === true, bounced: row.bounced === true, callsToday: Number(row.calls_today) || 0 };
 }
 
@@ -830,6 +833,7 @@ export async function aiSecondsToday({ businessId, callerNumber, callSid }) {
     [businessId, callerNumber ?? null, callSid ?? null]
   );
   const row = res.rows[0];
+  noteAccess("aiSecondsToday", { rowCount: res.rows.length });
   return { after: Number(row.after) || 0, before: Number(row.before) || 0 };
 }
 

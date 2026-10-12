@@ -44,6 +44,16 @@ describe("migration 054 is folded into schema.sql exactly", () => {
     }
   });
 
+  it("the pending_dials id sequence is revoked from vetra_app in both files", () => {
+    const line = "REVOKE ALL ON SEQUENCE pending_dials_id_seq FROM vetra_app;";
+    expect(mig).toContain(line);
+    expect(schema).toContain(line);
+  });
+
+  it("app_end_pending_dial also purges rows older than a day", () => {
+    expect(fnBlock(mig, "app_end_pending_dial")).toContain("DELETE FROM pending_dials WHERE started_at < now() - interval '1 day';");
+  });
+
   it("neither platform table enables row-level security", () => {
     expect(mig).not.toMatch(/ROW LEVEL SECURITY/i);
   });

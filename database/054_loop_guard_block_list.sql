@@ -6,8 +6,8 @@
 -- number we dialled). A call that reaches the same business from either of
 -- those numbers while the dial is still ringing is our own transfer bouncing
 -- back, and is rejected. Rows expire at dial timeout + 15 s and are deleted
--- after a day, so a crash before the action fires can never block a real
--- caller for long.
+-- after about a day (purged on every record and every end), so a crash before
+-- the action fires can never block a real caller for long.
 --
 -- blocked_callers: numbers WE refuse, set by scripts/block-caller.js through
 -- the migrate job. business_id NULL = blocked for every business.
@@ -47,7 +47,7 @@ REVOKE ALL ON pending_dials FROM vetra_app;
 REVOKE ALL ON SEQUENCE pending_dials_id_seq FROM vetra_app;
 
 COMMENT ON TABLE pending_dials IS
-  'Loop guard: a transfer dial that may still be ringing. Platform table: deliberately NO row-level security and NO grant to vetra_app; reachable only through app_record_pending_dial / app_end_pending_dial / app_dial_bounced. Rows expire at dial timeout + 15 s and are deleted after one day.';
+  'Loop guard: a transfer dial that may still be ringing. Platform table: deliberately NO row-level security and NO grant to vetra_app; reachable only through app_record_pending_dial / app_end_pending_dial / app_dial_bounced. Rows expire at dial timeout + 15 s and are deleted after about one day (purged on every record and every end).';
 
 CREATE TABLE IF NOT EXISTS blocked_callers (
   phone       text PRIMARY KEY,
@@ -112,6 +112,7 @@ BEGIN
   IF p_call_sid IS NULL OR btrim(p_call_sid) = '' THEN
     RETURN 0;
   END IF;
+  DELETE FROM pending_dials WHERE started_at < now() - interval '1 day';
   UPDATE pending_dials SET ended_at = now() WHERE call_sid = p_call_sid AND ended_at IS NULL;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RETURN v_n;

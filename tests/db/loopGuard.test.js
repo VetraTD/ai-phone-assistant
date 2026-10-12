@@ -187,6 +187,16 @@ d("054: the loop guard", () => {
     expect(rows).toEqual([{ call_sid: "CAg7-new" }]);
   });
 
+  it("7b. ending a dial also deletes rows older than a day", async () => {
+    await admin.query(
+      `INSERT INTO pending_dials (business_id, call_sid, caller_number, dialled_number, started_at, expires_at)
+       VALUES ($1,'CAg7b-old',$2,$3, now() - interval '2 days', now() - interval '2 days')`,
+      [BIZ_A, X, DIALLED]
+    );
+    await one(app, `SELECT app_end_pending_dial($1) AS n`, ["CAg7b-none"]);
+    expect((await admin.query(`SELECT 1 FROM pending_dials WHERE call_sid = 'CAg7b-old'`)).rowCount).toBe(0);
+  });
+
   it("8. a null or blank caller is stored NULL and matches only through the dialled number", async () => {
     await record(BIZ_A, "CAg8-null", null, DIALLED);
     await record(BIZ_A, "CAg8-blank", "   ", OTHER);
@@ -286,6 +296,45 @@ d("054: repeat-caller counts", () => {
       await app.query(`SELECT set_config('app.business_id', $1, true)`, [BIZ_A]);
       expect((await one(app, `SELECT app_ai_seconds_today($1,$2) AS n`, [BIZ_A, X])).n).toBe(720);
       expect((await one(app, `SELECT current_setting('app.business_id', true) AS s`)).s).toBe(BIZ_A);
+    } finally {
+      await app.query("ROLLBACK");
+    }
+  });
+});
+
+d("054: scope restore is observable", () => {
+  const scope = async () => (await one(app, `SELECT current_setting('app.business_id', true) AS s`)).s;
+  const UNLISTED = "0f0f0054-0000-4000-8000-0000000000ff"; // a uuid that is in no directory row
+
+  it("M2a. app_ai_seconds_today leaves an unscoped transaction unscoped", async () => {
+    await seedCall(BIZ_A, "CAm2a", X, { endSecs: 50 });
+    await app.query("BEGIN");
+    try {
+      expect((await one(app, `SELECT app_ai_seconds_today($1,$2) AS n`, [BIZ_A, X])).n).toBe(50);
+      expect((await scope()) || "").toBe("");
+    } finally {
+      await app.query("ROLLBACK");
+    }
+  });
+
+  it("M2b. app_calls_from_today restores a scope that is not in business_directory", async () => {
+    await seedCall(BIZ_A, "CAm2b", X);
+    await app.query("BEGIN");
+    try {
+      await app.query(`SELECT set_config('app.business_id', $1, true)`, [UNLISTED]);
+      expect((await one(app, `SELECT app_calls_from_today($1) AS n`, [X])).n).toBe(1);
+      expect(await scope()).toBe(UNLISTED);
+    } finally {
+      await app.query("ROLLBACK");
+    }
+  });
+
+  it("M2c. app_calls_from_today leaves an unscoped transaction unscoped", async () => {
+    await seedCall(BIZ_A, "CAm2c", X);
+    await app.query("BEGIN");
+    try {
+      expect((await one(app, `SELECT app_calls_from_today($1) AS n`, [X])).n).toBe(1);
+      expect((await scope()) || "").toBe("");
     } finally {
       await app.query("ROLLBACK");
     }
