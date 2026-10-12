@@ -596,6 +596,8 @@ function doorFakeDb(over = {}) {
     // S3-4 (D6): no stored clip by default -- every existing test in this
     // file that never overrides this keeps getting today's <Say> fallback.
     fetchAttemptTransferMissAudio: vi.fn(async () => null),
+    // Batch-3 S4: the result route ends the pending dial (loop guard).
+    endPendingDial: vi.fn(async () => 1),
     ...over,
   };
 }
@@ -690,6 +692,37 @@ describe("POST /twilio/outbound-whisper", () => {
 });
 
 describe("POST /twilio/outbound-transfer-result", () => {
+  // Batch-3 S4: the pending dial ends here whatever the outcome, resolved or not
+  // (the Live refused-transfer <Redirect> lands here too, with no row: 0 is fine).
+  it("ends the pending dial for this CallSid on every outcome, resolved or not", async () => {
+    for (const [sid, status] of [
+      [PARENT_SID, "completed"],
+      [PARENT_SID, "no-answer"],
+      ["CAunknown000000000000000000000000001", "busy"],
+    ]) {
+      const db = doorFakeDb();
+      await request(doorApp(db))
+        .post("/twilio/outbound-transfer-result")
+        .query({ attempt: DOOR_ATTEMPT })
+        .type("form")
+        .send({ CallSid: sid, DialCallStatus: status });
+      expect(db.endPendingDial).toHaveBeenCalledTimes(1);
+      expect(db.endPendingDial).toHaveBeenCalledWith(sid);
+    }
+  });
+
+  it("a throwing end is logged (not an alert) and the answer is unchanged", async () => {
+    const log = { info: vi.fn(), error: vi.fn() };
+    const db = doorFakeDb({ endPendingDial: vi.fn(async () => { throw new Error("db down"); }) });
+    const res = await request(doorApp(db, {}, log))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID, DialCallStatus: "completed" });
+    expect(res.text).toBe("<Response></Response>");
+    expect(log.error).toHaveBeenCalledWith("pending_dial_end_failed", expect.objectContaining({ callSid: PARENT_SID, message: "db down" }));
+  });
+
   // S3-4 (D6, controller ruling): a completed transfer now writes the
   // deterministic outcome_code -- postCall.js's TERMINAL_OUTCOMES then closes
   // the outreach terminal_outcome instead of rescheduling a contact who was

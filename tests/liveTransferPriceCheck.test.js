@@ -147,6 +147,8 @@ function fakeDb({ transfer } = {}) {
     finishAttemptSession: async () => {},
     // I6 (fix wave, checkpoint 2b): the session's own answered stamp.
     stampAttemptAnswered: async () => {},
+    // Batch-3 S4: the dial is recorded before it starts.
+    recordPendingDial: async () => "pd-1",
   };
 }
 

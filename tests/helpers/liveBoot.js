@@ -131,6 +131,9 @@ export function fakeDb(config, businessId) {
     // stamp does not get an unexpected outbound_answered_stamp_failed error
     // log (several tests assert the log is otherwise clean).
     stampAttemptAnswered: async () => {},
+    // Batch-3 S4: every transfer records its dial first; a fake without this
+    // would log pending_dial_write_failed in every test that transfers.
+    recordPendingDial: async () => "pd-1",
   };
 }
 

@@ -12,6 +12,7 @@ const mockFetchCallTranscript = vi.fn(async () => []);
 const mockUpdateCallSummary = vi.fn(async () => {});
 const mockUpdateCallLatency = vi.fn(async () => {});
 const mockIsEnabled = vi.fn(() => true);
+const mockEndPendingDial = vi.fn(async () => 1);
 // null is a FAILED read and [] a genuinely empty one; the judge wire has to treat
 // them differently, so the fake keeps them apart the way services/db.js does.
 const mockListAppointmentsByCallId = vi.fn(async () => []);
@@ -30,6 +31,7 @@ vi.mock("../services/db.js", () => ({
     }
   },
   completeCall: (...args) => mockCompleteCall(...args),
+  endPendingDial: (...args) => mockEndPendingDial(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   fetchCallTranscript: (...args) => mockFetchCallTranscript(...args),
   updateCallSummary: (...args) => mockUpdateCallSummary(...args),
@@ -109,6 +111,26 @@ beforeEach(() => {
 });
 
 describe("POST /twilio/status", () => {
+  describe("the pending dial (loop guard)", () => {
+    it.each(["completed", "failed", "busy", "no-answer"])("%s ends the dial for this CallSid", async (status) => {
+      const res = await request(app).post("/twilio/status").type("form").send({ CallSid: "CA_pd_1", CallStatus: status });
+      expect(res.status).toBe(200);
+      expect(mockEndPendingDial).toHaveBeenCalledWith("CA_pd_1");
+    });
+
+    it("a non-terminal status leaves it alone", async () => {
+      await request(app).post("/twilio/status").type("form").send({ CallSid: "CA_pd_2", CallStatus: "in-progress" });
+      expect(mockEndPendingDial).not.toHaveBeenCalled();
+    });
+
+    it("a throwing end is swallowed: the rest of the handler still runs", async () => {
+      mockEndPendingDial.mockRejectedValueOnce(new Error("db down"));
+      const res = await request(app).post("/twilio/status").type("form").send({ CallSid: "CA_pd_3", CallStatus: "completed" });
+      expect(res.status).toBe(200);
+      expect(mockCompleteCall).toHaveBeenCalled();
+    });
+  });
+
   describe("missed-call caller text-back", () => {
     it("texts the caller on no-answer with zero/absent duration when smsFollowupEnabled", async () => {
       mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-1", name: "Test Biz", sms_followup_enabled: true });

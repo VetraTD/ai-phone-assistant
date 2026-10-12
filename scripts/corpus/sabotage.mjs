@@ -154,6 +154,11 @@ const DIALPARITY = "tests/dialCostVendorParity.test.js";
 const PRICELIVE = "tests/liveTransferPriceCheck.test.js";
 const SETBIZ = "tests/setBusinessConfig.test.js";
 const CAPCONFIG = "tests/capabilityConfig.test.js";
+// Batch-3 S4 Task 4.2: pending dials and the inbound guards.
+const PENDINGLIVE = "tests/livePendingDial.test.js";
+const GUARDS = "tests/inboundGuards.test.js";
+const GUARDROUTES = "tests/inboundGuardRoutes.test.js";
+const GUARDROUTESCASCADE = "tests/inboundGuardRoutesCascade.test.js";
 
 const SABOTAGES = [
   {
@@ -1528,6 +1533,78 @@ const SABOTAGES = [
     find: "AND pd.expires_at > now()",
     replace: "AND true /* SABOTAGE */",
     red: ["tests/migration054Fold.test.js"],
+  },
+  {
+    name: "pending-dial-recorded-live",
+    why: "the Live transfer stops recording its dial. A forward-all bounce of the transfer then reaches the assistant as a fresh call, which transfers again: the business's own phone rings in a loop (batch-3 S4).",
+    file: "lib/voice/live/index.js",
+    find: "    await notePendingDial({",
+    replace: "    await (async () => {})({ /* SABOTAGE */",
+    red: [PENDINGLIVE],
+  },
+  {
+    name: "pending-dial-recorded-cascade",
+    why: "the cascade transfer stops recording its dial. A forward-all bounce of the transfer then reaches the assistant as a fresh call and loops the business's own phone (batch-3 S4).",
+    file: "lib/voice/session.js",
+    find: "            const id = await db.recordPendingDial({",
+    replace: '            const id = await (async () => "SABOTAGE")({',
+    red: [SESSION_CASCADE],
+  },
+  {
+    name: "pending-dial-ended-on-result",
+    why: "/twilio/transfer-result stops ending the pending dial. The row then lives out its full window after the dial is over, so a caller ringing back within it is refused as a loop (batch-3 S4).",
+    file: "server.js",
+    find: "    // Both outcomes end it, so this runs before the hangup early return.\n    try {\n      await db.endPendingDial(callSid);",
+    replace: "    // Both outcomes end it, so this runs before the hangup early return.\n    try {\n      await Promise.resolve(); // SABOTAGE",
+    red: [TRANSFERRESULT],
+  },
+  {
+    name: "loop-guard-refuses-bounce",
+    why: "the inbound guard stops refusing a call that is a forward-all bounce of our own transfer. The bounce is answered as a fresh call, transfers again, and the business's phone rings in a loop (batch-3 S4).",
+    file: "lib/inboundGuards.js",
+    find: "  if (facts.bounced) {",
+    replace: "  if (false /* SABOTAGE */) {",
+    red: [GUARDS, GUARDROUTES, GUARDROUTESCASCADE],
+  },
+  {
+    name: "block-list-refuses",
+    why: "the inbound guard stops rejecting a number on the block list. A caller the owner blocked gets through to the assistant (batch-3 S4).",
+    file: "lib/inboundGuards.js",
+    find: "  if (facts.blocked) {",
+    replace: "  if (false /* SABOTAGE */) {",
+    red: [GUARDS, GUARDROUTES, GUARDROUTESCASCADE],
+  },
+  {
+    name: "repeat-calls-threshold",
+    why: "the repeat-caller alert can never fire. A number ringing us dozens of times a day (burning minutes) raises nothing (batch-3 S4).",
+    file: "lib/inboundGuards.js",
+    find: "if (countable && facts.callsToday === REPEAT_CALLS_ALERT_AT) {",
+    replace: "if (false /* SABOTAGE */) {",
+    red: [GUARDS],
+  },
+  {
+    name: "inbound-guards-live-route",
+    why: "/twilio/live-voice computes the guard verdict and ignores it. Bounces and blocked callers are answered on the Live line (batch-3 S4).",
+    file: "server.js",
+    find: "if (guardTwiml) return res.send(guardTwiml);",
+    replace: "if (guardTwiml) void guardTwiml; /* SABOTAGE */",
+    red: [GUARDROUTES],
+  },
+  {
+    name: "inbound-guards-cascade-route",
+    why: "/twilio/voice computes the guard verdict and ignores it. Bounces and blocked callers are answered on the cascade line (batch-3 S4).",
+    file: "server.js",
+    find: "      return res.send(guardTwiml);",
+    replace: "      void guardTwiml; /* SABOTAGE */",
+    red: [GUARDROUTESCASCADE],
+  },
+  {
+    name: "inbound-guard-fails-open",
+    why: "a failing guard lookup rethrows instead of answering. On Live the throw lands in the cascade-fallback catch and a real caller is handed to the wrong front-end; on the cascade the call errors. A database blip must never stop a caller reaching the business (batch-3 S4).",
+    file: "lib/inboundGuards.js",
+    find: "    return null;\n  }\n  if (!facts) return null;",
+    replace: "    throw err; /* SABOTAGE */\n  }\n  if (!facts) return null;",
+    red: [GUARDS, GUARDROUTES, GUARDROUTESCASCADE],
   },
 ];
 

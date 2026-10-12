@@ -267,6 +267,8 @@ vi.mock("../services/db.js", () => ({
   markCallTransferred: vi.fn(async () => {
     H.writes.push({ op: "markCallTransferred", tenant: H.activeTenant });
   }),
+  // Batch-3 S4: every transfer records its dial just before it starts.
+  recordPendingDial: vi.fn(async () => "pd-1"),
 }));
 
 vi.mock("../services/notifications.js", () => ({
@@ -1499,7 +1501,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
 
   // U4: the transfer rings with a timeout + action (so a no-answer leads to a
   // message) and the REST update uses the call's OWN Twilio account.
-  async function runCascadeTransfer({ accountSid, config, callerPhone } = {}) {
+  async function runCascadeTransfer({ accountSid, config, callerPhone, webhookBusiness } = {}) {
     H.llmFactory = () => makeGen([
       {
         type: "done",
@@ -1513,7 +1515,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
     if (config) db.loadConfig.mockReturnValueOnce({ ...db.loadConfig(), ...config });
     const ws = new FakeWs();
     handleVoiceSessionConnection(ws);
-    await startCall(ws, newSid(), { accountSid, ...(callerPhone !== undefined ? { callerPhone } : {}) });
+    const sid = newSid();
+    // What the /twilio/voice webhook leaves on the shared state (server.js).
+    if (webhookBusiness) callState.getState(sid).business = webhookBusiness;
+    await startCall(ws, sid, { accountSid, ...(callerPhone !== undefined ? { callerPhone } : {}) });
     await flush();
     H.turnManagerInstances[0].opts.onTurnEnd("quiero hablar con una persona.");
     await flush();
@@ -1538,6 +1543,70 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const twiml = await runCascadeTransfer({ callerPhone: "" });
     expect(twiml).toContain("<Dial ");
     expect(twiml).not.toContain("callerId");
+  });
+
+  // Pending dial (batch 3 S4, Task 4.2): recorded after the price check and just
+  // before the REST update that starts the <Dial>; a failed write never stops it.
+  describe("9a-iii. pending dial", () => {
+    it("records the dial with the business id, caller, dialled number and window, BEFORE the update", async () => {
+      db.recordPendingDial.mockClear();
+      mockTwilioCallsUpdate.mockClear();
+      const order = [];
+      db.recordPendingDial.mockImplementationOnce(async () => {
+        order.push("record");
+        return "pd-1";
+      });
+      mockTwilioCallsUpdate.mockImplementationOnce(async () => {
+        order.push("update");
+        return {};
+      });
+      const twiml = await runCascadeTransfer({ config: { transferNoAnswer: "own_voicemail" } });
+      expect(twiml).toContain("<Dial");
+      expect(db.recordPendingDial).toHaveBeenCalledTimes(1);
+      expect(db.recordPendingDial).toHaveBeenCalledWith({
+        businessId: "biz1",
+        callSid: expect.any(String),
+        callerNumber: "+15559999999",
+        dialledNumber: "+15551234567",
+        timeoutSec: 45,
+      });
+      expect(order).toEqual(["record", "update"]);
+    });
+
+    it("uses the webhook's business when state.businessId was never set (createCall failed)", async () => {
+      db.recordPendingDial.mockClear();
+      db.createCall.mockRejectedValueOnce(new Error("insert failed"));
+      const twiml = await runCascadeTransfer({ webhookBusiness: { id: "biz-webhook" } });
+      expect(twiml).toContain("<Dial");
+      expect(db.recordPendingDial).toHaveBeenCalledTimes(1);
+      expect(db.recordPendingDial.mock.calls[0][0].businessId).toBe("biz-webhook");
+    });
+
+    it("an anonymous caller is recorded as null", async () => {
+      db.recordPendingDial.mockClear();
+      await runCascadeTransfer({ callerPhone: "anonymous" });
+      expect(db.recordPendingDial.mock.calls[0][0].callerNumber).toBeNull();
+    });
+
+    it("a price-refused transfer writes no row", async () => {
+      db.recordPendingDial.mockClear();
+      const twiml = await runCascadeTransfer({ config: { transferPhoneNumber: "+449090123456" } });
+      expect(twiml).not.toContain("<Dial");
+      expect(db.recordPendingDial).not.toHaveBeenCalled();
+    });
+
+    it("a write that throws still sends the transfer TwiML and logs pending_dial_write_failed", async () => {
+      db.recordPendingDial.mockClear();
+      db.recordPendingDial.mockRejectedValueOnce(new Error("db down"));
+      log.error.mockClear();
+      const twiml = await runCascadeTransfer();
+      expect(twiml).toContain("<Dial");
+      const failed = log.error.mock.calls.filter((c) => c[0] === "pending_dial_write_failed");
+      expect(failed).toHaveLength(1);
+      expect(failed[0][1]).toMatchObject({ site: "cascade_transfer", reason: "db down", severity: "warn" });
+      expect(JSON.stringify(failed[0][1])).not.toContain("5559999999");
+      expect(JSON.stringify(failed[0][1])).not.toContain("5551234567");
+    });
   });
 
   // Number block (batch 3 S3, Task 3.2a): the price check runs before the <Dial>.

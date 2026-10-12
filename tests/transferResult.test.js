@@ -9,6 +9,7 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "not-a-real-key";
 
 const mockIsEnabled = vi.fn(() => true);
 const mockLookup = vi.fn(async () => null);
+const mockEndPendingDial = vi.fn(async () => 1);
 
 // loadConfig is the REAL implementation (delegated), so the
 // db.loadConfig -> resolveProfile wire is exercised: a rename or shape change
@@ -19,6 +20,7 @@ vi.mock("../services/db.js", async (importOriginal) => {
     ...actual,
     isEnabled: (...a) => mockIsEnabled(...a),
     lookupBusinessByPhone: (...a) => mockLookup(...a),
+    endPendingDial: (...a) => mockEndPendingDial(...a),
     loadConfig: (...a) => actual.loadConfig(...a),
   };
 });
@@ -60,6 +62,25 @@ beforeEach(() => {
   twimlState.throws = false;
   mockIsEnabled.mockReset().mockReturnValue(true);
   mockLookup.mockReset().mockResolvedValue(null);
+  mockEndPendingDial.mockReset().mockResolvedValue(1);
+});
+
+describe("POST /twilio/transfer-result: pending dial", () => {
+  it.each(["completed", "no-answer", "busy", "failed"])("%s ends the dial for this CallSid", async (status) => {
+    await post(app, { CallSid: "CA_end_1", To: UK, From: FROM, DialCallStatus: status });
+    expect(mockEndPendingDial).toHaveBeenCalledTimes(1);
+    expect(mockEndPendingDial).toHaveBeenCalledWith("CA_end_1");
+  });
+
+  it("a throwing end leaves the response unchanged (completed -> Hangup, otherwise the message)", async () => {
+    mockEndPendingDial.mockRejectedValue(new Error("db down"));
+    const done = await post(app, { CallSid: "CA_end_2", To: UK, From: FROM, DialCallStatus: "completed" });
+    expect(done.status).toBe(200);
+    expect(done.text).toBe("<Response><Hangup/></Response>");
+    const missed = await post(app, { CallSid: "CA_end_2", To: UK, From: FROM, DialCallStatus: "no-answer" });
+    expect(missed.status).toBe(200);
+    expect(missed.text).toContain("<Record");
+  });
 });
 
 describe("POST /twilio/transfer-result", () => {

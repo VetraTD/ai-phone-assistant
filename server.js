@@ -17,6 +17,7 @@ import { WebSocketServer } from "ws";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber } from "./lib/phone.js";
+import { inboundGuardTwiml } from "./lib/inboundGuards.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
@@ -602,6 +603,14 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
         // assistant the check exists to prevent.
         return res.send(buildUnroutedVoicemailTwiml(voicemailCallbackUrl(BASE_URL, businessPhone), profile.twimlSayVoice, messageDoneUrl(BASE_URL)));
       }
+
+      // Inbound guards (block list, forward-all loop). The helper FAILS OPEN and
+      // never throws: a throw here would land in the cascade-fallback catch
+      // below and hand a refused caller to the cascade.
+      if (business) {
+        const guardTwiml = await inboundGuardTwiml({ database: db, business, from: callerPhone, callSid, route: "live" });
+        if (guardTwiml) return res.send(guardTwiml);
+      }
     }
 
     const streamToken = mintMediaStreamToken(callSid);
@@ -814,6 +823,15 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
       );
     }
 
+    // Inbound guards (block list, forward-all loop), shared with the Live route.
+    // A refused call creates no call row: that is made by the socket, which a
+    // Reject never reaches.
+    const guardTwiml = await inboundGuardTwiml({ database: db, business, from: callerPhone, callSid, route: "cascade" });
+    if (guardTwiml) {
+      callState.remove(callSid);
+      return res.send(guardTwiml);
+    }
+
     // P10: the socket now carries a per-call credential.
     //
     // In the PATH, not a query string — Twilio does not carry a
@@ -945,8 +963,9 @@ app.post("/twilio/message-done", twilioValidationAnyAccount, (req, res) => {
 // message" after a real conversation is wrong. Anything else means nobody
 // spoke to the caller, so they get the message prompt in the business's own
 // voice instead of silence. Never a 500 and never an empty body: this is
-// the caller's last audio. (Batch-3 S4 adds "end the pending dial for this
-// CallSid" here, and the warm transfer adds a case to transferOutcome.)
+// the caller's last audio. It also ends the pending dial for this CallSid
+// (batch-3 S4: the loop guard stops matching once the dial is over); the warm
+// transfer adds a case to transferOutcome.
 app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body?.CallSid;
   const dialStatus = req.body?.DialCallStatus || null;
@@ -965,6 +984,12 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
     });
 
   try {
+    // Both outcomes end it, so this runs before the hangup early return.
+    try {
+      await db.endPendingDial(callSid);
+    } catch (err) {
+      log.error("pending_dial_end_failed", { callSid, message: err?.message });
+    }
     const outcome = transferOutcome(req.body);
     log.info("transfer_result", { callSid, dialStatus, outcome });
     if (outcome === "hangup") return res.send("<Response><Hangup/></Response>");
@@ -1000,6 +1025,13 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
+    // The parent call ending ends its dial: a caller who hung up mid-ring and
+    // rings back is not bounced as a forward-all loop.
+    try {
+      await db.endPendingDial(callSid);
+    } catch (err) {
+      log.error("pending_dial_end_failed", { callSid, message: err?.message });
+    }
     // Read from the SHARED store, not local memory.
     //
     // This handler is an ordinary HTTP POST. On Cloud Run the load balancer
