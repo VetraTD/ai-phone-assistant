@@ -1521,6 +1521,14 @@ const SABOTAGES = [
     cwd: "AI-phone-dashboard/backend",
     red: ["src/__tests__/settings.test.js"],
   },
+  {
+    name: "pending-dial-expiry",
+    why: "app_dial_bounced stops requiring an unexpired pending dial: a stale row (crash before the dial's action fired) would block a real caller forever (batch-3 S4, review focus 5).",
+    file: "database/054_loop_guard_block_list.sql",
+    find: "AND pd.expires_at > now()",
+    replace: "AND true /* SABOTAGE */",
+    red: ["tests/migration054Fold.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

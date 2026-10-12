@@ -35,6 +35,8 @@ const DIRECTORIES = [
   "call_attempt_directory",
   "dial_registry",
   "outreach_schedule",
+  "pending_dials",
+  "blocked_callers",
 ];
 
 let admin;

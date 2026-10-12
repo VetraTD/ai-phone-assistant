@@ -766,6 +766,73 @@ export async function lookupBusinessByPhone(twilioNumber) {
   return recovered;
 }
 
+// ---------------------------------------------------------------------------
+// Inbound launch guards (migration 054). All four run on the POOL, never on a
+// tenant-scoped client, by design: pending_dials / blocked_callers are
+// platform tables with no grant to vetra_app, and the functions that read
+// `calls` set (and restore) their own tenant scope. Each THROWS on a database
+// error so the caller decides fail-open vs fail-closed, and returns null when
+// no database is configured. Phone numbers are never logged here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Record a transfer dial that may still be ringing (loop guard).
+ * @returns {Promise<number|string|null>} the new row id, null when no database
+ */
+export async function recordPendingDial({ businessId, callSid, callerNumber, dialledNumber, timeoutSec }) {
+  if (!pool) return null;
+  const res = await pool.query(`SELECT app_record_pending_dial($1,$2,$3,$4,$5) AS id`, [
+    businessId,
+    callSid,
+    callerNumber ?? null,
+    dialledNumber,
+    timeoutSec ?? null,
+  ]);
+  return res.rows[0].id;
+}
+
+/**
+ * End the open pending dials of a parent call.
+ * @returns {Promise<number|null>} how many rows were ended, null when no database
+ */
+export async function endPendingDial(callSid) {
+  if (!pool) return null;
+  const res = await pool.query(`SELECT app_end_pending_dial($1) AS n`, [callSid ?? null]);
+  return res.rows[0].n;
+}
+
+/**
+ * Everything the inbound webhook asks about a caller, in one round trip.
+ * `countCalls` false skips the cross-tenant walk (callsToday comes back 0).
+ * @returns {Promise<{blocked: boolean, bounced: boolean, callsToday: number}|null>}
+ */
+export async function inboundGuardFacts({ businessId, from, countCalls }) {
+  if (!pool) return null;
+  const res = await pool.query(
+    `SELECT app_caller_blocked($2,$1) AS blocked,
+            app_dial_bounced($1,$2) AS bounced,
+            app_calls_from_today($3) AS calls_today`,
+    [businessId, from ?? null, countCalls ? (from ?? null) : null]
+  );
+  const row = res.rows[0];
+  return { blocked: row.blocked === true, bounced: row.bounced === true, callsToday: Number(row.calls_today) || 0 };
+}
+
+/**
+ * AI seconds a caller has used at a business today (UTC), counted twice in one
+ * round trip: `after` includes the named call, `before` excludes it.
+ * @returns {Promise<{after: number, before: number}|null>}
+ */
+export async function aiSecondsToday({ businessId, callerNumber, callSid }) {
+  if (!pool) return null;
+  const res = await pool.query(
+    `SELECT app_ai_seconds_today($1,$2) AS after, app_ai_seconds_today($1,$2,$3) AS before`,
+    [businessId, callerNumber ?? null, callSid ?? null]
+  );
+  const row = res.rows[0];
+  return { after: Number(row.after) || 0, before: Number(row.before) || 0 };
+}
+
 /**
  * Insert a new call row.
  * @param {string} businessId
