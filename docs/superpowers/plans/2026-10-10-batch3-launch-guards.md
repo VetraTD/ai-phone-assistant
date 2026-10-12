@@ -25,7 +25,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 | Session | Content | Hours | Status |
 |---|---|---|---|
 | S1 | Voicemail fix + transfer stopgap + per-business choice + 60-min transfer limit (+ db-inspect add-on, findings A/B) | 4–5 | **done 2026-10-11** in ≈1.7 h actual (≈0.4 h planning + ≈1.3 h execution); code head `618742c` — see "S1 as built" |
-| S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | not started |
+| S2 | 10-minute end + polite failure (never a silent line) | 4.5–5.5 | **done 2026-10-11** in ≈4.1 h actual (≈0.4 h planning + ≈3.7 h execution); code head `41847f9` — see "S2 as built" |
 | S3 | Number block (price check at every dial and text) | 3.5–4 | not started |
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | not started |
 | S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | not started |
@@ -84,6 +84,98 @@ Environment notes: local Postgres (`vetra-pg16`, :55432) has 052 applied. The ga
 `.superpowers/sdd/2026-10-10-batch3-launch-guards/gate-v3.sh <sha> <label> [db] [dbfirst] [only:<row>]...` — never edit a
 gate script while it runs (bash reads it as it goes). Load flakes seen once each under parallel runs: vitest worker
 "Timeout calling onTaskUpdate", `tests/outboundEuFloor.test.js` 20 ms perf bound.
+
+### S2 as built (2026-10-11) — what later sessions must know
+
+Commits on `feat/outbound-stage4` (code `ef4b102..41847f9`): `84cd871` clock module + harness seams · `23c2824` clock
+wiring + `redirectCall` · `bcc56c7` rows · `71aea29`/`1716ab5`/`bde6233` review round 1 · `4eb1c8b` review round 2 ·
+`523440a` polite failure · `b865eed` rows · `41847f9` Minor wave D1–D9. Final gate at `41847f9` (gate worktree): root
+296 files / 7299 tests green, test:db 45 files / 642 tests green, census 111 rows clean, all 19 new S2 rows red-on-sabotage, and the two S1 transfer rows
+(`transfer-client-by-account`, `transfer-has-action`) still red after the `redirectCall` extraction.
+
+**Owner rulings made while planning S2 (2026-10-11)** — they override the Session 2 text below:
+- **O1 "leave an ending alone".** If a hang-up is already queued (`pendingExit`, playing out) or a transfer redirect is
+  in flight, the 9:30 hard end and the Gemini-drop handler do NOT redirect; the queued exit finishes on its mark or its
+  15 s backstop. Whichever stood down stores a `deferredEnd`; if the caller speaks and `cancelPendingExit` really
+  cancels the exit, the stored ending runs at once. Precedence: a polite failure replaces a stored hard end; a hard end
+  never replaces a stored polite failure.
+- **O2 "notes wait for a pause".** The 8:30 wrap note and the 9:00 goodbye note go out at the next model `turnComplete`,
+  AFTER the exit-arming block (the plan's "`closeLiveGeneration` boundary" only runs on outbound live-mode calls). They
+  are held while a tool call or its continuation is open, an exit is queued, or a guard note went out at that same turn
+  end, and forced after 20 s. The goodbye replaces an undelivered wrap and is skipped if the silence ladder already set
+  `exitAfterTurn` or an exit is queued. `exitAfterTurn` is set only when the goodbye actually goes out; a goodbye forced
+  into an open model turn is promoted at the NEXT turn boundary, so the cut turn can't hang up before the goodbye is said.
+  The wrap is dropped while an `end_call` is held for an unanswered question, so it can't spend the "question outranks a
+  hang-up" hold.
+
+New names:
+- `lib/voice/live/callClock.js`:
+  - `resolveClockConfig(env)`: env `LIVE_CALL_WRAP_UP_SEC` / `_GOODBYE_SEC` / `_HARD_END_SEC`; refuses anything not
+    strictly below 589 s and falls back to the defaults, logging `live_call_clock_config_refused`;
+  - `createCallClock`;
+  - `WRAP_UP_NOTE`, `GOODBYE_NOTE`, `NOTE_FORCE_AFTER_MS` (20 s), `HARD_END_REDIRECT_TIMEOUT_MS` (5 s).
+- `lib/voice/live/index.js`:
+  - deps `setTimer`/`clearTimer`;
+  - `redirectCall(twiml, { purpose })`: S1's per-account client resolution, extracted unchanged;
+  - `redirectCallBounded`: the one 5 s race; twilio-node waits 30 s, and 570 + 30 is past Google's cut;
+  - `exitUnderway()`, `endingInProgress()`, `hardEndUnderway`, the `deferredEnd` slot (a rejecting deferred action
+    still finishes the call);
+  - `onHardEnd`, `politeFailure(reason)` + `politeFailureRun` (a second caller awaits the in-flight redirect before
+    finishing), `endWithPoliteFailure`;
+  - `armExit` refuses while a hard end or polite failure is committed.
+- Harness: `fakeTwilioClient`, `live.close()` (callbacks captured at connect CALL time, so a drop can arrive while
+  connect hangs), `connectError`, `bootLive({ twilioClient, twilioClientForAccountSid, twilioClientFor, setTimer,
+  clearTimer, accountSid })`.
+
+New log events:
+- time notes: `live_time_note` / `_deferred` / `_skipped`;
+- hard end: `live_max_duration_hard_end` (alert), `_deferred`, `_skipped`, `_redirect_failed`;
+- polite failure: `live_polite_failure` (alert), `live_polite_failure_failed` (alert), `live_polite_failure_deferred`;
+- `live_exit_refused_hard_end`.
+
+`live_transfer_client` / `transfer_client_lookup_failed` now also fire for the hard end and the polite failure. They
+carry a `purpose` field, so filter on it if they are ever alerted on.
+
+Facts the plan did not have:
+- **A refused Gemini handshake does not reject `connect`.** With `@google/genai` 1.42, `onclose` fires and `connect`
+  never settles. So "AI won't start" logs in production as `live_close_abnormal` (1006) + `live_polite_failure`
+  reason `live_dropped`, NOT `live_connect_failed`. The S6 alert list already covers both.
+- `server.js` refuses to boot without `BASE_URL`, so the message TwiML URLs, built like the transfer action URLs, are
+  always absolute.
+- The plan's row `hard-end-checks-closed` was not added. The clock's own stopped flag makes that `closed` check
+  unobservable while `finish()` completes. `clock-stopped-in-finish` covers Review focus 1.
+- Task 2.3 needed no edit: the five alerts are already in S6 step 4, and `CALL_MAX_DURATION_MINUTES=10` is already in
+  S6 step 3.
+
+New sabotage rows (19):
+- clock and notes: `clock-stopped-in-finish`, `clock-config-under-google-limit`, `hard-end-stands-down-for-exit`,
+  `deferred-end-fires-on-cancel`, `goodbye-note-waits-for-turn-end`, `time-note-waits-for-tool-continuation`,
+  `wrap-note-respects-question-hold`, `forced-goodbye-waits-for-next-turn`, `tool-latch-reset-at-flush`;
+- polite failure: `polite-failure-on-drop`, `polite-failure-not-after-close`, `polite-failure-on-connect-failed`,
+  `polite-failure-stands-down-for-exit`, `polite-failure-blocks-transfer`, `polite-failure-outbound-never-voicemail`,
+  `polite-failure-awaits-inflight`;
+- interplay: `hard-end-yields-to-polite-failure`, `polite-failure-yields-to-hard-end`, `deferred-end-always-finishes`.
+
+Parked (record-and-park, not fixed):
+- the wrap note is lost when `armExit` was refused by the barge grace and the caller then talks on (the goodbye and
+  hard end still come);
+- a goodbye skipped because an exit was queued is not re-armed if that exit is cancelled (the call ends at 9:30 on the
+  spoken time-up line, never silent);
+- a sticky `pendingTransfer` (pre-existing) makes notes go out only by the 20 s force;
+- a second `turnComplete` for a cut turn's trailing output could still arm after a forced goodbye's promotion (bounded
+  by the barge grace + hard end);
+- when a drop defers behind a queued exit, the connect/start catches still finish at once (unreachable with SDK 1.42);
+- the callClock refusal log carries the raw env strings.
+
+**None of this is live-tested.** S6 L1 (stay on ~9½ min) is the first real check. A Gemini drop can't be forced
+live, so the polite failure stays offline-proven.
+
+Environment notes:
+- S2's workspace is `.superpowers/sdd/2026-10-10-batch3-launch-guards-s2/` (ledger, briefs, reports,
+  `gate-s2.sh` = gate-v3 with its own `LOGDIR`).
+- The skill's `review-package` script writes into the S1 folder (it maps the plan file there); move the file after.
+- The controller session restarted once mid-session. The stopped implementer left uncommitted work and an orphaned
+  vitest. Back up the diff, kill the orphan, then resume the implementer with SendMessage; nothing was lost.
 
 ---
 
@@ -770,10 +862,43 @@ open Minors, commit sha).
 > estimate 4.5–5.5 h; S1 ran at ~40% of its estimate, but S2 has harness work and opus reviews — expect ~3–4 h.
 
 ### S3
-> Execute session S3 (number block) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` from
-> commit <sha>. The price snapshot comes from `scripts/refresh-dial-costs.mjs` (Twilio Pricing API, free,
-> account B creds from `.env`; never print them). Gate includes the dashboard backend's own vitest. Method:
-> faster variant. End: gate green, commit, Status, S4 message. Estimate 3.5–4 h.
+> Execute session S3 (number block) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` on
+> `feat/outbound-stage4`, continuing from S2 (code head `41847f9`, plus the plan-doc commit on top). Do only S3.
+>
+> STEP 0, before anything else:
+> - Read the plan's Status table, "S1 as built", "S2 as built", Owner decisions (decision 1 is the number block),
+>   What the code shows (findings 7–10), Global constraints, Review focus, File map and Session 3 in full.
+> - Read memory sdd-gates-and-memory-limits, never-git-checkout-uncommitted-work, a-fix-can-be-the-next-defect,
+>   owner-wants-speed-and-low-usage, plan-verbatim-code-fails-open and ask-before-spending-api-money.
+> - Line numbers in the plan are at `a238b80`. S1 and S2 moved `lib/voice/live/index.js` (now ~9,000 lines),
+>   `lib/voice/session.js` and `server.js`, so locate code by quoted text. In Live, the transfer dial is now built in
+>   `redialForTransfer` and sent through `redirectCall`. The dial-time price check goes BEFORE the TwiML is built
+>   there. If the check refuses, the call must still end somewhere a caller can hear (the existing no-number /
+>   cantTransfer paths), never in silence.
+> - Gate worktree `C:/Users/nithi/VetraTD/ai-phone-gate` (node_modules junction; check main's count is ~269;
+>   `test-audio/` is already copied in).
+> - Copy `.superpowers/sdd/2026-10-10-batch3-launch-guards-s2/gate-s2.sh` into S3's own workspace and change its
+>   `LOGDIR`. The gate must ALSO run the dashboard backend's own vitest (`AI-phone-dashboard/backend`), so add that
+>   stage. Never edit a gate script while it runs.
+> - Local Postgres :55432 is at migration 052. S3 adds 053, folded into `schema.sql` in the same commit.
+>
+> The price snapshot comes from `scripts/refresh-dial-costs.mjs` (Twilio Pricing API, free, account B credentials
+> from `.env`; print counts only, never credentials). Running it is a free API read, but say so before running it.
+> The dashboard copy of the price module must be byte-identical (vendored), with a test that proves it.
+>
+> METHOD: superpowers:subagent-driven-development, faster variant.
+> - Sonnet implementers and reviewers. Opus reviews only Task 3.2 (every dial and text site; fail-CLOSED for money).
+> - Full gate per task, or one combined gate over consecutive tasks.
+> - Census after any `index.js` / `tools.js` / `strings.js` edit.
+> - Critical/Important fixed in-task with re-review; Minors in ONE wave at the end.
+> - Pipeline gates with the next implementer. One implementer at a time.
+>
+> STOP AND ASK if a decision isn't covered by the plan, the code contradicts it, the session passes 6 h, or anything
+> needs production, a paid API or a real call. No paid calls, no real calls, no production, no deploy, no push. Never
+> git checkout/restore over uncommitted work; commit before any sabotage.
+>
+> END: gate green (root + db + dashboard + census + every new row red-on-sabotage), commit, Status table with actual
+> hours, "S3 as built", S4 message refreshed, 5-line report. Plan estimate 3.5–4 h; S1 took 1.7 h and S2 4.1 h.
 
 ### S4
 > Execute session S4 (loop guard, block list, repeat-caller alerts) of
