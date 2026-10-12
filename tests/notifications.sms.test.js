@@ -30,9 +30,11 @@ vi.mock("twilio", () => ({
 // tests/db/smsConsent.test.js, where an unscoped read actually returns zero
 // rows instead of being asserted to.
 const mockLatestSmsConsent = vi.fn(async () => ({ id: "c1", granted: true }));
+const mockIsEnabled = vi.fn(() => false);
+const mockFetchBusinessById = vi.fn(async () => null);
 vi.mock("../services/db.js", () => ({
-  isEnabled: () => false,
-  fetchBusinessById: vi.fn(async () => null),
+  isEnabled: () => mockIsEnabled(),
+  fetchBusinessById: (...args) => mockFetchBusinessById(...args),
   withTenantSafe: async (businessId, fn) => {
     try {
       return await fn();
@@ -47,6 +49,8 @@ beforeEach(() => {
   for (const key of ENV_KEYS) originalEnv[key] = process.env[key];
   mockMessagesCreate.mockClear();
   mockLatestSmsConsent.mockReset();
+  mockIsEnabled.mockReset().mockReturnValue(false);
+  mockFetchBusinessById.mockReset().mockResolvedValue(null);
   mockLatestSmsConsent.mockResolvedValue({ id: "c1", granted: true });
 });
 
@@ -351,6 +355,69 @@ describe("sendCallerSms — gating matrix", () => {
     ).resolves.toBe(false);
     // The send was attempted — this is not a case of the gate silently
     // swallowing the call before Twilio was ever reached.
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Number block (batch 3 S3, Task 3.2a): no text to a number over the price
+// ceiling or a premium/special-rate one. Paired with demonstrated sends.
+describe("sms price check — sms_destination_refused", () => {
+  const NEVER = "+449090123456"; // UK premium rate
+  const OVER = "+923001234567"; // Pakistan mobile: over the text ceiling
+  const KIND_VARS = { name: "Alex", business: "Test Biz", datetime: "Tomorrow 3pm" };
+
+  function captureEvents(event) {
+    const lines = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      if (typeof chunk === "string") {
+        for (const l of chunk.split(String.fromCharCode(10))) if (l.includes(`"event":"${event}"`)) lines.push(JSON.parse(l));
+      }
+      return true;
+    });
+    return { lines, restore: () => spy.mockRestore() };
+  }
+
+  it("sendCallerSms to a refused number: no Twilio call, false, logged without the number", async () => {
+    const { sendCallerSms } = await loadNotifications();
+    for (const to of [NEVER, OVER]) {
+      const cap = captureEvents("sms_destination_refused");
+      const sent = await sendCallerSms(ENABLED_CONFIG, to, "appointment_confirmation", KIND_VARS);
+      cap.restore();
+      expect(sent).toBe(false);
+      expect(cap.lines).toHaveLength(1);
+      expect(JSON.stringify(cap.lines[0])).not.toContain(to.slice(3));
+    }
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("a refused number is never HELD: no consent record, and a later release sends nothing", async () => {
+    mockLatestSmsConsent.mockResolvedValue(null);
+    const { sendCallerSms, releaseHeldCallerSms, _clearHeldCallerSms } = await loadNotifications();
+    _clearHeldCallerSms();
+    expect(await sendCallerSms(ENABLED_CONFIG, NEVER, "appointment_confirmation", KIND_VARS)).toBe(false);
+    expect(await releaseHeldCallerSms(BUSINESS_ID, NEVER)).toBe(0);
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    // Control: an allowed number IS held in the same situation and released.
+    expect(await sendCallerSms(ENABLED_CONFIG, "+15551234567", "appointment_confirmation", KIND_VARS)).toBe(false);
+    expect(await releaseHeldCallerSms(BUSINESS_ID, "+15551234567")).toBe(1);
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("allowed UK and US numbers still send", async () => {
+    const { sendCallerSms } = await loadNotifications();
+    expect(await sendCallerSms(ENABLED_CONFIG, "+442079460958", "missed_call", { business: "Test Biz" })).toBe(true);
+    expect(await sendCallerSms(ENABLED_CONFIG, "+15551234567", "missed_call", { business: "Test Biz" })).toBe(true);
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("an owner notification to a refused config.phone sends no SMS; an allowed one does", async () => {
+    mockIsEnabled.mockReturnValue(true);
+    const { notifyAppointmentBooked } = await loadNotifications();
+    mockFetchBusinessById.mockResolvedValue({ name: "Test Biz", notification_phone: NEVER });
+    await notifyAppointmentBooked({ businessId: BUSINESS_ID, appointment: { scheduled_at: "2026-10-12T10:00:00Z" } });
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    mockFetchBusinessById.mockResolvedValue({ name: "Test Biz", notification_phone: "+442079460958" });
+    await notifyAppointmentBooked({ businessId: BUSINESS_ID, appointment: { scheduled_at: "2026-10-12T10:00:00Z" } });
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
   });
 });

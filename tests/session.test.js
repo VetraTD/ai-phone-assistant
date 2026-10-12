@@ -1540,6 +1540,44 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(twiml).not.toContain("callerId");
   });
 
+  // Number block (batch 3 S3, Task 3.2a): the price check runs before the <Dial>.
+  describe("9a-iv. transfer price check", () => {
+    it("a never number: ONE update with the cantTransfer line and a <Record>, no <Dial>, not marked transferred", async () => {
+      db.markCallTransferred.mockClear();
+      mockTwilioCallsUpdate.mockClear();
+      const twiml = await runCascadeTransfer({ config: { transferPhoneNumber: "+449090123456" } });
+      await flush();
+      expect(mockTwilioCallsUpdate).toHaveBeenCalledTimes(1);
+      expect(twiml).toContain("<Record");
+      expect(twiml).toContain("can&apos;t put you through");
+      expect(twiml).not.toContain("<Dial");
+      expect(db.markCallTransferred).not.toHaveBeenCalled();
+    });
+
+    it("a needs_switch_on number is refused when allowPricierNumbers is not true", async () => {
+      db.markCallTransferred.mockClear();
+      mockTwilioCallsUpdate.mockClear();
+      const refused = await runCascadeTransfer({ config: { transferPhoneNumber: "+447624123456" } });
+      expect(refused).not.toContain("<Dial");
+      expect(db.markCallTransferred).not.toHaveBeenCalled();
+    });
+
+    it("the same number dials once allowPricierNumbers is true", async () => {
+      mockTwilioCallsUpdate.mockClear();
+      const allowed = await runCascadeTransfer({
+        config: { transferPhoneNumber: "+447624123456", allowPricierNumbers: true },
+      });
+      expect(allowed).toContain("<Dial");
+    });
+
+    it("an allowed number is unchanged", async () => {
+      mockTwilioCallsUpdate.mockClear();
+      const twiml = await runCascadeTransfer({ config: { transferPhoneNumber: "+442079460958" } });
+      expect(twiml).toContain("<Dial");
+      expect(twiml).toContain("+442079460958");
+    });
+  });
+
   describe("9a-iii. transfer REST update uses the call's own Twilio account", () => {
     const ENV_KEYS = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID_ALT", "TWILIO_AUTH_TOKEN_ALT"];
     let saved;

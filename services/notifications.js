@@ -6,6 +6,7 @@ import { isValidE164 } from "../lib/validate.js";
 import { normalizePhoneNumber } from "../lib/phone.js";
 import { smsTemplateProblem } from "../lib/smsConsent.js";
 import * as db from "./db.js";
+import { checkText } from "../lib/dialCost.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
@@ -148,6 +149,15 @@ async function sendEmail({ to, subject, text, html }) {
  * @returns {Promise<boolean>}
  */
 async function sendSms({ to, body }) {
+  // Number block: no text goes to a number over the price ceiling or a
+  // premium/special-rate one. First statement, so every caller of sendSms
+  // (owner notifications, released held texts, caller texts) is covered.
+  // No phone number in the log.
+  const verdict = checkText(to);
+  if (!verdict.ok) {
+    log.error("sms_destination_refused", { reason: verdict.reason, iso: verdict.iso, severity: "warn" });
+    return false;
+  }
   if (!twilioClient || !TWILIO_SMS_FROM) {
     log.error("notification_dropped", {
       channel: "sms",
@@ -550,6 +560,13 @@ export async function sendCallerSms(
   // -------------------------------------------------------------------------
   if (!businessConfig?.smsFollowupEnabled) return false;
   if (!isValidE164(toNumber)) return false;
+  // Number block, BEFORE the consent lookup and the hold: a refused number must
+  // never be held (a held text occupies a slot in the bounded hold map).
+  const verdict = checkText(toNumber);
+  if (!verdict.ok) {
+    log.error("sms_destination_refused", { reason: verdict.reason, iso: verdict.iso, severity: "warn" });
+    return false;
+  }
   const template = DEFAULT_SMS_TEMPLATES[kind];
   if (!template) {
     log.error("sms_followup_unknown_kind", { message: `sendCallerSms: unknown kind "${kind}"` });

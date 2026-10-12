@@ -283,6 +283,20 @@ describe("validateCapabilityConfig", () => {
   });
 });
 
+describe("loadConfig — allowPricierNumbers (migration 053)", () => {
+  it("true passes through", () => {
+    expect(loadConfig({ ...BUSINESS, allow_pricier_numbers: true }, []).allowPricierNumbers).toBe(true);
+  });
+  it("false, null, undefined and the string \"true\" are all false", () => {
+    for (const v of [false, null, undefined, "true", 1, "t"]) {
+      expect(loadConfig({ ...BUSINESS, allow_pricier_numbers: v }, []).allowPricierNumbers).toBe(false);
+    }
+  });
+  it("null business is false", () => {
+    expect(loadConfig(null).allowPricierNumbers).toBe(false);
+  });
+});
+
 describe("loadConfig — transferNoAnswer (migration 052)", () => {
   it("passes own_voicemail through", () => {
     expect(loadConfig({ ...BUSINESS, transfer_no_answer: "own_voicemail" }, []).transferNoAnswer).toBe("own_voicemail");

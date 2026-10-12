@@ -507,6 +507,7 @@ export function loadConfig(business, capabilityRows = null) {
       afterHoursPolicy: "take_message",
       transferPolicy: "always",
       transferNoAnswer: "take_message",
+      allowPricierNumbers: false,
       languagesSpoken: ["en"],
       customInstructions: null,
       voiceProvider: "elevenlabs",
@@ -558,6 +559,8 @@ export function loadConfig(business, capabilityRows = null) {
     transferNoAnswer: TRANSFER_NO_ANSWER.includes(business.transfer_no_answer)
       ? business.transfer_no_answer
       : "take_message",
+    // Strict: only a real boolean true switches pricier numbers on (migration 053).
+    allowPricierNumbers: business.allow_pricier_numbers === true,
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     customInstructions: business.custom_instructions || null,
     voiceProvider: business.voice_provider || "elevenlabs",

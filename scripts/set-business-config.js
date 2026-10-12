@@ -43,6 +43,7 @@
 
 import pg from "pg";
 import { cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
+import { checkDial, REFUSAL_MESSAGES } from "../lib/dialCost.js";
 
 const cfg = {
   instance: process.env.CLOUD_SQL_INSTANCE,
@@ -97,6 +98,10 @@ const FIELDS = [
   // must be restorable, and it is business configuration, like the
   // `phone_number b64` line above. Not a caller number.
   "transfer_phone_number",
+  // The per-client switch-on for numbers costing 10-60 cents/min (migration 053).
+  // WE set it; there is no dashboard screen. Off by default: only numbers at or
+  // under 10 cents/min are dialled automatically. Exactly "true" or "false".
+  "allow_pricier_numbers",
 ];
 
 /**
@@ -113,10 +118,22 @@ const VALIDATORS = {
     v === "take_message" || v === "own_voicemail" ? null : "must be exactly take_message or own_voicemail",
   transfer_phone_number: (v) =>
     E164.test(v) ? null : `must be E.164, + then 7-15 digits, no spaces or formatting (got a value ending ${last4(v)})`,
+  allow_pricier_numbers: (v) => (v === "true" || v === "false" ? null : "must be exactly true or false"),
 };
 function refusal(field, value, flag) {
   const err = VALIDATORS[field]?.(value);
   return err ? `Refusing: ${flag} ${field} ${err}.` : null;
+}
+
+/**
+ * The number block for transfer_phone_number: the dial-time price check, run
+ * BEFORE the number is stored. needs_switch_on is refused unless the same
+ * command also writes allow_pricier_numbers = true. Never echoes the number.
+ */
+function transferPriceRefusal(value, allowPricier, flag) {
+  const v = checkDial(value, { allowPricier });
+  if (v.ok) return null;
+  return `Refusing: ${flag} transfer_phone_number (ending ${last4(value)}) ${v.reason}. ${REFUSAL_MESSAGES[v.reason]}`;
 }
 
 const TO = argOf("to");
@@ -170,6 +187,16 @@ for (let i = 0; i < argv.length; i += 1) {
     process.exit(1);
   }
   SETS[field] = decoded;
+}
+// --set args come in any order, so the cross-field check waits until all are
+// parsed. If allow_pricier_numbers is going to be --copy'd, the answer is not
+// known yet: the check after the copy decides.
+if (SETS.transfer_phone_number !== undefined && (SETS.allow_pricier_numbers !== undefined || !COPY.includes("allow_pricier_numbers"))) {
+  const bad = transferPriceRefusal(SETS.transfer_phone_number, SETS.allow_pricier_numbers === "true", "--set");
+  if (bad) {
+    console.error(bad);
+    process.exit(1);
+  }
 }
 
 const { poolConfig, close } = await cloudSqlPoolConfig(cfg, { connectionTimeoutMillis: 10_000 });
@@ -256,6 +283,16 @@ try {
         console.error(bad);
         process.exit(1);
       }
+    }
+  }
+
+  // Every value written to transfer_phone_number is price-checked before any
+  // write, with the allow_pricier_numbers value THIS command writes (if any).
+  if (changes.transfer_phone_number !== null && changes.transfer_phone_number !== undefined) {
+    const bad = transferPriceRefusal(changes.transfer_phone_number, changes.allow_pricier_numbers === "true", "--copy/--set");
+    if (bad) {
+      console.error(bad);
+      process.exit(1);
     }
   }
 

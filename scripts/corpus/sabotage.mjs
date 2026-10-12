@@ -149,6 +149,10 @@ const POLITE = "tests/livePoliteFailure.test.js";
 // Batch-3 S3: the number block (price table + checkDial/checkText).
 const DIALCOST = "tests/dialCost.test.js";
 const DIALPARITY = "tests/dialCostVendorParity.test.js";
+// Batch-3 S3 Task 3.2a: price check at voice transfers and texts.
+const PRICELIVE = "tests/liveTransferPriceCheck.test.js";
+const SETBIZ = "tests/setBusinessConfig.test.js";
+const CAPCONFIG = "tests/capabilityConfig.test.js";
 
 const SABOTAGES = [
   {
@@ -1385,6 +1389,78 @@ const SABOTAGES = [
     find: "export const TEXT_MAX_EACH = 0.25;",
     replace: "export const TEXT_MAX_EACH = 0.26;",
     red: [DIALPARITY],
+  },
+  {
+    name: "live-transfer-price-checked",
+    why:
+      "Live's transfer price check is never acted on: a premium or over-ceiling number is sent a <Dial> (batch-3 S3, number block).",
+    file: "lib/voice/live/index.js",
+    find: '    if (!verdict.ok) {\n      log.error("dial_destination_refused", {',
+    replace: '    if (false /* SABOTAGE */) {\n      log.error("dial_destination_refused", {',
+    red: [PRICELIVE],
+  },
+  {
+    name: "live-outbound-transfer-price-checked",
+    why:
+      "A refused OUTBOUND transfer stops ending in the Redirect to the transfer-result handler and plays the inbound message TwiML instead: the contact is asked to leave a message on a call WE placed (batch-3 S3).",
+    file: "lib/voice/live/index.js",
+    find: "    if (state.outboundCall) {\n      const resultUrl = ",
+    replace: "    if (false /* SABOTAGE */) {\n      const resultUrl = ",
+    red: [PRICELIVE],
+  },
+  {
+    name: "live-transfer-switch-on-respected",
+    why:
+      "The per-client allow_pricier_numbers wire is forced on in Live: 10-60 cent/min numbers are dialled for every client, switched on or not (batch-3 S3).",
+    file: "lib/voice/live/index.js",
+    find: "{ allowPricier: state.config?.allowPricierNumbers === true });",
+    replace: "{ allowPricier: true /* SABOTAGE */ });",
+    red: [PRICELIVE],
+  },
+  {
+    name: "cascade-transfer-price-checked",
+    why:
+      "The cascade's transfer price check is never acted on: a premium or over-ceiling number is sent a <Dial> (batch-3 S3).",
+    file: "lib/voice/session.js",
+    find: '      if (!verdict.ok) {\n        log.error("dial_destination_refused", {',
+    replace: '      if (false /* SABOTAGE */) {\n        log.error("dial_destination_refused", {',
+    red: [SESSION_CASCADE],
+  },
+  {
+    name: "sms-price-checked",
+    why:
+      "sendSms's price check is neutralised: owner notifications, released held texts and caller texts go to premium or over-ceiling numbers (batch-3 S3).",
+    file: "services/notifications.js",
+    find: "  const verdict = checkText(to);\n  if (!verdict.ok) {",
+    replace: "  const verdict = checkText(to);\n  if (false /* SABOTAGE */) {",
+    red: [SMS],
+  },
+  {
+    name: "caller-sms-checked-before-hold",
+    why:
+      "sendCallerSms loses its early price check: a refused number with no consent record is HELD, taking a slot in the bounded hold map, and is counted as released later (batch-3 S3).",
+    file: "services/notifications.js",
+    find: "  const verdict = checkText(toNumber);\n  if (!verdict.ok) {",
+    replace: "  const verdict = checkText(toNumber);\n  if (false /* SABOTAGE */) {",
+    red: [SMS],
+  },
+  {
+    name: "onboarding-transfer-price-checked",
+    why:
+      "set-business-config stops price-checking transfer_phone_number: we can store a premium-rate transfer number for a client (batch-3 S3).",
+    file: "scripts/set-business-config.js",
+    find: "  const v = checkDial(value, { allowPricier });",
+    replace: "  const v = { ok: true } /* SABOTAGE */;",
+    red: [SETBIZ],
+  },
+  {
+    name: "config-allow-pricier-strict",
+    why:
+      "loadConfig reads allow_pricier_numbers as truthy instead of strictly true: a stray string or number switches pricier numbers on (batch-3 S3).",
+    file: "services/db.js",
+    find: "    allowPricierNumbers: business.allow_pricier_numbers === true,",
+    replace: "    allowPricierNumbers: Boolean(business.allow_pricier_numbers) /* SABOTAGE */,",
+    red: [CAPCONFIG],
   },
 ];
 
