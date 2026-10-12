@@ -112,6 +112,24 @@ describe("the polite failure", () => {
     expect(c.marks).toContain("live-exit-end_call");
   }
 
+  /**
+   * end_call armed, and the goodbye has REAL audio on the wire (3 s, 24 kHz
+   * PCM16), so a local barge has something to cut. Returns once the exit is
+   * queued; the audio is still playing (the injected clock has not moved).
+   */
+  async function endCallWithAudio(c) {
+    await c.s.assistantTurn(ASKED);
+    await c.s.callerSays("No, that's everything.");
+    await c.s.callTool("end_call", {});
+    const audio = Buffer.alloc(24000 * 3 * 2);
+    for (let i = 0; i < audio.length / 2; i++) audio.writeInt16LE(i % 2 ? 8000 : -8000, i * 2);
+    c.s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: audio.toString("base64") } }] } } });
+    await c.s.assistantTurn("Thanks for calling. Goodbye.");
+    // The exit mark is queued BEHIND the 3 s of audio, so it has not reached the
+    // wire (the pacer sends it after the audio); the exit is armed and pending.
+    expect(c.marks).not.toContain("live-exit-end_call");
+  }
+
   async function transferArmed(c) {
     await c.s.callTool("request_transfer", { reason: "billing" });
     await c.s.assistantTurn("Putting you through now.");
@@ -127,6 +145,56 @@ describe("the polite failure", () => {
     expect(update.twiml).toContain(
       'recordingStatusCallback="https://voice.example.test/twilio/voicemail?to=%2B18176011171"',
     );
+  }
+
+  /** An outbound call's config and database (test 2 and 2b). */
+  function outboundFixture() {
+  const BIZ = "biz-pf-out";
+  const SID = "CApfoutbound1";
+  const CALLER_ID = "+441372656055";
+  const OUT_CONFIG = {
+    businessId: BIZ,
+    businessName: "Digile Media",
+    mainPhone: CALLER_ID,
+    timezone: "Europe/London",
+    businessHours: {},
+    locale: null,
+    liveVoice: null,
+    allowedTasks: ["general_question"],
+    capabilities: {},
+  };
+  const database = {
+    ...fakeDb(OUT_CONFIG, BIZ),
+    withTenant: async (_id, fn) => fn(),
+    outboundAttemptByCallSid: async (sid) =>
+      sid === SID
+        ? { businessId: BIZ, attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
+        : null,
+    outboundCallContext: async () => ({
+      attemptNo: 1,
+      openerAudio: null,
+      toNumber: "+15559876543",
+      outreachId: "out-1",
+      campaignId: "camp-1",
+      campaignVersion: 1,
+      contactId: "contact-1",
+      trigger: {},
+      templateKey: "speed_to_lead",
+      complianceClass: "solicited",
+      audience: "business",
+      config: { persona_name: "Ava", caller_id: CALLER_ID, capabilities: [] },
+      firstName: "Priya",
+      contactTimezone: "America/Chicago",
+    }),
+    fetchBusinessById: async () => ({
+      id: BIZ,
+      name: "Digile Media",
+      timezone: "Europe/London",
+      phone_number: CALLER_ID,
+    }),
+    fetchBusinessCapabilities: async () => [],
+  };
+  return { BIZ, SID, CALLER_ID, OUT_CONFIG, database };
   }
 
   it("1. connect rejects (inbound): one message update, a log line, then the call is finished", async () => {
@@ -148,51 +216,7 @@ describe("the polite failure", () => {
   });
 
   it("2. connect rejects (outbound): the hang-up line only, never a voicemail", async () => {
-    const BIZ = "biz-pf-out";
-    const SID = "CApfoutbound1";
-    const CALLER_ID = "+441372656055";
-    const OUT_CONFIG = {
-      businessId: BIZ,
-      businessName: "Digile Media",
-      mainPhone: CALLER_ID,
-      timezone: "Europe/London",
-      businessHours: {},
-      locale: null,
-      liveVoice: null,
-      allowedTasks: ["general_question"],
-      capabilities: {},
-    };
-    const database = {
-      ...fakeDb(OUT_CONFIG, BIZ),
-      withTenant: async (_id, fn) => fn(),
-      outboundAttemptByCallSid: async (sid) =>
-        sid === SID
-          ? { businessId: BIZ, attemptId: "att-1", outreachId: "out-1", campaignId: "camp-1", campaignVersion: 1 }
-          : null,
-      outboundCallContext: async () => ({
-        attemptNo: 1,
-        openerAudio: null,
-        toNumber: "+15559876543",
-        outreachId: "out-1",
-        campaignId: "camp-1",
-        campaignVersion: 1,
-        contactId: "contact-1",
-        trigger: {},
-        templateKey: "speed_to_lead",
-        complianceClass: "solicited",
-        audience: "business",
-        config: { persona_name: "Ava", caller_id: CALLER_ID, capabilities: [] },
-        firstName: "Priya",
-        contactTimezone: "America/Chicago",
-      }),
-      fetchBusinessById: async () => ({
-        id: BIZ,
-        name: "Digile Media",
-        timezone: "Europe/London",
-        phone_number: CALLER_ID,
-      }),
-      fetchBusinessCapabilities: async () => [],
-    };
+    const { BIZ, SID, OUT_CONFIG, database } = outboundFixture();
     const outClient = fakeTwilioClient();
     const s = await bootLive({
       config: OUT_CONFIG,
@@ -207,6 +231,27 @@ describe("the polite failure", () => {
     await s.settle();
     expect(outClient.updates).toHaveLength(1);
     expect(outClient.updates[0].twiml).toContain("We&apos;ll be in touch");
+    expect(outClient.updates[0].twiml).toContain("<Hangup/>");
+    expect(outClient.updates[0].twiml).not.toContain("<Record");
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("2b. an outbound start that crashes before the context is read: the hang-up line only, never a voicemail", async () => {
+    const { SID, OUT_CONFIG, database } = outboundFixture();
+    const outClient = fakeTwilioClient();
+    const s = await bootLive({
+      config: OUT_CONFIG,
+      env: ENV,
+      callSid: SID,
+      customParameters: { direction: "outbound" },
+      authorizedCallSid: SID,
+      database: { ...database, loadConfig: () => { throw new Error("config exploded"); } },
+      twilioClientFor: vi.fn(async () => outClient),
+      twilioClient: outClient,
+      waitForConnect: false,
+    });
+    await s.settle();
+    expect(outClient.updates).toHaveLength(1);
     expect(outClient.updates[0].twiml).toContain("<Hangup/>");
     expect(outClient.updates[0].twiml).not.toContain("<Record");
     expect(s.ws.readyState).toBe(3);
@@ -323,16 +368,23 @@ describe("the polite failure", () => {
     expect(c.tw.updates).toHaveLength(0);
   });
 
-  it("8b. (O1) a drop while an end_call exit is queued, then the caller speaks: the message goes, then finish", async () => {
+  it("8b. (O1) a drop while an end_call exit is queued, then the caller talks over the goodbye audio (a LOCAL barge): the message goes, then finish", async () => {
     const c = await bookedCall();
-    await endCallQueued(c);
+    await endCallWithAudio(c);
     c.s.live.close({ code: 1011 });
     await c.s.settle();
     expect(c.tw.updates).toHaveLength(0);
     expect(c.s.ws.readyState).toBe(1);
 
-    await c.s.callerSays("Actually, one more thing.");
-    await c.s.settle();
+    const cap = captureEvents("live_exit_cancelled");
+    try {
+      await c.s.feed(800, { voiced: true });
+      await c.s.settle();
+    } finally {
+      cap.restore();
+    }
+    expect(cap.lines).toHaveLength(1);
+    expect(cap.lines[0]).toMatchObject({ reason: "barge" });
     expect(c.tw.updates).toHaveLength(1);
     expectMessageTwiml(c.tw.updates[0]);
     expect(c.s.ws.readyState).toBe(3);
@@ -368,16 +420,16 @@ describe("the polite failure", () => {
   });
 
   it("10. precedence: a drop replaces a deferred hard end (the message, not the time-up line); a hard end never replaces a deferred drop", async () => {
-    // hard end deferred first, then a drop
+    // hard end deferred first, then a drop; the caller's local barge releases it
     const c = await bookedCall();
-    await endCallQueued(c);
+    await endCallWithAudio(c);
     c.sch.fireAt(HARD_MS);
     await c.s.settle();
     expect(c.tw.updates).toHaveLength(0);
     c.s.live.close({ code: 1011 });
     await c.s.settle();
     expect(c.tw.updates).toHaveLength(0);
-    await c.s.callerSays("Actually, one more thing.");
+    await c.s.feed(800, { voiced: true });
     await c.s.settle();
     expect(c.tw.updates).toHaveLength(1);
     expectMessageTwiml(c.tw.updates[0]);
@@ -386,13 +438,13 @@ describe("the polite failure", () => {
 
     // drop deferred first, then a hard end: the drop stays in the slot
     const d = await bookedCall({ callSid: "CA_test", twilioClient: fakeTwilioClient() });
-    await endCallQueued(d);
+    await endCallWithAudio(d);
     d.s.live.close({ code: 1011 });
     await d.s.settle();
     d.sch.fireAt(HARD_MS);
     await d.s.settle();
     expect(d.tw.updates).toHaveLength(0);
-    await d.s.callerSays("Actually, one more thing.");
+    await d.s.feed(800, { voiced: true });
     await d.s.settle();
     expect(d.tw.updates).toHaveLength(1);
     expectMessageTwiml(d.tw.updates[0]);
@@ -424,7 +476,7 @@ describe("the polite failure", () => {
     expect(c.s.ws.readyState).toBe(3);
   });
 
-  it("10c. a transfer cannot start while the polite failure's redirect is in flight", async () => {
+  it("10c. defence in depth (unreachable with today's SDK: no tool call arrives after the Live socket closed): a transfer cannot start while the polite failure's redirect is in flight", async () => {
     let release;
     const gate = new Promise((r) => (release = r));
     const slow = {
@@ -454,6 +506,114 @@ describe("the polite failure", () => {
     release();
     await c.s.settle();
     expect(slow.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(3);
+  });
+
+  /** A client whose update waits on a gate. */
+  function gatedClient() {
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const client = {
+      updates: [],
+      calls: (sid) => ({
+        update: async (p) => {
+          client.updates.push({ sid, twiml: p.twiml });
+          await gate;
+          return {};
+        },
+      }),
+    };
+    return { client, release };
+  }
+
+  it("10d. (D1) a drop starts the polite failure, then the connect catch runs: the socket stays open until the redirect has landed", async () => {
+    const { client, release } = gatedClient();
+    let rejectConnect;
+    const connectGate = new Promise((_, rej) => (rejectConnect = rej));
+    const c = await boot({ twilioClient: client, connectGate });
+    c.s.live.close({ code: 1006 });
+    await c.s.settle();
+    expect(client.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(1);
+
+    rejectConnect(new Error("handshake refused"));
+    await c.s.settle();
+    // The connect catch has run politeFailure (latched) and must be waiting.
+    expect(client.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(1);
+
+    release();
+    await c.s.settle();
+    expect(client.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(3);
+  });
+
+  it("10e. (D2) a refused handshake: onclose fires (reason live_dropped) while connect never settles: one message update, then finish", async () => {
+    // With the real SDK a refused handshake fires onclose and connect stays
+    // pending. S6: such a refusal logs as a live_dropped polite failure, not
+    // connect_failed.
+    const cap = captureEvents("live_polite_failure");
+    const tw = fakeTwilioClient();
+    const connectGate = new Promise(() => {});
+    let c;
+    try {
+      c = await boot({ twilioClient: tw, connectGate });
+      c.s.live.close({ code: 1006 });
+      await c.s.settle();
+    } finally {
+      cap.restore();
+    }
+    expect(tw.updates).toHaveLength(1);
+    expectMessageTwiml(tw.updates[0]);
+    expect(cap.lines).toHaveLength(1);
+    expect(cap.lines[0]).toMatchObject({ reason: "live_dropped" });
+    expect(c.s.ws.readyState).toBe(3);
+  });
+
+  it("10f. (D4a) the 9:30 hard end while the polite failure's redirect is in flight: no second update", async () => {
+    const { client, release } = gatedClient();
+    const c = await boot({ twilioClient: client });
+    c.s.live.close({ code: 1011 });
+    await c.s.settle();
+    expect(client.updates).toHaveLength(1);
+
+    const cap = captureEvents("live_max_duration_skipped", "live_max_duration_hard_end");
+    try {
+      c.sch.fireAt(HARD_MS);
+      await c.s.settle();
+    } finally {
+      cap.restore();
+    }
+    expect(cap.of("live_max_duration_skipped")).toHaveLength(1);
+    expect(cap.of("live_max_duration_hard_end")).toHaveLength(0);
+    expect(client.updates).toHaveLength(1);
+    release();
+    await c.s.settle();
+    expect(client.updates).toHaveLength(1);
+    expect(c.s.ws.readyState).toBe(3);
+  });
+
+  it("10g. (D6) a deferred ending that rejects still ends the call", async () => {
+    const c = await bookedCall();
+    await endCallWithAudio(c);
+    c.sch.fireAt(HARD_MS); // stored as the deferred ending (an exit is queued)
+    await c.s.settle();
+    expect(c.tw.updates).toHaveLength(0);
+
+    // Make the stored hard end reject: its first log line throws.
+    const real = process.stdout.write.bind(process.stdout);
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk, ...rest) => {
+      if (typeof chunk === "string" && chunk.includes('"event":"live_max_duration_hard_end"')) {
+        throw new Error("log sink exploded");
+      }
+      return real(chunk, ...rest);
+    });
+    try {
+      await c.s.feed(800, { voiced: true }); // the local barge cancels the exit and runs it
+      await c.s.settle();
+    } finally {
+      spy.mockRestore();
+    }
     expect(c.s.ws.readyState).toBe(3);
   });
 

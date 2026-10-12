@@ -1275,6 +1275,60 @@ const SABOTAGES = [
     replace: '    if (false /* SABOTAGE */) {\n      log.info("live_exit_refused_polite_failure"',
     red: [POLITE],
   },
+  {
+    name: "polite-failure-outbound-never-voicemail",
+    why:
+      "The polite failure's twiml choice stops falling back to the start frame's direction. An outbound start that crashes before the outbound context exists (state.outboundCall unset) would offer the person we rang a voicemail recording prompt (batch-3 S2, Task D3).",
+    file: "lib/voice/live/index.js",
+    find: "const twiml = state.outboundCall || streamIsOutbound\n",
+    replace: "const twiml = state.outboundCall /* SABOTAGE */\n",
+    red: [POLITE],
+  },
+  {
+    name: "hard-end-yields-to-polite-failure",
+    why:
+      "onHardEnd stops standing down once a polite failure has committed. The 9:30 hard end then sends a second redirect over the message TwiML that is in flight (batch-3 S2, Task D4a).",
+    file: "lib/voice/live/index.js",
+    find: '    if (politeFailureSent) {\n      log.info("live_max_duration_skipped"',
+    replace: '    if (false /* SABOTAGE */) {\n      log.info("live_max_duration_skipped"',
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-yields-to-hard-end",
+    why:
+      "politeFailure stops standing down for a hard end whose redirect is in flight. A drop at 9:30 sends a second update over the time-up line (batch-3 S2, Task D4b).",
+    file: "lib/voice/live/index.js",
+    find: '    if (hardEndUnderway) {\n      log.info("live_polite_failure_skipped"',
+    replace: '    if (false /* SABOTAGE */) {\n      log.info("live_polite_failure_skipped"',
+    red: [POLITE],
+  },
+  {
+    name: "polite-failure-awaits-inflight",
+    why:
+      "A second politeFailure caller stops waiting for the first redirect. The connect catch finishes the call, closing the socket, while the message TwiML is still in flight; Twilio runs past <Connect> and ends the call before the message lands (batch-3 S2, Task D1).",
+    file: "lib/voice/live/index.js",
+    find: "    if (politeFailureRun) await politeFailureRun;\n",
+    replace: "    /* SABOTAGE */\n",
+    red: [POLITE],
+  },
+  {
+    name: "deferred-end-always-finishes",
+    why:
+      "A deferred ending that rejects is only logged. The caller talks the hang-up off, the stored ending throws, and the call is left open with no ending armed (batch-3 S2, Task D6).",
+    file: "lib/voice/live/index.js",
+    find: '        finish("deferred_end_failed");\n',
+    replace: "        /* SABOTAGE */\n",
+    red: [POLITE],
+  },
+  {
+    name: "tool-latch-reset-at-flush",
+    why:
+      "The new-caller-turn flush stops clearing the tool-call latch. A tool turn that never got turnComplete defers the next real pause, so the wrap-up note waits for a pause that is not coming (batch-3 S2, Task D8).",
+    file: "lib/voice/live/index.js",
+    find: "      toolCallSinceTurnEnd = false;\n      // LVX70: an episode the strategy never opened",
+    replace: "      /* SABOTAGE */\n      // LVX70: an episode the strategy never opened",
+    red: [CLOCK],
+  },
 ];
 
 const only = process.argv.includes("--only")

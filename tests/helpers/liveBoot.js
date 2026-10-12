@@ -83,13 +83,16 @@ export function fakeLive({ connectGate, connectError } = {}) {
     sent,
     connect: vi.fn(async ({ callbacks }) => {
       // Final fix wave I1: a test can hold the vendor connect open (cold connect).
+      // Captured at CALL time, before the gate: with the real SDK a refused
+      // handshake fires onclose while connect never settles, so a test must be
+      // able to close the vendor socket while connectGate still holds connect.
+      onmessage = callbacks.onmessage;
+      onclose = callbacks.onclose;
       if (connectGate === "reject" || connectError) {
         // The "AI won't start" case.
         throw connectError ?? new Error("connect refused");
       }
       if (connectGate) await connectGate;
-      onmessage = callbacks.onmessage;
-      onclose = callbacks.onclose;
       return { session, languagePinned: true, surface: "aistudio", model: "m" };
     }),
     push: (msg) => onmessage?.(msg),

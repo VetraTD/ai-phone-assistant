@@ -177,10 +177,12 @@ describe("createCallClock", () => {
   it("stop() twice is fine, and a start() after stop() arms nothing", () => {
     const { sch, clock } = build();
     clock.start();
+    const armedByFirstStart = sch.timers.length;
+    expect(armedByFirstStart).toBe(3);
     clock.stop();
     clock.stop();
     clock.start();
-    expect(sch.timers).toHaveLength(3);
+    expect(sch.timers).toHaveLength(armedByFirstStart);
   });
 
   it("stop() before start() is harmless", () => {
@@ -291,6 +293,10 @@ describe("Live harness seams (batch-3 S2)", () => {
       accountSid: "AC123",
     });
     expect(booted.live.connect).toHaveBeenCalled();
+    // The injected setTimer is the one the call clock really used: it received
+    // the three clock timers (the twilioClient/accountSid halves are proven by
+    // the wiring tests below, which fail if either is not passed through).
+    expect(sch.timers.map((t) => t.ms)).toEqual([510_000, 540_000, 570_000]);
   });
 });
 
@@ -612,7 +618,7 @@ describe("the call clock inside a Live session", () => {
     expect(c.s.ws.readyState).toBe(3);
   });
 
-  it("12. (S1/I3) an end_call the ask-gate refused AFTER the goodbye was delivered still ends the call", async () => {
+  it("12. (S1/I3) an end_call the ask-gate refused AFTER the goodbye was delivered: the call still ends (through the goodbye's own exit; 12b holds the hard-end half)", async () => {
     const c = await bookedCall();
     const { s, sch, tw, timeNotes } = c;
     await s.assistantTurn("You're all set for Friday at three thirty.");
@@ -684,6 +690,24 @@ describe("the call clock inside a Live session", () => {
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
     s.live.push({ serverContent: { interrupted: true } });
     await s.settle();
+    await fire(s, sch, T.WRAP);
+    const cap = captureEvents("live_time_note_deferred");
+    try {
+      await s.assistantTurn("That day is fully open.");
+    } finally {
+      cap.restore();
+    }
+    expect(cap.lines).toHaveLength(0);
+    expect(timeNotes(WRAP_UP_NOTE)).toHaveLength(1);
+  });
+
+  it("I1d. a tool turn that never gets turnComplete, then a new caller turn opens (the flush site): the next real pause is not deferred", async () => {
+    const { s, sch, timeNotes } = await bootClock();
+    await s.assistantSays("Our office opens at nine tomorrow");
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    // No turnComplete, no interrupted: only the caller's own voice opens the next turn.
+    await s.feed(400, { voiced: true });
+    await s.feed(1200);
     await fire(s, sch, T.WRAP);
     const cap = captureEvents("live_time_note_deferred");
     try {
