@@ -1278,6 +1278,9 @@ open Minors, commit sha).
 > - 5-line report.
 >
 > Plan estimate 3–4 h (the full sabotage run dominates) + ~0.5 h for Task 5.0. S1 1.7 h, S2 4.1 h, S3 ≈2.2 h, S4 ≈3.2 h.
+>
+> Reiterate the plan and ask any questions before starting. Test extensively so everything comes out right and
+> nothing breaks. Use every cost-, time- and usage-saving measure you can, without compromising quality.
 
 ### S6
 > Execute session S6 (deploy + live calls) of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` at
