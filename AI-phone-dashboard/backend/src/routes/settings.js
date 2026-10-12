@@ -11,7 +11,11 @@ const { authSensitiveLimiter } = require("../middleware/rateLimiters");
 // dialCost.mjs is ESM (a byte-identical copy of the root repo's lib/dialCost.js);
 // this package is CommonJS, so it is loaded once with a cached dynamic import.
 let dialCostPromise;
-const loadDialCost = () => (dialCostPromise ??= import("../dialCost.mjs"));
+const loadDialCost = () =>
+  (dialCostPromise ??= import("../dialCost.mjs").catch((e) => {
+    dialCostPromise = undefined; // a failed load must not be cached forever
+    throw e;
+  }));
 
 // Get a business by id (must match authenticated user's business)
 // /api/businesses/:id

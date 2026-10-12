@@ -1537,6 +1537,10 @@ if (from && !SABOTAGES.some((s) => s.name === from)) {
   console.error(`--from ${from}: no row by that name.`);
   process.exit(1);
 }
+if (only && !SABOTAGES.some((s) => s.name === only)) {
+  console.error(`--only ${only}: no row by that name.`);
+  process.exit(1);
+}
 let reached = !from;
 
 // ---------------------------------------------------------------------------

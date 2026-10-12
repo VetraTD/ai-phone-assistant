@@ -395,6 +395,7 @@ describe("sms price check — sms_destination_refused", () => {
     const { sendCallerSms, releaseHeldCallerSms, _clearHeldCallerSms } = await loadNotifications();
     _clearHeldCallerSms();
     expect(await sendCallerSms(ENABLED_CONFIG, NEVER, "appointment_confirmation", KIND_VARS)).toBe(false);
+    expect(mockLatestSmsConsent).not.toHaveBeenCalled(); // refused BEFORE the consent lookup
     expect(await releaseHeldCallerSms(BUSINESS_ID, NEVER)).toBe(0);
     expect(mockMessagesCreate).not.toHaveBeenCalled();
     // Control: an allowed number IS held in the same situation and released.

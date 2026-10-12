@@ -600,7 +600,7 @@ function doorFakeDb(over = {}) {
   };
 }
 
-function doorApp(db, envOverride = {}) {
+function doorApp(db, envOverride = {}, log = { info: vi.fn(), error: vi.fn() }) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   registerOutboundDoorRoutes(app, {
@@ -609,7 +609,7 @@ function doorApp(db, envOverride = {}) {
     mintToken: () => "tok",
     postCall: { tryClaim: async () => false },
     twilioClientFor: () => ({}),
-    log: { info: vi.fn(), error: vi.fn() },
+    log,
     now: () => 1_700_000_000_000,
     env: { BASE_URL: "https://voice.example.com", ...envOverride },
   });
@@ -724,6 +724,25 @@ describe("POST /twilio/outbound-transfer-result", () => {
     expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
     // I7: no longer needs the business's name at all.
     expect(db.fetchBusinessById).not.toHaveBeenCalled();
+  });
+
+  // Batch 3 S3 (A-M3): the Live outbound price-check refusal ends the call with a
+  // <Redirect> to this URL, and a Redirect carries NO DialCallStatus. The handler
+  // must treat the missing status as unanswered (callback line, not the empty
+  // "completed" TwiML).
+  it("no DialCallStatus at all (the refused-transfer Redirect): callback line, callback_requested, unanswered logged", async () => {
+    const db = doorFakeDb();
+    const log = { info: vi.fn(), error: vi.fn() };
+    const res = await request(doorApp(db, {}, log))
+      .post("/twilio/outbound-transfer-result")
+      .query({ attempt: DOOR_ATTEMPT })
+      .type("form")
+      .send({ CallSid: PARENT_SID });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("<Response><Say voice=\"Polly.Joanna\">We&apos;ll call you back shortly.</Say><Hangup/></Response>");
+    expect(db.setCallOutcomeCode).toHaveBeenCalledWith(PARENT_SID, "callback_requested");
+    expect(log.info).toHaveBeenCalledWith("outbound_transfer_unanswered", expect.objectContaining({ callSid: PARENT_SID, attemptId: DOOR_ATTEMPT }));
   });
 
   it("busy and failed take the same unanswered path as no-answer", async () => {

@@ -161,7 +161,7 @@ describe("POST /v1/triggers/:triggerToken -- fake db, business logic", () => {
     const db = fakeDb({ campaignRow: baseCampaignRow({ allowPricierNumbers: true }) });
     const res = await request(buildApp(db)).post(`/v1/triggers/${RAW_TOKEN}`).send({ phone: "+449090123456", consent: validConsent() });
     expect(res.status).toBe(422);
-    expect(res.body).toEqual({ error: "We can't call this number for you — please ring this lead yourself.", field: "phone" });
+    expect(res.body).toEqual({ error: "We can't call this number for you â€” please ring this lead yourself.", field: "phone" });
     expect(db.upsertContactForTrigger).not.toHaveBeenCalled();
     expect(db.recordTriggerConsent).not.toHaveBeenCalled();
     expect(db.createOutreachFromTrigger).not.toHaveBeenCalled();

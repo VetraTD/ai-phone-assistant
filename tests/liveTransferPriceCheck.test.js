@@ -48,10 +48,9 @@ function fakeLive() {
 }
 
 // ONE config for every test, inbound and outbound alike -- the same tenant,
-// the same business. transferPhoneNumber/transferPolicy are read only on the
-// INBOUND branch (state.outboundCall absent); the outbound branch bypasses
-// them entirely (this task's whole point), so their presence here is inert
-// for every outbound test and load-bearing for the inbound ones.
+// the same business. transferPhoneNumber/transferPolicy feed only the INBOUND
+// transfer; an outbound call transfers to the campaign's own transfer.to
+// (fakeDb below), so they are inert for the outbound tests.
 const CONFIG = {
   businessName: "Digile Media",
   timezone: "Europe/London",
@@ -68,15 +67,6 @@ const TRANSFER_TO = "+15550001111";
 const ATTEMPT_ID = "att-transfer-1";
 const BIZ = "biz-transfer";
 const OUT_SID = "CAoutTransfer0001";
-
-/**
- * A Saturday, outside "Mon-Fri 09:00-18:00" in any timezone this file uses --
- * for the one test that needs the window CLOSED. Every other test uses the
- * always-open default below, deliberately, so it needs no clock control at
- * all (real time, whenever the suite happens to run).
- */
-const OUTSIDE_WINDOW = new Date("2026-09-26T17:00:00Z");
-const OUTSIDE_WINDOW_WHEN = "Mon-Fri 09:00-18:00";
 
 /**
  * b22 (fix wave, checkpoint 2b): every test below that relies on the
@@ -165,12 +155,7 @@ async function boot({
   db,
   twilioClient,
   twilioClientFor,
-  twilioClientForAccountSid,
-  accountSid,
-  exitFallbackMs,
-  callSid = OUT_SID,
   customParameters,
-  env = {},
 } = {}) {
   const ws = new FakeSocket();
   let clock = 0;
@@ -178,21 +163,18 @@ async function boot({
     now: () => clock,
     connect: live.connect,
     database: db,
-    env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com", ...env },
+    env: { TWILIO_VALIDATE_SIGNATURE: "false", BASE_URL: "https://voice.example.com", },
     // Task 20: never the REAL, wired-up singleton (it would try services/
     // db.js's real pool -- unconfigured in every test here).
     postCall: { tryClaim: async () => false, tryClaimByAttempt: async () => false },
     ...(twilioClient ? { twilioClient } : {}),
     ...(twilioClientFor ? { twilioClientFor } : {}),
-    ...(twilioClientForAccountSid ? { twilioClientForAccountSid } : {}),
-    ...(exitFallbackMs !== undefined ? { exitFallbackMs } : {}),
   });
   ws.deliver({
     event: "start",
     start: {
-      callSid,
+      callSid: OUT_SID,
       streamSid: "MZ1",
-      ...(accountSid ? { accountSid } : {}),
       customParameters: customParameters ?? { direction: "outbound" },
     },
   });
@@ -215,12 +197,6 @@ async function boot({
   }
   return { ws, live };
 }
-
-/** A tool that reports success and asks for whatever effect the test wants (identical to liveHangup.test.js's own). */
-const toolReturning = (stateEffects) => async (fc) => ({
-  functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
-  stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" }, ...stateEffects },
-});
 
 async function callTool(live, name, args = {}) {
   live.push({ toolCall: { functionCalls: [{ id: "t1", name, args }] } });
@@ -278,9 +254,10 @@ async function inboundTransfer(number, extra = {}) {
 describe("Live inbound transfer — price check", () => {
   it("a never number: ONE message update (Record + cantTransfer line), no <Dial>, not marked transferred, logged", async () => {
     const cap = captureEvents("dial_destination_refused");
-    const { updates, db } = await inboundTransfer(NEVER);
+    const { updates, db, ws } = await inboundTransfer(NEVER);
     cap.restore();
     expect(updates).toHaveLength(1);
+    expect(ws.readyState).toBe(3); // the call finishes, not left open
     expect(updates[0].twiml).toContain("<Record");
     expect(updates[0].twiml).toContain("can&apos;t put you through");
     expect(updates[0].twiml).not.toContain("<Dial");
@@ -346,15 +323,17 @@ describe("Live outbound transfer — price check", () => {
       await driveTransfer(ws, live, updates);
       await new Promise((r) => setImmediate(r));
       out.db = db;
+      out.ws = ws;
     });
     return { updates, ...out };
   }
 
   it("a never number: ONE update, a POST Redirect to the transfer-result handler, no <Dial>", async () => {
     const cap = captureEvents("dial_destination_refused");
-    const { updates, db } = await outboundTransfer(NEVER);
+    const { updates, db, ws } = await outboundTransfer(NEVER);
     cap.restore();
     expect(updates).toHaveLength(1);
+    expect(ws.readyState).toBe(3); // the call finishes, not left open
     expect(updates[0].twiml).toBe(
       '<Response><Redirect method="POST">https://voice.example.com/twilio/outbound-transfer-result?attempt=att-transfer-1</Redirect></Response>'
     );

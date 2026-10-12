@@ -141,8 +141,22 @@ export function assertBootable(text) {
   return assertCompleteTable(parseTable(text));
 }
 
+export const tmpPathFor = (target) => `${target}.tmp-${process.pid}`;
+
+// Remove any .tmp-* file this run may have left beside the targets. No rollback
+// of already-renamed tables: the parity test catches a mismatched pair.
+export function cleanupTmp(targets) {
+  for (const t of targets) {
+    try {
+      fs.rmSync(tmpPathFor(t), { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 function writeAtomic(target, text) {
-  const tmp = `${target}.tmp-${process.pid}`;
+  const tmp = tmpPathFor(target);
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, target);
 }
@@ -217,10 +231,15 @@ async function main() {
   const table = transform(raw);
   const text = serialize(table);
   assertBootable(text); // nothing is written unless the result would boot
-  for (const p of TABLE_PATHS) writeAtomic(p, text);
-  const [a, b] = TABLE_PATHS.map((p) => fs.readFileSync(p));
-  if (Buffer.compare(a, b) !== 0 || Buffer.compare(a, Buffer.from(text)) !== 0) {
-    throw new Error("the two table copies are not byte-identical after writing");
+  try {
+    for (const p of TABLE_PATHS) writeAtomic(p, text);
+    const [a, b] = TABLE_PATHS.map((p) => fs.readFileSync(p));
+    if (Buffer.compare(a, b) !== 0 || Buffer.compare(a, Buffer.from(text)) !== 0) {
+      throw new Error("the two table copies are not byte-identical after writing");
+    }
+  } catch (e) {
+    cleanupTmp(TABLE_PATHS);
+    throw e;
   }
   const perCat = {};
   for (const v of Object.values(table.voice)) perCat[v[2]] = (perCat[v[2]] || 0) + 1;

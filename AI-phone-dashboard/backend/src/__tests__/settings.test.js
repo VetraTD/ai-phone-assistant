@@ -456,6 +456,19 @@ describe("PUT /api/business/:id/settings", () => {
       expect(updateCall()).toBeUndefined();
     });
 
+    it("both numbers in one body: an allowed transfer number does not excuse a refused notification_phone", async () => {
+      mockWithFlag(false);
+      const res = await put({ transfer_phone_number: "+442079460958", notification_phone: "+923001234567" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/^notification_phone: /);
+      expect(updateCall()).toBeUndefined();
+    });
+
+    // B-M4(b), not added: dialCost.mjs is loaded by a NATIVE dynamic import() from
+    // a CommonJS module. vi.mock and require.cache cannot intercept that, so this
+    // harness cannot fake a failing import without a test-only export or racing
+    // other files on the real dialCost.mjs.
+
     it("a UK landline transfer number is saved", async () => {
       mockWithFlag(false);
       const res = await put({ transfer_phone_number: "+442079460958" });

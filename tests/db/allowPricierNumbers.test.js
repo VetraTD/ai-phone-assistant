@@ -56,5 +56,8 @@ describeDb("businesses.allow_pricier_numbers", () => {
     const row = await businessRow();
     expect(row.allow_pricier_numbers).toBe(true);
     expect(db.loadConfig(row, []).allowPricierNumbers).toBe(true);
+    // And the app's own read path (what a live call uses), not only the raw row.
+    const viaApp = await db.withTenant(TENANT, () => db.fetchBusinessById(TENANT));
+    expect(viaApp.allow_pricier_numbers).toBe(true);
   });
 });

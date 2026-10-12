@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { categoryOf, transform, assertCompletePull, serialize, assertBootable } from "../scripts/refresh-dial-costs.mjs";
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { categoryOf, transform, assertCompletePull, serialize, assertBootable, cleanupTmp, tmpPathFor } from "../scripts/refresh-dial-costs.mjs";
 
 const P = "Programmable Outbound Minute - ";
 const pp = (name, price, prefixes) => ({ base_price: String(price), current_price: String(price), friendly_name: P + name, prefixes });
@@ -151,5 +153,21 @@ describe("assertBootable (the pre-write check)", () => {
     expect(() => assertBootable(serialize(nan))).toThrow();
     const noSms = { ...t, sms: {} };
     expect(() => assertBootable(serialize(noSms))).toThrow();
+  });
+});
+
+describe("cleanupTmp (failed write leaves no .tmp-* behind)", () => {
+  it("removes leftover temp files and tolerates missing ones", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dialcost-"));
+    try {
+      const a = join(dir, "a.json");
+      const b = join(dir, "b.json");
+      writeFileSync(tmpPathFor(a), "x");
+      expect(existsSync(tmpPathFor(a))).toBe(true);
+      cleanupTmp([a, b]); // b has no temp file
+      expect(existsSync(tmpPathFor(a))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
