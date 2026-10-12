@@ -34,6 +34,12 @@ function normaliseVoice(raw) {
   return typeof raw === "string" && /^Polly\.[A-Za-z]+(-Neural)?$/.test(raw) ? raw : null;
 }
 
+// Our own number as Twilio sends it in To. Anything else (missing, empty, an
+// array) means we cannot show our number as caller ID, so we never Dial.
+function normaliseTo(raw) {
+  return typeof raw === "string" && /^\+[1-9]\d{6,14}$/.test(raw) ? raw : null;
+}
+
 function str(v) {
   return typeof v === "string" ? v : "";
 }
@@ -47,7 +53,13 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
   const voice = normaliseVoice(event.v);
   const step = str(event.step);
   const domain = str(context.DOMAIN_NAME);
-  const base = domain ? "https://" + domain + "/fallback" : "fallback";
+  const to = normaliseTo(event.To);
+  // The runtime's own path, so the Function works wherever the owner created it.
+  let path = str(context.PATH) || "/fallback";
+  if (path[0] !== "/") path = "/" + path;
+  // Without DOMAIN_NAME (local use only) the URL is relative to the current one,
+  // so the last path segment is what resolves correctly.
+  const base = domain ? "https://" + domain + path : path.split("/").pop() || "fallback";
   const voicemailUrl = str(context.VOICEMAIL_URL);
 
   const message = (line) => {
@@ -60,7 +72,10 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
       method: "POST",
     };
     if (voicemailUrl) {
-      attrs.recordingStatusCallback = voicemailUrl + "?to=" + encodeURIComponent(str(event.To));
+      // With no valid To the callback is kept without ?to=: /twilio/voicemail
+      // falls back to the To in the callback body, and if no business is found
+      // it still logs the recording URL so the message can be recovered.
+      attrs.recordingStatusCallback = voicemailUrl + (to ? "?to=" + encodeURIComponent(to) : "");
     }
     response.record(attrs);
     response.hangup();
@@ -80,8 +95,12 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
     return message(LINES.noAnswer);
   }
 
-  // First request. A call from a number to itself, or from the number we were
-  // about to ring, is a loop.
+  // First request. Without a valid To we cannot set our number as caller ID, and
+  // Twilio would show the caller's: take a message instead of dialling.
+  if (!to) return message(LINES.technical);
+
+  // A call from a number to itself, or from the number we were about to ring, is
+  // a loop.
   if (event.From === event.To || (n && event.From === n)) {
     response.reject({ reason: "busy" });
     return response;
@@ -93,7 +112,7 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
   const dial = response.dial({
     timeout: ringSec,
     timeLimit: 3600,
-    callerId: event.To,
+    callerId: to,
     action: base + "?" + after.toString(),
     method: "POST",
   });
@@ -106,7 +125,16 @@ function handler(context, event, callback) {
   try {
     twiml = buildFallbackTwiml(event, context, Twilio.twiml.VoiceResponse);
   } catch (err) {
-    twiml = LAST_RESORT_TWIML;
+    // Send the last resort as text/xml when the runtime lets us; a bare string's
+    // Content-Type is up to the runtime.
+    try {
+      const r = new Twilio.Response();
+      r.appendHeader("Content-Type", "text/xml");
+      r.setBody(LAST_RESORT_TWIML);
+      twiml = r;
+    } catch (err2) {
+      twiml = LAST_RESORT_TWIML;
+    }
   }
   callback(null, twiml);
 }

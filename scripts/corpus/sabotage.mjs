@@ -1647,8 +1647,16 @@ const SABOTAGES = [
     name: "fallback-callerid-ours",
     why: "the Dial shows the caller's number instead of ours, so the business's phone forwards the call straight back to us as a new call from a stranger and the loop guard cannot recognise it (batch-3 S5 Task 5.1).",
     file: "twilio/fallback/fallback.js",
-    find: "    callerId: event.To,",
+    find: "    callerId: to,",
     replace: "    callerId: event.From, /* SABOTAGE */",
+    red: [FALLBACK],
+  },
+  {
+    name: "fallback-requires-to",
+    why: "the Function dials without a valid To, so the Dial has no callerId and Twilio shows the CALLER's number as the caller ID, which defeats the loop guard; a missing From and To also compare equal (batch-3 S5 W2, F8).",
+    file: "twilio/fallback/fallback.js",
+    find: "  if (!to) return message(LINES.technical);",
+    replace: "  if (false /* SABOTAGE */) return message(LINES.technical);",
     red: [FALLBACK],
   },
   {

@@ -74,6 +74,25 @@ describe("branches", () => {
     },
   );
 
+  it.each([["missing", undefined], ["empty", ""], ["an array", [OURS]], ["not E.164", "442071234567"]])(
+    "takes a message with the technical line, no Dial, when To is %s",
+    (_label, bad) => {
+      const xml = build({ To: bad });
+      expect(xml).toContain(CALL_LINES.technical);
+      expect(xml).not.toContain("<Dial");
+      expect(xml).not.toContain("<Reject");
+      expect(tags(xml, "Record")).toHaveLength(1);
+      expect(attr(tags(xml, "Record")[0], "recordingStatusCallback")).toBe("https://prod.example.com/twilio/voicemail");
+    },
+  );
+
+  it("From and To both missing is a message, not a Reject", () => {
+    const xml = build({ From: undefined, To: undefined });
+    expect(xml).toContain(CALL_LINES.technical);
+    expect(xml).not.toContain("<Dial");
+    expect(xml).not.toContain("<Reject");
+  });
+
   it("dials the transfer number with no Say before it", () => {
     const xml = build({});
     expect(xml).toMatch(/^<\?xml[^>]*\?><Response><Dial /);
@@ -118,6 +137,22 @@ describe("the Dial", () => {
     expect(url.searchParams.get("n")).toBe(BIZ);
     expect(url.searchParams.get("t")).toBe("45");
     expect(url.searchParams.get("v")).toBe("Polly.Amy");
+  });
+
+  it("action uses context.PATH when set, and /fallback when absent", () => {
+    const other = unesc(attr(tags(build({}, { ...CTX, PATH: "/other" }), "Dial")[0], "action"));
+    expect(other.startsWith("https://vetra-fallback-1234.twil.io/other?step=after")).toBe(true);
+    const noSlash = unesc(attr(tags(build({}, { ...CTX, PATH: "other" }), "Dial")[0], "action"));
+    expect(noSlash.startsWith("https://vetra-fallback-1234.twil.io/other?step=after")).toBe(true);
+    const rec = attr(tags(build({ n: undefined }, { ...CTX, PATH: "/other" }), "Record")[0], "action");
+    expect(rec).toBe("https://vetra-fallback-1234.twil.io/other?step=done");
+    const none = unesc(attr(tags(build({}), "Dial")[0], "action"));
+    expect(none.startsWith("https://vetra-fallback-1234.twil.io/fallback?step=after")).toBe(true);
+  });
+
+  it("relative action uses the last path segment of PATH", () => {
+    const raw = attr(tags(build({}, { PATH: "/other" }), "Dial")[0], "action");
+    expect(raw.startsWith("other?step=after")).toBe(true);
   });
 
   it("action is relative without DOMAIN_NAME", () => {
@@ -246,6 +281,34 @@ describe("handler", () => {
     expect(xml).toContain("<Response>");
     expect(xml).toContain("<Say");
     expect(xml).toContain("<Hangup/>");
+  });
+
+  it("sends the last resort as a text/xml Twilio.Response when the global has one", () => {
+    const rec = { headers: [], body: null };
+    class FakeResponse {
+      appendHeader(k, v) {
+        rec.headers.push([k, v]);
+      }
+      setBody(b) {
+        rec.body = b;
+      }
+    }
+    globalThis.Twilio = {
+      Response: FakeResponse,
+      twiml: {
+        VoiceResponse: function Boom() {
+          throw new Error("boom");
+        },
+      },
+    };
+    const calls = [];
+    handler(CTX, { From: CALLER, To: OURS }, (...a) => calls.push(a));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBeNull();
+    expect(calls[0][1]).toBeInstanceOf(FakeResponse);
+    expect(rec.headers).toEqual([["Content-Type", "text/xml"]]);
+    expect(rec.body).toContain("<Say>");
+    expect(rec.body).toContain("<Hangup/>");
   });
 
   it("still answers when the Twilio global is missing", () => {

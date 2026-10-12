@@ -9,7 +9,9 @@ slash), e.g. the `voice-uk-prod-…run.app` address. Every `gcloud` line needs
 When our server cannot answer a call, Twilio runs a small program of ours (the
 Function in `twilio/fallback/fallback.js`). It rings the business's transfer
 number, showing OUR number as the caller. If nobody answers, the caller leaves a
-message, and our server files it automatically once it is reachable again.
+message. Our server files that message only if it can be reached when the
+recording ends; it is not re-sent later, so after any outage check Twilio's
+Recordings by hand (section 7).
 
 A call that comes back from our own number, or from the transfer number, is
 refused (loop protection). So **always test from a phone that is NOT the transfer
@@ -20,16 +22,22 @@ number.**
 Numbers are bought in the Twilio console, not by our code.
 
 1. Use **account A** for UK numbers (it holds the approved UK regulatory bundle).
-   Account B is the US account.
+   Account B is the US account. Confirm in the console which account really holds
+   the UK bundle before you buy; the repo cannot check this.
 2. Phone Numbers → Buy a number → Voice → buy it.
 3. Open the number → Voice Configuration:
    - **A call comes in**: Webhook, `https://<prod base>/twilio/live-voice`, HTTP POST.
    - **Call status changes** (StatusCallback): `https://<prod base>/twilio/status`,
      HTTP POST. **Set this on EVERY hand-configured number on BOTH accounts.**
      Pending dials end there and the call-completion write depends on it.
-4. Save. Then set `businesses.phone_number` to that exact E.164 string
-   (`+441372…`, no spaces, no leading newline) with `scripts/set-business-config.js`
-   through the migrate job.
+4. Save. A NEW tenant's number goes in with `scripts/import-tenant.js` through the
+   migrate job, as the exact E.164 string (`+441372…`, no spaces, no leading
+   newline). `set-business-config.js` cannot set it (the number is only its
+   lookup key), and there is no supported way to re-point an existing tenant's
+   number to a different one.
+5. After importing a tenant, run section 4 (`fallback-urls.js`) and read any
+   "no transfer number in this URL" notes: the importer does not price-check the
+   transfer or notification numbers.
 
 ## 3. Create the Function — once per Twilio account (A and B)
 
@@ -77,7 +85,12 @@ line:
 - premium-rate, over our ceiling, or no price known: pick a different transfer
   number.
 
-The script prints every number we have; ignore the ones on the other account.
+The script prints every number we have on BOTH accounts; ignore the ones on the
+other account. A URL pasted into a number on the wrong account fails Twilio's
+Protected check, which shows up as an application error, and only during an
+outage when nobody is watching. So: the Function URL's domain must be the one on
+THIS account's Functions page, and paste only into numbers you can see in THIS
+account's console.
 
 ## 5. Paste the URL into each number
 
@@ -90,7 +103,11 @@ Save. Re-open the number and check the URL saved whole, including `%2B`.
 - a business's transfer number changes,
 - a business changes its "if nobody picks up" choice,
 - a new number is added,
-- a number moves between accounts.
+- a number moves between accounts,
+- `allow_pricier_numbers` is switched OFF (the pasted URL keeps dialling the
+  pricier number during an outage until you re-print it),
+- the price table is refreshed (`scripts/refresh-dial-costs.mjs`),
+- the business's locale or voice changes (the `v` part of the URL).
 
 ## 7. After an outage
 
@@ -116,10 +133,15 @@ every business; no `--days` lasts until removed). Output shows the last 4 digits
 ## 9. Quick test
 
 1. Point a spare number's "Primary handler fails" at the real URL, and its "A
-   call comes in" at a dead URL (so our server looks down).
+   call comes in" at a dead URL (so our server looks down). The spare only gets
+   a printed URL if it is a tenant in `business_directory`, so set it up as a
+   test tenant first (section 2).
 2. Call it from a phone that is NOT the transfer number.
-3. Answer on the transfer phone: you talk to the caller, and the transfer phone
-   shows OUR number. Hang up.
+3. The caller should hear ringing while the transfer phone rings. Answer on the
+   transfer phone: you talk to the caller, and the transfer phone shows OUR
+   number. Hang up.
 4. Call again and do not answer: leave a message. It appears in the dashboard
-   once the server is reachable.
+   only if `/twilio/voicemail?to=<spare>` finds a business for the spare. If the
+   spare is not a test tenant, expect `degraded_voicemail_no_business` in the
+   logs and find the message in Twilio's Recordings.
 5. Put the spare number's "A call comes in" back.
