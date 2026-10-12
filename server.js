@@ -16,8 +16,8 @@ import * as twilioRecordings from "./services/twilioRecordings.js";
 import { WebSocketServer } from "ws";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
-import { normalizePhoneNumber } from "./lib/phone.js";
-import { inboundGuardTwiml } from "./lib/inboundGuards.js";
+import { normalizePhoneNumber, last4 } from "./lib/phone.js";
+import { inboundGuardTwiml, isRealCallerNumber, isOwnNumber, AI_MINUTES_ALERT_SEC } from "./lib/inboundGuards.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
@@ -1083,6 +1083,38 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
       operation: "completeCall",
       callSid,
     });
+
+    // Repeat-caller AI-minutes alert (batch-3 S4). AWAITED before the response,
+    // for the cpu_idle reason above. It runs after completeCall so this call's
+    // own ended_at is on the row; `before` excludes this call's SID, so only
+    // the call that crosses the line sees before < limit <= after, and the
+    // alert fires once per caller per business per day. An alert, never a
+    // refusal, and never a 500: this handler returning an error earns a retry.
+    if (status === "completed" && businessId && isRealCallerNumber(req.body.From)) {
+      let ai = null;
+      try {
+        ai = await db.aiSecondsToday({ businessId, callerNumber: req.body.From, callSid });
+      } catch (err) {
+        log.error("repeat_caller_minutes_check_failed", { callSid, businessId, message: err?.message });
+      }
+      if (ai && ai.before < AI_MINUTES_ALERT_SEC && ai.after >= AI_MINUTES_ALERT_SEC) {
+        let business = null;
+        try {
+          business = await db.lookupBusinessByPhone(req.body.To);
+        } catch {
+          // A failed lookup still alerts; the own-number check just cannot run.
+        }
+        if (!isOwnNumber(business, req.body.From)) {
+          log.error("repeat_caller_minutes", {
+            callSid,
+            businessId,
+            callerLast4: last4(req.body.From),
+            aiMinutes: Math.round(ai.after / 60),
+            severity: "warn",
+          });
+        }
+      }
+    }
 
     if (businessId && ["failed", "busy", "no-answer"].includes(status)) {
       notifications.notifyCallMissed({ businessId, call: callContext, status }).catch(() => {});

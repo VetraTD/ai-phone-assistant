@@ -159,6 +159,8 @@ const PENDINGLIVE = "tests/livePendingDial.test.js";
 const GUARDS = "tests/inboundGuards.test.js";
 const GUARDROUTES = "tests/inboundGuardRoutes.test.js";
 const GUARDROUTESCASCADE = "tests/inboundGuardRoutesCascade.test.js";
+// Batch-3 S4 Task 4.3: the repeat-caller AI-minutes alert.
+const STATUS = "tests/twilioStatus.test.js";
 
 const SABOTAGES = [
   {
@@ -1605,6 +1607,14 @@ const SABOTAGES = [
     find: "    return null;\n  }\n  if (!facts) return null;",
     replace: "    throw err; /* SABOTAGE */\n  }\n  if (!facts) return null;",
     red: [GUARDS, GUARDROUTES, GUARDROUTESCASCADE],
+  },
+  {
+    name: "repeat-minutes-crossing",
+    why: "the crossing test never fires, so a caller who burns half an hour of AI time in a day is never flagged (batch-3 S4). The alert must fire exactly on the call that takes the day past the line.",
+    file: "server.js",
+    find: "      if (ai && ai.before < AI_MINUTES_ALERT_SEC && ai.after >= AI_MINUTES_ALERT_SEC) {",
+    replace: "      if (false /* SABOTAGE */) {",
+    red: [STATUS],
   },
 ];
 

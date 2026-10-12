@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import request from "supertest";
 import * as callState from "../lib/callState.js";
+import { log } from "../lib/logger.js";
 
 // Twilio signature validation is orthogonal to what this file tests — see
 // tests/degradedMode.test.js for the same pattern/rationale.
@@ -13,6 +14,7 @@ const mockUpdateCallSummary = vi.fn(async () => {});
 const mockUpdateCallLatency = vi.fn(async () => {});
 const mockIsEnabled = vi.fn(() => true);
 const mockEndPendingDial = vi.fn(async () => 1);
+const mockAiSecondsToday = vi.fn(async () => ({ before: 0, after: 0 }));
 // null is a FAILED read and [] a genuinely empty one; the judge wire has to treat
 // them differently, so the fake keeps them apart the way services/db.js does.
 const mockListAppointmentsByCallId = vi.fn(async () => []);
@@ -32,6 +34,7 @@ vi.mock("../services/db.js", () => ({
   },
   completeCall: (...args) => mockCompleteCall(...args),
   endPendingDial: (...args) => mockEndPendingDial(...args),
+  aiSecondsToday: (...args) => mockAiSecondsToday(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   fetchCallTranscript: (...args) => mockFetchCallTranscript(...args),
   updateCallSummary: (...args) => mockUpdateCallSummary(...args),
@@ -128,6 +131,104 @@ describe("POST /twilio/status", () => {
       const res = await request(app).post("/twilio/status").type("form").send({ CallSid: "CA_pd_3", CallStatus: "completed" });
       expect(res.status).toBe(200);
       expect(mockCompleteCall).toHaveBeenCalled();
+    });
+  });
+
+  describe("repeat-caller AI-minutes alert", () => {
+    const CALLER = "+15559998888";
+    const post = (over = {}) =>
+      request(app)
+        .post("/twilio/status")
+        .type("form")
+        .send({ CallSid: "CA_rm_1", CallStatus: "completed", To: "+15550001111", From: CALLER, ...over });
+    let errSpy;
+    const alerts = (event) => errSpy.mock.calls.filter((c) => c[0] === event);
+    const seed = (sid = "CA_rm_1") => callState.writeShared(sid, { businessId: "biz-rm" });
+
+    beforeEach(() => {
+      errSpy = vi.spyOn(log, "error").mockImplementation(() => {});
+      mockAiSecondsToday.mockResolvedValue({ before: 0, after: 0 });
+      mockLookupBusinessByPhone.mockResolvedValue(null);
+    });
+    afterEach(() => errSpy.mockRestore());
+
+    it("alerts once, with minutes and last four digits, on the call that crosses 30 minutes", async () => {
+      seed();
+      mockAiSecondsToday.mockResolvedValue({ before: 1700, after: 1900 });
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(alerts("repeat_caller_minutes")).toHaveLength(1);
+      const [, fields] = alerts("repeat_caller_minutes")[0];
+      expect(fields).toMatchObject({ callSid: "CA_rm_1", businessId: "biz-rm", callerLast4: "8888", aiMinutes: 32, severity: "warn" });
+      expect(JSON.stringify(errSpy.mock.calls)).not.toContain(CALLER);
+    });
+
+    it("passes this call's SID so 'before' excludes it", async () => {
+      seed();
+      await post();
+      expect(mockAiSecondsToday).toHaveBeenCalledWith({ businessId: "biz-rm", callerNumber: CALLER, callSid: "CA_rm_1" });
+    });
+
+    it.each([
+      ["already past the line before this call", { before: 1900, after: 2000 }],
+      ["still under the line", { before: 1000, after: 1500 }],
+    ])("no alert when %s", async (_n, ai) => {
+      seed();
+      mockAiSecondsToday.mockResolvedValue(ai);
+      await post();
+      expect(alerts("repeat_caller_minutes")).toHaveLength(0);
+    });
+
+    it("does not look at a non-completed call", async () => {
+      seed();
+      await post({ CallStatus: "failed" });
+      expect(mockAiSecondsToday).not.toHaveBeenCalled();
+    });
+
+    it("does not look at an anonymous caller", async () => {
+      seed();
+      await post({ From: "+266696687" });
+      expect(mockAiSecondsToday).not.toHaveBeenCalled();
+    });
+
+    it("does not look when the call has no business", async () => {
+      await post({ CallSid: "CA_rm_nobiz" });
+      expect(mockAiSecondsToday).not.toHaveBeenCalled();
+    });
+
+    it("no alert when the caller is the business's own number", async () => {
+      seed();
+      mockAiSecondsToday.mockResolvedValue({ before: 1700, after: 1900 });
+      mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-rm", transfer_phone_number: CALLER });
+      await post();
+      expect(alerts("repeat_caller_minutes")).toHaveLength(0);
+    });
+
+    it("a failed business lookup still alerts", async () => {
+      seed();
+      mockAiSecondsToday.mockResolvedValue({ before: 1700, after: 1900 });
+      mockLookupBusinessByPhone.mockRejectedValue(new Error("lookup down"));
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(alerts("repeat_caller_minutes")).toHaveLength(1);
+    });
+
+    it("a failing minutes query is a 200, a check-failed log and no alert", async () => {
+      seed();
+      mockAiSecondsToday.mockRejectedValue(new Error("db down"));
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(alerts("repeat_caller_minutes")).toHaveLength(0);
+      expect(alerts("repeat_caller_minutes_check_failed")).toHaveLength(1);
+      expect(mockCompleteCall).toHaveBeenCalled();
+    });
+
+    it("a null result (no database) is quiet", async () => {
+      seed();
+      mockAiSecondsToday.mockResolvedValue(null);
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(errSpy).not.toHaveBeenCalled();
     });
   });
 
