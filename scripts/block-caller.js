@@ -26,8 +26,8 @@
 //
 // DRY RUN BY DEFAULT. Without --confirm, --add and --remove say what they WOULD
 // do and write nothing (no write transaction is opened). Nothing prints a
-// caller number whole: only its last four digits. The reason is printed as the
-// operator typed it, so keep numbers out of it.
+// caller number whole: only its last four digits. The reason is stored as the
+// operator typed it but printed with any run of 5+ digits masked to its last four.
 //
 // The migrate job connects as Cloud SQL `postgres`, which owns these tables
 // and has no BYPASSRLS; business_directory is a platform table, so the
@@ -141,10 +141,18 @@ function expiryText(row) {
   return when.getTime() <= Date.now() ? `${iso} (expired)` : iso;
 }
 
+/**
+ * A reason is stored as typed but printed masked: any run of 5+ digits (a number
+ * typed into it) becomes an ellipsis and its last four digits.
+ */
+export function maskReason(reason) {
+  return String(reason ?? "").replace(/\d{5,}/g, (run) => `…${run.slice(-4)}`);
+}
+
 /** One masked line per row. Never the whole number. */
 export function formatRow(row) {
   const scope = row.business_id ? `business ${row.business_id}` : "all";
-  return `ending ${last4(row.phone)}  scope: ${scope}  expires: ${expiryText(row)}  reason: ${row.reason}`;
+  return `ending ${last4(row.phone)}  scope: ${scope}  expires: ${expiryText(row)}  reason: ${maskReason(row.reason)}`;
 }
 
 async function resolveBusiness(client, businessPhone) {

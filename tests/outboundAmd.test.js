@@ -52,6 +52,11 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "not-a-real-key";
 const mockLookupBusinessByPhone = vi.fn(async () => null);
 
 vi.mock("../services/db.js", () => ({
+  // Launch guards (batch 3 S4): harmless defaults so a found business does not log guard failures.
+  recordPendingDial: async () => "1",
+  endPendingDial: async () => 0,
+  inboundGuardFacts: async () => ({ blocked: false, bounced: false, callsToday: 0 }),
+  aiSecondsToday: async () => ({ after: 0, before: 0 }),
   isEnabled: () => true,
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   loadConfig: (business) => (business ? { businessName: business.name || "Test Biz", smsFollowupEnabled: false, smsTemplates: {} } : null),

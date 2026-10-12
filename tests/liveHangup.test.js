@@ -81,6 +81,8 @@ function fakeDb(config = CONFIG) {
     isEnabled: () => true,
     lookupBusinessByPhone: async () => ({ id: "biz-1" }),
     loadConfig: () => config,
+    // Pending dial (batch 3 S4): a transfer records the dial before it starts.
+    recordPendingDial: async () => "1",
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],

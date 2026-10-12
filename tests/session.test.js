@@ -1553,7 +1553,10 @@ describe("session.js — v2 pipeline orchestrator", () => {
       mockTwilioCallsUpdate.mockClear();
       const order = [];
       db.recordPendingDial.mockImplementationOnce(async () => {
-        order.push("record");
+        // Resolves on a LATER tick: a fire-and-forget record would put "update"
+        // before "record:done" and fail the order assertion.
+        await new Promise((r) => setTimeout(r, 5));
+        order.push("record:done");
         return "pd-1";
       });
       mockTwilioCallsUpdate.mockImplementationOnce(async () => {
@@ -1570,7 +1573,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         dialledNumber: "+15551234567",
         timeoutSec: 45,
       });
-      expect(order).toEqual(["record", "update"]);
+      expect(order).toEqual(["record:done", "update"]);
     });
 
     it("uses the webhook's business when state.businessId was never set (createCall failed)", async () => {
@@ -1586,6 +1589,13 @@ describe("session.js — v2 pipeline orchestrator", () => {
       db.recordPendingDial.mockClear();
       await runCascadeTransfer({ callerPhone: "anonymous" });
       expect(db.recordPendingDial.mock.calls[0][0].callerNumber).toBeNull();
+    });
+
+    it("a formatted stored transfer number is refused by the price check, so no row (normalising at the record is defence only)", async () => {
+      db.recordPendingDial.mockClear();
+      const twiml = await runCascadeTransfer({ config: { transferPhoneNumber: "+1 817-555-0102" } });
+      expect(twiml).not.toContain("<Dial");
+      expect(db.recordPendingDial).not.toHaveBeenCalled();
     });
 
     it("a price-refused transfer writes no row", async () => {

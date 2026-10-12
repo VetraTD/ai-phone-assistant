@@ -1097,6 +1097,10 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
       } catch (err) {
         log.error("repeat_caller_minutes_check_failed", { callSid, businessId, message: err?.message });
       }
+      // Not deduped on purpose: Twilio may redeliver a completed callback, which
+      // sees the same before/after and alerts again. Cross-instance state to stop
+      // that is not worth it for a warn-level alert, so "once per caller per day"
+      // above is "at most a few", not strictly once.
       if (ai && ai.before < AI_MINUTES_ALERT_SEC && ai.after >= AI_MINUTES_ALERT_SEC) {
         let business = null;
         try {

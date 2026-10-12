@@ -247,7 +247,10 @@ async function inboundTransfer(number, { extra = {}, callerPhone = CALLER, recor
   db.recordPendingDial = vi.fn(
     record ??
       (async () => {
-        order.push("record");
+        // Resolves on a LATER tick, so a fire-and-forget record (no await) would
+        // put "update" before "record:done" and fail the order assertion.
+        await new Promise((r) => setTimeout(r, 5));
+        order.push("record:done");
         return "pd-1";
       })
   );
@@ -275,7 +278,15 @@ describe("Live inbound transfer: pending dial", () => {
       dialledNumber: NORMAL,
       timeoutSec: 20,
     });
-    expect(order).toEqual(["record", "update"]);
+    expect(order).toEqual(["record:done", "update"]);
+  });
+
+  it("a formatted stored transfer number is refused by the price check, so no row (normalising at the record is defence only)", async () => {
+    // checkDial accepts strict E.164 only, so a formatted number never reaches
+    // the record on any front-end; the E.164 normalisation there is a backstop.
+    const { db, updates } = await inboundTransfer("+1 817-555-0102");
+    expect(updates[0].twiml).not.toContain("<Dial");
+    expect(db.recordPendingDial).not.toHaveBeenCalled();
   });
 
   it("own_voicemail widens the window to 45 s", async () => {
@@ -392,7 +403,8 @@ describe("Live outbound transfer: pending dial", () => {
       db.recordPendingDial = vi.fn(
         record ??
           (async () => {
-            order.push("record");
+            await new Promise((r) => setTimeout(r, 5));
+            order.push("record:done");
             return "pd-1";
           })
       );
@@ -414,7 +426,13 @@ describe("Live outbound transfer: pending dial", () => {
       dialledNumber: NORMAL,
       timeoutSec: 20,
     });
-    expect(order).toEqual(["record", "update"]);
+    expect(order).toEqual(["record:done", "update"]);
+  });
+
+  it("a formatted campaign transfer number is refused by the price check, so no row", async () => {
+    const { db, updates } = await outboundTransfer("+1 817-555-0102");
+    expect(updates[0].twiml).not.toContain("<Dial");
+    expect(db.recordPendingDial).not.toHaveBeenCalled();
   });
 
   it("a price-refused outbound transfer writes no row", async () => {

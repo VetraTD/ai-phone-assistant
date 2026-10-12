@@ -85,6 +85,13 @@ describe("formatRow", () => {
     expect(line).toContain("until removed");
     expect(line).toContain("business 11111111");
   });
+
+  it("masks a number typed into the reason down to its last four digits", () => {
+    const line = formatRow({ phone: NUM, business_id: null, reason: "caller +447700900123 again, 12 calls", expires_at: null });
+    expect(line).toContain("reason: caller +…0123 again, 12 calls");
+    expect(line).not.toContain("7700900");
+    expect(line).not.toMatch(WHOLE_NUMBER);
+  });
 });
 
 describe("the script, run with no database configured", () => {

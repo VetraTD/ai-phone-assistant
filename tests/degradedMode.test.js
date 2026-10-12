@@ -22,6 +22,11 @@ const mockSendCallerSms = vi.fn(async () => {});
 const mockWithTenantSafe = vi.fn(async (businessId, fn) => (businessId ? fn() : null));
 
 vi.mock("../services/db.js", () => ({
+  // Launch guards (batch 3 S4): harmless defaults so a found business does not log guard failures.
+  recordPendingDial: async () => "1",
+  endPendingDial: async () => 0,
+  inboundGuardFacts: async () => ({ blocked: false, bounced: false, callsToday: 0 }),
+  aiSecondsToday: async () => ({ after: 0, before: 0 }),
   isEnabled: (...args) => mockIsEnabled(...args),
   lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
   createCustomerRequest: (...args) => mockCreateCustomerRequest(...args),

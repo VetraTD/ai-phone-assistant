@@ -40,7 +40,11 @@ beforeAll(async () => {
   await admin.query(`REVOKE ALL ON SCHEMA public FROM ${PROBE_ROLE}`).catch(() => {});
   await admin.query(`DROP ROLE IF EXISTS ${PROBE_ROLE}`);
   await admin.query(`CREATE ROLE ${PROBE_ROLE} LOGIN PASSWORD '${PROBE_PASS}' NOSUPERUSER NOBYPASSRLS`);
-  await admin.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PROBE_ROLE}`);
+  // Exactly what scripts/block-caller.js touches and nothing more, so a passing
+  // test proves the script needs no other table. (app_caller_blocked is read back
+  // as admin, never as the probe, so no EXECUTE grant.)
+  await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON blocked_callers TO ${PROBE_ROLE}`);
+  await admin.query(`GRANT SELECT ON business_directory TO ${PROBE_ROLE}`);
   await admin.query(`GRANT USAGE ON SCHEMA public TO ${PROBE_ROLE}`);
 
   const u = new URL(ADMIN_URL);
