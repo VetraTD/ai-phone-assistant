@@ -213,6 +213,14 @@ voicemail.
   address), which can take days.
 - [ ] Digile: sign the pilot agreement; ask which booking systems their clinics
   use.
+- [ ] **Texting registration (owner, 2026-10-13: starts once VetraTD LLC is formed,
+  in the next couple of weeks).** US: A2P 10DLC brand + campaign registration in
+  Twilio (needs the EIN; approval roughly 1–3 weeks; small one-time and monthly
+  fees); until then US carriers block business texts. UK: decide per client between
+  a UK mobile number (two-way, needs the regulatory bundle) and an alphanumeric
+  sender name (one-way, no replies). +441372656055 cannot send texts (Twilio:
+  `sms: false`). Then set `TWILIO_SMS_FROM` (or per-number senders). Gates the
+  customer-texting track below.
 
 ### 3. First month — before about 5–10 clients (~37–54 h)
 
@@ -268,8 +276,34 @@ voicemail.
   (it posts to a dead Railway host), a registered address added.
 - [ ] **Load test** (2–3 h, ~$2–5, ask first): how many calls it takes at once
   has never been measured (backlog O7).
+- [ ] **Customer texting, phase 1 — texts that work** (~8–12 h; owner approved the
+  track 2026-10-13; needs the texting registration in section 2). Built and switched
+  off today: five caller texts (booking confirmed / cancelled / request pending,
+  message received, missed call), a per-business switch, `sms_consents`, a price
+  check on every text; production sends none (`TWILIO_SMS_FROM` unset). Phase 1:
+  switch them on; add text reminders (e.g. 24 h before, "reply C to confirm, R to
+  reschedule"; reminders exist today only as outbound AI calls); STOP/HELP, quiet
+  hours, per-business on/off + wording, consent asked on the call, the right sender
+  per country; re-run S6 L6 (blocked/bounced caller gets no text). Rules: text only
+  when something happened (no "thanks for calling" after every call); clinics get
+  minimal content (time and place, no treatment); surveys, review requests and
+  promotions are marketing and need explicit consent (TCPA / PECR); ask every
+  customer for reviews, never only happy ones (Google's rules). Pricing: decide an
+  included text allowance or pass-through (US ~1–2¢, UK ~4–5p a text).
 
 ### 4. Not blockers — after the first clients
+
+- **Customer texting, phase 2 — text the AI** (~20–30 h + ~$3–5 of tests, month 2,
+  after billing basics and Owner/Staff logins). Nothing receives inbound texts today
+  (1171's SMS URL is a Twilio demo page, 3291's is Railway). Replies reach the same
+  receptionist in text mode (cheaper text model): book, reschedule, cancel, answer,
+  take a message, knowing the customer's calls and appointments; hand-off to the
+  business; a conversation view in the dashboard where staff can take over; rate
+  limits; the claim guard (the text channel had the "API" leak before). Needs a
+  two-way sender (US registered number; UK mobile number, not a sender name).
+- **Customer texting, phase 3 — extras** (~3–10 h each, when clients ask): surveys
+  and review requests (marketing consent), WhatsApp (Meta approval + pre-approved
+  templates; big in the UK/EU), broadcasts.
 
 - **Gemini cost savings** (~25–40 h including a test round, ~$15): trim the
   prompt, cut wasted turns, shorter replies, screen junk calls, Deepgram shadow.
