@@ -17145,3 +17145,15 @@ refusal the model speaks, offering a message or booking itself — the AI never 
 "Sorry, the line cut out for a second, where were we?" with the transcript as context; on failure the LVX174 line
 + `<Record>`. Parked until logs show real mid-call drops (the only one measured was Google's 9:49 cut, now handled
 by the clock).
+
+### Owner decisions for the receptionist round, 2026-10-12
+
+- **LVX167 part 4 (pause-aware hard end): YES, as "look for a pause from 9:25, force at 9:30".** The latest end
+  stays 9:30 (same 19 s margin to Google's 9:49 cut); the closing line plays in the caller's first pause after
+  9:25. The 10 s wait-past-9:30 variant was rejected (margin ~4 s). If Google cuts first, S2's polite failure
+  catches it (never silent).
+- **Off-topic chat (LVX168 scope): the receptionist says it can only help with the business** — no small talk.
+  A personal or vulnerable remark is still acknowledged first, like a person, then redirected gently ("I'm sorry
+  you're going through that, that sounds hard. I'm only able to help with <business> things here, but take your
+  time, there's no rush."). Plain off-topic ("let's talk about gaming") gets the polite redirect only. Never "I am
+  an AI assistant and cannot offer personal advice".
