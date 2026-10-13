@@ -151,7 +151,8 @@ voicemail.
   Live on +18175803291: a left message emailed the owner within 7 s; a blocked call sent no "Missed call" email.
   Batch-3 plan "E1 fixed". The fix exposed **LVX176**: a message-only call can email the owner a false
   "Unconfirmed booking — please contact the caller" and file a duplicate request. That is a false alarm, not a
-  lost message (receptionist backlog). Original entry (found 2026-10-12, S6 L2;
+  lost message. It is BUILT at `0fcd6f5` (with neutral "A caller may need a call back" wording for real misses)
+  and not yet deployed: it ships with receptionist round A. Original entry (found 2026-10-12, S6 L2;
   ~0.5–0.75 h + one deploy + one test call). `loadBusinessNotificationConfig`
   (`services/notifications.js`) reads the business with `db.fetchBusinessById`
   outside any tenant scope; `businesses` has FORCE row-level security, so the read

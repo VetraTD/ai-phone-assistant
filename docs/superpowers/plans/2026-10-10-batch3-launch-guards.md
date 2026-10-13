@@ -697,7 +697,9 @@ Still unproven live: the bounced-leg (L5 shape) Missed-call check. It has the sa
 proven offline only (the db test).
 
 **New finding → `docs/receptionist-backlog.md` LVX176:** a message-only call can send the owner a false
-"Unconfirmed booking" email and file a duplicate triage request.
+"Unconfirmed booking" email and file a duplicate triage request. It was built the same day at `0fcd6f5` and is
+NOT deployed. The owner chose to ship it with receptionist round A, and also chose neutral "A caller may need a
+call back" wording for real misses.
 
 Time: ≈1.7 h active (00:35–01:15 CDT planning, fix and deploy; 13:37–14:45 CDT live check and docs). Production
 since 09-29 shows 2 `claim_without_row` in 53 verified calls.

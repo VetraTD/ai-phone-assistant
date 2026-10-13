@@ -17160,7 +17160,7 @@ by the clock).
 
 ## E1 live check, 2026-10-13: one new defect, found because owner emails now work
 
-### LVX176 · A message-only call emails the owner a false "Unconfirmed booking" · **OPEN · P1** `[cheap]` ~1–2 h
+### LVX176 · A message-only call emails the owner a false "Unconfirmed booking" · **BUILT `0fcd6f5`, NOT deployed (ships with round A) · P1** `[cheap]`
 
 On the E1 check call `CA6514cf8ba98d599919f2b956d2640782` (test line, 2026-10-13 18:37 UTC) the caller left a
 message, and `record_customer_request` succeeded at 18:39:14. Two emails went out:
@@ -17188,6 +17188,28 @@ Production since 09-29: 2 `claim_without_row` in 53 verified calls.
   claim. It must never vouch for a booking claim.
 - `notifyUnconfirmedClaim`'s sentence must not say "appointment" when the claim was not about one.
 - Test: replay this call's ledger shape. Fits receptionist round A as a `[cheap]` add-on (owner decides).
+
+**Built 2026-10-13 (`0fcd6f5`, not deployed; owner: build now, ship with round A).**
+- Owner's rule: a successful `record_customer_request` / `record_quote_request` explains the claim when NO
+  appointment tool was attempted (refused or not), and the caller did not agree to a time this call showed them
+  (`bookingOwed.agreed` with point-checked OR listed slots).
+- Live passes `messagesRecorded` + `actionToolsAttempted` (names only) to `verifyCall`.
+- Counter `postcall_claim_explained_by_message`; `postcall_verify` logs `messages_recorded` and
+  `claim_explained_by_message`.
+- Accepted residual: a booking claim nobody asked for, on a call that also took a message.
+- Sabotage rows: `message-explains-needs-no-appointment-tool`, `message-explains-needs-no-agreed-time`,
+  `message-explains-claim`, `messages-recorded-not-counted`.
+- Gate at `0fcd6f5`: root 309 files / 7628 tests passed, db 50 / 690, census 156 rows; all 4 rows red, then
+  restored. A FULL sabotage was not run (the `lib/voice/live/index.js` edit touches about half the rows). Run it at
+  round A's final sha, which edits index.js anyway.
+
+**Owner decision 2026-10-13: a REAL miss still goes to the business, worded neutrally.** The owner asked "a
+business should never get that email, right?" Answer: false alarms, never; real misses, yes. A caller who
+believes they are booked must be rung, and an unreported miss is worse.
+- Email subject is now "A caller may need a call back — <business>", body "A caller may need a quick call back
+  to confirm their appointment (<number>)".
+- Dashboard notes start "Follow-up needed: … Please call them back to confirm."
+- Nothing says "the assistant told the caller".
 
 **Also seen on this call, no new item:** the message write was gated three times before it landed:
 1. 18:38:51: `agreed_now` with no read-back yet.
