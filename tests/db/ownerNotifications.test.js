@@ -113,7 +113,7 @@ describeDb("owner notifications read the business as vetra_app (E1)", () => {
 
   it("notifyUnconfirmedClaim emails the owner", async () => {
     await notifications.notifyUnconfirmedClaim({ businessId: TENANT, callbackNumber: null });
-    expectOneEmail(`Unconfirmed booking — ${NAME}`);
+    expectOneEmail(`A caller may need a call back — ${NAME}`);
   });
 
   it("notifyCustomerRequest emails the owner", async () => {

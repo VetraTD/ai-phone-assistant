@@ -599,6 +599,47 @@ const SABOTAGES = [
     red: [LANG, PROMPTS],
   },
   // -------------------------------------------------------------------------
+  // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
+  // attempted no appointment tool and showed the caller no time they agreed to.
+  // Three rows on one line: each half of the guard, and the explanation itself.
+  // -------------------------------------------------------------------------
+  {
+    name: "message-explains-needs-no-appointment-tool",
+    why:
+      "lets a saved message explain away a booking claim on a call that ALSO attempted an appointment tool: a real failure (caller told they are booked, nothing written) is hidden because the caller left a message too.",
+    file: "lib/postCallVerify.js",
+    find: "  const messageExplainsClaims = Number(messagesRecorded) > 0 && !appointmentToolAttempted && !bookingAgreed;",
+    replace: "  const messageExplainsClaims = Number(messagesRecorded) > 0 && !bookingAgreed; // SABOTAGE",
+    red: [VERIFY],
+  },
+  {
+    name: "message-explains-needs-no-agreed-time",
+    why:
+      "lets a saved message explain away a booking claim when the caller agreed to a time this call showed them: the fabricated booking the caller asked for, the one the business must ring about, goes unreported.",
+    file: "lib/postCallVerify.js",
+    find: "  const messageExplainsClaims = Number(messagesRecorded) > 0 && !appointmentToolAttempted && !bookingAgreed;",
+    replace: "  const messageExplainsClaims = Number(messagesRecorded) > 0 && !appointmentToolAttempted; // SABOTAGE",
+    red: [VERIFY],
+  },
+  {
+    name: "message-explains-claim",
+    why:
+      "brings back the E1 live-check false alarm (CA6514cf8b): a caller leaves a message, the receptionist says 'I've recorded that', and the owner is emailed to call back about an appointment nobody discussed, with a duplicate request filed.",
+    file: "lib/postCallVerify.js",
+    find: "  const messageExplainsClaims = Number(messagesRecorded) > 0 && !appointmentToolAttempted && !bookingAgreed;",
+    replace: "  const messageExplainsClaims = false; // SABOTAGE",
+    red: [VERIFY],
+  },
+  {
+    name: "messages-recorded-not-counted",
+    why:
+      "stops the live teardown counting saved messages, so verifyCall always sees messagesRecorded 0 and the LVX176 explanation never fires in production. verifyCall's own tests hand it the field directly, so only the wire test can see this.",
+    file: "lib/voice/live/index.js",
+    find: "        messagesRecordedThisCall += 1;",
+    replace: "        // SABOTAGE",
+    red: [POSTCALLWIRE],
+  },
+  // -------------------------------------------------------------------------
   // LVX147. Two rows, because the fix is in two files: verifyCall has to UNION
   // the two readers, and the live teardown has to HAND IT the judge's answer.
   // Breaking one while the other stands is how half a fix ships looking whole.

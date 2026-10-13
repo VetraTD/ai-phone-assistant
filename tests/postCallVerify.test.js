@@ -819,7 +819,8 @@ describe("a call that tried to write and could not", () => {
     expect(requestType).toBe("unconfirmed_claim");
     // Reworded when the gate widened on 2026-09-18 -- see the block below for
     // why "nothing was recorded" stopped being true of this shape.
-    expect(notes).toMatch(/the attempt was refused/);
+    // Reworded for the business on 2026-10-13 (LVX176): still names the shape.
+    expect(notes).toMatch(/tried to book or change an appointment and that change was not saved/);
   });
 
   it("counts the listed-only shape without acting on it", async () => {
@@ -872,7 +873,7 @@ describe("a call that tried to write and could not", () => {
     await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
 
     const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
-    expect(notes).toMatch(/was refused, so that change was never recorded/);
+    expect(notes).toMatch(/that change was not saved/);
     expect(notes).toMatch(/Other parts of the call may have gone through/);
     expect(notes).not.toMatch(/nothing was recorded/);
   });
@@ -1096,5 +1097,86 @@ describe("verifyCall - a callback claim backed by a successful schedule_callback
     const deps = fakeDeps({ booked: [] });
     const out = await verifyCall(input({ claims: [], callbacksScheduled: 1 }), deps);
     expect(out.verdict).toBe("ok");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX176 (E1 live check CA6514cf8b, 2026-10-13). The caller left a message,
+// record_customer_request succeeded, the receptionist said "I've recorded that
+// urgently" -- and the verdict was claim_without_row, because `writes` holds
+// appointment effects only. A duplicate request and an "unconfirmed booking"
+// email went to the owner about a call that worked. Owner's rule: a saved
+// message explains the claim when NO appointment tool was attempted and the
+// caller did not agree to a time this call showed them.
+// ---------------------------------------------------------------------------
+describe("verifyCall - a saved message explains a claim on a call with no appointment tool (LVX176)", () => {
+  beforeEach(() => clearStats());
+  const CLAIM = { turn: 5, kind: "claim", step: "gather_details", toolBacked: false };
+  // The production shape: two matcher claims, judge done/none, one message
+  // saved after two refusals, the read-back agreed to but no time ever shown.
+  const e1 = (over = {}) =>
+    input({
+      claims: [CLAIM, { ...CLAIM, turn: 6, toolBacked: true }],
+      judgeClaimedDone: true,
+      judgeAgreedAction: "none",
+      messagesRecorded: 1,
+      actionToolsAttempted: ["record_customer_request"],
+      bookingOwed: { agreed: true, pointVerified: 0, verified: 0 },
+      ...over,
+    });
+
+  it("the E1 call -> ok, no request filed, nobody alerted, and the explanation is counted", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1(), deps);
+    expect(out.verdict).toBe("ok");
+    expect(deps.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_claim_explained_by_message).toBe(1);
+    expect(deps.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ messages_recorded: 1, claim_explained_by_message: true })
+    );
+  });
+
+  it("the same call with NO message saved -> claim_without_row (today's behaviour)", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1({ messagesRecorded: 0 }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it("an appointment tool was attempted, even one that wrote no effect -> claim_without_row", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      e1({ actionToolsAttempted: ["record_customer_request", "cancel_appointment"] }),
+      deps
+    );
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("the caller agreed to a point-checked time -> not explained away", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1({ bookingOwed: { agreed: true, pointVerified: 1, verified: 1 } }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+    expect(deps.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("the caller agreed after being shown a LIST of times -> not explained away", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1({ bookingOwed: { agreed: true, pointVerified: 0, verified: 4 } }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("a quote request counts as a saved request, the same way", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1({ actionToolsAttempted: ["record_quote_request"] }), deps);
+    expect(out.verdict).toBe("ok");
+  });
+
+  it("a message saved and no claim at all -> ok, and nothing is counted as explained", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(e1({ claims: [], judgeClaimedDone: undefined }), deps);
+    expect(out.verdict).toBe("ok");
+    expect(getLatencyStats().turnTaking.postcall_claim_explained_by_message ?? 0).toBe(0);
   });
 });

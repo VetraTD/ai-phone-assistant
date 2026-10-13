@@ -784,3 +784,36 @@ describe("post-call bookingOwed still needs a clear yes (review C1)", () => {
     expect(arg(s.verify).bookingOwed.agreed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX176: the wire. lib/postCallVerify.js lets a saved message explain a claim
+// only when it can see the message AND every action tool the call attempted.
+// ---------------------------------------------------------------------------
+describe("LVX176 — a saved message reaches the post-call read", () => {
+  it("counts a successful record_customer_request and names the tools attempted", async () => {
+    const s = await boot();
+    await s.callTool("record_customer_request", { request_type: "message" });
+    await s.hangUp();
+    expect(arg(s.verify).messagesRecorded).toBe(1);
+    expect(arg(s.verify).actionToolsAttempted).toEqual(["record_customer_request"]);
+  });
+
+  it("a REFUSED message write is not counted, but is named as attempted", async () => {
+    const s = await boot(undefined, ["record_customer_request"]);
+    await s.callTool("record_customer_request", { request_type: "message" });
+    await s.hangUp();
+    expect(arg(s.verify).messagesRecorded).toBe(0);
+    expect(arg(s.verify).actionToolsAttempted).toEqual(["record_customer_request"]);
+  });
+
+  it("an appointment tool on the same call is named, so post-call cannot explain a claim away", async () => {
+    const s = await boot();
+    await s.book();
+    await s.callTool("record_customer_request", { request_type: "message" });
+    await s.hangUp();
+    expect(arg(s.verify).messagesRecorded).toBe(1);
+    expect(arg(s.verify).actionToolsAttempted).toEqual(
+      expect.arrayContaining(["book_appointment", "record_customer_request"])
+    );
+  });
+});

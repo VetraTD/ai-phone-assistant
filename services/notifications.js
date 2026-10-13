@@ -282,6 +282,11 @@ export async function notifyAppointmentBooked({ businessId, appointment }) {
  * unrelated reason lands here too, and the business needs to ring the caller in
  * either case.
  *
+ * ACTION FIRST, ABOUT THE CALLER (owner, 2026-10-13). The business reads this,
+ * and "the receptionist told the caller … no matching record exists" reads as
+ * "your receptionist failed" while burying the one thing to do. It now says
+ * what to do and why the caller needs it; the dashboard row has the reason.
+ *
  * Rate-limited like every other owner notification. A tenant whose assistant
  * fabricates on every call has a bigger problem than a throttled alert, and an
  * unthrottled path here would be the loudest way to discover it.
@@ -295,10 +300,9 @@ export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
     const sentence =
-      "On a recent call the receptionist told the caller an appointment was booked, cancelled " +
-      "or changed, and no matching record exists. Please check the call and contact the caller" +
-      (callbackNumber ? ` on ${callbackNumber}.` : ".");
-    const subject = `Unconfirmed booking — ${config.businessName}`;
+      "A caller may need a quick call back to confirm their appointment" +
+      (callbackNumber ? ` (${callbackNumber}).` : ".");
+    const subject = `A caller may need a call back — ${config.businessName}`;
     if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
     if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
   } catch (err) {
