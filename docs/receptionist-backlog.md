@@ -17289,3 +17289,23 @@ thing twice.
 signals they are wrapping up. The hang-up check stops being the thing that forces it. If the model still emits a
 goodbye without the ask, the refusal's follow-up must not be a second farewell (the backwards order). Measure with
 the same counters plus the backwards-order count.
+
+### Round A plan (owner, 2026-10-13): A1 "say it once" first, then A2 "endings and hand-offs"
+
+- **A1 "say it once"** (about 2 sessions, one deploy). It covers LVX177 (save gates), LVX172 (spelling), LVX178
+  (closing ask), plus the deploy of LVX176 (built at `0fcd6f5`).
+- **A2 "endings and hand-offs"** (about 2 sessions, one deploy). It covers LVX167 (10-minute end), LVX174 (fixed
+  lines in the receptionist's voice) and LVX175 (check the transfer before announcing it).
+- **After round A:** LVX168–171 (manner).
+
+**LVX172 design agreed (owner, 2026-10-13).**
+- When the caller spelled the name, the booking's ONE read-back spells the surname back letter by letter: "Tuesday
+  at 3 for Jon, D-O-D-L-A, booking that now". The caller can correct it in that same moment ("no, D as in David").
+- It is still one confirmation, never a separate spelling ask (the LVX177 rule).
+- The other half of LVX172, running out of time to correct near the 10-minute limit, is fixed by LVX167 in A2.
+
+**A1 done when:**
+- the LVX177 measure shows at most one confirmation per action on the live calls;
+- a message call sends only "New customer request" (no "may need a call back");
+- a booking with a spelled surname reads it back once, letter by letter, and saves on the first non-objection;
+- the call ends "anything else?" → caller says no → goodbye, never backwards.
