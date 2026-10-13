@@ -36,6 +36,13 @@ two failures found — **owner emails are never sent** (new item below) and the
 
 ### 1. Code before the first paying client (~19–28 h)
 
+**Order from here (owner, 2026-10-12, after S6):** (1) owner-email fix — launch blocker below, ~1.5–2 h;
+(2) receptionist round: clean 10-min ending + warmth + ask-once + no invented names + no needless refusals +
+surname (backlog LVX167–172) with the fixed lines in the receptionist's voice (LVX174) and the transfer pre-check
+(LVX175), ~8–11 h over 2 sessions; (3) after a failed transfer the receptionist comes back as one continuous
+conversation (LVX173, pulled forward from warm transfer part 2), ~4–6 h; (4) deploy the current dashboard;
+(5) merge to `main` + shut down Railway/Supabase. Then section 3.
+
 **Batch 3** = the first six items below (~16–23 h), built together, in that
 order. Plan first (~1 h, owner reviews it), in a fresh session; the plan splits
 the build into sessions of ~3–5 h (likely 5: number block; 10-min end; overflow
@@ -220,7 +227,8 @@ voicemail.
   callers (confused, elderly, bad line, long genuine problem) are never cut off.
   Add the free US caller-ID verification signal at the same time.
 - [ ] **Warm transfer** (~10–14 h, rough, + ~$3 of test calls, ask first; owner
-  approved 2026-10-10), right after "going nowhere"; builds on the batch 3 stopgap. (1) The receptionist
+  approved 2026-10-10), right after "going nowhere"; builds on the batch 3 stopgap. **Part (2) is pulled
+  forward as backlog LVX173 (owner 2026-10-12); what remains here is part (1), the whisper + press 1, ~6–8 h.** (1) The receptionist
   writes a one-line summary as part of the transfer; staff hear it before the
   caller is connected ("Call from Jane about moving Thursday's appointment. Press
   1 to take it.") and it is saved on the call. Pressing 1 proves a person

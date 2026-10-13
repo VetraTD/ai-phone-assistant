@@ -17097,3 +17097,51 @@ elsewhere is Dodla). The read-back came at 9:07 and the hard end at 9:30 left no
 - One reply measured 10.1 s after the caller's last voice (`reply_after_last_voice_ms`), around the booking
   retry at ~8:00; p50 1.3 s. The owner did not report a silence. Check on the next long call.
 - A real booking was written: Digile Media, Tue 2026-10-13 16:30 CDT (`id_tail 2d6a50`).
+
+## Owner decisions 2026-10-12 (after S6) — the caller is never handed to a canned voice if the AI can still talk
+
+Owner: "shouldn't the AI come back and speak normally to the person? ... it should flow naturally like a normal
+human would." And: the "leave a message" lines should be in the receptionist's own voice. Every way a call can
+fail to reach a person, with today's behaviour, is listed in the S6 discussion; the decisions:
+
+### LVX173 · After a failed transfer, the receptionist comes back · **OPEN · P1** `[medium]` ~4–6 h + ~$1–2 calls
+
+Pulled forward from warm transfer part (2) (`docs/readiness.md` §3), built on its own before the whisper/press-1
+part. Cases: transfer not answered (20 s), busy/declined, bounced back to us (L5 loop), dial failed.
+`/twilio/transfer-result` returns a new `<Connect><Stream>` instead of the Polly line + `<Record>`; the new Live
+session gets the call's transcript from the DB, the captured facts (caller ID, name, intent, booking in progress),
+WHY it transferred (asked for a person / task it couldn't do / urgent) and the dial outcome.
+**Standard (owner): one continuous conversation.** No second greeting (code skips it); opens with the situation
+("Sorry about that, Jane, I couldn't get hold of anyone just now. I can take a message so Mark calls you back
+about Thursday, or I can try to sort it out with you myself"); full tools (book, answer, take a STRUCTURED message
+through `capabilities/messages.js`, not a raw recording); never re-asks what it already captured — confirms
+instead. Rules: at most one return per call (a second "can I speak to someone" → "I tried, nobody's free" +
+message); the 10-minute clock keeps running from the call's start; never on hard end or AI failure; "own
+voicemail" businesses unchanged; if the AI can't start, fall back to the recorded line (LVX174) + `<Record>`.
+Probe first (~30 min, cents): Gemini session resumption — if a resumed session works on our setup, the AI
+continues the real conversation (audio context included) instead of a transcript; else transcript.
+Known limit: caller words in the transcript are lossy (model is the ASR) — it may need to confirm.
+Done when: live calls — person asked, no answer; transferred mid-booking then booking finished after the return;
+busy; L5 loop — each sounds like one conversation (no re-greeting, no re-asking).
+
+### LVX174 · Fixed lines in the receptionist's voice · **OPEN · P2** `[cheap]` ~2–3 h + one ear-test call
+
+The five `CALL_LINES` (`lib/twiml.js`: noAnswer, cantTransfer, technical, technicalOutbound, timeUp) are spoken by
+Twilio Polly today, a different voice from the receptionist. Pre-generate each line per Gemini voice + language
+with Google TTS (same voice names as Live, e.g. Kore; a few cents), `<Play>` them, Polly as the fallback when a
+clip is missing. The Twilio fallback Function plays clips stored as Twilio Assets per account (it must not depend
+on our server). Lines stay generic (no business or caller name). Ear-test on a phone before committing: the TTS
+rendering of a voice may differ from the Live one; if not close, keep Polly. Bundle with LVX167 (it rewrites the
+time-up line anyway). Used where the AI cannot speak: AI won't start, AI dropped, 10-minute end, server down.
+
+### LVX175 · Check the transfer can happen BEFORE saying "connecting you" · **OPEN · P2** `[cheap]` ~1 h
+
+Today a transfer refused at exit (no number, price check) is announced ("let me get you over to someone") and then
+Polly says "Sorry, I can't put you through". `request_transfer` should run the same checks first and return a
+refusal the model speaks, offering a message or booking itself — the AI never leaves the call.
+
+### Parked: reconnect once when the AI drops mid-call (~2–3 h)
+
+"Sorry, the line cut out for a second, where were we?" with the transcript as context; on failure the LVX174 line
++ `<Record>`. Parked until logs show real mid-call drops (the only one measured was Google's 9:49 cut, now handled
+by the clock).
