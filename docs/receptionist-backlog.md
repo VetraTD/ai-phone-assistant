@@ -17217,3 +17217,75 @@ believes they are booked must be rung, and an unreported miss is worse.
 3. 18:39:12: `write_refused_no_consent`.
 
 The caller heard extra read-backs. Same class as [guards that ask get declined] / [a mangled yes].
+
+## Owner round 2026-10-13: "it shouldn't make me say yes twice" — measured, then recorded
+
+The owner asked why the receptionist feels more like a bot than ChatGPT voice. Most examples traced to our own gates,
+not the model: on the E1 call `CA6514cf8b` a message save was refused three times (consent, then write-order, then
+consent), producing a second spelling request and two extra "shall I proceed?" confirmations. Both items below come
+from free production-log reads (voice-uk-prod, 2026-10-13). Most calls are on the Digile US line, which since 09-16
+has been mostly our own test traffic, so read the numbers as directional.
+
+### LVX177 · The save gates mostly block saves the caller wanted · **OPEN · P1** `[medium]` ~2–3 h + 1–2 live calls
+
+**Measured.** Every write attempt from 2026-09-16 (3.8 Live) to 2026-10-13:
+- 67 calls tried a save; 51 (76%) had at least one gate refusal.
+- 124 refusals in total. 90 (73%) were on a save that went through later in the same call, so the caller wanted it
+  and was made to confirm again, about 2 extra confirmations each time.
+- By gate: write-order (read-back) 101, of which 70 were later saved; spelling 16, of which 15 were later saved;
+  consent 7, of which 5 were later saved. The write-order ceiling (release after 2 refusals on the same proposal)
+  fired 13 times.
+- 60 episodes (one tool, one call, at least one refusal): 45 went through, 15 never saved.
+  - In 12 of the 15, the post-call judge saw the receptionist **claim it was done anyway**. The gate turned a correct
+    save into a false "you're booked".
+  - Only 3 (2 cancels, 1 booking) look like the gate may have protected the caller: nothing claimed, no agreement
+    seen. They may just be hang-ups.
+- By tool: book 33 episodes (26 through), cancel 17 (13), reschedule 8 (5), correct name 1 (0), message 1 (1).
+- Scripts: session scratchpad `gates.js` (the event names are in this entry).
+  - Inputs: `tool_duration` for the action tools, plus `write_order_refused` / `write_refused_no_consent`, each
+    matched within 1.5 s.
+  - Any other gated refusal counts as the spelling gate.
+
+**Owner decisions (2026-10-13).** Strictness matches the harm, and the rule is now "save unless it HEARS a no".
+Today it is "save only once it hears a clear yes".
+
+| Action | Rule |
+|---|---|
+| Message / quote request | No read-back gate. Save on the first clear request. It may repeat the details in one breath, but never waits for a yes. A correction files again (the business may see two, the second corrected). |
+| Booking / reschedule | The model reads back once, then saves unless the next answer is a no, a question or a correction. "Tuesday at 3 for Jon Doe, booking that now." The post-call check stays the net. |
+| Cancel | Unchanged. It confirms once, and asks again if the answer is unreadable. 2 of the 3 plausible protections were cancels. |
+| Spelling | If the caller spelled the name once (`spelling_voiced_answer`), accept it as heard. No second ask: a spoken read-back cannot show letters. |
+
+**Accepted trade.** A stray booking the caller did not fully agree to becomes slightly more likely. It is visible:
+it sits in the calendar, and the caller heard "booking that now" and could object. A false "you're booked" with
+nothing saved is invisible until the caller turns up. The owner's goal: a caller never confirms or spells the same
+thing twice.
+
+**Also needed, or the gate change alone won't hold:**
+- Trim the prompt's confirmation rules to "read back once, then do it".
+- Ship a measure: confirmations per save and repeat requests per call, before and after, with a target of at most
+  one confirmation per action. On Live we cannot block a sentence, only remove what pushes the model to repeat.
+- The recorded-call (corpus replay) fixtures assume today's gate behaviour, so expect fixture updates
+  ([eval fixtures encode old behaviour]). This overlaps LVX172 (surname); plan them together.
+
+### LVX178 · The model forgets "anything else?" in 4 of 10 calls; about 1 in 10 hears goodbye before the ask · **OPEN · P2** `[cheap]` ~1–2 h
+
+**Measured.** All 79 inbound Live calls from 2026-09-17 (closing fix 00075) to 2026-10-13:
+- 52 ended by the receptionist (`end_call_mark`); 27 by the caller (`twilio_stop`), 14 of them under 20 s.
+- **It never signed off without the offer** (`signoff_without_ask` 0). The safety catch works.
+- **But in 20 of the 52 (38%) the model tried to hang up without asking.** The LVX132 gate refused it (`no_ask`, once
+  per call), and only then did it ask.
+- Separately, the post-action ask note fired on 21 calls and was honoured on 20.
+- What was said at the 22 refused hang-ups:
+  - 10 clean ("is there anything else?");
+  - **4 backwards in one breath** ("…have a wonderful day. Is there anything else I can help with?");
+  - 2 more had the goodbye in the turn before the ask;
+  - 8 unclear.
+
+  So about 6 of the 52 receptionist-ended calls sound backwards. Classified by regex on the receptionist's lines
+  only (session scratchpad `closing2.js`); no caller text was read.
+
+**Fix direction (decide in planning).** Make the ask part of the moment a task completes, plus the moment the caller
+signals they are wrapping up. The hang-up check stops being the thing that forces it. If the model still emits a
+goodbye without the ask, the refusal's follow-up must not be a second farewell (the backwards order). Measure with
+the same counters plus the backwards-order count.
