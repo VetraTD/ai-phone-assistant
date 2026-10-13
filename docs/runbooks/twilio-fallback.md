@@ -94,6 +94,28 @@ account's console.
 
 ## 5. Paste the URL into each number
 
+**First decide, per client, whether the URL keeps its `n=` part (owner rule,
+2026-10-12).** Ask at onboarding: *"Does your phone ring first and only come to
+us when nobody answers, or do calls come straight to us?"*
+
+- **Their phone rings first, then forwards to us on no-answer** (or busy): paste
+  the URL **without** `n=…&` (keep `t` and `v`), e.g.
+  `https://vetra-fallback-1234.twil.io/fallback?t=20&v=Polly.Amy`. Nobody answered
+  their phone already; ringing it again during an outage only makes the caller wait
+  twice. The caller goes straight to the message.
+- **Calls come straight to us** (our number replaced their main number, or their
+  number forwards ALL calls to us without ringing): paste the URL **with** `n=` as
+  printed. During an outage their transfer phone rings first, then the message.
+
+`fallback-urls.js` always prints `n=` when the business has a transfer number, so
+strip it by hand for the first kind. A per-business `fallback_mode` setting that
+prints the right URL (~1 h) is parked until the first ring-first client who also
+gives a transfer number.
+
+The fallback shows the BUSINESS's number to whoever it rings, not the caller's: it
+has no database, so caller ID is its only way to spot a forward-back loop (section
+1). The live transfer, when our server is up, shows the caller's number.
+
 Phone Numbers → Manage → Active numbers → the number → Voice Configuration →
 **Primary handler fails** → Webhook → paste the printed URL → **HTTP POST** →
 Save. Re-open the number and check the URL saved whole, including `%2B`.

@@ -27,6 +27,13 @@ Checked in the code on 2026-10-09 (`feat/outbound-stage4`): no billing code,
 `goAway` / `sessionResumption` handling), no Twilio fallback URL. Live calls do
 write transcripts now. Last real test round (2026-10-03, 5 calls): 5/5 pass.
 
+**2026-10-12 (batch 3 S6):** batch 3 is LIVE — `voice-uk-prod-00101-fk2` @ `c185ff5`
+(rollback `00100-nzn` @ `c755f56`). Fallback URLs are set on +441372656055 and
++18176011171. Live calls L1–L7 (10 calls; Twilio ≈$0.25, ≈$2 all-in with Gemini
+— under the ~$4–5 approved): every guard did its job;
+two failures found — **owner emails are never sent** (new item below) and the
+10-minute end is abrupt (backlog LVX167). Details: the batch-3 plan, "S6 as built".
+
 ### 1. Code before the first paying client (~19–28 h)
 
 **Batch 3** = the first six items below (~16–23 h), built together, in that
@@ -40,7 +47,10 @@ callers are WATCHED (alerts + block list), not automatically limited; ONE rule
 for every call the AI can't or shouldn't take: business's backup number, then
 voicemail.
 
-- [ ] **Block premium-rate and foreign numbers** for transfers, outbound and
+- [x] **DONE, live 2026-10-12 (S3, deployed S6).** Every dial and text is
+  price-checked; production numbers checked at deploy (none needed switching on).
+  The refusal itself is proven offline only; live calls dialled an allowed US mobile.
+  **Block premium-rate and foreign numbers** for transfers, outbound and
   texts (abuse guards task 1, ~3 h). Today any valid number is accepted as a
   transfer number (`settingsValidation.js`) and outbound accepts any `+44`,
   including 09 and 070. That costs $0.30 to several dollars a minute, and abuse
@@ -48,7 +58,11 @@ voicemail.
   phones down. Allow `+447624` (Isle of Man mobiles). The transfer destination
   is only ever the business's own setting (checked: never a number a caller
   says).
-- [ ] **End calls before Google's 10-minute limit; never leave a line silent**
+- [x] **DONE, live-tested 2026-10-12 (S6 L1).** Wrap note 8:43, hard end 9:30.6,
+  line closed 19 s before Google's cut, never silent. The ending was abrupt (the
+  soft goodbye found no gap) — clean-ending design agreed, backlog LVX167 (~3–4 h).
+  Polite failure (AI won't start / drops) is proven offline only.
+  **End calls before Google's 10-minute limit; never leave a line silent**
   (~5–8 h incl. tests, ~$2 of test calls, ask first). Wrap-up at ~8½ min, end at
   ~9½ (Google closed a real call at 9m49s). If the AI drops or will not start:
   apologise, take a message, hang up. Transferred calls end after 60 min.
@@ -56,7 +70,9 @@ voicemail.
   common). Evidence: call CAdfeb9d sat silent for 50 minutes after Gemini closed,
   and those minutes count toward the client's usage. Customers are told "calls
   end at 10 minutes".
-- [ ] **Gemini overflow guard + alert** (2–3 h, rough; added 2026-10-09, owner
+- [ ] **DEFERRED by the batch-3 plan** (its "Deferred" list: ~2 h, build at ~5
+  clients or before outbound is switched on). Not built.
+  **Gemini overflow guard + alert** (2–3 h, rough; added 2026-10-09, owner
   approved for batch 3). Count the Live calls in progress across all clients;
   near the Gemini limit (~6 on Tier 2, see section 2), a new caller is forwarded
   to the business's own number, or voicemail if nobody answers, instead of
@@ -66,7 +82,13 @@ voicemail.
   message (`live_connect_failed` → `finish()` closes the Twilio socket, and
   nothing follows `<Connect>`); a call cut mid-way sits silent (`onclose` only
   logs). Which shape Google uses is unknown — never hit.
-- [ ] **Twilio fallback on every number** (2–3 h, rough): if our server is down,
+- [x] **DONE, live-tested 2026-10-12 (S6 L7a/b).** Twilio Functions on both
+  accounts; fallback URLs on +441372656055 and +18176011171 (message-only: neither
+  has a transfer number). Server "down" → rang the transfer number (answered), then
+  no answer → message filed on the right business. Per-client rule (owner): strip
+  the ring-first part for clients whose own phone rings before forwarding to us —
+  runbook `docs/runbooks/twilio-fallback.md`.
+  **Twilio fallback on every number** (2–3 h, rough): if our server is down,
   ring the business's own phone, then take a voicemail if nobody answers — never
   Twilio's "application error" message, which is what a caller hears today. It
   must be hosted by Twilio (a fallback URL to a TwiML Bin or Twilio Function), not
@@ -76,7 +98,11 @@ voicemail.
   down" that does not forward to us (owner's mobile, a direct line); the transfer
   number has the same rule. Nothing in the code sets a fallback URL; check the
   Twilio console too.
-- [ ] **Watch repeat callers, don't block them** (~1 h). Alert us when one caller
+- [x] **DONE, live 2026-10-12 (S4, deployed S6).** Block list live-tested (S6 L6:
+  blocked → refused before answer, $0; Verizon told the caller "this number can't
+  be dialed"; unblocked → answered). Repeat-caller alerts are in the alert policy,
+  proven offline only (no live trigger).
+  **Watch repeat callers, don't block them** (~1 h). Alert us when one caller
   uses more than 30 AI minutes at one business in a day, or one number calls more
   than 30 times a day across all clients. A block list we control: a blocked
   number is refused before Twilio picks up (`<Reject>`, $0). Automatic limits
@@ -85,7 +111,12 @@ voicemail.
   voicemail; never count the business's own number) only if the alerts show
   real abuse. Worst case without them: a prankster ~$40/day; a bot ~$80/hour
   while it lasts (bounded by the 10-minute end and the overflow guard).
-- [ ] **Transfer loop guard + unanswered-transfer stopgap** (~3–4 h; owner
+- [x] **DONE, live-tested 2026-10-12 (S6 L2–L5).** Unanswered → message (L2);
+  answered → clean end (L3); "own voicemail" choice → their voicemail at ~28 s (L4);
+  transfer number forwarding back to us → refused in ~2 s, caller got the message
+  line (L5). The message is filed, but the owner email never goes (item below), and
+  no caller text goes because SMS is off in production (`TWILIO_SMS_FROM` unset).
+  **Transfer loop guard + unanswered-transfer stopgap** (~3–4 h; owner
   approved both 2026-10-10). Loop: if the transfer number forwards back to us,
   the AI answers its own transfer, transfers again, and so on until the caller
   hangs up (exists today). A call that reaches the business from the same caller
@@ -108,6 +139,16 @@ voicemail.
   voicemail answers; if nothing answers, fall back to the message). Set by us at
   onboarding with the setup questions; no dashboard screen yet. Option 2 means no
   dashboard record, no caller text, and (in the warm transfer) "press 1" off.
+- [ ] **Owner emails are never sent — LAUNCH BLOCKER** (found 2026-10-12, S6 L2;
+  ~0.5–0.75 h + one deploy + one test call). `loadBusinessNotificationConfig`
+  (`services/notifications.js`) reads the business with `db.fetchBusinessById`
+  outside any tenant scope; `businesses` has FORCE row-level security, so the read
+  returns nothing and the email is skipped without an error. SMTP is configured;
+  nothing reached the inbox or Sent folder for L1's booking or the L2/L7 messages.
+  Hits all four owner emails (new appointment, unconfirmed booking, customer
+  request, missed call). Fix: read inside `withTenantSafe` (as `server.js` ~1507
+  does), test that reproduces it first. On the test call also prove a blocked or
+  bounced call sends NO "Missed call" email.
 - [ ] **Deploy the current dashboard** (2–3 h, rough). The live dashboard backend
   is from 2026-09-08. Hide the outbound-only setting cards first.
 - [ ] **Merge `feat/outbound-stage4` into `main`, then shut down Railway and

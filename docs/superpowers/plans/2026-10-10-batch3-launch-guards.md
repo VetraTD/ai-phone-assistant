@@ -29,7 +29,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 | S3 | Number block (price check at every dial and text) | 3.5–4 | **done 2026-10-11** in ≈2.2 h active (≈0.45 h planning + ≈1.75 h execution; plus ≈1.3 h waiting for an owner reply after a memory-killed gate); code head `12bdaf4` — see "S3 as built" |
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | **done 2026-10-12** in ≈3.2 h actual (≈0.55 h planning incl. 3 owner answers + ≈2.6 h execution); code head `8d66ff4` — see "S4 as built" |
 | S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | **done 2026-10-12** in ≈3.5 h actual (≈0.4 h planning incl. 3 owner answers + ≈3.1 h execution, of which ≈1.8 h was the full sabotage + gate at the final sha); code head `c185ff5` — see "S5 as built" |
-| S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | not started |
+| S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | **done 2026-10-12** in ≈6.0 h (16:06–22:10 CDT; over by ≈2 h: owner design talks on the fallback rule and the call ending, the owner-email bug trace, the token-exposure fix); LIVE `voice-uk-prod-00101-fk2` @ `c185ff5`; L1–L7 all guards passed, owner emails broken (E1, launch blocker) — see "S6 as built" |
 | | **Total** | **21.5–27** | |
 
 **Execution (owner 2026-10-10):** subagent-driven, faster variant (sonnet implementers + reviewers; opus
@@ -533,6 +533,117 @@ Environment notes:
 - Local Postgres :55432 is still at **054** (S5 added no migration).
 - Stopping a full sabotage mid-row: `taskkill /F /T` on the script's bash PID, then in the (clean, detached) gate
   worktree `git checkout -- <file named in scripts/corpus/.sabotage-in-progress>` and `rm` the journal.
+
+### S6 as built (2026-10-12) — production state and live results
+
+**Deployed:**
+- `voice-uk-prod-00101-fk2` @ `c185ff5`, 100% traffic. Image
+  `us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice@sha256:00d50f78c0219f175fe81bec421a4d9fbc4ef01da4ccbb2f7099422716c022e0`
+  (build `45ad253c`, main checkout, clean tree).
+- Env diff vs `00100-nzn` = exactly `GIT_COMMIT_SHA` c755f56→c185ff5 and `CALL_MAX_DURATION_MINUTES` absent→10.
+- Boot clean: no `dial_cost_table_stale`, `live_call_clock_config_refused` or crash; `sms_channel_off` as expected.
+- Rollback: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00100-nzn=100`
+  (`c755f56`; 052–054 are additive).
+
+**Migrations:**
+- `migrate --status` (`vetra-migrate-uk-prod-vpf5m`) showed exactly 052–054 pending, no "edited" error.
+- Applied in `-wkvxg`.
+- The migrate job's image is now `:c185ff5`.
+
+**Alert policy `15114942414748467079`:**
+- 14 events added, 32 in total.
+- It fired for real: L1's `live_max_duration_hard_end` emailed the owner at 19:48 CDT.
+- The incident title still says "Outbound: alertable error" for an inbound event (cosmetic).
+
+**Fallback Functions:**
+- Setup: Protected, `VOICEMAIL_URL=<BASE_URL>/twilio/voicemail`, branch-head `twilio/fallback/fallback.js`.
+  Deployed by a Serverless-API script, not the console.
+- A: `https://vetra-fallback-3972.twil.io/fallback` (service `ZSf0772f14cc8346f09700d3d1af6310c9`).
+- B: `https://vetra-fallback-4671.twil.io/fallback` (service `ZSadc212fe4f332f0b944b446abd1daca0`).
+- A signed request with each account's token returned the expected TwiML on both: first request → Dial, then
+  `step=after&DialCallStatus=no-answer` → Say + Record.
+
+**Fallback URLs** (set by REST, re-read byte for byte):
+- +441372656055 (A) and +18176011171 (B) both use the message-only `…/fallback?t=20&v=Polly.<voice>`. Neither
+  tenant has a transfer number (`transfer_policy` never).
+- StatusCallback `/twilio/status` POST was already on every Live number on both accounts (pre-flight).
+
+**Owner rule: the fallback is per client** (runbook §5):
+- The client's own phone rings first and forwards to us on no-answer → paste the URL without `n=` (straight to the
+  message).
+- Calls come straight to us (our number replaced theirs, or they forward ALL calls to us) → paste it with `n=`.
+- Done by hand today. `fallback_mode` is deferred (below).
+
+**Live calls** (owner's phone → test line; the brother's mobile is the transfer number):
+
+| Call | CallSid | Result |
+|---|---|---|
+| L1 10-min end | `CAb4567abe115ca5be1fb2ab54dd300fc5` | **PASS (guard).** Wrap note 8:43. Goodbye due 9:00, held back (`tool_continuation`, a booking was finishing). Forced at 9:20, refused twice (`live_exit_refused_recent_barge`: caller talking). Hard end 9:30.6. Twilio 577 s, never silent. Ending abrupt → backlog LVX167; the call also showed LVX168–172. A real booking was written (Tue 10-13 16:30 CDT, `id_tail 2d6a50`; owner: leave it). |
+| L2 no answer | `CA783a5e9d3bf5fda69c61180dad7e767a` | **PASS except email.** Transfer → child `no-answer` (20 s) → message line → Record → `degraded_voicemail_received`; `customer_requests` 22→23. **No owner email (E1).** No caller text (SMS off). |
+| L3 answered | `CAad530504244c210f99a5805f4a0ab9bd` | **PASS.** Child `completed` 66 s → `outcome: hangup`; nothing played after. The brother saw the caller's number. |
+| L4 own voicemail | `CA3ed449ad2caf33b8b4e21f84b11907ea` | **PASS.** `transfer_no_answer=own_voicemail` (set, then back to `take_message`, both verified). ~28 s ring → his voicemail (child 18 s) → hangup. |
+| L7a server down, answered | `CA1612529db4d6f33554c27c40c4662ca4` | **PASS.** 3291 primary `/twilio/l7-dead` → 404 (Twilio alert 11200) → B Function → rang the brother from +18175803291, answered 29 s. |
+| L7b server down, no answer | `CA8f279a304e269f5c93d42882f8f2c9d3` | **PASS except email.** Child `no-answer` → Polly line → Record → `/twilio/voicemail?to=%2B18175803291` → `degraded_voicemail_received`; 3291 tenant `customer_requests` 0→1; no `_no_business`. |
+| L5 loop | `CA6893868086e388da1415123f105cdcc5` | **PASS.** 1171 → 3291 (loop Function, `answerOnBridge`) → back to 1171 → `transfer_loop_refused` → `<Reject>` busy, 0 s, $0 → original `transfer_result {dialStatus: busy, outcome: message}` → message (23→24). 32 s in total. |
+| L6a blocked | `CAe6fde98bd2225f057eff07498f9e7432` | **PASS.** `block-caller --add … --business +18176011171 --days 1` (dry run, then confirm) → `inbound_caller_blocked` → `call_ended_status_callback {callStatus: no-answer, durationSeconds: 0}`, $0. Verizon told the caller "this number can't be dialed". No text, but that proves nothing: SMS is off. |
+| L6b unblocked | `CAa949107e2420d279045a853621ea6b0f` | **PASS.** `--remove` (dry run, then confirm), list → 0 rows; answered normally, 33 s. |
+
+Spend: Twilio ≈$0.25, ≈$2 all-in with Gemini (approved ~$4–5). The owner reported no silence in L7, but ringback
+during the fallback Dial (S5 note "Fallback ringback") was not explicitly confirmed.
+
+**Findings:**
+- **E1 · Owner emails are never sent. LAUNCH BLOCKER, fix next session.**
+  - Cause: `services/notifications.js` `loadBusinessNotificationConfig` → `db.fetchBusinessById` runs outside
+    `withTenant`. `businesses` has FORCE RLS `tenant_isolation` (`id = app_current_business_id()`), so the read
+    returns 0 rows → `null` → silent return.
+  - Evidence:
+    - 00101 has `SMTP_USER`/`SMTP_PASS` (secret `smtp-password`);
+    - no `notification_dropped` or `notification_email` error was logged;
+    - nothing reached the owner's inbox or Sent folder for L1's booking (00:47 UTC) or the L2/L7b messages;
+    - the tenant rows say `notifications_enabled` true with an email.
+  - Affects all four `notify*` paths (appointment, unconfirmed booking, customer request, missed call). Probably
+    since the GCP cutover.
+  - Not yet reproduced in a test: write the failing test first.
+  - On the fix's live call, also prove a blocked caller (L6a shape) and a bounced leg (L5 shape) send NO "Missed
+    call" email. `notifyCallMissed` runs for busy/no-answer when `businessId` is set; those calls logged
+    `db_unscoped_fallback completeCall` (no business resolved), so they are probably skipped, but that is
+    unproven.
+- **E2 · SMS is off in production** (`TWILIO_SMS_FROM` unset → `HAS_SMS_CREDS=false`): no caller texts at all.
+  L6's "no text" and S5's missed-call re-check are still offline-proven only. Re-run L6 once it is set.
+- **E3 · The L5 loop needed `answerOnBridge="true"`.** Without it Twilio answers 3291 before the bounce, our Dial
+  reads `completed`, and the caller is hung up instead of hearing the message line. Plan correction, not a code
+  defect.
+- **E4 · Account B's auth token appeared in local tool output once.** An axios error dump during the Function deploy
+  printed the Basic auth header. All scripts now use safe error handlers. Rotate the B token after launch week:
+  `.env` and secret `TWILIO_AUTH_TOKEN_ALT` together.
+- **E5 · `<Reject>` sounds like a dead number** on Verizon ("this number can't be dialed"). Fine for an abuser,
+  misleading for a customer blocked by mistake. Owner may later prefer a busy tone.
+- **E6 · `db_unscoped_fallback completeCall`** logs on every status callback for a call our server never handled
+  (fallback-handled, bounced, blocked). Harmless noise.
+- **E7 · Dashboard settings do not reach production.** The owner's notification-email change in the dashboard
+  never landed (the live dashboard backend is the 2026-09-08 one: readiness "Deploy the current dashboard").
+  The import payload was used instead.
+
+**Production state after S6:**
+- **+18176011171 Digile Media:** restored.
+  - `set-business-config --show` is identical to the pre-S6 backup (21 field lines).
+  - db-inspect matches the original on 12 fields: `transfer_policy` never, no transfer number, notifications off.
+  - Messages 22→24 (L2 and L5 test messages); appointments 67, including L1's booking.
+- **+441372656055 (UK):** untouched apart from the fallback URL.
+- **+18175803291:** live as a test line (owner's choice).
+  - Tenant `fbd7b12b-51e7-45ee-8e24-5b12a0068f55` "VetraTD Test Line".
+  - Webhooks: voice → `/twilio/live-voice`; fallback → B Function, message-only; StatusCallback → `/twilio/status`.
+  - Tenant config: `transfer_policy` never, no transfer number; notifications on → owner's email (dead until E1);
+    `customer_requests` 1.
+  - SMS URL is still Railway (untouched).
+  - Pre-S6 webhooks, for the record: voice `https://ai-phone-assistant-production-2300.up.railway.app/twilio/voice`,
+    no fallback, status `…/twilio/status`.
+- **L5 loop Function deleted** (`ZS739982335e32cb5a41cca18bbd3ab141`). B's services are now `vetra-fallback` and
+  `keyboard-typing`.
+- **Block list:** 0 rows.
+- **Backups:** `.superpowers/backups/2026-10-12-s6-1171-show.txt` and `…-uk-show.txt`.
+- **Scratch scripts** (session scratchpad, not committed): `numbers.mjs`, `set-number.mjs`, `deploy-fn.mjs`,
+  `sigcheck.mjs`, `recent.mjs`, `job.sh`.
 
 ---
 
@@ -1171,9 +1282,9 @@ number block (pure table + per-site tests).
 | Twilio country permissions, voice + SMS, BOTH accounts: UK, US/Canada, EU/EEA, Switzerland, Australia, NZ on; others off | Before the first client | 10 min |
 | Twilio daily spend alert (usage trigger), BOTH accounts | Before the first client | 10 min |
 | Gemini daily spend alert in AI Studio "VetraTD" | Before the first client | 10 min |
-| Approve S6 live-call spend (~$4–5) | Before S6 | — |
-| Create the fallback Function in each Twilio account + paste each number's fallback URL (runbook) | During S6 | ~20 min |
-| Give us a spare number for L5/L7 (or OK buying one, ~$1–2/month) and a second handset for L6 | Before S6 | — |
+| Approve S6 live-call spend (~$4–5) | Before S6 | **done** 2026-10-12 |
+| Create the fallback Function in each Twilio account + paste each number's fallback URL (runbook) | During S6 | **done** 2026-10-12 by script (see S6 as built) |
+| Give us a spare number for L5/L7 (or OK buying one, ~$1–2/month) and a second handset for L6 | Before S6 | **done**: +18175803291 (now a live test line) |
 | Onboarding script: ask each client for "a number that reaches a person and never forwards to us" and their transfer choice | First client | — |
 
 ---
@@ -1201,6 +1312,16 @@ number block (pure table + per-site tests).
   green under sabotage — give `tests/liveEndCallAsk.test.js` a test for each half. Next receptionist-fixes batch.
 - **Fallback URL drift check** (`fallback-urls.js --verify` against Twilio): with self-serve, when clients
   change their own transfer number.
+- **`fallback_mode` per business (S6, ~1 h)**: a column plus `fallback-urls.js` support, so ring-first clients get
+  the URL without `n=` automatically. Build for the first ring-first client who also gives a transfer number.
+- **Re-run L6 with SMS on (S6 E2)**: once `TWILIO_SMS_FROM` is set, check that a blocked or bounced caller gets
+  no "sorry we missed you" text.
+- **Campaign `transfer.to` price check (S6 2b)**: before outbound go-live.
+- **Rotate account B's auth token (S6 E4)**: after launch week; `.env` and `TWILIO_AUTH_TOKEN_ALT` together.
+- **Reject sound (S6 E5)**: busy tone instead of the carrier's "can't be dialed", if the owner prefers.
+- **Announce the caller to the fallback's answerer (S6)**: say the caller's number when the fallback's ring is
+  answered, since caller ID shows the business. Optional; the owner has not asked for it.
+- **Skip `completeCall` for calls we never handled (S6 E6)**: log noise only.
 
 ---
 
@@ -1439,3 +1560,25 @@ open Minors, commit sha).
 > I approve the live calls L1–L7 at ~$4–5: <yes/no>. I will create the Twilio Functions during the session.
 > Rollback target = the revision live before deploy (expected `00100-nzn` @ `c755f56`; verify). Stop and ask before
 > anything not in the S6 steps. Estimate 3–4 h.
+
+### Next session (after S6) — owner-email fix (E1), optionally with the clean call ending (LVX167)
+> Fix S6 finding E1 of `docs/superpowers/plans/2026-10-10-batch3-launch-guards.md` ("S6 as built"): owner emails are
+> never sent because `loadBusinessNotificationConfig` reads `businesses` outside the tenant scope (FORCE RLS → 0
+> rows → silent skip). Production = `voice-uk-prod-00101-fk2` @ `c185ff5`; rollback `00100-nzn` @ `c755f56`.
+>
+> STEP 0: read "S6 as built", `docs/readiness.md` §1 (the launch-blocker item), and memory reading-production-data,
+> unscoped-writes-now-fail-closed, definer-does-not-bypass-rls, terraform-broken-deploy-route,
+> prod-migration-checksums-crlf.
+>
+> 1. A test that reproduces it first (local Postgres :55432 at 054, connected as the NOBYPASSRLS app role): each of
+>    the four `notify*` paths sends with the tenant set up as in production. It must FAIL before the fix.
+> 2. Fix: the lookup inside `db.withTenantSafe(businessId, …)` (as `server.js` ~1507). Check every other caller of
+>    `fetchBusinessById` outside a tenant scope (`lib/outbound/callContext.js`, `liveRender.js`, `outboundSeed.js`)
+>    and say which are affected — record, don't widen the fix without asking.
+> 3. Gate + sabotage the new test, commit, ONE deploy from the main checkout (clean tree).
+> 4. One live call (~$0.10): +18175803291 (live test line, notifications → owner's email): leave a message → the
+>    "New customer request" email arrives. Then prove a blocked caller (block-caller `--business +18175803291
+>    --days 1`, call, remove) sends NO "Missed call" email.
+> 5. <Optional, owner decides: also LVX167 clean call ending (~3–4 h + one ~$2 10-minute call) in the same deploy.>
+>
+> Stop and ask before anything not in these steps. Estimate ~1.5–2 h (E1 alone).

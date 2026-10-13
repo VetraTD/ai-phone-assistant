@@ -17013,3 +17013,87 @@ class: any model re-call with slightly different arguments ("Nithin" then "Nithi
 and the pack's branch is the backstop -- a second row needs the caller to say yes to "an additional one".
 Fix when it shows up: return the effective arguments from executeToolCall and key the guard on those.
 Watch: `live_guard_duplicate_suppressed` vs two booked rows for one caller on one call.
+
+## S6 call L1, 2026-10-12 — the 10-minute end worked; the call around it showed six defects
+
+Call `CAb4567abe115ca5be1fb2ab54dd300fc5`, production `voice-uk-prod-00101-fk2` @ `c185ff5`, tenant Digile Media
+(+18176011171), owner calling, 577 s. The batch-3 clock did its job: wrap note at 8:43, goodbye due at 9:00 (held
+back while the booking finished), forced at 9:20 (exit refused: caller talking), hard end at 9:30.6, line closed
+9:37 -- 19 s before Google's 9:49 cut, never silent. Everything below is what the owner heard around it. Recorded
+2026-10-12 at the owner's request ("backlog it and we will address it"); none of it is fixed.
+
+### LVX167 · The hard end is a hang-up, and the soft goodbye never found a gap · **OPEN · P1** `[medium]`
+
+The goodbye slot (9:00) was taken by the booking's confirmation, the forced goodbye (9:20) landed while the caller
+was talking, so the only close left was the 9:30 emergency line ("I'm sorry, we've reached the time limit for this
+call. Thank you for calling. Goodbye.") over the caller. Owner: "it just abruptly ended the call ... the ending
+of the call was not very smooth."
+
+Agreed design (owner, 2026-10-12, "sounds right"):
+1. **Hard end -> message tone, not hang-up** (code, always happens). Last line: "I'm sorry, I can't stay on the
+   line any longer. If there's anything else, leave a message after the tone and the team will get back to you."
+   Then `<Record>` into the existing voicemail path (`/twilio/voicemail`: message row + email). ~1 h.
+2. **Earlier clock** (env only): `LIVE_CALL_WRAP_UP_SEC=450`, `LIVE_CALL_GOODBYE_SEC=510`, hard end stays 570.
+   Two minutes to finish in-progress work instead of one.
+3. **Wrap note chosen by code from call state**, spoken by the model: mid-booking / mid-message -> "I'll need to
+   wrap up in a couple of minutes, let's get this booked" (finish, skip extras); idle -> offer book / take a
+   message / connect to the team (the last only when transfer is allowed for this tenant); caller already asked
+   for a person -> transfer now. Never say a number of minutes. Never promise a callback no code sends.
+4. Optional: hard end waits for a caller pause, up to ~9:40 (smaller margin to 9:49). ~1 h.
+Parked, not chosen: Gemini session resumption past 10 min (4-8 h+, cost per turn grows with length; calls over
+9 min are rare). Revisit if a paying client hits the cap.
+
+Done when: one live call past 9:30 ends at a message tone, the wrap note at ~7:30 matches the call state, and a
+booking in progress at 7:30 is written before the goodbye. ~3-4 h + one ~$2 call.
+
+### LVX168 · Cold when the caller shared something personal · **OPEN · P1** `[medium]`
+
+Caller (8:14): "I'm kind of ... I just want to have a normal conversation and I'm not really feeling th[at]..."
+Reply: "I'm sorry to hear you're going through a tough time. I'm not able to provide personal advice, but could
+you please spell your full name so we can finalize the booking?" Caller (8:43): "I just told you about a
+vulnerable time in my life. And you're just telling me that you don't care." Reply: "I assure you I care, but I
+am an AI assistant and cannot offer personal advice. Could you please spell your full name...?"
+
+Owner: "It needs to act fully like a human." Wanted: acknowledge in plain human words, PAUSE the task (no ask in
+the same breath), let the caller lead, come back to the booking only when they do. Never "I'm not able to provide
+personal advice" / "I am an AI assistant" as a deflection. Constraint kept: tone like a person, but the greeting's
+AI disclosure stays and a direct "are you a bot?" is never answered with a lie.
+Likely needs code, not only prompt (see "prompt caps need counters"): an ask suppressed for the turn after a
+caller's personal/emotional turn.
+
+### LVX169 · It pushes: every question deflected, the same ask repeated · **OPEN · P1** `[medium]`
+
+In 9 minutes: "best contact number" asked 6 times (caller: "A lot of people ask me for my contact number";
+"Don't you already have my contact?"; "Didn't you just ask for that like a minute ago?") -- while it had the
+caller ID all along and only offered it at 4:43. Name spelling asked 4 times in 70 s, re-asked on every off-topic
+turn. Timeline / process / restaurant questions all answered with "the team will discuss that on the strategy
+call" + an ask (caller: "Why are you just telling me to go through the strategy call? That's kind of rude.").
+`live_repeated_phrase` fired 8 times. Wanted: answer what it can first; one ask per need, counted in code; offer
+the caller-ID number once ("is the number you're calling from best?"). Check the Digile tenant's custom
+instructions before fixing -- part of the push may be config, not the prompt.
+
+### LVX170 · Invented a company name from garbled audio · **OPEN · P2** `[cheap]`
+
+Caller's company name transcribed as "Vai na na na"; reply: "My apologies, I have that corrected to Doddle
+Consulting" -- a name nobody said, then used for the rest of the call. Wanted: unclear name -> ask to repeat or
+spell, never fill in. Same family as "provenance cannot discriminate".
+
+### LVX171 · Over-refusal on a plain question about the business · **OPEN · P2** `[cheap]`
+
+Caller: "could you just tell me more about what [Digile] Media is, what businesses you guys actually cover?"
+Reply: "I'm not able to share details about ownership or how the business operates behind the scenes." A normal
+sales question read as a probe. Find which instruction produces the ownership refusal and narrow it.
+
+### LVX172 · The spelled surname came out wrong and the call ended before it could be corrected · **OPEN · P2**
+
+Caller spelled the name; transcript "N I C H I N B O D L A"; booked as "Nithin Bodla" (owner's surname on file
+elsewhere is Dodla). The read-back came at 9:07 and the hard end at 9:30 left no turn to correct it. Known limit
+("read-back can't catch spelling"); LVX167 item 3 (finish earlier) gives the correction a turn.
+
+### Also seen on L1, no new item
+
+- Unclear audio transcribed as Spanish ("¿Sabes?", "Vente a llorar a otro lado") -- known, the Live API has no
+  input-language control. The model answered in English; the written transcript holds the Spanish.
+- One reply measured 10.1 s after the caller's last voice (`reply_after_last_voice_ms`), around the booking
+  retry at ~8:00; p50 1.3 s. The owner did not report a silence. Check on the next long call.
+- A real booking was written: Digile Media, Tue 2026-10-13 16:30 CDT (`id_tail 2d6a50`).
