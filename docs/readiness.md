@@ -146,7 +146,12 @@ voicemail.
   voicemail answers; if nothing answers, fall back to the message). Set by us at
   onboarding with the setup questions; no dashboard screen yet. Option 2 means no
   dashboard record, no caller text, and (in the warm transfer) "press 1" off.
-- [ ] **Owner emails are never sent — LAUNCH BLOCKER** (found 2026-10-12, S6 L2;
+- [x] **Owner emails are never sent — LAUNCH BLOCKER — FIXED 2026-10-13.** `28b8111`, live as
+  `voice-uk-prod-00102-q9q`. Test `tests/db/ownerNotifications.test.js` (red before, green after, sabotaged).
+  Live on +18175803291: a left message emailed the owner within 7 s; a blocked call sent no "Missed call" email.
+  Batch-3 plan "E1 fixed". The fix exposed **LVX176**: a message-only call can email the owner a false
+  "Unconfirmed booking — please contact the caller" and file a duplicate request. That is a false alarm, not a
+  lost message (receptionist backlog). Original entry (found 2026-10-12, S6 L2;
   ~0.5–0.75 h + one deploy + one test call). `loadBusinessNotificationConfig`
   (`services/notifications.js`) reads the business with `db.fetchBusinessById`
   outside any tenant scope; `businesses` has FORCE row-level security, so the read

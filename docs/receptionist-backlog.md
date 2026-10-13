@@ -17157,3 +17157,41 @@ by the clock).
   you're going through that, that sounds hard. I'm only able to help with <business> things here, but take your
   time, there's no rush."). Plain off-topic ("let's talk about gaming") gets the polite redirect only. Never "I am
   an AI assistant and cannot offer personal advice".
+
+## E1 live check, 2026-10-13: one new defect, found because owner emails now work
+
+### LVX176 · A message-only call emails the owner a false "Unconfirmed booking" · **OPEN · P1** `[cheap]` ~1–2 h
+
+On the E1 check call `CA6514cf8ba98d599919f2b956d2640782` (test line, 2026-10-13 18:37 UTC) the caller left a
+message, and `record_customer_request` succeeded at 18:39:14. Two emails went out:
+- 18:39:21, correct: "New customer request".
+- 18:39:32, false: "Unconfirmed booking — VetraTD Test Line". Its wording: "told the caller an appointment was
+  booked, cancelled or changed, and no matching record exists… contact the caller".
+
+`postcall_claim_reconciled` also filed a second `customer_request` (`2242220d…`), a triage note, beside the real
+message.
+
+**Why.** `lib/postCallVerify.js` `reconcile()`:
+- Only appointment effects count as writes: `wroteAnything` = booked/changed rows + `writes`, and `writes` holds
+  booked/changed effects only. `postcall_judge` said `wrote_nothing: true`.
+- So the receptionist's "your message has been passed on" claim (`claimed_by_matcher` and `claimed_by_judge`)
+  reconciles as `claim_without_row`.
+- Same class as the CA450e3d callback case, which `topic: "callback"` fixed for callbacks only.
+- Contributing: the claim was spoken at 18:39:12 while the write was still being refused
+  (`live_claim_without_action`), two seconds before it landed.
+
+**Before E1 this was invisible**: the email path was dead, so only the duplicate request showed (in the dashboard).
+Production since 09-29: 2 `claim_without_row` in 53 verified calls.
+
+**Fix shape (not built):**
+- A successful `record_customer_request` backs a message-topic claim, the way a booked callback backs a callback
+  claim. It must never vouch for a booking claim.
+- `notifyUnconfirmedClaim`'s sentence must not say "appointment" when the claim was not about one.
+- Test: replay this call's ledger shape. Fits receptionist round A as a `[cheap]` add-on (owner decides).
+
+**Also seen on this call, no new item:** the message write was gated three times before it landed:
+1. 18:38:51: `agreed_now` with no read-back yet.
+2. 18:39:01: `write_order_refused`.
+3. 18:39:12: `write_refused_no_consent`.
+
+The caller heard extra read-backs. Same class as [guards that ask get declined] / [a mangled yes].

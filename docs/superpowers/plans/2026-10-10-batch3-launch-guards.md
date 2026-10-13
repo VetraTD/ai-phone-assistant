@@ -30,6 +30,7 @@ NOBYPASSRLS), vitest + supertest, Twilio Functions (serverless, "Protected").
 | S4 | Loop guard + block list + repeat-caller alerts | 3.5–4.5 | **done 2026-10-12** in ≈3.2 h actual (≈0.55 h planning incl. 3 owner answers + ≈2.6 h execution); code head `8d66ff4` — see "S4 as built" |
 | S5 | Twilio fallback Function + fallback-URL script + runbook + checkpoint (full sabotage, final review) | 3–4 | **done 2026-10-12** in ≈3.5 h actual (≈0.4 h planning incl. 3 owner answers + ≈3.1 h execution, of which ≈1.8 h was the full sabotage + gate at the final sha); code head `c185ff5` — see "S5 as built" |
 | S6 | ONE deploy (gcloud, main checkout) + live test calls (~$4–5, approved separately) | 3–4 | **done 2026-10-12** in ≈6.0 h (16:06–22:10 CDT; over by ≈2 h: owner design talks on the fallback rule and the call ending, the owner-email bug trace, the token-exposure fix); LIVE `voice-uk-prod-00101-fk2` @ `c185ff5`; L1–L7 all guards passed, owner emails broken (E1, launch blocker) — see "S6 as built" |
+| E1 | Owner-email fix + ONE deploy + 2 live calls (~$0.10) | 1.5–2 | **done 2026-10-13** in ≈1.7 h active; LIVE `voice-uk-prod-00102-q9q` @ `28b8111`; message email arrived, blocked call sent no Missed-call email; new LVX176 (false "Unconfirmed booking" email) — see "E1 fixed" |
 | | **Total** | **21.5–27** | |
 
 **Execution (owner 2026-10-10):** subagent-driven, faster variant (sonnet implementers + reviewers; opus
@@ -644,6 +645,62 @@ during the fallback Dial (S5 note "Fallback ringback") was not explicitly confir
 - **Backups:** `.superpowers/backups/2026-10-12-s6-1171-show.txt` and `…-uk-show.txt`.
 - **Scratch scripts** (session scratchpad, not committed): `numbers.mjs`, `set-number.mjs`, `deploy-fn.mjs`,
   `sigcheck.mjs`, `recent.mjs`, `job.sh`.
+
+### E1 fixed (2026-10-13) — owner emails work in production
+
+**Fix:** `28b8111` `fix(notifications): read the business inside its tenant scope (E1)`.
+- `loadBusinessNotificationConfig` now reads the business inside its own `db.withTenantSafe(businessId, …)` unit.
+  Every caller fires `notify*` after its own unit of work has resolved (`.then` or after an await), so it had no
+  scope to inherit.
+- Owner-approved addition: a row that cannot be read logs `notification_business_unreadable` (`businessId`, warn)
+  instead of returning in silence. **Follow-up, not done:** add it to alert policy `15114942414748467079`.
+- Root mocks in `tests/notifications.drops.test.js` / `notifications.phi.test.js` gained `withTenantSafe`.
+
+**Test:** `tests/db/ownerNotifications.test.js` (8 tests). It runs the real module on real Postgres as `vetra_app`,
+with only the SMTP transport mocked.
+- Before the fix, the 4 paths (appointment, unconfirmed booking, customer request, missed call) were RED. The
+  nested-scope case was green, which confirmed the missing scope as the cause.
+- After the fix: 8/8.
+- Hand-sabotage at `28b8111` in the gate worktree (wrap removed): exactly those 4 went red, then the file was
+  restored and the tree was clean. Db tests can't be `sabotage.mjs` rows (the root config excludes `tests/db`).
+
+**Gate (`gate-v3.sh 28b8111 e1 db`):**
+- root 309 files / 7618 tests passed, with the known load flake `Timeout calling "onTaskUpdate"` (1 error, 0
+  failures);
+- census 152 rows OK;
+- db 50 files / 690 tests passed.
+
+**Other unscoped-looking `fetchBusinessById` callers: none affected.** `lib/outbound/callContext.js:114`,
+`lib/outbound/liveRender.js:441` and `lib/probe/outboundSeed.js:164` all run inside `db.withTenant(…)`.
+`server.js:1507/1537` already use `withTenantSafe`.
+
+**Deploy (gcloud, main checkout, clean tree):**
+- Build `96c9e538`. Image `voice@sha256:c3ef3cb166507e02c881d6bee584acf56f4255a134697b1f13f4385cd81323e3`.
+- Migrate job image → `:28b8111`; `migrate --status` (`-knvx2`) showed 53 applied, none pending, no "edited".
+- LIVE `voice-uk-prod-00102-q9q` @ `28b8111`, 100% traffic.
+- Env diff vs `00101-fk2` = only `GIT_COMMIT_SHA` c185ff5→28b8111. The rest of the spec is identical apart from
+  the knative nonce.
+- Boot clean: no crash, no `dial_cost_table_stale`, no `live_call_clock_config_refused`; `sms_channel_off` as
+  expected.
+- Rollback: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00101-fk2=100`
+  (`c185ff5`).
+
+**Live check on +18175803291** (owner's phone; ~$0.10 approved):
+
+| Call | CallSid | Result |
+|---|---|---|
+| a. leave a message | `CA6514cf8ba98d599919f2b956d2640782` | **PASS.** `record_customer_request` succeeded at 18:39:14 UTC. "New customer request — VetraTD Test Line" reached nithinjd06@gmail.com at 18:39:21 (SENT+INBOX). Also sent: a FALSE "Unconfirmed booking" email at 18:39:32 → LVX176. |
+| b. blocked caller | `CAf99ee5d0b369123703790b78afb1a660` | **PASS.** `block-caller --add … --business +18175803291 --days 1` (dry run, then confirm; list showed 1) → `inbound_caller_blocked` → status `no-answer` 0 s → `db_unscoped_fallback completeCall` (no business resolved, so `notifyCallMissed` never ran) → no "Missed call" email after 3+ min. Then `--remove` (dry run, then confirm) → list 0 rows. |
+
+Still unproven live: the bounced-leg (L5 shape) Missed-call check. It has the same `db_unscoped_fallback` shape as
+(b), so it is expected to send nothing as well. The positive Missed-call email and the appointment email are
+proven offline only (the db test).
+
+**New finding → `docs/receptionist-backlog.md` LVX176:** a message-only call can send the owner a false
+"Unconfirmed booking" email and file a duplicate triage request.
+
+Time: ≈1.7 h active (00:35–01:15 CDT planning, fix and deploy; 13:37–14:45 CDT live check and docs). Production
+since 09-29 shows 2 `claim_without_row` in 53 verified calls.
 
 ---
 
