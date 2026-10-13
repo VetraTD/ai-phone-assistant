@@ -83,8 +83,19 @@ function checkRateLimit(businessId) {
  */
 export async function loadBusinessNotificationConfig(businessId) {
   if (!db.isEnabled() || !businessId) return null;
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return null;
+  // Scoped, in its own unit of work (S6 finding E1). Every caller fires a
+  // notify* AFTER its own withTenantSafe has resolved, so there is no scope to
+  // inherit; unscoped, `businesses` (FORCE row-level security, read as the
+  // NOBYPASSRLS vetra_app) returned no row and every owner email was skipped
+  // in silence from the GCP cutover until 2026-10-13.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
+  if (!business) {
+    // The silence is what hid E1. No address and no subject: the id is enough.
+    log.error("notification_business_unreadable", { businessId, severity: "warn" });
+    return null;
+  }
   if (business.notifications_enabled === false) return null;
   const email = typeof business.notification_email === "string" && business.notification_email.trim()
     ? business.notification_email.trim()

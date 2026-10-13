@@ -43,6 +43,7 @@ const BUSINESS = {
 
 vi.mock("../services/db.js", () => ({
   isEnabled: () => true,
+  withTenantSafe: async (_businessId, fn) => fn(),
   fetchBusinessById: async () => BUSINESS,
 }));
 
