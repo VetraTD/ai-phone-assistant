@@ -21,7 +21,8 @@ Owner decisions there are final.
 | Plan | exploration + plan + 4 owner answers | **done 2026-10-13** (~0.9 h) — `b19cc5c` |
 | S1 | T1 detectors, T2 save policy, T3 spell once, T7 replay/test updates | **done 2026-10-13** (~1.9 h active) — code head `a7d2d99`, see "S1 as built" |
 | S2 | T4 prompts, T5 closing, T5b silence (added after S1), T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | **built 2026-10-13** (~2.5 h active) — code head `c185a97`; full sabotage pending, see "S2 as built" |
-| Part 2 | one deploy + 3 live calls | after S2 |
+| S3 | I3: a same-call message correction updates the first message; one owner email (owner, after S2) | next (~1–1.5 h) — starting message under "S3" |
+| Part 2 | one deploy + live calls a–d | after S3 |
 
 ## Owner answers (2026-10-13, planning)
 - Q1 same breath: **save in same breath**; when the read-back is not visible at tool time, refuse once with the
@@ -435,7 +436,34 @@ old rule · eval scenarios 18/32/39/40/42/44/45 encode the old flow (not run, no
 that now" and hung up silently is not booked (owner-accepted; the neutral "may need a call back" alert covers it) ·
 "Yes, sorry" said as a hedge saves.
 
-## Part 2 starting message (paste into a fresh session)
+## S3 — owner, 2026-10-13 (after S2): fix I3 before part 2
+
+Owner chose "fix before deploy": a caller who corrects a message on the same call ("no, it's 0 1 2 4") must not file a
+second message — the correction UPDATES the first one, and the owner gets ONE "New customer request" email with the
+final details. Est. ~1–1.5 h active. Today: `capabilities/messages.js:226` `db.createCustomerRequest` then `:240`
+`notifyCustomerRequest` fire on every `record_customer_request` (same for `record_quote_request`), no de-dupe. Design
+question for S3 to settle on the code (explore first): one email with the final details means the email must wait until
+the message can no longer change (end of call, or a short quiet window) — check how post-call / `saveOutstandingMessage`
+and the owner-email path already run before choosing; the row update is a same-call, same-request-type match. Tests red
+first; sabotage rows for "a correction updates, not inserts" and "one email per message"; gate: root + census + test:db,
+then `--only` on the rows `rows-touched.mjs` lists for `c185a97..HEAD` (a full run only if most rows are touched). Part
+2's call (a) then checks: correct the number once → one row, one email, with the corrected number.
+
+## S3 starting message (paste into a fresh session)
+
+> Run receptionist round A1 — S3: fix review finding I3 before part 2. Plan:
+> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built" and "S3". Ledger
+> `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`, code head `c185a97`.
+> FIRST read the full sabotage verdict started 22:54 CDT 2026-10-13: `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s2-final.log`
+> (+ `-sab.log`); pass = every row red except `ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`; if
+> it never finished (look for `^ALL-DONE`; check for orphans and a `.sabotage-in-progress` journal in `ai-phone-gate`),
+> resume with `--from <row>`; fill the verdict into "S2 as built" (replace SABOTAGE_PENDING). Any green row is a
+> finding: fix red-first. Then I3 (owner: a same-call correction updates the first message; ONE owner email with the
+> final details). Rules: no paid runs; never deploy; never git checkout over uncommitted work in the main tree; serialize
+> vitest; census after every edit to tools.js/index.js/strings.js; stop and ask at 2 h. End with S3 as built and an
+> updated part-2 starting message.
+
+## Part 2 starting message (paste into a fresh session — AFTER S3)
 
 > Run receptionist round A1 "say it once" — part 2: ONE deploy + live calls. Plan:
 > `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built" and "Part 2". Ledger
