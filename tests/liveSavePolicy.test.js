@@ -178,6 +178,21 @@ describe("decideSave — the pure decision", () => {
     ).toBe(false);
   });
 
+  // Final review I2. "Same breath" saves a STATEMENT read-back ("…booking that
+  // now"). A read-back that ASKS ("…shall I go ahead and book that?") has asked
+  // for an answer; saving before it comes is the CA6b662e / LVX95 shape. Held,
+  // awaiting the answer -- and the read-back then stands for the next turn.
+  it("an in-turn read-back that asks a question awaits the answer", () => {
+    const asked = `Just to confirm, ${SAID.replace(/, booking that now\.$/, "")}. Shall I go ahead and book that?`;
+    const d = decideSave({ ...base, inTurnReplyText: asked });
+    expect(d).toMatchObject({ readBackSource: "in_turn", readBackStanding: true, agreed: false, awaitingAnswer: true });
+  });
+
+  it("an in-turn statement read-back still saves (owner Q1)", () => {
+    const d = decideSave({ ...base, inTurnReplyText: SAID });
+    expect(d).toMatchObject({ readBackSource: "in_turn", agreed: true, awaitingAnswer: false });
+  });
+
   it("an absent wire (null) is not read as silence", () => {
     const d = decideSave({ ...base, lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: null });
     expect(d).toMatchObject({ agreed: true, awaitingAnswer: false });
@@ -309,6 +324,34 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     expect(functionResponse.response.message).toMatch(/WAIT/);
     expect(functionResponse.response.message).not.toMatch(/did not agree/i);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  // Final review I4: a yes that carries a change is a change. isAffirmative
+  // alone used to pass the write-order gate and book the OLD slot.
+  it.each(["Yeah, make it four.", "Sure, can we make it 4 though", "Yeah, what time was that again?"])(
+    "holds a yes that carries a change or a question: %j",
+    async (said) => {
+      const { functionResponse } = await book(live({ lastReplyText: SAID, lastCallerText: said }));
+      expect(functionResponse.response.success).toBe(false);
+      expect(mockCreateAppointment).not.toHaveBeenCalled();
+    }
+  );
+
+  it("holds a booking whose read-back is a question asked in the same breath", async () => {
+    const asked = `Just to confirm, ${SAID.replace(/, booking that now\.$/, "")}. Shall I go ahead and book that?`;
+    const { functionResponse } = await book(live({ inTurnReplyText: asked, lastCallerText: "Ten works." }));
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/WAIT/);
+    expect(functionResponse.response.message).not.toMatch(/whether to go ahead/i);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("a held awaiting booking is stashed, so the caller's yes can re-issue it", async () => {
+    const { stateEffects } = await book(
+      live({ lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: false })
+    );
+    const packs = Object.values(stateEffects.capabilityState || {});
+    expect(packs.some((p) => p?.pendingWrite?.name === "book_appointment")).toBe(true);
   });
 
   it("an objection is answered, not re-confirmed", async () => {

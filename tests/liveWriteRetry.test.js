@@ -610,14 +610,23 @@ describe("a gated retry is not a failed retry", () => {
     expect(notes.find((t) => /did not go through/i.test(t))).toBeFalsy();
   });
 
-  it("tells the model to ask for the go-ahead instead, and to say nothing is wrong", async () => {
+  // CHANGED 2026-10-13 (round A1, final review I1). Was "tells the model to ask
+  // for the go-ahead instead": "Read the details back ... and ask whether to go
+  // ahead" -- for a BOOKING that is the second read-back and the second yes A1
+  // removes (the model usually read it back once already, as a statement the
+  // retry's strict rule cannot see). The retry keeps its strict rule (owner);
+  // the note now has the model call again, and ITS call is judged by A1 -- with
+  // nothing read back, that call's refusal hands it the one sentence to say.
+  it("tells the model to call the booking again -- no second read-back, no yes -- and that nothing is wrong", async () => {
     const s = await boot({ retryGated: true });
     await s.book();
     await s.spell();
 
     const note = s.notes().find((t) => /NOT A FAILURE/.test(t));
     expect(note).toBeTruthy();
-    expect(note).toMatch(/ask whether to go ahead/i);
+    expect(note).not.toMatch(/ask whether to go ahead/i);
+    expect(note).toMatch(/Call book_appointment again now/);
+    expect(note).toMatch(/do not ask the caller to confirm/i);
     expect(note).toMatch(/do not (say it failed|offer)/i);
   });
 

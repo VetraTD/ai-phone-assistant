@@ -48,6 +48,20 @@ describe("farewellBeforeAsk — what it must not count", () => {
     expect(farewellBeforeAsk("Thanks for calling Digile Media, and have a great day.", EN)).toBe(false);
   });
 
+  // Final review: phrases that are not goodbyes, counted against a target of 0.
+  it.each([
+    "I'll take care of that for you. Is there anything else I can help you with?",
+    "Do you have a day in mind? Is there anything else you'd like to add?",
+    "We have a morning slot open. Is there anything else you need?",
+    "Good morning, thanks for calling Digile Media. Is there anything else I can help with?",
+  ])("not a goodbye before the ask: %j", (t) => {
+    expect(farewellBeforeAsk(t, EN)).toBe(false);
+  });
+
+  it("the default greeting does not open with a goodbye", () => {
+    expect(farewellIndex("Good morning, thanks for calling Digile Media. How can I help you today?", EN)).toBe(-1);
+  });
+
   it("empty or missing text", () => {
     expect(farewellBeforeAsk("", EN)).toBe(false);
     expect(farewellBeforeAsk(undefined, EN)).toBe(false);

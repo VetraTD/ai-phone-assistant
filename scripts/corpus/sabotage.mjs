@@ -154,6 +154,7 @@ const A1_SILENCEREADBACK = "tests/liveSilenceReadBack.test.js";
 const A1_CONFIRMAUDIT = "tests/liveConfirmAudit.test.js";
 const A1_E2E = "tests/liveWritePathEndToEnd.test.js";
 const A1_LIVESILENCE = "tests/liveSilence.test.js";
+const A1_CLOSINGORDER = "tests/closingOrder.test.js";
 // Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
 const CLOCK = "tests/liveCallClock.test.js";
 const POLITE = "tests/livePoliteFailure.test.js";
@@ -1961,6 +1962,71 @@ const SABOTAGES = [
     find: "                const a1Awaiting = a1Booking && a1Save.awaitingAnswer === true;",
     replace: "                const a1Awaiting = false; // SABOTAGE",
     red: [A1_SAVEPOLICY],
+  },
+  // Round A1 final-review fix round (2026-10-13).
+  {
+    name: "in-turn-question-awaits",
+    why: "round A1 final review I2: a read-back that ASKS ('…shall I go ahead and book that?') in the same breath as the tool call waits for the answer; only the statement form ('…booking that now') saves at once. Saving before the answer is the CA6b662e / LVX95 shape.",
+    file: "lib/voice/savePolicy.js",
+    find: "    const asks = /\\?/.test(inTurnReplyText) || !strings?.readBackStatementRe?.test(inTurnReplyText);",
+    replace: "    const asks = false; // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "a1-objection-before-write-order",
+    why: "round A1 final review I4: 'Yeah, make it four' is an objection; the write-order gate passes it on isAffirmative and books the slot that was read back. Held before that gate.",
+    file: "services/tools.js",
+    find: "                  : a1Save.applies && a1Save.objection",
+    replace: "                  : false // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "apology-with-change-objects",
+    why: "round A1 final review I4: the 'Yes, sorry' exemption must not swallow 'Sorry, yes, make it four'.",
+    file: "lib/transcriptUtils.js",
+    find: "  return isAffirmative(rest) && !NEGATION_RE.test(rest) && !callerObjects(rest);",
+    replace: "  return isAffirmative(rest) && !NEGATION_RE.test(rest); // SABOTAGE",
+    red: [A1_READBACKSTMT],
+  },
+  {
+    name: "retry-note-booking-no-second-yes",
+    why: "round A1 final review I1: a held engine retry of a BOOKING tells the model to call again, not to 'read the details back and ask whether to go ahead' -- the second read-back and second yes A1 removes.",
+    file: "lib/voice/live/index.js",
+    find: "        ? saveRuleFor(pending.name) === \"booking\"",
+    replace: "        ? false // SABOTAGE",
+    red: [RETRY],
+  },
+  {
+    name: "awaiting-booking-stashed",
+    why: "round A1 final review I1: a booking held awaiting the answer to its statement read-back is stashed, so the caller's answer can re-issue it (confirmReadBackRe never sees the statement form).",
+    file: "services/tools.js",
+    find: "                    ...(probeReadBack || a1Save.awaitingAnswer === true",
+    replace: "                    ...(probeReadBack // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "farewell-not-take-care-of",
+    why: "LVX178 counter accuracy: 'I'll take care of that… anything else?' is not a goodbye; counted, it fails a target of 0 on a clean call.",
+    file: "lib/voice/strings.js",
+    find: "\\btake\\s+care\\b(?!\\s+of\\b)|",
+    replace: "\\btake\\s+care\\b|",
+    red: [A1_CLOSINGORDER],
+  },
+  {
+    name: "farewell-skips-greeting-lead",
+    why: "LVX178 counter accuracy: 'Good morning, thanks for calling …' is the greeting, not a goodbye.",
+    file: "lib/voice/closingOrder.js",
+    find: "      GREETING_LEAD_RE.test(text.slice(0, m.index))",
+    replace: "      m.index === 0 // SABOTAGE",
+    red: [A1_CLOSINGORDER],
+  },
+  {
+    name: "confirm-readback-tied-to-slot",
+    why: "round A1 T6 accuracy: a booking's read-backs are the ones naming its slot; counting 'I'm putting you through' or a read-back of a slot the caller changed makes saves_over_one_readback nonzero on a clean call.",
+    file: "lib/voice/live/index.js",
+    find: "    !(save.rule === \"booking\" && save.slot) || readBackMentionsSlot(text, save.slot);",
+    replace: "    true; // SABOTAGE",
+    red: [A1_CONFIRMAUDIT],
   },
 ];
 

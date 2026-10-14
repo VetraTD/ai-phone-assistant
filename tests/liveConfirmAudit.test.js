@@ -163,6 +163,26 @@ describe("the confirm block", () => {
     expect(saves[0]).toMatchObject({ readbacks: 1, refusals: 1 });
   });
 
+  it("a booking's read-backs are the ones that name its slot", async () => {
+    // Final review: "I'm putting you through" / a read-back of a slot that was
+    // then changed is not a read-back of THIS booking.
+    const { summary, saves } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_slot" });
+      await availability(s);
+      await s.assistantTurn("Just to confirm, Friday, September 18 at 10:00 AM for Jon Dodla. Does that sound right?");
+      await s.callerSays("Actually, make it two.");
+      await s.assistantTurn(READ_BACK);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(saves[0].readbacks).toBe(1);
+    expect(summary.confirm.saves_over_one_readback).toBe(0);
+    // Both turns were read-backs; only one was of this booking.
+    expect(summary.confirm.readbacks).toBe(2);
+  });
+
   it("ladder lines are never counted as read-backs", async () => {
     const { summary } = await record(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_ladder" });

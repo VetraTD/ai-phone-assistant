@@ -139,6 +139,11 @@ describe("callerObjects — the answer to a read-back that stops a booking", () 
   });
 
   it.each([
+    // Final review I4: the apology exemption must not swallow an amendment
+    // that rides on a "yes".
+    ["a yes, sorry, and a change", "Sorry, yes, make it four."],
+    ["a yes, sorry, and another day", "Sorry, yes, can we do Thursday at 2"],
+    ["yes sorry, another time", "Yes sorry, at four please"],
     ["a name correction", "Sorry, it's John with an H."],
     ["a time correction", "Tuesday, sorry, Wednesday."],
     ["a bare apology", "Sorry."],

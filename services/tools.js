@@ -264,10 +264,10 @@ function a1AwaitingMessage(toolName) {
   return (
     heldWritePreamble(toolName) +
     `you have ALREADY read these details back; do not read them back again and do not ` +
-    `ask them to confirm. The caller has not made a sound since. WAIT for them -- if ` +
-    `they have gone quiet, just check they are still there. As soon as they answer ` +
-    `and do not object, call this again with the same details. Do not tell them ` +
-    `anything went wrong and do not offer a callback.`
+    `ask them to confirm. The caller has not answered yet. WAIT for them -- if they ` +
+    `have gone quiet, just check they are still there. As soon as they answer and do ` +
+    `not object, call this again with the same details. Do not tell them anything ` +
+    `went wrong and do not offer a callback.`
   );
 }
 
@@ -1491,7 +1491,11 @@ export async function executeToolCall(fc, ctx) {
                     // back, a later "yes" is agreement to something the caller
                     // never heard, and re-issuing on it writes exactly what this
                     // gate exists to stop.
-                    ...(probeReadBack
+                    // Round A1 (final review I1): an A1 booking held awaiting the
+                    // answer to its one read-back is stashed too -- the read-back
+                    // happened (statement form, which confirmReadBackRe does not
+                    // see), so the caller's answer may re-issue it.
+                    ...(probeReadBack || a1Save.awaitingAnswer === true
                       ? { pendingWrite: { name: fc.name, args: fc.args || {}, reason: "write_order" } }
                       : {}),
                   },
@@ -1536,7 +1540,26 @@ export async function executeToolCall(fc, ctx) {
                         "meant. Tell them you did not catch that and ask them to say it again.",
                       callerLine: "Sorry, I didn't catch that — could you say it again?",
                     }
-                  : null;
+                  : a1Save.applies && a1Save.objection
+                    ? {
+                        // Final review I4: on the A1 booking rule a yes that
+                        // carries a change or a question ("Yeah, make it four")
+                        // is an objection. The write-order gate below would
+                        // pass it on isAffirmative and book the slot that was
+                        // read back. Held here, NOT stashed: the caller's next
+                        // "OK" must not re-issue the old slot.
+                        counter: "write_refused_a1_objection",
+                        gate: "write_order",
+                        message:
+                          heldWritePreamble(fc.name) +
+                          `the caller did not agree to what you read back: they said no, asked a question ` +
+                          `or changed something. Answer them or make the change. If the details change, ` +
+                          `read the new ones back once in one sentence and call this again; otherwise call ` +
+                          `this again once they are happy. Do not ask them to confirm a second time, do not ` +
+                          `tell them anything went wrong, and do not offer a callback.`,
+                        callerLine: "No problem — what would you like to change?",
+                      }
+                    : null;
             if (consentRefusal) {
               bumpCounter(consentRefusal.counter);
               return {
@@ -1548,7 +1571,8 @@ export async function executeToolCall(fc, ctx) {
                 stateEffects: {
                   // Round A1, T6: which gate held it, for the per-call ledger.
                   writeGateRefusal:
-                    consentRefusal.counter === "write_refused_hesitation" ? "hesitation" : "unusable",
+                    consentRefusal.gate ||
+                    (consentRefusal.counter === "write_refused_hesitation" ? "hesitation" : "unusable"),
                   // silent, for the same reason the spelling gate's event is:
                   // nothing ran, so the session must not narrate work that was
                   // declined. The event still goes out so metrics and the
