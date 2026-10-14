@@ -234,7 +234,12 @@ describe("LVX62 — 'the letters win' keeps the rule and drops the false reason"
     // Neither "overwrite silently" nor "ignore the spelling". On the call that
     // found this, following the old rule would have written "Nighin Dodla"; the
     // model disobeyed and was right, and that disobedience was load-bearing.
-    expect(prefix()).toContain("say the letters back one at a time");
+    // Round A1 (2026-10-13): the letters are still said back one at a time,
+    // but INSIDE the one read-back of the booking or message. The old wording
+    // ("say the letters back one at a time and ask the caller to confirm those
+    // letters") was a separate confirmation the owner heard as "spell it twice".
+    expect(prefix()).toContain("say them back one at a time inside your one read-back");
+    expect(prefix()).not.toContain("confirm those letters");
   });
 
   it("does not send the caller round the loop again", () => {

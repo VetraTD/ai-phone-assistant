@@ -58,8 +58,11 @@ import { bumpCounter } from "../lib/voice/metrics.js";
 const BOOK_APPOINTMENT_DECLARATION = {
   name: "book_appointment",
   description:
-    "Book an appointment after the caller has confirmed the details " +
-    "(name, date/time, service type). Call this only after confirmation.",
+    // Round A1: was "Call this only after confirmation" — a wait for a yes
+    // after the read-back. One read-back, then book unless they object.
+    "Book an appointment. Read the day, the time and the name back ONCE as " +
+    "you book it — e.g. \"Tuesday at 3 for Jon Doe, booking that now\" — and " +
+    "call this in that same response; book it unless the caller objects.",
   parameters: {
     type: "object",
     properties: {
@@ -684,8 +687,11 @@ function bookingGuidance(config, now, canCheck) {
       `4. If a check comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
       `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away. That time is now settled: do NOT call check_appointment_availability again for it while you collect details. You already have the answer, and re-asking makes the caller wait while you check something you have just checked.\n` +
       `6. If there is anything else you are REQUIRED to collect, ask for it one item per turn. If nothing else is required, go straight to the read-back — do not invent extra questions such as asking for a phone number you were not told to collect.\n` +
-      `7. Read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
-      `8. Do NOT call book_appointment until the caller clearly confirms. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
+      // Round A1 (owner, 2026-10-13): was "7. Read all details back and ask a
+      // clear yes/no ... 8. Do NOT call book_appointment until the caller
+      // clearly confirms" — the second yes the owner heard.
+      `7. Read the day, the time and the name back ONCE and book it in the same breath — for example "Tuesday at 3 for Jon Doe, booking that now" — calling book_appointment in that same response. If they spelled their name, say the letters in that one read-back. Do not ask "shall I go ahead?" first.\n` +
+      `8. If the caller objects, asks a question or changes something, deal with that and read back only what changed. Never ask them to confirm the same details twice. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
     );
   }
 
@@ -695,8 +701,8 @@ function bookingGuidance(config, now, canCheck) {
     `1. Ask whether they prefer mornings or afternoons.\n` +
     `2. Ask if any specific days of the week don't work for them.\n` +
     `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
-    `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then read the details back ONCE (name, date, time, service) and book it in the same breath — "Thursday at 2 for Marcus Webb, booking that now" — calling book_appointment in that same response.\n` +
+    `5. Book it unless the caller objects; never ask them to confirm the same details twice.\n` +
     `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
   );
 }

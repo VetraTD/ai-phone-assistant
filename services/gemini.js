@@ -686,7 +686,9 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
           "response as this call — thank them for their time and wish them " +
           "well. Nothing you say after this is heard."
         : "Signal that the conversation is naturally complete and the caller " +
-          "is ready to hang up. You MUST write your warm sign-off in the SAME " +
+          "is ready to hang up: you have asked whether there is anything else " +
+          "and they said no, or they said goodbye. Never say goodbye before " +
+          "that question has been answered. You MUST write your warm sign-off in the SAME " +
           "response as this call — thank them for calling, use the business name, " +
           "and wish them well. Nothing you say after this is heard.",
       parameters: {
@@ -1306,7 +1308,11 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // solicit a phone number it already had from caller ID, which cost a turn
     // on every booking. The live failure this addresses was a caller reading
     // out a number and an email that were written down without being checked.
-    `Before writing or changing anything (booking, cancellation, message), read the details back and get a clear "yes" from the caller first. Any contact details the caller gives you get read back too — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
+    // Round A1 (owner, 2026-10-13: "it shouldn't make me say yes twice"). Was
+    // one rule for every write: read back, then wait for a clear "yes". The
+    // gate now saves a message as soon as it is called, and a booking after
+    // ONE read-back unless the caller objects; cancellations keep the yes.
+    `Before saving anything, read the details back ONCE, then do it. A message or quote request: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: say the day, the time and the name once as you book it — for example "Tuesday at 3 for Jon Doe, booking that now" — and book it unless the caller objects. A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
     // From a live call: asked about "my wife Sarah", the assistant went looking
     // for a third party's booking by name — and on another it read the name
     // OUT of the record and asked the caller to confirm it, which is
@@ -1457,7 +1463,7 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   // This is the change in this round carrying the most uncertainty: it is prompt
   // text on the path an eval band would measure, and no band has been run
   // (LVX43 notes the reworded spelling gate has never had one either).
-  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too. If the letters produce something that does not look like a name, or they differ from what you heard by a single letter, do not just overwrite it: say the letters back one at a time and ask the caller to confirm those letters, and use what they tell you. Never ask them to spell it a second time from scratch.\n`;
+  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too. If the letters produce something that does not look like a name, or they differ from what you heard by a single letter, do not just overwrite it: use the letters, and say them back one at a time inside your one read-back of the booking or message — not as a separate question. If the caller corrects a letter, use what they tell you. Never ask them to spell it a second time from scratch.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   // M5 (checkpoint 2b review): "take their details for follow-up" is the
   // same phantom-tool shape as NNR 1 above, on outbound only.
@@ -2191,7 +2197,8 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
       `=== SPELLING NOT YET CONFIRMED ===\n` +
         `The caller has not spelled a name on this call yet. When they give you a name you are ` +
         `going to write down, ask them — right then, while you are still taking details — to spell ` +
-        `it, and read the letters back. Do not leave it until you are confirming or booking. You ` +
+        `it. The letters are said back once, inside your read-back of the booking or message — not ` +
+        `as a question of their own. Do not leave it until you are confirming or booking. You ` +
         `cannot record a name until they have spelled it or told you not to bother, so getting this ` +
         `now is what stops you having to interrupt the booking later. If they decline, tell you it ` +
         `is spelled how it sounds, or ignore the question twice, accept the name as you heard it ` +
@@ -2432,8 +2439,10 @@ function buildStepGuidance(step, intent, config, stepExtras = {}) {
 
     case "confirm":
       return (
-        `The action was just completed. Confirm the details to the caller — ` +
-        `read back key information (dates, times, phone numbers). Read phone numbers digit by digit. ` +
+        // Round A1: the details were read back once BEFORE the save. Reading
+        // them back again here was the second confirmation the owner heard.
+        `The action was just completed. Tell the caller in one short sentence that it is done — ` +
+        `do not read the details back again, you already did. ` +
         `Then explicitly ask if there's anything else they need help with. ` +
         // The sentence eval/scenarios/25-intent-switch-midcall.js guards. Same
         // instruction, different mechanism — a caller must still be able to

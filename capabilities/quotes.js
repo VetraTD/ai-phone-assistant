@@ -75,8 +75,10 @@ const QUOTE_GUIDANCE =
   `One question at a time:\n` +
   `1. Ask what specifically they'd like a price for, and listen for details that change the price.\n` +
   `2. Ask for their name.\n` +
-  `3. Ask for the best callback number, and read it back digit by digit to confirm.\n` +
-  `4. Read back what they asked about, then call record_quote_request.\n` +
+  // Round A1: the number had its own read-back before the summary. One
+  // summary now, recorded straight away.
+  `3. Ask for the best callback number.\n` +
+  `4. Summarise once, in one breath — what they want priced and their number digit by digit — and call record_quote_request straight away. If they correct anything, record it again with the fix.\n` +
   `NEVER give a price, a range, or an estimate — not even "usually around". You do not have ` +
   `pricing, and a number you invent is one the business has to honor. If the caller pushes for ` +
   `a figure, say you'd rather have someone give them an accurate number than guess.`;

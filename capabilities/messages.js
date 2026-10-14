@@ -71,12 +71,15 @@ const MESSAGE_PROTOCOL_SECTION =
   // it renders on BOOKING calls too — leaving the old sentence here would have
   // reinstated the instruction on exactly the calls the other edit is for.
   `1. Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard, so "Thanks — and what's the best number to reach you on?" is all you need. Once they have spelled it you may use their first name — "Thanks, Nithin — ". If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them to spell it again. Do not ask them to spell anything unless you are told to.\n` +
-  `2. Number: ask for the best callback number. Read it back digit by digit to confirm. If they say "the number I'm calling from", confirm you'll use it.\n` +
+  // Round A1 (owner, 2026-10-13): the number used to be read back on its own
+  // ("Read it back digit by digit to confirm") and the message saved "only
+  // AFTER the read-back is confirmed" — two waits for a yes. Now one summary,
+  // saved in the same breath; a correction files it again.
+  `2. Number: ask for the best callback number. You will read it back digit by digit in your one summary — not now. If they say "the number I'm calling from", use it.\n` +
   `3. Reason: ask briefly what the call is regarding.\n` +
   `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
-  `5. Read the full message back once: name, number, reason. Correct anything they change.\n` +
-  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."\n` +
-  `Record it with record_customer_request only AFTER the read-back is confirmed.`;
+  `5. Summarise it ONCE, in one breath — name, the number digit by digit, the reason — and record it with record_customer_request in that same response: "So that's Jon on 2 1 4, 5 5 5, 0 1 2 3 about the invoice — passing that on now." Do not wait for a yes. If they correct anything, record it again with the fix.\n` +
+  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."`;
 
 /**
  * Step guidance for the two message intents. Callbacks additionally collect a
@@ -86,13 +89,12 @@ const MESSAGE_PROTOCOL_SECTION =
 function messageGuidance(intent) {
   return (
     `Your task: Follow the message protocol, one question at a time: ` +
-    `(1) ask for their name; (2) ask for the best callback number and read it back digit by digit to confirm; ` +
+    `(1) ask for their name; (2) ask for the best callback number; ` +
     `(3) ask briefly what the call is regarding` +
     (intent === "callback_request" ? ` and their preferred callback time` : ``) +
     `; (4) ask if it's urgent or if the next business day is fine; ` +
-    `(5) read the full message back once — name, number, reason — and correct anything they change; ` +
-    `(6) promise the callback. ` +
-    `Only call record_customer_request after the read-back is confirmed.`
+    `(5) summarise it once — name, the number digit by digit, reason — and call record_customer_request in that same response, without waiting for a yes; if they correct anything, record it again with the fix; ` +
+    `(6) promise the callback.`
   );
 }
 
