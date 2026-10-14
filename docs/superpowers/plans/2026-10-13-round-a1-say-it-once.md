@@ -20,7 +20,7 @@ Owner decisions there are final.
 |---|---|---|
 | Plan | exploration + plan + 4 owner answers | **done 2026-10-13** (~0.9 h) — `b19cc5c` |
 | S1 | T1 detectors, T2 save policy, T3 spell once, T7 replay/test updates | **done 2026-10-13** (~1.9 h active) — code head `a7d2d99`, see "S1 as built" |
-| S2 | T4 prompts, T5 closing, T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | next — starting message at the bottom |
+| S2 | T4 prompts, T5 closing, T5b silence (added after S1), T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | next (~3.5–4 h active + ~2 h machine) — starting message at the bottom |
 | Part 2 | one deploy + 3 live calls | after S2 |
 
 ## Owner answers (2026-10-13, planning)
@@ -167,6 +167,54 @@ previous-turn farewell flag).
 - [ ] Red tests in `tests/liveEndCallAsk.test.js` (refusal text has no goodbye, starts with the ask) and
   `tests/liveCompletionAsk.test.js` (backwards counter: one-breath and two-turn shapes; ask-then-goodbye = 0).
 
+### T5b · Silence like a person + the A1 silence correction — 1–1.5 h (added by the owner after S1)
+Owner, 2026-10-13 evening: "If there is silence, shouldn't it behave like a normal receptionist … a polite 'Hello?'
+or 'Are you there?' … then the second one being the normal nudge and then it ending after that if nothing is there?"
+Approved: the wording below, plus reversing S1's ruling that a read-back followed by NO sound at all saves a booking.
+
+**Today (verified at `a7d2d99`).** `checkSilence` in `lib/voice/live/index.js` runs three rungs, each spoken by the
+model in the receptionist's own voice via `speakLine`; any VOICED audio (VAD, not the transcript) resets it. Gaps from
+`SILENCE_THRESHOLDS` (`lib/voice/session.js`): 6–10 s, then +6–8 s, then +8–10 s by step (ending: 4/8/12 s). Text from
+`buildSilenceNudge` / `buildSilenceGoodbye` + `lib/voice/strings.js`:
+rung 1 `nudge1` "I'm still here whenever you're ready." · rung 2 per step, at `confirm` `nudgeConfirm` **"Just say yes
+to confirm, or let me know if anything needs to change."** (a second confirmation — breaks A1) · rung 3
+`goodbyeWithPhone`/`goodbyeNoPhone` "It seems like you may have stepped away. Feel free to call us back at … anytime.
+Have a great day. Goodbye!" then hang up.
+
+**Change 1 — the words (en + es; timings unchanged, they were never measured).**
+| Rung | New line |
+|---|---|
+| 1 | `nudge1`: "Hello? Are you still there?" (es "¿Hola? ¿Sigue ahí?") |
+| 2 | identify / gather lines kept (they help a caller who is thinking); `nudgeConfirm` → "Sorry, are you still there? I've got that ready for you whenever you are." — never "say yes to confirm" (es equivalent); `nudgeDefault` → "Take your time, I'm here when you're ready." |
+| 3 | "I think I've lost you. Feel free to call us back at {phone}. Bye for now." (no-phone variant without the number; es equivalent), then hang up as today |
+Outbound lines (`nudgeOutbound1`, `goodbyeOutbound`) untouched. Any test pinning the old strings: update and name the
+old wording in the commit body.
+
+**Change 2 — the A1 save rule tells "said something the transcript lost" from "made no sound".**
+- New wire `callerVoicedSinceReply`: `lib/voice/live/index.js` sets it true where `spelling_voiced_answer` is decided
+  (utterance close, `voicedMs >= voicedAnswerMs()`), and resets it ONLY where `lastReplyText = replyText` runs (a real
+  reply) — never on a ladder line (`spokenLinePending`), so the read-back standing across a nudge is still judged
+  against the caller's sound since IT (LVX120's rule). Expose in `turnState()`, copy in `lib/voice/live/tools.js`.
+- `decideSave` gains input `callerVoicedSinceReply`. A read-back on the PREVIOUS turn with no voiced sound since →
+  `{ readBackSource: "previous", agreed: false, objection: false, awaitingAnswer: true }` → the write is held (gate a
+  on an empty turn, which already re-stashes it for the retry on a clear yes; gate d's "you called this before they had
+  answered — WAIT" message otherwise). Voiced-but-garbled still saves; the same-breath (in-turn) read-back still saves
+  (owner Q1); messages unchanged.
+- Engine retry and cancels unchanged.
+- Expected test flips (each encodes S1's reversed ruling, say so): `liveWritePathEndToEnd` "A1: a booking read back
+  into silence is saved" → held; `liveConsentLatch` "A1: the second read-back, unanswered, saves" → held;
+  `liveSavePolicy` decideSave/executeToolCall cases with `""` → split into voiced (save) and silent (hold). Corpus
+  replay: fixtures carry caller text but no VAD; if an attempt flips, derive `caller_voiced` in build-fixtures from
+  `live_utterance` voiced frames between the standing turn and the attempt and have the replay `feed(ms, { voiced })`
+  before the call — never just edit `expect`.
+- Accepted edge: a caller who heard "booking that now" and then hung up silently is not booked; post-call may raise the
+  neutral "A caller may need a call back" alert, which is the right outcome for a caller who left mid-booking.
+
+**Tests (red first):** strings tests for the three rungs (and no "yes to confirm" anywhere in the inbound ladder);
+`decideSave` voiced/silent split; `liveToolContext` copy test; a `bootLive` e2e with both ends real: read-back → no
+frames → book is held → `feed(…, { voiced: true })` + "yes" → saved; read-back → voiced frames + "" transcript →
+saved; read-back → ladder rung 1 fires "Hello? Are you still there?" (assert the line sent via `speakLine`).
+
 ### T6 · Measure — 0.75 h
 Files: `lib/voice/live/index.js` (`confirmAudit` ledger, increments in `auditTurn` + `onTool`, summary
 `confirm: { ...confirmAudit },` on its OWN line after the `closing:` anchor), `lib/voice/metrics.js` `COUNTER_NAMES`
@@ -190,7 +238,9 @@ New rows (census 156 → ~169): `message-skips-gates`, `booking-garbled-answer-s
 `booking-question-refuses`, `in-turn-readback-counts`, `in-turn-readback-wire`, `readback-tied-to-slot-a1`,
 `engine-retry-stays-strict`, `cancel-stays-strict`, `spelling-once`, `composed-readback-spells-surname`,
 `statement-readback-regex`, `no-ask-refusal-no-goodbye`, `backwards-goodbye-counter`, `confirm-ledger-wire`,
-`save-confirmations-counted`. Anchors end before any `$\``; census clean.
+`save-confirmations-counted`, and for T5b `silence-hello-first-rung`, `confirm-nudge-never-asks-yes`,
+`no-voice-since-readback-holds`, `voiced-since-reply-wire`, `voiced-flag-survives-nudge`. Anchors end before any `$\``;
+census clean.
 
 ### T9 · Commit, gate, ONE full sabotage — ~0.4 h active + ~2 h machine
 - [ ] Commits per task on `feat/outbound-stage4` (no push). Final sha → `gate-v4.sh` (copy of v3 + `fullsab` mode,
@@ -213,7 +263,7 @@ New rows (census 156 → ~169): `message-skips-gates`, `booking-garbled-answer-s
 |---|---|---|---|
 | Plan (this) | exploration + plan + questions | ~0.8 h | — |
 | Session 1 | T1 + T2 + T3 + T7 → commit, root gate + census | ~3.0 h | ~0.3 h |
-| Session 2 | T4 + T5 + T6 + T8 → commit, full gate + ONE full sabotage + opus review + as-built | ~2.4 h | ~2 h |
+| Session 2 | T4 + T5 + T5b + T6 + T8 → commit, full gate + ONE full sabotage + opus review + as-built | ~3.5–4 h | ~2 h |
 | Part 2 | one deploy + 3 live calls (separate approval) | ~1.5 h | — |
 
 **Session ends:** S1 ends with commits + root gate + census green, this doc's Status updated and an S2 starting
@@ -228,6 +278,9 @@ only `GIT_COMMIT_SHA` (check `VOICE_SPELL_MISS_CAP` unset); boot logs clean. LVX
 (b) book with a spelled surname → one letter-by-letter read-back, saved on first non-objection;
 `saves_over_one_readback` 0, `readback_spelled` 1.
 (c) ending → "anything else?" → no → goodbye; `backwards_goodbye` 0.
+(d) silence (T5b): after the booking read-back say nothing → hear "Hello? Are you still there?" → say "yes" → booked
+once; then on a second short call stay silent throughout → "Hello? Are you still there?", the rung-2 line (never "say
+yes to confirm"), "I think I've lost you…" and the hang-up; nothing booked. `live_silence_line` stages 1-3 in the log.
 
 ## S1 as built (2026-10-13) — what S2 must know
 
@@ -261,7 +314,9 @@ Commits on `feat/outbound-stage4` (not pushed): `b19cc5c` plan · `507a10c` T1 d
   are retries. One flip: `CA0ef8d2` #0 refuse → write. Canary 34/96 unchanged; no cancel attempt flipped.
 
 **Rulings (ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`)**
-- A previous-turn read-back of this slot with NO caller turn since saves a booking (owner Q1: nothing heard = save).
+- ~~A previous-turn read-back of this slot with NO caller turn since saves a booking.~~ **REVERSED by the owner the
+  same evening:** a person checks the caller is still there instead. Built in S2 as T5b (no voiced sound since the
+  read-back → held; the ladder's first rung asks "Hello? Are you still there?").
 - Spelling: built the spec's narrow rule (voiced answer settles), not the plan's cap 2→1, which also re-opened the
   "talked past the question → misheard name written" defect.
 - `write_confirm_readback_prev_turn` (process counter) now also counts A1 read-backs; the A1 per-call ledger (T6) is
@@ -287,12 +342,18 @@ template literal — sabotage rows are applied with `String.replace`, which expa
 
 ## S2 starting message (paste into a fresh session)
 
-> Run receptionist round A1 "say it once" — session S2 of part 1 (T4 prompts, T5 closing, T6 measure, T8 sabotage
-> rows, T9 full gate + ONE full sabotage + opus review). Plan: `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md`
-> — read "S1 as built" first; ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md` (resume after
-> Task 3). Branch `feat/outbound-stage4`, code head `a7d2d99`. Execution: native (superpowers:executing-plans), one
-> opus whole-branch review during the full sabotage. Owner decisions in the plan are final. Also during the sabotage
-> wait: the free 10-03→10-13 log read (refusals per save on post-batch-2 code) with `CLOUDSDK_CONFIG=~/.gcloud-vetra2`.
-> Rules: no paid runs; never git checkout over uncommitted work in the main tree; one full sabotage at the final sha in
-> `ai-phone-gate` (copy gate-v3 → gate-v4 with a `fullsab` mode), waited on in the foreground; stop and ask at 3 h.
-> End with the plan's "S2 as built" and the part-2 starting message.
+> Run receptionist round A1 "say it once" — session S2 of part 1: T4 prompt trims, T5 closing (LVX178), **T5b silence
+> like a person + the A1 silence correction (added by the owner after S1)**, T6 measure, T8 sabotage rows, T9 full gate
+> + ONE full sabotage + opus review. Plan: `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S1 as
+> built" and T5b first; ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md` (resume after Task 3).
+> Branch `feat/outbound-stage4`, code head `a7d2d99` (docs after it). Execution: native (superpowers:executing-plans),
+> one opus whole-branch review during the full sabotage. Owner decisions in the plan are final, including T5b: rung 1
+> "Hello? Are you still there?", rung 2 never asks for a yes, rung 3 "I think I've lost you…"; a read-back followed by NO
+> voiced sound is held (S1's opposite ruling is reversed), voiced-but-garbled still saves, the same-breath read-back
+> still saves. Order: T4 → T5 → T5b → T6 → T8 → T9 (T4 and T5b both touch strings/prompt snapshots — regenerate
+> snapshots once, after both). During the sabotage wait: the free 10-03→10-13 log read with
+> `CLOUDSDK_CONFIG=~/.gcloud-vetra2` — refusals per save on post-batch-2 code, and how long callers pause before
+> answering (for the silence timings, which stay unchanged this round). Rules: no paid runs; never git checkout over
+> uncommitted work in the main tree; one full sabotage at the final sha in `ai-phone-gate` (copy gate-v3 → gate-v4 with
+> a `fullsab` mode), waited on in the foreground; S2 is estimated at ~3.5–4 h active, so stop and ask at 3 h with what is
+> left. End with the plan's "S2 as built" and the part-2 starting message (calls a–d).
