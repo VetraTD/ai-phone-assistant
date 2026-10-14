@@ -180,6 +180,7 @@
     {
       "at": "2026-09-17T06:12:56.268Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

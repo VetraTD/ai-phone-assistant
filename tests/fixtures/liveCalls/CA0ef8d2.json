@@ -166,6 +166,7 @@
     {
       "at": "2026-09-19T15:55:27.192Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -179,8 +180,8 @@
       "observed": "held",
       "refused_by": "write_order",
       "budget_released": false,
-      "expect": "refuse",
-      "why": "'I'll book that for you on Tuesday 22nd at 9 AM. Please confirm these details.' was not recognised as a read-back, and the caller's 'agreed' came before any question had been put. Refusing is right, and the model's response to it -- reading the details back properly and asking -- is the behaviour the refusal text asks for.",
+      "expect": "write",
+      "why": "CHANGED refuse -> write 2026-10-13 (round A1, owner: read back ONCE, then save unless it HEARS a no). 'Great. I'll book that strategy call for you on Tuesday, September 22nd at 9:00 AM. Please confirm these details.' answered 'Yeah, that that works.' The old expectation encoded the rule that only an OFFER ('shall I...?') is a read-back, so this statement read-back did not count and the caller was asked to confirm a second time ('Shall I go ahead and book...?') -- exactly LVX177's complaint. readBackStatementRe now recognises it, it names the slot, and the answer is not a no.",
       "standing_turn": 14,
       "agreed_turn": 14,
       "standing_read_back": "Great. I'll book that strategy call for you on Tuesday, September 22nd at 9:00 AM. Please confirm these details.",
@@ -197,6 +198,7 @@
     {
       "at": "2026-09-19T15:55:37.073Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

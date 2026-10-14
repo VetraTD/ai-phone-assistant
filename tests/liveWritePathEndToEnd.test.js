@@ -129,6 +129,17 @@ const CLIENT = "Nitin Dodla";
 // "just to confirm" is matched by confirmReadBackRe (lib/voice/strings.js).
 const READ_BACK = `Just to confirm, I'm booking you in for Monday, September 7th at 2 00 PM. Does that sound right?`;
 
+// Round A1: the CA422f58 shape on the tool it actually happened to.
+const SEED = {
+  id: "appt-seed",
+  business_id: BUSINESS_ID,
+  client_name: CLIENT,
+  client_phone: "+15551234567",
+  scheduled_at: SLOT,
+  status: "scheduled",
+};
+const CANCEL_READ_BACK = `Just to confirm, you'd like to cancel your appointment on Monday, September 7th at 2 00 PM, is that right?`;
+
 async function boot({ seedAppointments = [] } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
@@ -192,6 +203,13 @@ async function boot({ seedAppointments = [] } = {}) {
     },
     async book(args = { scheduled_at: SLOT, client_name: CLIENT }) {
       live.push({ toolCall: { functionCalls: [{ id: `b${Math.random()}`, name: "book_appointment", args }] } });
+      await settle();
+      await settle();
+    },
+    // Round A1: CA422f58's own tool. Cancels kept the strict rule, so the
+    // silent-turn refusal and its re-issue are pinned on a cancel.
+    async cancel(args = { appointment_id: SEED.id }) {
+      live.push({ toolCall: { functionCalls: [{ id: `c${Math.random()}`, name: "cancel_appointment_db", args }] } });
       await settle();
       await settle();
     },
@@ -325,18 +343,20 @@ describe("the Live write path, end to end, asserted on the row", () => {
   // in the test below. It is "no caller text on this turn AND no agreement token
   // anywhere on the call", and the token is read ONLY to refuse, never to allow.
   // -------------------------------------------------------------------------
+  // ROUND A1 (owner, 2026-10-13): this was a BOOKING until A1, encoding the old
+  // rule "a booking needs a yes the caller was heard to give". Bookings are now
+  // saved unless a no is heard (the twin below), so the refusal is pinned on
+  // the tool CA422f58 actually hit -- a cancellation -- where it still holds.
   it("refuses a write on a silent turn when the caller has agreed to nothing at all", async () => {
-    const s = await boot();
+    const s = await boot({ seedAppointments: [SEED] });
 
-    await s.checkAvailability();
-    await s.assistantTurn(READ_BACK);
+    await s.assistantTurn(CANCEL_READ_BACK);
     // No caller turn at all: the read-back was spoken into silence.
-    await s.book();
+    await s.cancel();
 
-    // WAS 1 until the refusal shipped, asserted as the defect with the comment
-    // "Should be 0". This is the row CA422f58 wrote against a question its
-    // caller had not answered.
-    expect(s.store.scheduled()).toHaveLength(0);
+    // WAS cancelled until the refusal shipped. This is the row CA422f58 changed
+    // against a question its caller had not answered.
+    expect(s.store.scheduled()).toHaveLength(1);
     // Still zero: the refusal returns ABOVE the cascade, so none of it ran.
     expect(c().write_consent_checked ?? 0).toBe(0);
     expect(c().write_order_would_refuse ?? 0).toBe(0);
@@ -354,9 +374,23 @@ describe("the Live write path, end to end, asserted on the row", () => {
     // HELD, NOT FAILED, as a boolean. lib/voice/live/index.js reads exactly this
     // to decide whether to tell the caller the booking did not go through --
     // prose saying "NOT A FAILURE" is not a branch.
-    const r = s.bookResponses().at(-1)?.response;
+    const r = s.toolResponses().filter((x) => x.name === "cancel_appointment_db").at(-1)?.response;
     expect(r?.success).toBe(false);
     expect(r?.gated).toBe(true);
+  });
+
+  it("A1: a booking read back into silence is saved -- nothing was heard, so there is no no", async () => {
+    // The old twin of the test above, under the owner's 2026-10-13 rule. The
+    // caller heard the read-back and did not object; LVX177 measured that
+    // holding these produced second confirmations and false "you're booked".
+    const s = await boot();
+
+    await s.checkAvailability();
+    await s.assistantTurn(READ_BACK);
+    await s.book();
+
+    expect(s.store.scheduled()).toHaveLength(1);
+    expect(c().write_refused_no_consent_silent_turn ?? 0).toBe(0);
   });
 
   // -------------------------------------------------------------------------
@@ -421,26 +455,28 @@ describe("the Live write path, end to end, asserted on the row", () => {
   // CA422f58 should have done: commit at 20:51:49 on the real "Yes." rather than
   // at 20:51:42 on nothing.
   // -------------------------------------------------------------------------
+  // Round A1: a cancel, for the reason given above the silent-turn test.
   it("re-issues the refused write when the caller finally agrees, and writes it once", async () => {
-    const s = await boot();
+    const s = await boot({ seedAppointments: [SEED] });
 
-    await s.checkAvailability();
-    await s.assistantTurn(READ_BACK);
+    await s.assistantTurn(CANCEL_READ_BACK);
     // The caller says nothing. The write is refused, not dropped.
-    await s.book();
-    expect(s.store.scheduled()).toHaveLength(0);
+    await s.cancel();
+    expect(s.store.scheduled()).toHaveLength(1);
     expect(c().write_refused_no_consent_silent_turn).toBe(1);
 
     // NOW they answer the question that was actually put to them. The turn has
     // to close for the engine to see it, which is what assistantTurn does.
     await s.callerSays("Yes.");
-    await s.assistantTurn("Lovely, that's booked in for you.");
+    await s.assistantTurn("Okay, that's cancelled for you.");
     await s.settle();
     await s.settle();
 
-    // THE ROW EXISTS, exactly once, at the time that was read back.
-    expect(s.store.scheduled()).toHaveLength(1);
-    expect(s.store.scheduled()[0].scheduled_at).toContain("2026-09-07");
+    // THE CANCEL LANDED: the seeded row is no longer scheduled. (The re-issue
+    // runs through retryPendingWrite, not the socket, so there is no second
+    // functionResponse to count; the row is the evidence.)
+    expect(s.store.scheduled()).toHaveLength(0);
+    expect(c().write_retry_attempted).toBe(1);
     // And the agreement that released it was a real one, recorded by the ledger
     // rather than inferred from the write having happened.
     expect(c().consent_agreement_recorded).toBe(1);

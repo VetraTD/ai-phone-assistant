@@ -26,6 +26,7 @@ import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
 import { OUTBOUND_CLOSING_RULE } from "../lib/outbound/prompt.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
+import { decideSave, composeReadBack } from "../lib/voice/savePolicy.js";
 import {
   stripFillers,
   isHesitationOnly,
@@ -1185,6 +1186,26 @@ export async function executeToolCall(fc, ctx) {
               !/\?\s*$/.test(lastCallerText.trim()) &&
               readBackMentionsSlot(lastCallerText, writeSlot)
           );
+          // ROUND A1 "SAY IT ONCE" (owner, 2026-10-13). One decision, read by
+          // every gate below and logged by the probe: a message is not gated; a
+          // booking or reschedule needs ONE read-back of this slot (previous turn
+          // or the turn in progress) and is then saved unless the caller
+          // objected. `applies: false` -- the cascade, the end-of-call sweep,
+          // the engine's own retry (fc.id "retry_*", lib/voice/live/index.js
+          // retryPendingWrite), cancels and every other tool -- leaves each gate
+          // exactly as it was. See lib/voice/savePolicy.js.
+          const a1Save = decideSave({
+            toolName: fc.name,
+            onLive: ctx?.callerSaidThisCall != null,
+            lastChance: ctx?.lastChance === true,
+            engineRetry: typeof fc.id === "string" && fc.id.startsWith("retry_"),
+            writeSlot,
+            lastReplyText: probeReply,
+            inTurnReplyText: typeof ctx?.inTurnReplyText === "string" ? ctx.inTurnReplyText : "",
+            lastCallerText,
+            callerRestatedSlot,
+            strings: probeStrings,
+          });
           // TRUST THE AI AFTER A PROPER READ-BACK (owner, 2026-10-02, O3
           // CA9c2d26 "nada más"). Derived here beside LVX144's fact for the same
           // reason: the probe logs it and the gate consumes it, from one copy.
@@ -1202,7 +1223,7 @@ export async function executeToolCall(fc, ctx) {
               writeSlot &&
               readBackMentionsSlot(probeReply, writeSlot) &&
               agreesAfterReadBack(lastCallerText)
-          );
+          ) || a1Save.agreed;
           // WHICH FRONT-END IS THIS, and the answer has to be structural.
           //
           // services/gemini.js never mentions callerSaidThisCall; Live
@@ -1243,7 +1264,12 @@ export async function executeToolCall(fc, ctx) {
                 ? "gate_ran"
                 : probeToken
                   ? "allowed_token"
-                  : "refused_no_consent";
+                  : // A1: a message, or a booking whose one read-back of this
+                    // slot is standing and has not been objected to. Nothing
+                    // was heard, so there is no no to hear (owner, 2026-10-13).
+                    a1Save.applies && a1Save.agreed
+                    ? "a1_save_unless_no"
+                    : "refused_no_consent";
           {
             // WAS THE TURN THE CALLER ANSWERED ASKING MORE THAN ONE THING?
             //
@@ -1311,6 +1337,13 @@ export async function executeToolCall(fc, ctx) {
               // this turn, but they agreed to something earlier;
               // "refused_no_consent" is CA422f58.
               silent_turn_verdict: silentTurnVerdict,
+              // Round A1: which save rule ran and what it found. `a1_rule` is
+              // logged even when the rule does not apply (cancel, strict), so a
+              // cancel reading `a1_applies=false` is proof it kept the old gate.
+              a1_rule: a1Save.rule,
+              a1_applies: a1Save.applies,
+              a1_readback: a1Save.readBackSource,
+              a1_objection: a1Save.objection,
             });
           }
 
@@ -1446,8 +1479,14 @@ export async function executeToolCall(fc, ctx) {
           let orderReleasePatch = null;
 
           if (lastCallerText.trim() !== "") {
+            // Round A1: a message is not held for anything the caller said;
+            // a booking with its read-back standing is not held for a turn that
+            // did not transcribe (garble is not a no), but still is for a bare
+            // "um" (not an answer yet). Cancels and strict tools: unchanged.
             const consentRefusal =
-              isHesitationOnly(lastCallerText)
+              a1Save.applies && a1Save.rule === "message"
+                ? null
+                : isHesitationOnly(lastCallerText)
                 ? {
                     counter: "write_refused_hesitation",
                     message:
@@ -1457,7 +1496,7 @@ export async function executeToolCall(fc, ctx) {
                       "real answer.",
                     callerLine: "Sorry — did you want me to go ahead with that?",
                   }
-                : isUnusableTranscript(lastCallerText)
+                : isUnusableTranscript(lastCallerText) && !(a1Save.applies && a1Save.readBackStanding)
                   ? {
                       counter: "live_unusable_transcript",
                       message:
@@ -1590,7 +1629,12 @@ export async function executeToolCall(fc, ctx) {
             // details -- date, time, name -- because then a read-back for another
             // appointment cannot match. Do not reintroduce a window before that.
             // -----------------------------------------------------------------
-            const readBackMade = Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText));
+            // Round A1: OR the booking rule's read-back (a statement such as
+            // "...booking that now", or one in the turn being spoken), always
+            // tied to this slot; a message needs none. See savePolicy.js.
+            const readBackMade =
+              Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText)) ||
+              (a1Save.applies && a1Save.readBackStanding);
 
             // -----------------------------------------------------------------
             // LVX144. SAYING THE TIME BACK IS AGREEING TO IT.
@@ -2088,7 +2132,37 @@ export async function executeToolCall(fc, ctx) {
                 // asking for another read-back is the defect. Say what is
                 // actually missing instead: the caller's answer, which nobody
                 // has waited for.
-                const message = readBackMade
+                // Round A1 (owner, 2026-10-13): on the booking rule, ONE
+                // read-back. With none standing, the model is handed the exact
+                // sentence -- built from the arguments that will be written,
+                // surname spelled if the caller spelled it (LVX172) -- so the
+                // caller hears the row the business gets, once. With one
+                // standing, the only way here is an objection (a no, a question,
+                // a change): answer it, never re-confirm.
+                const a1Booking = a1Save.applies && a1Save.rule === "booking";
+                const a1Sentence = a1Booking
+                  ? composeReadBack({
+                      toolName: fc.name,
+                      args: fc.args || {},
+                      config: ctx?.config,
+                      callerSpelled: ctx?.callerSpelled === true,
+                    })
+                  : null;
+                const message = a1Booking
+                  ? readBackMade
+                    ? heldWritePreamble(fc.name) +
+                      `the caller did not agree to what you read back: they said no, asked a question ` +
+                      `or changed something. Answer them or make the change. If the details change, ` +
+                      `read the new ones back once in one sentence and call this again; otherwise call ` +
+                      `this again once they are happy. Do not ask them to confirm a second time, do not ` +
+                      `tell them anything went wrong, and do not offer a callback.`
+                    : heldWritePreamble(fc.name) +
+                      `this is still going ahead. Read it back to the caller ONCE, in exactly these ` +
+                      `words and with nothing before them: "${a1Sentence}" Then call this again with the ` +
+                      `same details straight away. If they say no, ask a question or change something, ` +
+                      `sort that out first. Do not ask them to confirm a second time, do not tell them ` +
+                      `anything went wrong, and do not offer a callback.`
+                  : readBackMade
                   ? heldWritePreamble(fc.name) +
                     `you have ALREADY read these details back to the caller; do not read them back ` +
                     `again and do not ask them to confirm a second time. You called this before they ` +
@@ -2122,7 +2196,13 @@ export async function executeToolCall(fc, ctx) {
                     toolResult: {
                       name: fc.name,
                       success: false,
-                      message: "Just to confirm before I do that — shall I go ahead?",
+                      // Round A1: never a second "shall I go ahead?" on the
+                      // booking rule -- the one read-back, or a plain question.
+                      message: a1Booking
+                        ? readBackMade
+                          ? "No problem — what would you like to change?"
+                          : a1Sentence
+                        : "Just to confirm before I do that — shall I go ahead?",
                       callerSafe: true,
                     },
                     toolCallEvent: { name: fc.name, args: fc.args, silent: true },

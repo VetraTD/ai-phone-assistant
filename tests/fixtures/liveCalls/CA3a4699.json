@@ -103,6 +103,7 @@
     {
       "at": "2026-09-19T16:20:22.197Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

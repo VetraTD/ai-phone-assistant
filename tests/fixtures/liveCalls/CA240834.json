@@ -117,6 +117,7 @@
     {
       "at": "2026-09-19T22:43:15.947Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -151,6 +152,7 @@
     {
       "at": "2026-09-19T22:43:26.684Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

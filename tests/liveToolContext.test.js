@@ -96,6 +96,31 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(ctx.lastReplyText).toBe("");
   });
 
+  // Round A1 "say it once". The booking save rule reads a read-back spoken in
+  // the turn in progress, and the handed read-back spells a surname the caller
+  // spelled. Both are produced by lib/voice/live/index.js turnState() and are
+  // dead unless copied here -- the LVX45 shape this file exists for.
+  it("carries inTurnReplyText through to the tool (the A1 in-turn read-back wire)", async () => {
+    const ctx = await ctxFor(() => ({
+      step: "confirm",
+      callerTurnCount: 4,
+      inTurnReplyText: "Friday at 2 PM for Marcus Bell, booking that now.",
+    }));
+    expect(ctx.inTurnReplyText).toBe("Friday at 2 PM for Marcus Bell, booking that now.");
+  });
+
+  it("normalises a missing inTurnReplyText to a string, never undefined", async () => {
+    const ctx = await ctxFor(() => ({ step: "identify_intent", callerTurnCount: 1 }));
+    expect(ctx.inTurnReplyText).toBe("");
+  });
+
+  it("carries callerSpelled through to the tool (the A1/LVX172 wire)", async () => {
+    const yes = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, callerSpelled: true }));
+    expect(yes.callerSpelled).toBe(true);
+    const no = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4 }));
+    expect(no.callerSpelled).toBe(false);
+  });
+
   it("carries the rest of the turn state the gates read", async () => {
     const ctx = await ctxFor(() => ({
       step: "confirm",

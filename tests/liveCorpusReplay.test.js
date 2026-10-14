@@ -193,7 +193,11 @@ async function replay(fixture) {
         await s.callerSays(attempt.caller_text);
         lastSaid = attempt.caller_text;
       }
-      const [response] = await s.callTool(attempt.tool, argsFor(attempt));
+      // Round A1: an attempt the ENGINE issued (retryPendingWrite) goes in with
+      // the id it really carried, because the gate keeps the old rule for it.
+      const [response] = await s.callTool(attempt.tool, argsFor(attempt), {
+        id: attempt.via === "engine_retry" ? `retry_${attempt.tool}` : undefined,
+      });
       results.push({ attempt, response });
     }
   }

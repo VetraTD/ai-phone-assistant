@@ -208,6 +208,7 @@
     {
       "at": "2026-09-19T06:27:55.389Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -239,6 +240,7 @@
     {
       "at": "2026-09-19T06:27:58.914Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -270,6 +272,7 @@
     {
       "at": "2026-09-19T06:28:08.966Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -301,6 +304,7 @@
     {
       "at": "2026-09-19T06:28:09.894Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -332,6 +336,7 @@
     {
       "at": "2026-09-19T06:28:27.741Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -363,6 +368,7 @@
     {
       "at": "2026-09-19T06:28:36.120Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": false,
         "readback_now": true,
@@ -394,6 +400,7 @@
     {
       "at": "2026-09-19T06:28:45.824Z",
       "tool": "reschedule_appointment_db",
+      "via": "engine_retry",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -425,6 +432,7 @@
     {
       "at": "2026-09-19T06:29:18.572Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -456,6 +464,7 @@
     {
       "at": "2026-09-19T06:29:32.115Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -487,6 +496,7 @@
     {
       "at": "2026-09-19T06:29:57.428Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -518,6 +528,7 @@
     {
       "at": "2026-09-19T06:31:20.634Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -549,6 +560,7 @@
     {
       "at": "2026-09-19T06:31:31.529Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

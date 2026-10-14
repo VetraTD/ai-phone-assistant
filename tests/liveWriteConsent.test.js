@@ -202,13 +202,16 @@ describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => 
     expect(functionResponse.response.success).toBe(true);
   });
 
-  it("still refuses that same message write when it is NOT the sweep", async () => {
-    // The exemption is the flag, not the tool. Without it this is an ordinary
-    // write on a turn the caller never spoke on.
+  it("A1: saves that same message write when it is NOT the sweep, too", async () => {
+    // Until round A1 this asserted a REFUSAL: "the exemption is the flag, not
+    // the tool". That encoded the old rule that a message waits for a yes like
+    // a booking does. Owner, 2026-10-13: messages and quote requests have no
+    // read-back gate -- saved on the first clear request (LVX177; the E1 call
+    // CA6514cf8b was refused three times on a message). The booking twin above
+    // ("refuses when the caller's turn was empty...") still refuses.
     const fc = { id: "m1", name: "record_customer_request", args: { request_type: "message" } };
     const { functionResponse } = await executeToolCall(fc, liveCtx());
-    expect(functionResponse.response.success).toBe(false);
-    expect(functionResponse.response.gated).toBe(true);
+    expect(functionResponse.response.success).toBe(true);
   });
 });
 

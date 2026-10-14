@@ -110,6 +110,7 @@
     {
       "at": "2026-09-17T06:02:21.431Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -141,6 +142,7 @@
     {
       "at": "2026-09-17T06:02:32.935Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

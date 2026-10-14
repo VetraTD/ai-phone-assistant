@@ -131,6 +131,7 @@
     {
       "at": "2026-09-18T00:42:42.058Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -164,6 +165,7 @@
     {
       "at": "2026-09-18T00:42:51.051Z",
       "tool": "reschedule_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -195,6 +197,7 @@
     {
       "at": "2026-09-18T00:43:06.216Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -226,6 +229,7 @@
     {
       "at": "2026-09-18T00:43:15.843Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -255,6 +259,7 @@
     {
       "at": "2026-09-18T00:43:22.022Z",
       "tool": "reschedule_appointment_db",
+      "via": "engine_retry",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -284,6 +289,7 @@
     {
       "at": "2026-09-18T00:43:22.746Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": false,
         "readback_now": false,
@@ -313,6 +319,7 @@
     {
       "at": "2026-09-18T00:44:14.172Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

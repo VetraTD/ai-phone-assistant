@@ -159,6 +159,7 @@
     {
       "at": "2026-09-18T14:21:38.321Z",
       "tool": "cancel_appointment_db",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -190,6 +191,7 @@
     {
       "at": "2026-09-18T14:23:16.299Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,
@@ -221,6 +223,7 @@
     {
       "at": "2026-09-18T14:23:28.571Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -252,6 +255,7 @@
     {
       "at": "2026-09-18T14:23:38.555Z",
       "tool": "book_appointment",
+      "via": "engine_retry",
       "probe": {
         "gate_ran": true,
         "readback_now": false,
@@ -281,6 +285,7 @@
     {
       "at": "2026-09-18T14:23:42.528Z",
       "tool": "book_appointment",
+      "via": "model",
       "probe": {
         "gate_ran": true,
         "readback_now": true,

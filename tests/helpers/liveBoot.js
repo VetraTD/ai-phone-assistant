@@ -340,10 +340,12 @@ export async function bootLive({
       return live.sent.toolResponses.slice(before).flatMap((m) => m.functionResponses || []);
     },
 
-    async callTool(name, args = {}) {
+    async callTool(name, args = {}, { id } = {}) {
       const before = live.sent.toolResponses.length;
       toolSeq += 1;
-      live.push({ toolCall: { functionCalls: [{ id: `fc${toolSeq}`, name, args }] } });
+      // `id` lets a replay issue a call the way retryPendingWrite does
+      // ("retry_<tool>"), which the gate treats differently since round A1.
+      live.push({ toolCall: { functionCalls: [{ id: id || `fc${toolSeq}`, name, args }] } });
       await settle();
       await settle();
       return live.sent.toolResponses

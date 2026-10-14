@@ -741,8 +741,8 @@ const EXPECTATIONS = {
     note: "3.8, rev 00085. Booked correctly with no fabrication -- refused once, asked properly, then wrote. The refusal loop working exactly as designed. It is also the call that wrote the WRONG NAME: the caller spelled their surname out letter by letter, correctly, and the row still carries the version the model had misheard three turns earlier (LVX62).",
     attempts: [
       {
-        expect: "refuse",
-        why: "'I'll book that for you on Tuesday 22nd at 9 AM. Please confirm these details.' was not recognised as a read-back, and the caller's 'agreed' came before any question had been put. Refusing is right, and the model's response to it -- reading the details back properly and asking -- is the behaviour the refusal text asks for.",
+        expect: "write",
+        why: "CHANGED refuse -> write 2026-10-13 (round A1, owner: read back ONCE, then save unless it HEARS a no). 'Great. I'll book that strategy call for you on Tuesday, September 22nd at 9:00 AM. Please confirm these details.' answered 'Yeah, that that works.' The old expectation encoded the rule that only an OFFER ('shall I...?') is a read-back, so this statement read-back did not count and the caller was asked to confirm a second time ('Shall I go ahead and book...?') -- exactly LVX177's complaint. readBackStatementRe now recognises it, it names the slot, and the answer is not a no.",
       },
       {
         expect: "write",
@@ -1056,6 +1056,11 @@ function build(file) {
   const orderRefusals = events.filter((e) => e.event === "write_order_refused");
   const consentRefusals = events.filter((e) => e.event === "write_refused_no_consent");
   const budgetReleases = events.filter((e) => e.event === "write_attempt_budget_released");
+  // Round A1: who issued the write. retryPendingWrite logs live_write_retried
+  // in the same millisecond as its probe; a model call logs nothing of the
+  // kind. The gate treats the two differently since A1 (the engine's retry
+  // keeps the old, stricter rule), so the replay has to know which it was.
+  const retries = events.filter((e) => e.event === "live_write_retried");
   const nearest = (list, ts, tool) => {
     let best = null;
     let bestGap = Infinity;
@@ -1149,6 +1154,7 @@ function build(file) {
     return {
       at: p.ts,
       tool: p.tool,
+      via: nearest(retries, p.ts, p.tool) ? "engine_retry" : "model",
       probe: {
         gate_ran: p.gate_ran,
         readback_now: p.readback_now,

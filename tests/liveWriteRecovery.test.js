@@ -150,7 +150,10 @@ describe("an apology must not buy the gate another refusal", () => {
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
     await s.callerSays("Friday afternoon please.");
     await s.assistantTurn(READ_BACK);
-    await s.callerSays("");
+    // Round A1: was "" (silence). Under "save unless it HEARS a no" a silent
+    // answer to a read-back now saves a booking, so the refusal this test needs
+    // comes from an answer every rule reads as a hold.
+    await s.callerSays("Hang on.");
     expect(ok(await s.callTool("book_appointment", bookArgs()))).toBe(false);
 
     // The caller changes their mind. A different time is a different question,

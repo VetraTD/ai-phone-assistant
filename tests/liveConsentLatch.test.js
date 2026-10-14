@@ -403,7 +403,13 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     await s.assistantTurn(
       `Just to confirm, I'm booking you in for Monday, September 7th at 3 00 PM instead. Does that sound right?`
     );
-    await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
+    // Round A1 (owner, 2026-10-13): this used to write OTHER_SLOT and assert a
+    // refusal -- the old rule that a booking needs a yes heard on this turn.
+    // Under "save unless it HEARS a no" the 3 PM read-back, unanswered, now
+    // saves (the twin below). What this test exists for is the agreement given
+    // to 2 PM being spent on something else, so it now writes the SUPERSEDED
+    // slot: the caller's yes was to 2 PM, but the read-back standing is 3 PM.
+    await s.book({ scheduled_at: SLOT, client_name: CLIENT });
 
     // The counter records that the token no longer matches the standing
     // read-back. Since 2026-09-17 that is MEASUREMENT and not the decision --
@@ -412,6 +418,23 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     // here must not be able to come from the counter alone.
     expect(c().write_consent_agreement_superseded).toBe(1);
     expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  it("A1: the second read-back, unanswered, saves the slot it names", async () => {
+    const s = await boot();
+
+    await s.checkAvailability(SLOT);
+    await s.checkAvailability(OTHER_SLOT);
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes.");
+    await s.assistantTurn(
+      `Just to confirm, I'm booking you in for Monday, September 7th at 3 00 PM instead. Does that sound right?`
+    );
+    await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
+
+    expect(s.store.scheduled()).toHaveLength(1);
+    // 3 PM Chicago (CDT), stored as an instant: the slot the standing read-back named.
+    expect(s.store.scheduled()[0].scheduled_at).toBe("2026-09-07T20:00:00.000Z");
   });
 
   // -------------------------------------------------------------------------
