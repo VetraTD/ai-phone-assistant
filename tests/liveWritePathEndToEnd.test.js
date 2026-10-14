@@ -379,18 +379,25 @@ describe("the Live write path, end to end, asserted on the row", () => {
     expect(r?.gated).toBe(true);
   });
 
-  it("A1: a booking read back into silence is saved -- nothing was heard, so there is no no", async () => {
-    // The old twin of the test above, under the owner's 2026-10-13 rule. The
-    // caller heard the read-back and did not object; LVX177 measured that
-    // holding these produced second confirmations and false "you're booked".
+  // CHANGED 2026-10-13 (round A1, T5b). Was "A1: a booking read back into
+  // silence is saved -- nothing was heard, so there is no no", which encoded
+  // S1's ruling that a previous-turn read-back with no caller turn since saves.
+  // The owner reversed it the same evening: a person who reads a booking back
+  // and hears nothing checks the caller is there; they do not book it. A sound
+  // the transcript lost still saves (tests/liveSilenceReadBack.test.js).
+  it("A1/T5b: a booking read back into silence is HELD -- not a sound since, so nobody answered", async () => {
     const s = await boot();
 
     await s.checkAvailability();
     await s.assistantTurn(READ_BACK);
     await s.book();
 
-    expect(s.store.scheduled()).toHaveLength(1);
-    expect(c().write_refused_no_consent_silent_turn ?? 0).toBe(0);
+    expect(s.store.scheduled()).toHaveLength(0);
+    const r = s.toolResponses().filter((x) => x.name === "book_appointment").at(-1)?.response;
+    expect(r?.success).toBe(false);
+    expect(r?.gated).toBe(true);
+    // Wait, never "shall I go ahead?" a second time.
+    expect(r?.message).not.toMatch(/whether to go ahead/i);
   });
 
   // -------------------------------------------------------------------------

@@ -123,6 +123,31 @@ describe("callerObjects — the answer to a read-back that stops a booking", () 
     expect(callerObjects(s)).toBe(false);
   });
 
+  // T5b. The silence ladder's first rung is "Hello? Are you still there?", and
+  // the natural answer carries an apology. NEGATION_RE (shared, not widened or
+  // narrowed here) lists "sorry", so "Yes, sorry." read as an objection and a
+  // caller who answered the ladder was asked to confirm again. "Sorry" is not
+  // an objection when everything else in the turn is a yes or "I'm here"; it
+  // still is when it marks a correction.
+  it.each([
+    ["a yes with an apology", "Yes, sorry."],
+    ["an apology and presence", "Sorry, yes, I'm still here."],
+    ["presence then apology", "I'm here, sorry."],
+    ["yeah, sorry", "Yeah sorry"],
+  ])("does not object to %s: %j", (_label, s) => {
+    expect(callerObjects(s)).toBe(false);
+  });
+
+  it.each([
+    ["a name correction", "Sorry, it's John with an H."],
+    ["a time correction", "Tuesday, sorry, Wednesday."],
+    ["a bare apology", "Sorry."],
+    ["a pardon", "Sorry?"],
+    ["an apology and a no", "Sorry, no."],
+  ])("still objects to %s: %j", (_label, s) => {
+    expect(callerObjects(s)).toBe(true);
+  });
+
   it("lets a caller restate the slot being written (LVX144)", () => {
     expect(callerObjects("2 p.m. works.")).toBe(true);
     expect(callerObjects("2 p.m. works.", { restatedSlot: true })).toBe(false);

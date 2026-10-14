@@ -254,6 +254,23 @@ function heldWritePreamble(toolName) {
   );
 }
 
+/**
+ * Round A1, T5b (owner, 2026-10-13): a booking read back ONCE and met by no
+ * sound at all is held -- and the model is told to wait, never to ask for a
+ * yes. Shared by the silent-turn gate and the write-order gate, whichever sees
+ * it first; both used to say "ask whether to go ahead", a second confirmation.
+ */
+function a1AwaitingMessage(toolName) {
+  return (
+    heldWritePreamble(toolName) +
+    `you have ALREADY read these details back; do not read them back again and do not ` +
+    `ask them to confirm. The caller has not made a sound since. WAIT for them -- if ` +
+    `they have gone quiet, just check they are still there. As soon as they answer ` +
+    `and do not object, call this again with the same details. Do not tell them ` +
+    `anything went wrong and do not offer a callback.`
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // tools.js — Gemini tool-call executor.
@@ -1203,6 +1220,10 @@ export async function executeToolCall(fc, ctx) {
             inTurnReplyText: typeof ctx?.inTurnReplyText === "string" ? ctx.inTurnReplyText : "",
             lastCallerText,
             callerRestatedSlot,
+            // T5b: ANY sound the model heard since the last real reply. Only a
+            // boolean counts; an absent wire is null and is not read as silence.
+            callerVoicedSinceReply:
+              typeof ctx?.callerVoicedSinceReply === "boolean" ? ctx.callerVoicedSinceReply : null,
             strings: probeStrings,
           });
           // TRUST THE AI AFTER A PROPER READ-BACK (owner, 2026-10-02, O3
@@ -1343,6 +1364,10 @@ export async function executeToolCall(fc, ctx) {
               a1_applies: a1Save.applies,
               a1_readback: a1Save.readBackSource,
               a1_objection: a1Save.objection,
+              // T5b. null = the wire was absent on this call (not silence).
+              a1_voiced:
+                typeof ctx?.callerVoicedSinceReply === "boolean" ? ctx.callerVoicedSinceReply : null,
+              a1_awaiting: a1Save.awaitingAnswer === true,
             });
           }
 
@@ -1413,8 +1438,11 @@ export async function executeToolCall(fc, ctx) {
                 response: {
                   success: false,
                   gated: true,
-                  message:
-                    heldWritePreamble(fc.name) +
+                  // T5b: a booking already read back ONCE waits; it never asks
+                  // a second time whether to go ahead.
+                  message: a1Save.awaitingAnswer === true
+                    ? a1AwaitingMessage(fc.name)
+                    : heldWritePreamble(fc.name) +
                     `this is still ` +
                     `going ahead. The caller has not answered you: their last turn carried no speech ` +
                     `at all, and they have not agreed to anything on this call. Do not write ` +
@@ -1429,7 +1457,9 @@ export async function executeToolCall(fc, ctx) {
                 toolResult: {
                   name: fc.name,
                   success: false,
-                  message: "Sorry — did you want me to go ahead with that?",
+                  message: a1Save.awaitingAnswer === true
+                    ? getStrings(ctx?.config).nudge1
+                    : "Sorry — did you want me to go ahead with that?",
                   callerSafe: true,
                 },
                 toolCallEvent: { name: fc.name, args: fc.args, silent: true },
@@ -2147,7 +2177,12 @@ export async function executeToolCall(fc, ctx) {
                       callerSpelled: ctx?.callerSpelled === true,
                     })
                   : null;
-                const message = a1Booking
+                // T5b: read back, then not a sound from the caller. Nothing to
+                // answer and nothing to re-read: wait for them.
+                const a1Awaiting = a1Booking && a1Save.awaitingAnswer === true;
+                const message = a1Awaiting
+                  ? a1AwaitingMessage(fc.name)
+                  : a1Booking
                   ? readBackMade
                     ? heldWritePreamble(fc.name) +
                       `the caller did not agree to what you read back: they said no, asked a question ` +
@@ -2197,7 +2232,9 @@ export async function executeToolCall(fc, ctx) {
                       success: false,
                       // Round A1: never a second "shall I go ahead?" on the
                       // booking rule -- the one read-back, or a plain question.
-                      message: a1Booking
+                      message: a1Awaiting
+                        ? getStrings(ctx?.config).nudge1
+                        : a1Booking
                         ? readBackMade
                           ? "No problem — what would you like to change?"
                           : a1Sentence

@@ -420,7 +420,13 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
     expect(s.store.scheduled()).toHaveLength(0);
   });
 
-  it("A1: the second read-back, unanswered, saves the slot it names", async () => {
+  // CHANGED 2026-10-13 (round A1, T5b). Was "A1: the second read-back,
+  // unanswered, saves the slot it names" -- S1's ruling that a previous-turn
+  // read-back with no caller turn since saves, reversed by the owner the same
+  // evening (no sound since the read-back = held). Still pinned: the earlier
+  // "Yes." to 2 PM never rides onto 3 PM, and once the caller answers the 3 PM
+  // read-back, it is the slot that read-back named that is written.
+  it("A1/T5b: the second read-back, unanswered, is held; answered, it saves the slot it names", async () => {
     const s = await boot();
 
     await s.checkAvailability(SLOT);
@@ -431,7 +437,10 @@ describe("the consent latch: an agreement survives an interposed caller turn", (
       `Just to confirm, I'm booking you in for Monday, September 7th at 3 00 PM instead. Does that sound right?`
     );
     await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
+    expect(s.store.scheduled()).toHaveLength(0);
 
+    await s.callerSays("Yes, that's fine.");
+    await s.book({ scheduled_at: OTHER_SLOT, client_name: CLIENT });
     expect(s.store.scheduled()).toHaveLength(1);
     // 3 PM Chicago (CDT), stored as an instant: the slot the standing read-back named.
     expect(s.store.scheduled()[0].scheduled_at).toBe("2026-09-07T20:00:00.000Z");

@@ -1231,7 +1231,9 @@ describe("session.js — v2 pipeline orchestrator", () => {
       // ...never the generic step-based nudge ladder.
       const wroteGenericNudge = H.ttsTurns.slice(ttsCountBefore).some((t) =>
         t.write.mock.calls.some(([txt]) =>
-          /still here whenever you're ready|calling to book an appointment, leave a message/i.test(txt || "")
+          // T5b: rung 1 is now "Hello? Are you still there?" (was "I'm still here
+          // whenever you're ready."), so the generic-ladder detector follows it.
+          /Are you still there\?|calling to book an appointment, leave a message/i.test(txt || "")
         )
       );
       expect(wroteGenericNudge).toBe(false);
@@ -2852,7 +2854,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
           // ("voice-xyz") — a warm-EL miss — so it must speak LIVE, never play
           // the Google-voiced buffer.
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
-            voiceKey !== "voice-xyz" && text === "I'm still here whenever you're ready." ? cachedNudge : null
+            voiceKey !== "voice-xyz" && text === "Hello? Are you still there?" ? cachedNudge : null
           );
 
           const ws = new FakeWs();
@@ -2872,7 +2874,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
           expect(audioOut.enqueue).not.toHaveBeenCalledWith(cachedNudge);
           expect(H.ttsTurns.length).toBeGreaterThan(ttsCountBefore);
           const nudgeTurn = H.ttsTurns[H.ttsTurns.length - 1];
-          expect(nudgeTurn.write).toHaveBeenCalledWith("I'm still here whenever you're ready.");
+          expect(nudgeTurn.write).toHaveBeenCalledWith("Hello? Are you still there?");
         } finally {
           vi.useRealTimers();
         }
@@ -2897,7 +2899,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         try {
           const cachedNudge = Buffer.from([7, 7]);
           H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
-            text === "I'm still here whenever you're ready." ? cachedNudge : null
+            text === "Hello? Are you still there?" ? cachedNudge : null
           );
 
           const ws = new FakeWs();
@@ -2924,7 +2926,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         try {
           // The business's own main_phone (+18175803291), spoken as digit
           // groups — NOT the transfer target (+15551234567) and not raw E.164.
-          const goodbyeText = "It seems like you may have stepped away. Feel free to call us back at 817-580-3291 anytime. Have a great day. Goodbye.";
+          const goodbyeText = "I think I've lost you. Feel free to call us back at 817-580-3291. Bye for now.";
           const cachedGoodbye = Buffer.from([5, 5]);
           // Google-voiced entry present, but the EL business looks it up under
           // its EL voiceId — a warm-EL miss — so the goodbye is spoken live in
@@ -3269,7 +3271,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         const warmEl = Buffer.from([4, 2]);
         // Hit ONLY under the EL voiceId — the business's own warmed voice.
         H.utteranceCacheInstance.get.mockImplementation((voiceKey, kind, text) =>
-          voiceKey === "voice-xyz" && text === "I'm still here whenever you're ready." ? warmEl : null
+          voiceKey === "voice-xyz" && text === "Hello? Are you still there?" ? warmEl : null
         );
 
         const ws = new FakeWs();

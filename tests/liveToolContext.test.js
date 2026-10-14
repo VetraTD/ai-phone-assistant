@@ -121,6 +121,18 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
     expect(no.callerSpelled).toBe(false);
   });
 
+  // Round A1, T5b: "made no sound since the read-back" holds a booking. The
+  // value must arrive as the boolean turnState() produced; anything else is
+  // null (wire absent), which the gate logs and treats as before T5b.
+  it("carries callerVoicedSinceReply through to the tool (the T5b wire)", async () => {
+    const silent = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, callerVoicedSinceReply: false }));
+    expect(silent.callerVoicedSinceReply).toBe(false);
+    const voiced = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4, callerVoicedSinceReply: true }));
+    expect(voiced.callerVoicedSinceReply).toBe(true);
+    const absent = await ctxFor(() => ({ step: "confirm", callerTurnCount: 4 }));
+    expect(absent.callerVoicedSinceReply).toBeNull();
+  });
+
   it("carries the rest of the turn state the gates read", async () => {
     const ctx = await ctxFor(() => ({
       step: "confirm",

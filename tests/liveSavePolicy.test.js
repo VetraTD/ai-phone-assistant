@@ -144,6 +144,45 @@ describe("decideSave — the pure decision", () => {
     }
   );
 
+  // T5b (owner, 2026-10-13, reversing S1's ruling): a read-back followed by NO
+  // voiced sound is held -- a person checks the caller is still there. The
+  // "" case above is now the VOICED-but-untranscribed one; these are the split.
+  it("a previous-turn read-back with NO sound since is held, awaiting the answer", () => {
+    const d = decideSave({ ...base, lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: false });
+    expect(d).toMatchObject({
+      applies: true,
+      readBackStanding: true,
+      readBackSource: "previous",
+      agreed: false,
+      objection: false,
+      awaitingAnswer: true,
+    });
+  });
+
+  it("the same with a sound the transcript lost saves", () => {
+    const d = decideSave({ ...base, lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: true });
+    expect(d).toMatchObject({ readBackSource: "previous", agreed: true, awaitingAnswer: false });
+  });
+
+  it("silence does not hold an in-turn read-back, a message, or touch a cancel", () => {
+    expect(decideSave({ ...base, inTurnReplyText: SAID, callerVoicedSinceReply: false })).toMatchObject({
+      readBackSource: "in_turn",
+      agreed: true,
+    });
+    expect(
+      decideSave({ ...base, toolName: "record_customer_request", writeSlot: null, callerVoicedSinceReply: false })
+    ).toMatchObject({ rule: "message", agreed: true });
+    expect(
+      decideSave({ ...base, toolName: "cancel_appointment_db", lastReplyText: CANCEL_READ_BACK, callerVoicedSinceReply: false })
+        .applies
+    ).toBe(false);
+  });
+
+  it("an absent wire (null) is not read as silence", () => {
+    const d = decideSave({ ...base, lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: null });
+    expect(d).toMatchObject({ agreed: true, awaitingAnswer: false });
+  });
+
   it.each(["No.", "What time was that?", "Make it four.", "Um.", "Can we do Friday instead?"])(
     "a booking read back on the previous turn is held on %j",
     (said) => {
@@ -235,6 +274,42 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
       expect(mockCreateAppointment).not.toHaveBeenCalled();
     }
   );
+
+  // T5b: "" above stands for a sound the transcript lost (the wire absent reads
+  // as before). Made explicit, and split from a read-back met by no sound.
+  it("saves after a previous-turn read-back met by a sound the transcript lost", async () => {
+    const { functionResponse } = await book(
+      live({ lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: true })
+    );
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("holds after a previous-turn read-back met by NO sound, and says to wait -- not that they objected", async () => {
+    const { functionResponse, stateEffects } = await book(
+      live({ lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: false })
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(functionResponse.response.message).not.toMatch(/did not agree/i);
+    expect(stateEffects.toolResult.message).not.toMatch(/what would you like to change/i);
+    // Never a second yes (owner: rung 2 never asks for one; read back ONCE).
+    // The silent-turn gate's own wording ("Ask them once, plainly, whether to
+    // go ahead") is exactly that, so an awaiting booking gets the wait wording.
+    expect(functionResponse.response.message).not.toMatch(/whether to go ahead/i);
+    expect(functionResponse.response.message).toMatch(/WAIT/);
+    expect(stateEffects.toolResult.message).not.toMatch(/go ahead/i);
+    expect(stateEffects.toolResult.message).toBe("Hello? Are you still there?");
+  });
+
+  it("holds when the caller's last words came BEFORE the read-back and nothing since", async () => {
+    const { functionResponse } = await book(
+      live({ lastReplyText: SAID, lastCallerText: "Friday at ten works.", callerVoicedSinceReply: false })
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/WAIT/);
+    expect(functionResponse.response.message).not.toMatch(/did not agree/i);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
 
   it("an objection is answered, not re-confirmed", async () => {
     const { functionResponse } = await book(live({ lastReplyText: SAID, lastCallerText: "What time was that?" }));

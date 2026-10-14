@@ -163,7 +163,9 @@ describe("LVX19 silence ladder", () => {
     s.quiet(7_000);
 
     expect(getLatencyStats().turnTaking.nudges_fired).toBe(1);
-    expect(notes(s.live)[0]).toContain("I'm still here whenever you're ready.");
+    // Round A1, T5b (owner, 2026-10-13): rung 1 checks the caller is there.
+    // Was "I'm still here whenever you're ready."
+    expect(notes(s.live)[0]).toContain("Hello? Are you still there?");
   });
 
   it("speaks the business's own second-stage wording, not a hardcoded line", async () => {
