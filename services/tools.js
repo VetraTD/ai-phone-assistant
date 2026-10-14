@@ -2395,7 +2395,10 @@ export async function executeToolCall(fc, ctx) {
               // satisfied because SOME letters arrived; it cannot tell which part
               // of the name they spelled, and assembling them to find out is what
               // LVX62 rules out. So the ask is made explicit instead.
-              `spell their FULL name, first name and surname, and read the letters back. Do not tell ` +
+              // Round A1: no separate letter read-back -- the booking's ONE read-back spells the
+              // surname (lib/voice/savePolicy.js composeReadBack, LVX172).
+              `spell their FULL name, first name and surname. Do not spell it back to them now; your one ` +
+              `read-back of the booking will. Do not tell ` +
               `the caller anything went wrong, do not ` +
               `offer a callback, and do not take a message instead — they are on the line and the only ` +
               `thing missing is the spelling. Ask them now and wait for their answer; do not call this ` +
