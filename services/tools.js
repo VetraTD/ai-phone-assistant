@@ -37,6 +37,7 @@ import {
   callerClosesCall,
   textFingerprint,
   asksMoreThanOneThing,
+  callerObjects,
 } from "../lib/transcriptUtils.js";
 
 /**
@@ -1540,16 +1541,27 @@ export async function executeToolCall(fc, ctx) {
                         "meant. Tell them you did not catch that and ask them to say it again.",
                       callerLine: "Sorry, I didn't catch that — could you say it again?",
                     }
-                  : a1Save.applies && a1Save.objection
+                  : a1Save.applies &&
+                      a1Save.objection &&
+                      isAffirmative(lastCallerText) &&
+                      callerObjects(lastCallerText, { restatedSlot: true })
                     ? {
                         // Final review I4: on the A1 booking rule a yes that
-                        // carries a change or a question ("Yeah, make it four")
-                        // is an objection. The write-order gate below would
-                        // pass it on isAffirmative and book the slot that was
-                        // read back. Held here, NOT stashed: the caller's next
-                        // "OK" must not re-issue the old slot.
+                        // carries a change or a question ("Yeah, make it four",
+                        // "Yeah, what time was that?") is an objection. The
+                        // write-order gate below would pass it on isAffirmative
+                        // and book the slot that was read back. ONLY that case
+                        // is held here -- every other objection still goes
+                        // through the write-order gate and its ceiling, so a
+                        // hedge can never be refused forever. A yes that merely
+                        // NAMES a time ("Yeah, 4:30 works") is not held here
+                        // (restatedSlot: true drops that cue): the restated-
+                        // slot detector misses real restatements (CA239046).
+                        // NOT stashed: the caller's next "OK" must not re-issue
+                        // the old slot.
                         counter: "write_refused_a1_objection",
                         gate: "write_order",
+                        held: true,
                         message:
                           heldWritePreamble(fc.name) +
                           `the caller did not agree to what you read back: they said no, asked a question ` +
@@ -1566,7 +1578,12 @@ export async function executeToolCall(fc, ctx) {
                 functionResponse: {
                   id: fc.id,
                   name: fc.name,
-                  response: { success: false, message: consentRefusal.message },
+                  // HELD, not failed, for the A1 objection branch (as the
+                  // write-order gate marks its own) -- retryPendingWrite and the
+                  // claim guard branch on `gated`.
+                  response: consentRefusal.held
+                    ? { success: false, gated: true, message: consentRefusal.message }
+                    : { success: false, message: consentRefusal.message },
                 },
                 stateEffects: {
                   // Round A1, T6: which gate held it, for the per-call ledger.

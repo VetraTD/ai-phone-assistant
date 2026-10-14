@@ -333,6 +333,8 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     async (said) => {
       const { functionResponse } = await book(live({ lastReplyText: SAID, lastCallerText: said }));
       expect(functionResponse.response.success).toBe(false);
+      // HELD, not failed: retryPendingWrite and the claim guard branch on it.
+      expect(functionResponse.response.gated).toBe(true);
       expect(mockCreateAppointment).not.toHaveBeenCalled();
     }
   );
