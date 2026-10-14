@@ -144,6 +144,16 @@ const TRANSFERACCT = "tests/liveTransferAccount.test.js";
 const TRANSFEROUTCOME = "tests/transferOutcome.test.js";
 const TRANSFERRESULT = "tests/transferResult.test.js";
 const SESSION_CASCADE = "tests/session.test.js";
+// Round A1 "say it once" (2026-10-13, S2 T8).
+const A1_SAVEPOLICY = "tests/liveSavePolicy.test.js";
+const A1_SAVEWIRE = "tests/liveSavePolicyWire.test.js";
+const A1_READBACKSTMT = "tests/readBackStatement.test.js";
+const A1_SPELLONCE = "tests/spellOnce.test.js";
+const A1_LADDERWORDS = "tests/silenceLadderWords.test.js";
+const A1_SILENCEREADBACK = "tests/liveSilenceReadBack.test.js";
+const A1_CONFIRMAUDIT = "tests/liveConfirmAudit.test.js";
+const A1_E2E = "tests/liveWritePathEndToEnd.test.js";
+const A1_LIVESILENCE = "tests/liveSilence.test.js";
 // Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
 const CLOCK = "tests/liveCallClock.test.js";
 const POLITE = "tests/livePoliteFailure.test.js";
@@ -1731,6 +1741,226 @@ const SABOTAGES = [
     find: '    if (dialCallStatus === "completed") {\n      if (resolved) {',
     replace: '    if (dialCallStatus === "completed" && resolved) {\n      if (resolved) {',
     red: [TRANSFERLIVE],
+  },
+  // -------------------------------------------------------------------------
+  // ROUND A1 "SAY IT ONCE" (LVX177 / LVX172 / LVX178 + T5b), 2026-10-13.
+  // Hand-verified red row by row before the full run (S2 T8).
+  // -------------------------------------------------------------------------
+  {
+    name: "message-skips-gates",
+    why: "round A1 (owner 2026-10-13): a message is saved as soon as the model calls it. Puts messages back on the booking path, so a message with no read-back is held and the caller is asked to confirm it.",
+    file: "lib/voice/savePolicy.js",
+    find: "  if (rule === \"message\") {",
+    replace: "  if (false) { // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "message-skips-hesitation",
+    why: "round A1: messages skip the hesitation/unusable gate too. Without it a message answered 'umm' is held again (the gate that refused messages in LVX177's 124).",
+    file: "services/tools.js",
+    find: "              a1Save.applies && a1Save.rule === \"message\"",
+    replace: "              false // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "booking-garbled-answer-saves",
+    why: "round A1: a booking read back once is saved unless the caller objects; a garbled or untranscribed answer is not a no (73% of LVX177's refusals were on saves that later went through). Back to the clear-yes rule.",
+    file: "lib/voice/savePolicy.js",
+    find: "const objection = callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) });",
+    replace: "const objection = !/^\\s*(?:yes|yeah|yep|sure|ok(?:ay)?)\\b/i.test(lastCallerText || \"\") || callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) }); // SABOTAGE",
+    red: [A1_SAVEPOLICY, A1_SILENCEREADBACK],
+  },
+  {
+    name: "booking-objection-refuses",
+    why: "round A1: 'save unless it HEARS a no' -- a no, a question or a change after the read-back holds the booking. Ignores the objection, so 'No.' books.",
+    file: "lib/voice/savePolicy.js",
+    find: "agreed: !objection, objection, awaitingAnswer: false };",
+    replace: "agreed: true, objection, awaitingAnswer: false }; // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "booking-question-refuses",
+    why: "round A1: a question after the read-back ('what time was that?') is an objection, answered rather than booked over.",
+    file: "lib/transcriptUtils.js",
+    find: "  if (/\\?\\s*$/u.test(trimmed)) return true;\n  if (isHesitationOnly(trimmed)) return true;",
+    replace: "  // SABOTAGE: a question no longer objects\n  if (isHesitationOnly(trimmed)) return true;",
+    red: [A1_READBACKSTMT, A1_SAVEPOLICY],
+  },
+  {
+    name: "in-turn-readback-counts",
+    why: "round A1 (owner Q1): a read-back spoken in the same breath as the tool call saves. Without it the owner's own 'Tuesday at 3 for Jon Doe, booking that now' is refused and read back a second time.",
+    file: "lib/voice/savePolicy.js",
+    find: "  if (readsBackThisSlot(inTurnReplyText)) {",
+    replace: "  if (false) { // SABOTAGE",
+    red: [A1_SAVEPOLICY, A1_SAVEWIRE],
+  },
+  {
+    name: "in-turn-readback-wire",
+    why: "round A1: turnState produces the turn in progress for the save rule. Produced-but-not-sent is a dead rule (LVX45's shape); both ends real in liveSavePolicyWire.",
+    file: "lib/voice/live/index.js",
+    find: "    inTurnReplyText: turnReplyText || \"\",",
+    replace: "    inTurnReplyText: \"\", // SABOTAGE",
+    red: [A1_SAVEWIRE, A1_CONFIRMAUDIT],
+  },
+  {
+    name: "readback-tied-to-slot-a1",
+    why: "round A1 Review Focus 2: a read-back of one slot must not authorise a write for another (CA6b662e's shape). Drops the slot check.",
+    file: "lib/voice/savePolicy.js",
+    find: "    readBackMentionsSlot(text, writeSlot);",
+    replace: "    true; // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "engine-retry-stays-strict",
+    why: "round A1: the engine's own retry (fc.id retry_*) keeps the old rule -- code never acts on a looser agreement than the model's own call (batch-2 principle).",
+    file: "services/tools.js",
+    find: "engineRetry: typeof fc.id === \"string\" && fc.id.startsWith(\"retry_\"),",
+    replace: "engineRetry: false, // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "cancel-stays-strict",
+    why: "round A1 (owner): cancels are unchanged -- read-back AND a clear yes. Moves cancel_appointment_db onto the booking rule; the cancel pin must turn red.",
+    file: "lib/voice/savePolicy.js",
+    find: "  cancel_appointment_db: \"cancel\",",
+    replace: "  cancel_appointment_db: \"booking\", // SABOTAGE",
+    red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "spelling-once",
+    why: "LVX172 (owner): a voiced answer to the spelling question settles it -- the transcript losing the letters must not make the caller spell twice.",
+    file: "lib/voice/replyState.js",
+    find: "  if (state.spellingCaptured || state.spellingDeclined || state.spellingVoiced) return true;",
+    replace: "  if (state.spellingCaptured || state.spellingDeclined) return true; // SABOTAGE",
+    red: [A1_SPELLONCE],
+  },
+  {
+    name: "composed-readback-spells-surname",
+    why: "LVX172: the handed read-back spells the surname letter by letter when the caller spelled it -- 'Dodla' said back as 'Dodla' proves nothing.",
+    file: "lib/voice/savePolicy.js",
+    find: "    if (callerSpelled) {",
+    replace: "    if (false) { // SABOTAGE",
+    red: [A1_SAVEPOLICY, A1_SAVEWIRE],
+  },
+  {
+    name: "statement-readback-regex",
+    why: "round A1: 'Tuesday at 3 for Jon Doe, booking that now' is a read-back (readBackStatementRe; confirmReadBackRe only sees offers). The WHOLE English expression is disabled (call-closing-defects: narrowing one branch proves nothing).",
+    file: "lib/voice/strings.js",
+    find: "    readBackStatementRe:\n      /\\b(?:(?:i'?m|i\\s+am)",
+    replace: "    readBackStatementRe: /(?!)/, // SABOTAGE\n    readBackStatementReDisabled:\n      /\\b(?:(?:i'?m|i\\s+am)",
+    red: [A1_READBACKSTMT, A1_SAVEPOLICY],
+  },
+  {
+    name: "no-ask-refusal-no-goodbye",
+    why: "LVX178: the no_ask refusal hands the model the ask alone. The old 'Do NOT say goodbye again' assumed the goodbye was said; on Live it was not yet, so the model said goodbye AND then asked.",
+    file: "services/tools.js",
+    find: "\"else they need. Say only this, nothing before it, no goodbye: \\\"Before you go — \" +",
+    replace: "\"else they need. Do NOT say goodbye again. Say \\\"Before you go — \" +",
+    red: [ASK, TOOLSGATE],
+  },
+  {
+    name: "backwards-goodbye-counter",
+    why: "LVX178's own number: goodbye before 'anything else?' (one breath or two turns). A defect whose only counters belong to the guards that miss it cannot be shown to improve.",
+    file: "lib/voice/live/index.js",
+    find: "        closingAudit.backwards_goodbye += 1;",
+    replace: "        void 0; // SABOTAGE",
+    red: [COMPLETIONASK],
+  },
+  {
+    name: "confirm-ledger-wire",
+    why: "round A1 T6: the per-call confirm block is the A1 done-when (saves_over_one_readback 0). A ledger filled in and never emitted reads like one never filled in.",
+    file: "lib/voice/live/index.js",
+    find: "      confirm: { ...confirmAudit, refusals_by_gate: { ...confirmAudit.refusals_by_gate } },",
+    replace: "      // SABOTAGE: confirm ledger not emitted",
+    red: [A1_CONFIRMAUDIT],
+  },
+  {
+    name: "save-confirmations-counted",
+    why: "round A1 T6: the runner reports which action writes landed; without it no save is counted and save_confirmations never fires.",
+    file: "lib/voice/live/tools.js",
+    find: "          completedActions.push(fc.name);",
+    replace: "          void 0; // SABOTAGE",
+    red: [A1_CONFIRMAUDIT],
+  },
+  {
+    name: "gate-refusal-tags-reach-ledger",
+    why: "round A1 T6: each write gate tags its refusal; the runner must carry the tag or refusals_by_gate reads zero on every call.",
+    file: "lib/voice/live/tools.js",
+    find: "      if (effects.writeGateRefusal) writeGateRefusals.push(effects.writeGateRefusal);",
+    replace: "      // SABOTAGE: gate tags dropped",
+    red: [A1_CONFIRMAUDIT],
+  },
+  {
+    name: "silence-hello-first-rung",
+    why: "T5b (owner 2026-10-13): the first silence rung checks the caller is there -- 'Hello? Are you still there?'. Back to 'I'm still here whenever you're ready.'",
+    file: "lib/voice/strings.js",
+    find: "    nudge1: \"Hello? Are you still there?\",",
+    replace: "    nudge1: \"I'm still here whenever you're ready.\", // SABOTAGE",
+    red: [A1_LADDERWORDS, A1_LIVESILENCE],
+  },
+  {
+    name: "confirm-nudge-never-asks-yes",
+    why: "T5b: rung 2 never asks for a yes. 'Just say yes to confirm' was a second confirmation, the exact thing round A1 removes.",
+    file: "lib/voice/strings.js",
+    find: "    nudgeConfirm: \"Sorry, are you still there? I've got that ready for you whenever you are.\",",
+    replace: "    nudgeConfirm: \"Just say yes to confirm, or let me know if anything needs to change.\", // SABOTAGE",
+    red: [A1_LADDERWORDS],
+  },
+  {
+    name: "no-voice-since-readback-holds",
+    why: "T5b (owner reversed S1): a read-back followed by NO voiced sound is held -- a person checks the caller is still there. Back to S1's silent save.",
+    file: "lib/voice/savePolicy.js",
+    find: "    if (callerVoicedSinceReply === false) {",
+    replace: "    if (false) { // SABOTAGE",
+    red: [A1_SAVEPOLICY, A1_SILENCEREADBACK, A1_E2E],
+  },
+  {
+    name: "voiced-since-reply-wire",
+    why: "T5b: turnState produces callerVoicedSinceReply; absent, the gate reads null and silently falls back to S1's silent save. Both ends real in liveSilenceReadBack.",
+    file: "lib/voice/live/index.js",
+    find: "    callerVoicedSinceReply,",
+    replace: "    callerVoicedSinceReply: undefined, // SABOTAGE",
+    red: [A1_SILENCEREADBACK, A1_E2E],
+  },
+  {
+    name: "voiced-flag-survives-nudge",
+    why: "T5b: a ladder line is not a real reply. Resetting the flag on it would judge a caller's sound against the ladder line, not the read-back it holds over (LVX120's rule).",
+    file: "lib/voice/live/index.js",
+    find: "      if (spokenLinePending) bumpCounter(\"reply_held_over_spoken_line\");",
+    replace: "      if (spokenLinePending) { bumpCounter(\"reply_held_over_spoken_line\"); callerVoicedSinceReply = false; } // SABOTAGE",
+    red: [A1_SILENCEREADBACK],
+  },
+  {
+    name: "echo-is-not-an-answer",
+    why: "T5b: only voice the model heard counts. Our own audio echoing back while the read-back plays is withheld by the half-duplex gate and must not save a booking.",
+    file: "lib/voice/live/index.js",
+    find: "    if ((v.voiced && forwarded > 0) || released > 0) callerVoicedSinceReply = true;",
+    replace: "    if (v.voiced || released > 0) callerVoicedSinceReply = true; // SABOTAGE",
+    red: [A1_SILENCEREADBACK],
+  },
+  {
+    name: "ladder-answer-sorry-is-yes",
+    why: "T5b: 'Yes, sorry' answers 'Are you still there?'. 'sorry' is in the shared NEGATION_RE, so without this the caller who answered the ladder is asked to confirm again.",
+    file: "lib/transcriptUtils.js",
+    find: "  if (apologisingYes(trimmed)) return false;",
+    replace: "  // SABOTAGE: apology reads as an objection",
+    red: [A1_READBACKSTMT, A1_SILENCEREADBACK],
+  },
+  {
+    name: "awaiting-wait-wording-silent-turn",
+    why: "T5b: a booking held for silence tells the model to WAIT, never 'ask whether to go ahead' -- the silent-turn gate's own wording is a second yes.",
+    file: "services/tools.js",
+    find: "                  message: a1Save.awaitingAnswer === true\n                    ? a1AwaitingMessage(fc.name)",
+    replace: "                  message: false // SABOTAGE\n                    ? a1AwaitingMessage(fc.name)",
+    red: [A1_SAVEPOLICY, A1_E2E],
+  },
+  {
+    name: "awaiting-wait-wording-write-order",
+    why: "T5b: when the caller's last words predate the read-back, the write-order gate must say WAIT, not 'they did not agree' (which makes the model re-confirm).",
+    file: "services/tools.js",
+    find: "                const a1Awaiting = a1Booking && a1Save.awaitingAnswer === true;",
+    replace: "                const a1Awaiting = false; // SABOTAGE",
+    red: [A1_SAVEPOLICY],
   },
 ];
 

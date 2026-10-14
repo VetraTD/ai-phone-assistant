@@ -368,6 +368,19 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     expect(functionResponse.response.success).toBe(false);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
+
+  // T8 (sabotage row engine-retry-stays-strict). The case above cannot tell the
+  // two rules apart -- its read-back names no slot, so A1 refuses it too. This
+  // one can: the SAME read-back of this slot and the same mangled answer save
+  // when the model calls, and are held when the engine retries.
+  it("the same answer that saves the model's call is held on the engine's retry", async () => {
+    const ctx = () => live({ lastReplyText: SAID, lastCallerText: "da, ja, das" });
+    const retried = await book(ctx(), {}, "retry_book_appointment");
+    expect(retried.functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    const model = await book(ctx(), {}, "fc_model");
+    expect(model.functionResponse.response.success).toBe(true);
+  });
 });
 
 // Round A1, T6: write-gate refusals were process counters and log lines only,
