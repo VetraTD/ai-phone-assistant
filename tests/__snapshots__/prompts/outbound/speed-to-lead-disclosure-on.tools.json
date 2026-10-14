@@ -64,7 +64,7 @@
   },
   {
     "name": "book_appointment",
-    "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
+    "description": "Book an appointment. Read the day, the time and the name back ONCE as you book it — e.g. \"Tuesday at 3 for Jon Doe, booking that now\" — and call this in that same response; book it unless the caller objects.",
     "parameters": {
       "type": "object",
       "properties": {

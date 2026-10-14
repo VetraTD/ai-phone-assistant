@@ -1,7 +1,7 @@
 [
   {
     "name": "end_call",
-    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up. You MUST write your warm sign-off in the SAME response as this call — thank them for calling, use the business name, and wish them well. Nothing you say after this is heard.",
+    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up: you have asked whether there is anything else and they said no, or they said goodbye. Never say goodbye before that question has been answered. You MUST write your warm sign-off in the SAME response as this call — thank them for calling, use the business name, and wish them well. Nothing you say after this is heard.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -17,7 +17,7 @@
   },
   {
     "name": "book_appointment",
-    "description": "Book an appointment after the caller has confirmed the details (name, date/time, service type). Call this only after confirmation.",
+    "description": "Book an appointment. Read the day, the time and the name back ONCE as you book it — e.g. \"Tuesday at 3 for Jon Doe, booking that now\" — and call this in that same response; book it unless the caller objects.",
     "parameters": {
       "type": "object",
       "properties": {
