@@ -148,6 +148,14 @@ describe("end_call (inbound) — goodbye only after the ask is answered", () => 
     expect(d.description).toMatch(/Never say goodbye before/i);
   });
 
+  it("the inbound closing rule puts the ask before any goodbye (LVX178)", () => {
+    const p = prefix(avail);
+    expect(p).toMatch(/When a task is done, or the caller starts to wrap up, ask whether there is anything else before any goodbye/);
+    expect(p).toMatch(/never a goodbye and then the question/);
+    // Still not the scripted sentence (promptConversationTruth's tic rule).
+    expect(p).not.toContain("Is there anything else I can help you with?");
+  });
+
   it("outbound's description is untouched", () => {
     const f = Object.values(OUTBOUND_FIXTURES)[0];
     const d = buildAllDeclarations(f.config, f.extras).find((x) => x.name === "end_call");

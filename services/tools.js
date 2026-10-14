@@ -739,10 +739,9 @@ export async function executeToolCall(fc, ctx) {
                 message:
                   "[not caller speech] NOT A FAILURE — whatever you just did went through and the " +
                   "call is still open. You have not yet asked this caller whether there is anything " +
-                  "else they need. Do NOT say goodbye again and do NOT repeat what you just did. Say " +
-                  "ONE short sentence asking whether there is anything else you can help with, then " +
-                  "stop and wait for their answer. Once they answer, call end_call again and it will " +
-                  "go through.",
+                  "else they need. Say only this, nothing before it, no goodbye: \"Before you go — " +
+                  "is there anything else I can help you with?\" Then stop and wait for their " +
+                  "answer. Once they answer, call end_call again and it will go through.",
               },
             },
             stateEffects: {

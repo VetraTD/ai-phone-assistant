@@ -109,6 +109,20 @@ describe("the first hang-up on a call nobody was asked", () => {
     expect(counters().live_exit_arm_checked).toBe(0);
   });
 
+  it("hands the model the ask alone — nothing before it, no goodbye (LVX178)", async () => {
+    // Round A1. The old refusal said "Do NOT say goodbye again ... Say ONE short
+    // sentence asking whether there is anything else". On Live the tool runs
+    // BEFORE the turn's speech, so the model had not said goodbye yet: it then
+    // spoke its planned farewell AND the ask -- goodbye-then-ask, 2 of 434
+    // corpus turns. The refusal now gives it the one sentence to say.
+    const s = await bookedCall("CA_ask_words");
+    const [res] = await s.callTool("end_call", {});
+    const msg = res.response.message;
+    expect(msg).toMatch(/Say only this, nothing before it, no goodbye/);
+    expect(msg).toContain("Before you go — is there anything else I can help you with?");
+    expect(msg).not.toMatch(/Do NOT say goodbye again/);
+  });
+
   it("does not refuse the existing gates' cases differently", async () => {
     // The generic branch still owns a hang-up on turn one with nothing done.
     const s = await bootLive({ config: CONFIG, callSid: "CA_ask_generic" });

@@ -2143,7 +2143,11 @@ describe("end_call refuses while the caller is still thinking", () => {
     );
     expect(functionResponse.response.success).toBe(false);
     expect(functionResponse.response.message).toMatch(/not yet asked/i);
-    expect(functionResponse.response.message).toMatch(/do NOT say goodbye again/i);
+    // Round A1 / LVX178: was /do NOT say goodbye again/ -- that wording
+    // assumed the model had already said goodbye; on Live the tool runs first,
+    // so it then said its planned goodbye AND the ask (goodbye-then-ask). It
+    // now gets the one sentence to say, with no goodbye before it.
+    expect(functionResponse.response.message).toMatch(/Say only this, nothing before it, no goodbye/);
     expect(stateEffects.endCallRefusal).toBe("no_ask");
     expect(stateEffects.endCallNoAskRefusal).toBe(true);
     expect(stateEffects.toolResult.callerSafe).toBe(true);

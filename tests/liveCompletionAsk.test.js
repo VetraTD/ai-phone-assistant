@@ -435,6 +435,50 @@ describe("the per-call closing record", () => {
     return summaries[0];
   }
 
+  // LVX178. Goodbye before "anything else?" -- the order the owner heard.
+  it("counts goodbye-then-ask spoken in one breath", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_backwards_one_breath");
+      await s.assistantTurn(
+        "That is booked. Thank you for calling Digile Media, and have a wonderful day.Is there anything else I can help you with today?"
+      );
+      await s.hangUp();
+    });
+    expect(summary.closing.backwards_goodbye).toBe(1);
+  });
+
+  it("counts a goodbye turn followed by an ask turn with no caller words between", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_backwards_two_turns");
+      await s.assistantTurn("That is booked. Thanks for calling Digile Media, and have a great day.");
+      await s.assistantTurn("Is there anything else I can help you with today?");
+      await s.hangUp();
+    });
+    expect(summary.closing.backwards_goodbye).toBe(1);
+  });
+
+  it("does not count ask-then-goodbye, in one breath or across the caller's no", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_backwards_right_order");
+      await s.assistantTurn(ASKED);
+      await s.callerSays("No, that's everything.");
+      await s.assistantTurn("Thanks for calling Digile Media, and have a great day.");
+      await s.hangUp();
+    });
+    expect(summary.closing.backwards_goodbye).toBe(0);
+  });
+
+  it("does not count an ask that follows the caller's own words after a goodbye", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await bookedCall("CA_backwards_caller_between");
+      await s.assistantTurn("That is booked. Thanks for calling Digile Media, and have a great day.");
+      await s.callerSays("Oh wait, one more thing.");
+      await s.assistantTurn("Of course — what else can I help you with?");
+      await s.hangUp();
+    });
+    expect(summary.closing.backwards_goodbye).toBe(0);
+  });
+
   it("carries the note and the ask on the call that made them", async () => {
     const summary = await summaryOf(async () => {
       const s = await bookedCall("CA_ledger_honoured");
