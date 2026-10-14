@@ -20,7 +20,7 @@ Owner decisions there are final.
 |---|---|---|
 | Plan | exploration + plan + 4 owner answers | **done 2026-10-13** (~0.9 h) — `b19cc5c` |
 | S1 | T1 detectors, T2 save policy, T3 spell once, T7 replay/test updates | **done 2026-10-13** (~1.9 h active) — code head `a7d2d99`, see "S1 as built" |
-| S2 | T4 prompts, T5 closing, T5b silence (added after S1), T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | next (~3.5–4 h active + ~2 h machine) — starting message at the bottom |
+| S2 | T4 prompts, T5 closing, T5b silence (added after S1), T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | **built 2026-10-13** (~2.5 h active) — code head `c185a97`; full sabotage pending, see "S2 as built" |
 | Part 2 | one deploy + 3 live calls | after S2 |
 
 ## Owner answers (2026-10-13, planning)
@@ -357,3 +357,101 @@ template literal — sabotage rows are applied with `String.replace`, which expa
 > uncommitted work in the main tree; one full sabotage at the final sha in `ai-phone-gate` (copy gate-v3 → gate-v4 with
 > a `fullsab` mode), waited on in the foreground; S2 is estimated at ~3.5–4 h active, so stop and ask at 3 h with what is
 > left. End with the plan's "S2 as built" and the part-2 starting message (calls a–d).
+
+## S2 as built (2026-10-13) — what part 2 must know
+
+Commits on `feat/outbound-stage4` (not pushed): `a61171b` T4 prompts · `86d6e9b` T5 closing · `236425d` T5b silence ·
+`777af08` prompt snapshots (regenerated once) · `7b9693b` T6 measure · `7cad43b` T8 rows · `08c5c82` final-review fix
+round · `c185a97` fix-round follow-up (code head).
+Gate: at `7cad43b` root 7,825 passed (exit 1 = one vitest worker RPC timeout under load), census 183, test:db 690 —
+the full sabotage was stopped at its first row once the review landed (the fixes touch most rows). At `08c5c82` root
+went RED 7 (the fix round's early objection hold bypassed the write-order ceiling); fixed in `c185a97`.
+At `c185a97` (gate-v4): **root 318 files / 7,841 tests passed (exit 0), census 194 clean, test:db 50 files / 690 passed.** ONE full sabotage (194 rows) started 22:54 CDT in `ai-phone-gate`, log `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s2-final-sab.log`; pass = every row red except the 3 known baseline x (`ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`). Verdict: SABOTAGE_PENDING.
+
+**Final review (opus, whole branch S1+S2): 0 Critical, 5 Important.** Fixed, each red first: **I1** a held engine retry
+of a booking now tells the model to call again (no second read-back, no yes; the retry keeps its strict rule) and a
+booking held awaiting its read-back's answer is stashed; **I2** a read-back that ASKS in the same breath as the tool
+call ("…shall I go ahead and book that?") waits for the answer — only the statement form saves at once (ruling on
+owner Q1, flagged); **I4** "Sorry, yes, make it four" objects again, and a yes that carries a change or question
+("Yeah, make it four") is held before the write-order gate (only that case — every other objection keeps the gate's
+ceiling). Also fixed for the part-2 numbers: `farewellRe` false positives ("take care of", "have a day in mind",
+"Good morning, thanks for calling") and booking read-backs tied to the saved slot in the confirm ledger. **Not fixed
+(owner decision / latent): I3** a corrected message files a second row and a second owner email, the first one wrong
+(the plan's "a correction files again"); **I5** EHR reschedule has no slot for the booking rule (no EHR tenant live).
+~15 Minors are in the ledger as deferred.
+
+**What exists now (on top of S1)**
+- **T4 prompts.** Rule 3 is per kind: message/quote = one summary (number digit by digit inside it), recorded straight
+  away, a correction files again; booking/reschedule = day, time and name read back ONCE as it is booked ("Tuesday at 3
+  for Jon Doe, booking that now"), booked unless the caller objects; cancellation = read back + clear "yes". Spelled
+  letters are said back inside that one read-back (no "confirm those letters"). The post-action confirm step no longer
+  re-reads the details. Inbound `end_call` description + closing rule: ask "anything else?" when a task is done or the
+  caller wraps up; goodbye only after a no or their goodbye. `tests/a1PromptTrims.test.js` names every moved sentence.
+  Outbound moves only by the shared rule 3, letters rule and `book_appointment` description.
+- **T5 closing (LVX178).** The `end_call` no_ask refusal hands the model the one sentence: "Say only this, nothing before
+  it, no goodbye: 'Before you go — is there anything else I can help you with?'". New `strings.farewellRe` (en+es,
+  counter-only) + `lib/voice/closingOrder.js`; `closing.backwards_goodbye` counts goodbye-then-ask in one breath, or a
+  goodbye turn followed by an ask turn with no caller words between (prototype: 434 corpus turns, 32 farewells all real,
+  2 one-breath backwards, both real).
+- **T5b silence.** Ladder (en+es; timings unchanged; outbound untouched; shared with the cascade): rung 1 "Hello? Are you
+  still there?"; rung 2 confirm "Sorry, are you still there? I've got that ready for you whenever you are.", default
+  "Take your time, I'm here when you're ready."; rung 3 "I think I've lost you. Feel free to call us back at {phone}. Bye
+  for now." Wire `callerVoicedSinceReply` (owner at S2 start: "any heard voice" = a voiced frame forwarded to the model,
+  held speech the gate released, or a caller transcript past the echo gate; NOT the 400 ms spelling threshold), reset
+  only at a real reply. Previous-turn read-back + no voice since → `awaitingAnswer` → held, and BOTH the silent-turn gate
+  and the write-order gate tell the model to WAIT (their old wording asked "whether to go ahead" — a second yes);
+  caller-safe line = rung 1. Absent wire (null) reads as S1. `callerObjects`: "Yes, sorry" / "Sorry, I'm still here"
+  (the natural answer to rung 1) is not an objection; "Sorry, it's John with an H", "Sorry." and "Sorry?" still are.
+  Corpus replay: no attempt flipped (fixtures carry caller text), so build-fixtures needed no `caller_voiced`.
+- **T6 measure.** `live_call_summary.confirm` {saves, readbacks, gate_refusals, refusals_by_gate {consent, hesitation,
+  unusable, write_order, spelling}, max_readbacks_per_save, saves_over_one_readback, spell_asks, readback_spelled,
+  readback_spelled_missing} + one `save_confirmations` {callSid, tool, rule, readbacks, refusals} per save. A read-back
+  belongs to the next save; one spoken in the save's own turn belongs to it; ladder lines never count. Every write-gate
+  return carries `stateEffects.writeGateRefusal`. `scripts/corpus/confirmations.mjs` is the offline "before".
+- **T8.** 27 sabotage rows, + 11 for the fix round (census 156 → 194), each hand-verified red before the full run
+  (except `a1-objection-branch-skips-time-cue`, red only on the corpus replay — left to the full run).
+
+**Rulings (the ledger has each one's cost if wrong):** T5 two-turn backwards needs NO caller words between (goodbye →
+"Thank you." → ask is not counted; no_ask covers it) · T5b wire is frame-level · a null wire reads as S1 · gate a uses the
+wait wording · "sorry" + only a yes/presence is not an objection · T6 read-backs finalize at the end of the save's turn;
+readback_spelled counts booking AND message saves · T8 has 27 rows (6 for guards S2 added).
+
+**Baselines ("before")**
+- *Offline corpus* (`node scripts/corpus/confirmations.mjs`; call-corpus/ is a set of investigations, not a sample — a
+  distribution, never a rate): 38 saves on 28 saving calls; **17 saves heard more than one read-back** (bookings 12 of
+  22, cancels 5 of 16); **14 of 28 saving calls** had such a save; 70 gate refusals.
+- *Production after batch 2* (free log read, 10-03 01:44 CDT → 10-13, revisions 00100/00101/00102, 26 calls): 6 saving
+  calls, 6 saves (1 message, 3 booking/reschedule, 2 cancel); **7 holds before those saves = 1.17 per save; 4 of 6 saves
+  held at least once** (the message held 3 times — A1 ungates messages); **2 of 6 saves heard more than one read-back**.
+  Per call: 4 of the 6 callers who got something saved were asked again at least once. Small N.
+- *LVX178* (plan): no_ask 20/52 receptionist-ended calls, backwards ≈6/52; corpus one-breath backwards 2 of 434 turns.
+- *Silence timings:* **not measurable from today's logs.** The inbound ladder fired 0 rungs in 26 calls (no caller paused
+  past 6–10 s), and the per-turn pause cannot be rebuilt: `live_utterance.opened_ms` is a process clock and its log time
+  is written late. Before any timing change, add a per-utterance "ms since our audio stopped" field (not built).
+
+**Residuals, recorded, not fixed:** outbound keeps its guardrail "book only after a clear yes" while the shared gate and
+the `book_appointment` description now say one read-back (outbound is off in prod) · `correct_appointment_name` on the
+old rule · eval scenarios 18/32/39/40/42/44/45 encode the old flow (not run, not edited) · a caller who heard "booking
+that now" and hung up silently is not booked (owner-accepted; the neutral "may need a call back" alert covers it) ·
+"Yes, sorry" said as a hedge saves.
+
+## Part 2 starting message (paste into a fresh session)
+
+> Run receptionist round A1 "say it once" — part 2: ONE deploy + live calls. Plan:
+> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built" and "Part 2". Ledger
+> `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`, code head
+> `c185a97`; nothing deployed; production = voice-uk-prod-00102-q9q @ 28b8111 (rollback target). LVX176
+> (`0fcd6f5`) ships in this deploy. (1) ONE deploy from the main checkout with a clean tracked tree (prod migration
+> checksums are CRLF — never an LF worktree): `migrate status` (none expected), then the service; env diff vs 00102 = only
+> `GIT_COMMIT_SHA` (check `VOICE_SPELL_MISS_CAP` unset); boot logs clean. The deploy is outward-facing: confirm with me
+> first. (2) Live calls on +18175803291 from my phone +14699338887, each script in its own message; wait for my "done",
+> then read that call's `live_call_summary.confirm` / `.closing` and its `save_confirmations` (free log read,
+> `CLOUDSDK_CONFIG=~/.gcloud-vetra2`): (a) leave a message → one summary, saved at once, only the "New customer request"
+> email, `confirm.refusals_by_gate` all 0; (b) book with a spelled surname → one letter-by-letter read-back, saved on the
+> first non-objection, `saves_over_one_readback` 0, `readback_spelled` 1; (c) the ending → "anything else?" → no →
+> goodbye, `backwards_goodbye` 0, no second farewell after a no_ask refusal; (d) silence: after the booking read-back say
+> nothing → hear "Hello? Are you still there?" → say "yes" → booked once; then a second short call silent throughout →
+> rung 1, the rung-2 line (never "say yes to confirm"), "I think I've lost you…" and the hang-up, nothing booked,
+> `live_silence_line` stages 1–3 in the log. Paid calls need my approval (state the cost first). A1 done-when on these
+> calls: saves_over_one_readback 0, gate refusals ≤ 1 per save, backwards_goodbye 0. Not in scope: LVX167, LVX174,
+> LVX175, LVX168–171 (round A2).
