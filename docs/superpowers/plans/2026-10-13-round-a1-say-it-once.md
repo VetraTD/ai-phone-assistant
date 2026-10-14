@@ -14,6 +14,15 @@ Owner decisions there are final.
 
 **Tech:** Node 20 ESM, vitest, Gemini Live front-end (`lib/voice/live/index.js`), shared gate `services/tools.js`.
 
+## Status
+
+| Block | Content | Status |
+|---|---|---|
+| Plan | exploration + plan + 4 owner answers | **done 2026-10-13** (~0.9 h) — `b19cc5c` |
+| S1 | T1 detectors, T2 save policy, T3 spell once, T7 replay/test updates | **done 2026-10-13** (~1.9 h active) — code head `a7d2d99`, see "S1 as built" |
+| S2 | T4 prompts, T5 closing, T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | next — starting message at the bottom |
+| Part 2 | one deploy + 3 live calls | after S2 |
+
 ## Owner answers (2026-10-13, planning)
 - Q1 same breath: **save in same breath**; when the read-back is not visible at tool time, refuse once with the
   engine-composed sentence; the caller's reply saves unless no/question/change (garbled or silent = save).
@@ -219,3 +228,71 @@ only `GIT_COMMIT_SHA` (check `VOICE_SPELL_MISS_CAP` unset); boot logs clean. LVX
 (b) book with a spelled surname → one letter-by-letter read-back, saved on first non-objection;
 `saves_over_one_readback` 0, `readback_spelled` 1.
 (c) ending → "anything else?" → no → goodbye; `backwards_goodbye` 0.
+
+## S1 as built (2026-10-13) — what S2 must know
+
+Commits on `feat/outbound-stage4` (not pushed): `b19cc5c` plan · `507a10c` T1 detectors · `df5bf27` T2 save policy
+(+ T7 replay/test updates) · `a7d2d99` T3 spell once. Gate at `a7d2d99` (gate worktree, gate-v3): root 313 files / 7,738 tests passed (1 file, 5 tests skipped; +4 files / +110 tests vs `0fcd6f5`), census 156 rows clean. test:db not run (no DB change); S2 runs the full gate incl. test:db.
+
+**What exists now**
+- `lib/voice/strings.js` (en + es): `readBackStatementRe` ("…booking that now", "I'll book that…"; a SEPARATE key —
+  `confirmReadBackRe` and its other readers were not widened), `spelledLettersRe` (D-O-D-L-A). Prototyped on 416
+  assistant turns: 8/8 and 8/8 hits real, none a completion claim.
+- `lib/transcriptUtils.js` `callerObjects(text, { restatedSlot })`: no / hedge / "?" / bare "um" / a different time /
+  "make it…, can we do…" (3/3 corpus hits real). Empty or unreadable is NOT an objection.
+- `lib/voice/savePolicy.js`: `SAVE_RULE`, `saveRuleFor(name)`, `decideSave({...})` →
+  `{ rule, applies, readBackStanding, readBackSource: "not_needed"|"previous"|"in_turn"|null, agreed, objection }`,
+  `composeReadBack({ toolName, args, config, callerSpelled })` → "Friday, September 18 at 2:00 PM for Jon, D-O-D-L-A,
+  booking that now." (reschedule: "Moving your appointment to …, moving it now."). Naive `scheduled_at` = tenant wall
+  clock (formatted in UTC); offset-bearing = instant in tenant tz.
+- `services/tools.js`: `a1Save` computed beside the probe facts; feeds `callerAgreedAfterReadBack` (`|| a1Save.agreed`,
+  appended after the anchor's closing paren), `readBackMade` (`|| a1Save.readBackStanding`), the silent-turn verdict
+  (new value `"a1_save_unless_no"`), the hesitation/unusable block (messages skip both; booking with a read-back
+  skips "unusable"), and gate d's refusal text + caller line (objection → "answer it, never re-confirm"; none standing
+  → the composed sentence). Probe logs `a1_rule`, `a1_applies`, `a1_readback`, `a1_objection`. Engine retry = `fc.id`
+  starting `retry_` → `applies: false`.
+- Wires: `lib/voice/live/index.js` `turnState()` → `inTurnReplyText: turnReplyText || ""`,
+  `callerSpelled: Boolean(state.spellingCaptured || state.spellingVoiced)`; copied in `lib/voice/live/tools.js`. Proven
+  both ends real by `tests/liveSavePolicyWire.test.js` (producer hand-sabotaged red, restored).
+- `lib/voice/replyState.js`: `applyCallerVoicedAnswer` sets `state.spellingVoiced`; `spellingSettled` treats it like
+  letters. Miss cap unchanged (2).
+- Replay: `scripts/corpus/build-fixtures.mjs` emits `via: "engine_retry"|"model"` (from `live_write_retried`); the replay
+  issues engine retries with a `retry_<tool>` id (`tests/helpers/liveBoot.js` `callTool(name, args, { id })`). 8 attempts
+  are retries. One flip: `CA0ef8d2` #0 refuse → write. Canary 34/96 unchanged; no cancel attempt flipped.
+
+**Rulings (ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`)**
+- A previous-turn read-back of this slot with NO caller turn since saves a booking (owner Q1: nothing heard = save).
+- Spelling: built the spec's narrow rule (voiced answer settles), not the plan's cap 2→1, which also re-opened the
+  "talked past the question → misheard name written" defect.
+- `write_confirm_readback_prev_turn` (process counter) now also counts A1 read-backs; the A1 per-call ledger (T6) is
+  the measure.
+- Moved to S2: the farewell regex + `farewellBeforeAsk` (T5), `scripts/corpus/confirmations.mjs` (T6), the spelling
+  prompt block + "confirm those letters" (T4, with every other snapshot-changing prompt edit).
+
+**Residuals, recorded, not fixed:** `correct_appointment_name` keeps today's rule; a model that ignores an objection
+and re-reads the SAME slot in the turn in progress saves it (owner-accepted stray-booking trade).
+
+**For S2's T6 (`writeGateRefusal` tags):** the five refusal returns are gate a (`silentTurnVerdict ===
+"refused_no_consent"`), gate b/c (`if (consentRefusal)`), gate d (`!writeOrderGateOff()` branch), gate e (spelling,
+the `spellingGateRefusals` patch), plus the ceiling/budget releases (not refusals). Add the tag to each return's
+`stateEffects`; count in `lib/voice/live/index.js` `onTool`.
+
+**For S2's T8:** the anchors S1 added that need rows: `a1Save.applies && a1Save.rule === "message"` (message skips),
+`return { rule, applies: true, readBackStanding: true, readBackSource: "in_turn"` (in-turn), `if (readsBackThisSlot(lastReplyText))`
+(previous), `const objection = callerObjects(lastCallerText` (objection), `engineRetry: typeof fc.id === "string" &&
+fc.id.startsWith("retry_")` (retry strict), `cancel_appointment_db: "cancel",` (cancel strict → change to "booking"),
+`inTurnReplyText: turnReplyText || "",` (wire), `state.spellingCaptured || state.spellingDeclined || state.spellingVoiced`
+(spell once), the `who = words.length > 1 ?` line in `composeReadBack` (spelled surname; end the anchor before its
+template literal — sabotage rows are applied with `String.replace`, which expands `$` sequences).
+
+## S2 starting message (paste into a fresh session)
+
+> Run receptionist round A1 "say it once" — session S2 of part 1 (T4 prompts, T5 closing, T6 measure, T8 sabotage
+> rows, T9 full gate + ONE full sabotage + opus review). Plan: `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md`
+> — read "S1 as built" first; ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md` (resume after
+> Task 3). Branch `feat/outbound-stage4`, code head `a7d2d99`. Execution: native (superpowers:executing-plans), one
+> opus whole-branch review during the full sabotage. Owner decisions in the plan are final. Also during the sabotage
+> wait: the free 10-03→10-13 log read (refusals per save on post-batch-2 code) with `CLOUDSDK_CONFIG=~/.gcloud-vetra2`.
+> Rules: no paid runs; never git checkout over uncommitted work in the main tree; one full sabotage at the final sha in
+> `ai-phone-gate` (copy gate-v3 → gate-v4 with a `fullsab` mode), waited on in the foreground; stop and ask at 3 h.
+> End with the plan's "S2 as built" and the part-2 starting message.
