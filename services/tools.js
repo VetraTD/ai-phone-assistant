@@ -1452,6 +1452,8 @@ export async function executeToolCall(fc, ctx) {
                 },
               },
               stateEffects: {
+                // Round A1, T6: which gate held it, for the per-call ledger.
+                writeGateRefusal: "consent",
                 // silent, like every other gate's: nothing ran, so the session
                 // must not narrate work that was declined.
                 toolResult: {
@@ -1544,6 +1546,9 @@ export async function executeToolCall(fc, ctx) {
                   response: { success: false, message: consentRefusal.message },
                 },
                 stateEffects: {
+                  // Round A1, T6: which gate held it, for the per-call ledger.
+                  writeGateRefusal:
+                    consentRefusal.counter === "write_refused_hesitation" ? "hesitation" : "unusable",
                   // silent, for the same reason the spelling gate's event is:
                   // nothing ran, so the session must not narrate work that was
                   // declined. The event still goes out so metrics and the
@@ -2225,6 +2230,8 @@ export async function executeToolCall(fc, ctx) {
                     response: { success: false, gated: true, message },
                   },
                   stateEffects: {
+                    // Round A1, T6: which gate held it, for the per-call ledger.
+                    writeGateRefusal: "write_order",
                     // silent, like the spelling gate's: nothing ran, so the
                     // session must not narrate work that was declined.
                     toolResult: {
@@ -2466,6 +2473,8 @@ export async function executeToolCall(fc, ctx) {
                 response: { success: false, gated: true, message },
               },
               stateEffects: {
+                // Round A1, T6: which gate held it, for the per-call ledger.
+                writeGateRefusal: "spelling",
                 // refused: nothing ran. The voice session uses this to stay
                 // quiet — announcing "Getting that scheduled now." a moment
                 // before asking the caller to spell their name describes work

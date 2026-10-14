@@ -1642,6 +1642,11 @@ describe("services/tools.js — the spelling gate", () => {
     delete process.env.VOICE_SPELL_POLICY;
   });
 
+  it("tags its refusal for the per-call confirm ledger (round A1, T6)", async () => {
+    const { stateEffects } = await executeToolCall(bookFc, fresh);
+    expect(stateEffects.writeGateRefusal).toBe("spelling");
+  });
+
   it("refuses the write and asks for the spelling, for a caller it has not seen", async () => {
     const { functionResponse } = await executeToolCall(bookFc, fresh);
     expect(functionResponse.response.success).toBe(false);

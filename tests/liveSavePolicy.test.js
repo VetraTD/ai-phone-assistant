@@ -370,6 +370,37 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
   });
 });
 
+// Round A1, T6: write-gate refusals were process counters and log lines only,
+// so "how many times was THIS caller held" had no per-call answer. Each gate
+// now tags its refusal; lib/voice/live/index.js counts the tags per call.
+describe("writeGateRefusal — which gate held the write (T6)", () => {
+  it("silent turn (gate a): consent", async () => {
+    const { stateEffects } = await book(live({ lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: false }));
+    expect(stateEffects.writeGateRefusal).toBe("consent");
+  });
+
+  it("bare hesitation (gate b): hesitation", async () => {
+    const { stateEffects } = await book(live({ lastReplyText: SAID, lastCallerText: "Um." }));
+    expect(stateEffects.writeGateRefusal).toBe("hesitation");
+  });
+
+  it("unusable transcript (gate c): unusable", async () => {
+    const { stateEffects } = await cancel(live({ lastReplyText: CANCEL_READ_BACK, lastCallerText: "에레는" }));
+    expect(stateEffects.writeGateRefusal).toBe("unusable");
+  });
+
+  it("no read-back standing (gate d): write_order", async () => {
+    const { stateEffects } = await book(live({ lastReplyText: "Thanks, Marcus.", lastCallerText: "Book it please." }));
+    expect(stateEffects.writeGateRefusal).toBe("write_order");
+  });
+
+  it("a save carries no tag", async () => {
+    const { functionResponse, stateEffects } = await book(live({ lastReplyText: SAID, lastCallerText: "Yes." }));
+    expect(functionResponse.response.success).toBe(true);
+    expect(stateEffects.writeGateRefusal).toBeUndefined();
+  });
+});
+
 describe("CANCELS STAY STRICT (owner: unchanged) -- fails if anyone loosens them", () => {
   it.each([
     ["a loose yes", "I love it."],
