@@ -590,15 +590,66 @@ Oct 11:00 + Tue 20 Oct 14:00, customer_requests 3 → 4.
 
 ## Part 3 starting message (paste into a fresh session)
 
-> Run receptionist round A1 "say it once" — part 3: fix what the part-2 calls found, ONE redeploy, re-run calls. Plan:
-> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "Part 2 as built" (F1–F4) and "S2 as built" (the
-> gate design). Ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`;
-> production = `voice-uk-prod-00103-nvc` @ `eb60198` (rollback `00102-q9q` @ `28b8111`). FIRST reiterate the task,
-> hours and $ and ask me questions. Then: (1) F1 systematic debugging — why 6 tool rounds with one tool run
-> (call `CAff059ed83d190170d6cea4e9f306eac3`, 17:57:21–17:57:41Z); prototype on the call's own events before editing;
-> explain the cause in plain words with a yes/no fix decision; the cap reply for a held write must not say it failed.
-> (2) F4 spelling for a name on file + the second ask. (3) F3 the one read-back always spells a surname the caller
-> spelled (bookings and messages). (4) F2: bring me the options, no fix without my yes. Each fix red-first, census,
-> sabotage rows, opus review, db gate + ONE full sabotage in its own mintty window; ask me before the redeploy. Then
-> calls: (b) booking with a spelled surname on a NEW name (not on file), (d1) silence after the read-back, and (a) if
-> F3 touched messages. Paid calls need my approval. Not in scope: LVX167, LVX174, LVX175 (A2), LVX168–171.
+```text
+Run receptionist round A1 "say it once" — part 3: fix what the part-2 live calls found, ONE redeploy, re-run calls.
+
+FIRST, before any tool call that changes anything: reiterate this task back to me in plain words — the steps, what
+each fix and each call checks, hour estimate, $ cost — and ask me any questions you have (AskUserQuestion; recommended
+option first). Don't guess on anything that is mine to decide; wait for my answers, then start. Re-state where we are in
+one line whenever we move to the next step.
+
+Plan: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md — read "Part 2 as built" (F1–F4, call table) and "S2 as
+built" (the gate design). Ledger: .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (every Ruling + deferred
+minor; Part 2 lines at the end). Branch feat/outbound-stage4. Code head eb60198, docs head 1ef9de4.
+Production = voice-uk-prod-00103-nvc @ eb60198 (LIVE since 10-15, owner chose fix-forward); rollback target
+voice-uk-prod-00102-q9q @ 28b8111. Test line +18175803291 (VetraTD Test Line tenant; dashboard login
+nithinjd06+testline@gmail.com). My handset +14699338887 now has a name on file ("Nithin Dodla") and two test bookings
+(Mon 19 Oct 11:00, Tue 20 Oct 14:00).
+
+(1) F1 — false "unable to finalize your booking" (call CAff059ed83d190170d6cea4e9f306eac3, 17:57:21–17:57:41Z).
+Live sent book_appointment before any read-back text → the designed write_order refusal handed the composed sentence →
+the model spoke it, but toolRoundsThisTurn hit 6 > MAX_TOOL_ROUNDS 5 (lib/voice/live/index.js ~6474) and the cap's
+reply ("Stop calling tools…") made it say it couldn't book. Only ONE tool ran that turn — the 6 rounds are unexplained.
+Systematic debugging first: prototype on that call's own events (free log read, CLOUDSDK_CONFIG=~/.gcloud-vetra2)
+before editing; explain the cause in plain words with a yes/no fix decision for me. Whatever the cause, a cap reply
+for a held write must never make the model say it failed.
+(2) F4 — spelling forced for a name already on file, and asked twice (call CAfbe56923754b90d43679e12ed6a83163). The
+prompt says a name from an earlier visit is not spelled again; the spelling gate refused anyway. Never ask twice.
+(3) F3 — the ONE read-back spells back a surname the caller spelled (LVX172 agreed design), for bookings AND messages.
+Today it is conditional (services/gemini.js ~1466) and message step 5 (capabilities/messages.js ~81) omits it.
+(4) F2 — Live heard spelled letters as "diodo", so callerSpelled was false. Bring me the options with cost; no fix
+without my yes.
+
+Each fix: red-first (TDD), census, sabotage rows (hand-verified red), opus review of the whole fix set. Then db gate
++ ONE full sabotage at the final sha, launched in its own mintty Git Bash window (not a Claude Code background shell).
+Then ask me before the redeploy: ONE deploy from the main checkout with a clean tracked tree (prod migration checksums
+are CRLF — never an LF worktree), migrate status first, env diff vs 00103 = only GIT_COMMIT_SHA, boot logs clean; tell
+me the rollback command before running it.
+
+Live calls after the redeploy (each script in its own message; wait for my "done"; read that call's
+live_call_summary.confirm / .closing and save_confirmations): (b) a booking where I spell a surname that is NOT on file
+→ one read-back that spells the letters, saved on the first non-objection, no "unable"/"temporary issue",
+saves_over_one_readback 0, gate refusals ≤ 1; (d1) a booking with my name on file → no spelling ask; after the
+read-back I stay silent → "Hello? Are you still there?" → "yes" → booked once; (a) a message with a spelled surname
+only if F3 changed messages. Design the scripts around the name and bookings now on file for my handset. A1 done-when:
+saves_over_one_readback 0, gate refusals ≤ 1 per save, backwards_goodbye 0. A call that fails its check is a finding:
+explain it in plain words with a yes/no decision for me, fix red-first, and ask me before any redeploy.
+
+Conserve usage and time WITHOUT compromising quality:
+- Read only the plan sections named above and the parts of files you need (grep/offset), not whole big files; don't
+  re-read what you already have; don't re-derive facts the plan or ledger already settles.
+- Batch independent reads/commands into one turn; one filtered log query per call, not many.
+- Use cheaper models (sonnet/haiku) for mechanical subagent work (log extraction, searches); keep opus for any code
+  review of a fix. Spawn subagents only when they save real work.
+- Never skip a check to save time: every call's numbers are read from the logs, every fix is red-first with a test and
+  census, and a fix gets the full gate before redeploy. If saving usage would cost quality, say so and ask.
+- Keep replies short and plain; put the detail in the ledger, not the chat.
+
+Rules: paid calls/runs need my approval (state tokens + $ first). Never git checkout/restore over uncommitted work in
+the main tree. Serialize heavy vitest runs; run any long gate in its own Git Bash window, not a Claude Code background
+shell. Owner decisions are final — don't reopen them. Explain in plain words; give hour estimates. Stop and ask at 2 h
+with what is left. Ask before anything not in these steps. Not in scope: LVX167, LVX174, LVX175 (round A2), LVX168–171.
+
+End with: verdict per fix and per call, "Part 3 as built" in the plan, ledger + memory updated, and what round A2
+starts with.
+```
