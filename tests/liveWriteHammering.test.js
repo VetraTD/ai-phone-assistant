@@ -24,6 +24,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive, counters } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { composeReadBack } from "../lib/voice/savePolicy.js";
+import { log } from "../lib/logger.js";
 
 const OPEN = { open: "09:00", close: "18:00", closed: false };
 const CONFIG = {
@@ -165,5 +167,74 @@ describe("a model hammering one refused write", () => {
     expect(s.store.scheduled()).toHaveLength(1);
     expect(counters().live_write_refusal_replayed).toBeFalsy();
     expect(counters().live_guard_duplicate_suppressed).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round A1 part 3, F1 (CAff059ed, 2026-10-15). With no read-back standing the
+// write-order gate hands the model the one sentence to say. The model called
+// book_appointment five more times in three seconds; the echo answered four
+// (its key did not include the words spoken THIS turn, so "said it, called
+// again" -- the designed path -- could only ever get the cached refusal), and
+// the sixth hit the round cap, whose "Too many tool calls... speak with what
+// you already have" made the model tell the caller it could not book.
+// ---------------------------------------------------------------------------
+describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
+  const SENTENCE = composeReadBack({ toolName: "book_appointment", args: ARGS, config: CONFIG });
+
+  async function heldOnce() {
+    const s = await boot();
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn("Thanks. And the name for the booking?");
+    await s.callerSays("Marcus Bell.");
+    const [first] = await s.callTool("book_appointment", ARGS);
+    expect(first.response.gated).toBe(true);
+    expect(first.response.message).toContain(SENTENCE);
+    return s;
+  }
+
+  it("said in the same turn, then called again, reaches the gate and books", async () => {
+    const s = await heldOnce();
+    await s.assistantSays(SENTENCE);
+    const [second] = await s.callTool("book_appointment", ARGS);
+    expect(second.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+    expect(counters().live_write_refusal_replayed).toBeFalsy();
+  });
+
+  it("past the round cap, a held booking comes back held with its sentence -- never 'too many tool calls'", async () => {
+    const s = await heldOnce();
+    const rest = [];
+    for (let i = 0; i < 5; i += 1) rest.push(await s.callTool("book_appointment", ARGS));
+    expect(counters().live_tool_rounds_capped).toBe(1);
+    const capped = rest[4][0].response;
+    expect(capped.success).toBe(false);
+    expect(capped.gated).toBe(true);
+    expect(capped.message).toContain(SENTENCE);
+    expect(capped.message).not.toMatch(/too many|with what you already have|went wrong\.|failed\./i);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  it("the refusal says to say it FIRST, then call -- not 'straight away'", async () => {
+    const s = await boot();
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn("Thanks. And the name for the booking?");
+    await s.callerSays("Marcus Bell.");
+    const [first] = await s.callTool("book_appointment", ARGS);
+    expect(first.response.message).not.toMatch(/straight away/i);
+    expect(first.response.message).toMatch(/once you have said it/i);
+  });
+
+  it("the echo's log line names the call, so a filtered read finds it", async () => {
+    const spy = vi.spyOn(log, "info");
+    try {
+      const s = await heldOnce();
+      await s.callTool("book_appointment", ARGS);
+      const replayed = spy.mock.calls.filter(([event]) => event === "live_write_refusal_replayed");
+      expect(replayed).toHaveLength(1);
+      expect(replayed[0][1]).toMatchObject({ callSid: "CA_hammer", tool: "book_appointment" });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

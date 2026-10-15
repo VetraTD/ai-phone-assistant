@@ -99,6 +99,20 @@ describe("a read-back followed by no sound at all is held", () => {
     expect(s.store.scheduled()).toHaveLength(1);
   });
 
+  // Round A1 part 3 (F1): the refusal echo is keyed on the gate's inputs, and
+  // the voiced wire is one. A sound the transcript lost changes nothing else
+  // in the key, so the re-call used to get the cached hold.
+  it("a sound the transcript lost, after the hold, reaches the gate again and saves", async () => {
+    const s = await readBack("CA_p3_echo_voiced");
+    const [held] = await s.callTool("book_appointment", ARGS);
+    expect(held.response.success).toBe(false);
+    await s.feed(800, { voiced: true });
+    await s.feed(800);
+    const [r] = await s.callTool("book_appointment", ARGS);
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
   it("does not count our own audio echoing back while the read-back plays", async () => {
     const s = await bootLive({ config: CONFIG, callSid: "CA_t5b_echo" });
     await s.callTool("check_appointment_availability", { requested_at: SLOT });

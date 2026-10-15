@@ -2238,8 +2238,8 @@ export async function executeToolCall(fc, ctx) {
                       `tell them anything went wrong, and do not offer a callback.`
                     : heldWritePreamble(fc.name) +
                       `this is still going ahead. Read it back to the caller ONCE, in exactly these ` +
-                      `words and with nothing before them: "${a1Sentence}" Then call this again with the ` +
-                      `same details straight away. If they say no, ask a question or change something, ` +
+                      `words and with nothing before them: "${a1Sentence}" Once you have said it, call this ` +
+                      `again with the same details. If they say no, ask a question or change something, ` +
                       `sort that out first. Do not ask them to confirm a second time, do not tell them ` +
                       `anything went wrong, and do not offer a callback.`
                   : readBackMade
