@@ -2105,6 +2105,63 @@ const SABOTAGES = [
     replace: "        abandoned: abandonedTools, // SABOTAGE",
     red: [S3_LASTCHANCE],
   },
+  // Round A1 S3 review round (opus C1, I1, I2).
+  {
+    name: "request-reason-without-names",
+    why: "round A1 S3 C1: the caller's own name is not a reason; counted, 'Jon Smith wants a callback about his invoice' and 'Jon Smith says the gate code changed' merge and the second overwrites the first.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w) && !names.has(w))",
+    replace: "      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w)) // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "request-person-not-number",
+    why: "round A1 S3 C1: a clearly different name is a different person even on the same phone (Jon / Jane); merged, Jane's request overwrites Jon's.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "  return editDistance(x, y) / Math.max(x.length, y.length) <= 0.34;",
+    replace: "  return true; // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "request-no-reason-keeps-message",
+    why: "round A1 S3 C1: a re-record that says only 'wants a call back' must not replace 'about invoice 4471' on the row.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "          const message = !hasReason(reasonOf(row.message), row.callerName)",
+    replace: "          const message = false // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "quote-reason-is-description",
+    why: "round A1 S3 C1: a quote is matched on what it is FOR; with the Address/Urgency labels counted, two jobs at one address merge.",
+    file: "capabilities/quotes.js",
+    find: "      reasonOf: quoteReason,",
+    replace: "      reasonOf: (m) => m, // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "quote-number-on-insert-only",
+    why: "round A1 S3 I1: the caller ID fills a NEW quote only; on a correction that names no number it would overwrite the number the caller gave.",
+    file: "capabilities/quotes.js",
+    find: "        callbackNumber: data.callback_number || null,",
+    replace: "        callbackNumber: data.callback_number || party.phone || null, // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "correction-resends-unlanded-email",
+    why: "round A1 S3 I2: a correction re-sends the owner email the first save could not deliver; otherwise a refused first send plus a correction leaves the owner never told.",
+    file: "capabilities/messages.js",
+    find: "          if (await ownerNotifiedFor(saved.id)) return;",
+    replace: "          return; // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "notify-reports-delivery",
+    why: "round A1 S3 I2: notifyCustomerRequest says whether the owner was reached; a constant answer makes every correction either silent after a failed send or a second email.",
+    file: "services/notifications.js",
+    find: "    return reached;",
+    replace: "    return true; // SABOTAGE",
+    red: ["tests/notifications.phi.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

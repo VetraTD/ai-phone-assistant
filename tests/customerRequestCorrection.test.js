@@ -131,6 +131,8 @@ describe("sameRequest -- a correction, or a different request?", () => {
     ["another person, same reason", P("Bob", "2145550123", "about the invoice"), P("Sarah", "9725550199", "about the invoice"), false],
     // Opus review C1: each of these merged, and the update overwrote the first request.
     ["the caller's name inside both messages", P("Jon Smith", "1", "Jon Smith wants a callback about his invoice"), P("Jon Smith", "1", "Jon Smith says the gate code changed"), false],
+    // The name is half of each reason's words here: counted, these two would merge.
+    ["the caller's name is not the reason", P("Jon Smith", "1", "Jon Smith about the invoice"), P("Jon Smith", "1", "Jon Smith about the contract"), false],
     ["two Spanish messages", P("Ana", "1", "Quiere que le llamen sobre la factura"), P("Ana", "1", "Quiere que le llamen sobre la cita de su hija"), false],
     ["two people on one phone", P("Jon", "2145550123", "schedule an appointment"), P("Jane", "2145550123", "schedule an appointment"), false],
     // Ruling: a big name change is a different person, even if it was a
@@ -298,10 +300,12 @@ describe("different requests on one call stay separate", () => {
 
   it("two quotes for one address are two jobs", async () => {
     const { engine, calls } = makeEngine();
-    const at = { caller_name: "Ann", callback_number: "214 555 0177", service_address: "12 Oak Street" };
-    quotes.onEffect(quoted({ ...at, service_description: "roof repair" }), engine);
+    // The address and urgency are most of each stored text: counted as the
+    // reason, these two jobs would merge.
+    const at = { caller_name: "Ann", callback_number: "214 555 0177", service_address: "12 Oak Street", urgency: "this week" };
+    quotes.onEffect(quoted({ ...at, service_description: "gutters" }), engine);
     await settle();
-    quotes.onEffect(quoted({ ...at, service_description: "new fence" }), engine);
+    quotes.onEffect(quoted({ ...at, service_description: "fence" }), engine);
     await settle();
 
     expect(calls.rows).toHaveLength(2);
