@@ -12,7 +12,7 @@
 // Live order) belongs to that save, not the next one. Ladder lines never count.
 // ---------------------------------------------------------------------------
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { bootLive } from "./helpers/liveBoot.js";
+import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
 import { composeReadBack } from "../lib/voice/savePolicy.js";
 
@@ -241,5 +241,60 @@ describe("spelling", () => {
     });
     expect(summary.confirm.readback_spelled).toBe(0);
     expect(summary.confirm.readback_spelled_missing).toBe(0);
+  });
+});
+
+// Round A1 part 3, review I2 (owner 2026-10-15: prompt only, COUNTED). A name
+// on file is never asked for; the one read-back should spell its surname. The
+// code hands that sentence only when the model calls before speaking, so a
+// model that reads back on its own may leave the letters out -- counted here,
+// read on the live call.
+describe("an on-file name: was its surname spelled in the read-back?", () => {
+  const ON_FILE = { upcomingAppointments: [{ id: "a0", client_name: "Jon Dodla", scheduled_at: "2026-09-21T15:00:00Z" }] };
+  const bootOnFile = (callSid) =>
+    bootLive({ config: CONFIG, callSid, database: { ...fakeDb(CONFIG, "biz-1"), fetchCallerContext: async () => ON_FILE } });
+  const BOOK = { ...ARGS, in_addition_to_existing: true };
+
+  it("a read-back with no letters is counted", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootOnFile("CA_conf_onfile_plain");
+      await availability(s);
+      await s.assistantTurn(READ_BACK);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", BOOK);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.saves).toBe(1);
+    expect(summary.confirm.onfile_saves).toBe(1);
+    expect(summary.confirm.onfile_readback_unspelled).toBe(1);
+  });
+
+  it("a read-back that spells it is not", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootOnFile("CA_conf_onfile_spelled");
+      await availability(s);
+      await s.assistantTurn(SPELLED_READ_BACK);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", BOOK);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.onfile_saves).toBe(1);
+    expect(summary.confirm.onfile_readback_unspelled).toBe(0);
+  });
+
+  it("a name not on file is neither", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_onfile_none" });
+      await availability(s);
+      await s.assistantTurn(READ_BACK);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.onfile_saves).toBe(0);
+    expect(summary.confirm.onfile_readback_unspelled).toBe(0);
   });
 });

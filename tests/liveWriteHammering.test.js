@@ -232,6 +232,69 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     expect(s.store.scheduled()).toHaveLength(0);
   });
 
+  // Review I1: the model calls four more times BEFORE speaking, then says the
+  // sentence and calls -- round 6. Handing the sentence again would have it
+  // said twice and the booking held for a sound from the caller.
+  it("past the cap, once the handed sentence HAS been said, that one call reaches the gate and books", async () => {
+    const s = await heldOnce();
+    for (let i = 0; i < 4; i += 1) await s.callTool("book_appointment", ARGS);
+    await s.assistantSays(SENTENCE);
+    const [sixth] = await s.callTool("book_appointment", ARGS);
+    expect(counters().live_tool_rounds_cap_pass_said).toBe(1);
+    expect(sixth.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
+  it("past the cap after the sentence was said, a call that cannot pass is told not to say it again", async () => {
+    const s = await heldOnce();
+    for (let i = 0; i < 4; i += 1) await s.callTool("book_appointment", ARGS);
+    await s.assistantSays(SENTENCE);
+    // Round 6 as a batch: the one-call pass does not apply, so the cap answers.
+    const batch = await s.callToolBatch([
+      ["book_appointment", ARGS],
+      ["check_appointment_availability", { requested_at: SLOT }],
+    ]);
+    const book = batch.find((r) => r.name === "book_appointment").response;
+    expect(book.gated).toBe(true);
+    expect(book.message).not.toContain(SENTENCE);
+    expect(book.message).toMatch(/already said/i);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  // Review M3: a later hold of the same tool with no line of its own (the
+  // spelling gate) must replace the sentence an earlier hold left -- or the cap
+  // hands "booking that now" ahead of the spelling question.
+  it("past the cap, a later spelling hold is not answered with an earlier hold's sentence", async () => {
+    process.env.VOICE_SPELL_POLICY = "always";
+    const s = await boot();
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn("Thanks. And the name for the booking?");
+    await s.callerSays("Marcus Bell.");
+    const { client_name: _drop, ...noName } = ARGS;
+    const [first] = await s.callTool("book_appointment", noName);
+    expect(first.response.gated).toBe(true);
+    const all = [];
+    for (let i = 0; i < 5; i += 1) all.push(await s.callTool("book_appointment", ARGS));
+    expect(all[0][0].response.message).toMatch(/FULL name/);
+    expect(counters().live_tool_rounds_capped).toBe(1);
+    const capped = all[4][0].response;
+    expect(capped.gated).toBe(true);
+    expect(capped.message).not.toMatch(/booking that now/i);
+  });
+
+  it("a hold carried into a LATER model turn is still held at the cap", async () => {
+    // The held-line map is per model turn (cleared at turnComplete); the hold
+    // must be re-recorded in the next one, not fall back to "Too many tool calls".
+    const s = await heldOnce();
+    await s.turnEnds();
+    const all = [];
+    for (let i = 0; i < 6; i += 1) all.push(await s.callTool("book_appointment", ARGS));
+    expect(counters().live_tool_rounds_capped).toBe(1);
+    const capped = all[5][0].response;
+    expect(capped.gated).toBe(true);
+    expect(capped.message).not.toMatch(/too many|with what you already have/i);
+  });
+
   it("the refusal says to say it FIRST, then call -- not 'straight away'", async () => {
     const s = await boot();
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
