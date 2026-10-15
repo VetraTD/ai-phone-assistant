@@ -367,7 +367,13 @@ round · `c185a97` fix-round follow-up (code head).
 Gate: at `7cad43b` root 7,825 passed (exit 1 = one vitest worker RPC timeout under load), census 183, test:db 690 —
 the full sabotage was stopped at its first row once the review landed (the fixes touch most rows). At `08c5c82` root
 went RED 7 (the fix round's early objection hold bypassed the write-order ceiling); fixed in `c185a97`.
-At `c185a97` (gate-v4): **root 318 files / 7,841 tests passed (exit 0), census 194 clean, test:db 50 files / 690 passed.** ONE full sabotage (194 rows) started 22:54 CDT in `ai-phone-gate`, log `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s2-final-sab.log`; pass = every row red except the 3 known baseline x (`ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`). Verdict: SABOTAGE_PENDING.
+At `c185a97` (gate-v4): **root 318 files / 7,841 tests passed (exit 0), census 194 clean, test:db 50 files / 690 passed.** ONE full sabotage (194 rows) started 22:54 CDT in `ai-phone-gate`, log `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s2-final-sab.log`; pass = every row red except the 3 known baseline x (`ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`). Verdict: **NOT MEASURED.** Claude Code killed the gate's background shell for low memory at ~23:39; the
+orphaned run went on, but from row 5 (`hammer-brake`) on, all 190 rows printed "could not be READ (no test tally)"
+inside 10 minutes (log last written 23:49). In other words vitest never started, which says nothing about the suite.
+Rows 1–4 were measured and are red as expected (`word-clock`, `supersession-veto`, `spent-token`, `spent-latch`).
+The gate tree was left clean with no journal. Ruling (2026-10-14): do not resume at `c185a97`. S3 changes the code
+again, so ONE full sabotage runs at S3's final sha. Run it outside a Claude Code background shell (the owner's own Git
+Bash) so the memory reaper cannot kill it.
 
 **Final review (opus, whole branch S1+S2): 0 Critical, 5 Important.** Fixed, each red first: **I1** a held engine retry
 of a booking now tells the model to call again (no second read-back, no yes; the retry keeps its strict rule) and a
@@ -446,7 +452,7 @@ question for S3 to settle on the code (explore first): one email with the final 
 the message can no longer change (end of call, or a short quiet window) — check how post-call / `saveOutstandingMessage`
 and the owner-email path already run before choosing; the row update is a same-call, same-request-type match. Tests red
 first; sabotage rows for "a correction updates, not inserts" and "one email per message"; gate: root + census + test:db,
-then `--only` on the rows `rows-touched.mjs` lists for `c185a97..HEAD` (a full run only if most rows are touched). Part
+then ONE FULL sabotage at S3's final sha (the S2 run never measured rows 5–194; see the verdict above). Part
 2's call (a) then checks: correct the number once → one row, one email, with the corrected number.
 
 ## S3 starting message (paste into a fresh session)
@@ -454,14 +460,14 @@ then `--only` on the rows `rows-touched.mjs` lists for `c185a97..HEAD` (a full r
 > Run receptionist round A1 — S3: fix review finding I3 before part 2. Plan:
 > `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built" and "S3". Ledger
 > `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`, code head `c185a97`.
-> FIRST read the full sabotage verdict started 22:54 CDT 2026-10-13: `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s2-final.log`
-> (+ `-sab.log`); pass = every row red except `ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`; if
-> it never finished (look for `^ALL-DONE`; check for orphans and a `.sabotage-in-progress` journal in `ai-phone-gate`),
-> resume with `--from <row>`; fill the verdict into "S2 as built" (replace SABOTAGE_PENDING). Any green row is a
-> finding: fix red-first. Then I3 (owner: a same-call correction updates the first message; ONE owner email with the
-> final details). Rules: no paid runs; never deploy; never git checkout over uncommitted work in the main tree; serialize
-> vitest; census after every edit to tools.js/index.js/strings.js; stop and ask at 2 h. End with S3 as built and an
-> updated part-2 starting message.
+> The S2 full sabotage was NOT measured: rows 5–194 never ran ("S2 as built" has the details). Do not resume it.
+> Do I3 (owner: a same-call correction updates the first message; ONE owner email with the final details), red-first,
+> with new sabotage rows. Then gate: `gate-v4.sh <sha> <label> db` (root + census + test:db). If that is green, give me
+> the ONE command for `gate-v4.sh <sha> <label> noroot fullsab` to run in my own Git Bash, not as a Claude Code background
+> shell (the memory reaper killed the last one). Pass = every row red except `ask-branch-latch`, `ask-branch-in-turn`,
+> `ask-latch-per-action`. Rules: no paid runs; never deploy; never git checkout over uncommitted work in the main tree;
+> serialize vitest; census after every edit to tools.js/index.js/strings.js; stop and ask at 2 h. End with S3 as built
+> and an updated part-2 starting message.
 
 ## Part 2 starting message (paste into a fresh session — AFTER S3)
 
