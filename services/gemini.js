@@ -1463,7 +1463,14 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   // This is the change in this round carrying the most uncertainty: it is prompt
   // text on the path an eval band would measure, and no band has been run
   // (LVX43 notes the reworded spelling gate has never had one either).
-  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too. If the letters produce something that does not look like a name, or they differ from what you heard by a single letter, do not just overwrite it: use the letters, and say them back one at a time inside your one read-back of the booking or message — not as a separate question. If the caller corrects a letter, use what they tell you. Never ask them to spell it a second time from scratch.\n`;
+  //
+  // Round A1 part 3 (F3, 2026-10-15): the saying-back is now UNCONDITIONAL.
+  // The "does not look like a name / differs by one letter" condition left the
+  // ordinary case unspelled -- call (a)'s row holds "Dodole" for D-O-D-L-A --
+  // and LVX172's agreed design is that the one read-back spells the surname
+  // whenever the caller spelled it, so the caller hears the letters the
+  // business will get.
+  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too: whenever the caller has spelled their surname, say it back one letter at a time inside your one read-back of the booking or message — "Tuesday at 3 for Nithin, D-O-D-L-A, booking that now" — not as a separate question. If the caller corrects a letter, use what they tell you. Never ask them to spell it a second time from scratch.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   // M5 (checkpoint 2b review): "take their details for follow-up" is the
   // same phantom-tool shape as NNR 1 above, on outbound only.

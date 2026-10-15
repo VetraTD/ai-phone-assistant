@@ -133,6 +133,40 @@ describe("spelling — read back inside the one read-back, never a separate chec
   });
 });
 
+// Round A1 part 3 (2026-10-15). F3: the one read-back spelled a surname back
+// only when the letters "did not look like a name" or differed by one letter
+// (services/gemini.js), and the message summary never did -- call (a)'s row
+// holds "Dodole" for D-O-D-L-A. LVX172's agreed design is unconditional. F4
+// (owner): a name on file is never asked for; its surname is spelled in the
+// read-back instead, as a statement.
+describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", () => {
+  it("F3: a surname the caller spelled is always said back letter by letter inside the one read-back", () => {
+    const p = prefix(avail);
+    expect(p).not.toMatch(/does not look like a name, or they differ from what you heard by a single letter/);
+    expect(p).toMatch(
+      /whenever the caller has spelled their surname, say it back one letter at a time inside your one read-back/
+    );
+  });
+
+  it("F3: the message summary spells a surname they spelled (prefix step 5 and the step guidance)", () => {
+    expect(prefix(avail)).toMatch(/5\. Summarise it ONCE, in one breath — name \(a surname they spelled[^)]*one letter at a time\)/);
+    for (const intent of ["take_message", "callback_request"]) {
+      expect(tail(avail, "gather_details", intent)).toMatch(/\(5\) summarise it once — name \(a surname they spelled[^)]*one letter at a time\)/);
+    }
+  });
+
+  it("F4: a name on file is never asked for, and its surname is spelled in the one read-back (booking + message)", () => {
+    const p = prefix(avail);
+    const both = p.match(/If their name is already on their record from an earlier visit[^\n]*/g) || [];
+    expect(both.length).toBeGreaterThanOrEqual(2);
+    for (const line of both) {
+      expect(line).toMatch(/do not ask them to spell it again/);
+      expect(line).toMatch(/surname one letter at a time too/);
+      expect(line).toMatch(/a statement, not a question/);
+    }
+  });
+});
+
 describe("after the action — no second read-back", () => {
   it("the confirm step says it is done and asks anything else, without re-reading the details", () => {
     const t = tail(avail, "confirm", null);

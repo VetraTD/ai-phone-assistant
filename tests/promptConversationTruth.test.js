@@ -238,7 +238,12 @@ describe("LVX62 — 'the letters win' keeps the rule and drops the false reason"
     // but INSIDE the one read-back of the booking or message. The old wording
     // ("say the letters back one at a time and ask the caller to confirm those
     // letters") was a separate confirmation the owner heard as "spell it twice".
-    expect(prefix()).toContain("say them back one at a time inside your one read-back");
+    // Round A1 part 3 (F3, 2026-10-15): no longer only for suspect letters --
+    // a spelled surname is ALWAYS said back inside the one read-back, which
+    // covers the suspect case (the caller hears the letters and can correct
+    // one) without the model judging which letters look like a name.
+    expect(prefix()).toContain("say it back one letter at a time inside your one read-back");
+    expect(prefix()).toContain("If the caller corrects a letter, use what they tell you");
     expect(prefix()).not.toContain("confirm those letters");
   });
 
