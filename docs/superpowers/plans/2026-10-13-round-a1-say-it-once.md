@@ -469,19 +469,61 @@ then ONE FULL sabotage at S3's final sha (the S2 run never measured rows 5–194
 > serialize vitest; census after every edit to tools.js/index.js/strings.js; stop and ask at 2 h. End with S3 as built
 > and an updated part-2 starting message.
 
+## S3 as built (2026-10-14/15) — what part 2 must know
+
+Commits on `feat/outbound-stage4` (not pushed): `2ad29db` I3 correction updates · `a3cd9ba` Live + cascade wire
+tests · `c3ba26c` last-chance write · `0118380` test:db as vetra_app · `eb63f83` 6 rows · `5953aa0` review round
+(C1/I1/I2) · `eb60198` 7 rows (**code head**). No migration. Nothing deployed.
+
+**Finding that set the design:** the owner email and owner SMS are link-only by design ("A caller left a message or a
+callback request." + dashboard link; no caller fields). Owner (S3 start): the email stays at the FIRST save; a same-call
+correction UPDATES the row and sends nothing. The details the owner reads are the row's.
+
+**What exists now**
+- `lib/capabilities/customerRequests.js`: `sameRequest` (same PERSON — name missing, same first name, or a spelling fix
+  with at most a third of the letters different; the number never vouches — AND same REASON — Jaccard ≥ ½ over content
+  words minus EN+ES stop words minus the callers' name words); `saveCustomerRequest` (per-callId in-process chain; tenant
+  unit 1 = list this call's rows of this type, newest first, match, UPDATE; else tenant unit 2 = INSERT; a re-record with
+  no reason words keeps the row's message; `fallbackNumber` fills a new row only); `noteOwnerNotified`/`ownerNotifiedFor`.
+- `services/db.js` `listCallCustomerRequests` + `updateCustomerRequest` (COALESCE; business in the WHERE and in the RLS
+  scope; classified in `lib/phiAudit.js`).
+- Packs: `messages.js`/`quotes.js` notify + caller SMS on the first save only; a correction logs
+  `customer_request_corrected {callSid, tool}` and re-sends the email ONLY if the first send did not reach the owner
+  (`notifyCustomerRequest` now resolves true/false; a correction waits for a send still in flight). Quotes match on the
+  description (not the Address/Urgency labels) and keep segments a re-record leaves out.
+- **Last-chance fix (owner: fix in S3):** `saveOutstandingMessage` dispatched nothing — a message re-issued at close was
+  counted `message_saved_last_chance` with no row and no email. Its output now goes through `recordToolOutput` +
+  `dispatchEffects`; post-call verify waits for it and derives `abandoned` at verify time.
+
+**Rulings (ledger has each cost):** R1 email at first save · R2 (revised after review) same person + same reason; a false
+split (Jon → Jonathan, a reason correction, detail added) = 2 rows + 2 emails, nothing lost · R3 request_type literal
+(message → callback flip files separately) · R4 no callId → insert as today · R5 failed list/update → filed as new ·
+R6 caller SMS on first save only · R7 per-call chain · R8 log line, no counter.
+
+**Review (opus, one pass): 1 Critical, 2 Important — all fixed red-first** (C1 unrelated requests merged and overwritten;
+I1 quote correction overwrote the number with the caller ID; I2 an undelivered first email was no longer retried by
+the correction). **Not fixed (pre-existing, told to the owner):** the first-save email has no durable retry — an SMTP
+failure with no correction loses it exactly as before S3; the durable fix is an outbox (+2–3 h).
+
+**Gates:** `eb63f83` root 320 files / 7,868 passed, census 200, test:db 51 / 695 (superseded). `eb60198`: see the
+ledger line "S3 gate @eb60198". 13 new sabotage rows (census 207), each hand-verified red; 2 read green on the first
+pass and their test cases were sharpened.
+**Full sabotage at `eb60198` (owner's Git Bash):** VERDICT PENDING.
+
 ## Part 2 starting message (paste into a fresh session — AFTER S3)
 
 > Run receptionist round A1 "say it once" — part 2: ONE deploy + live calls. Plan:
-> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built" and "Part 2". Ledger
+> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "S2 as built", "S3 as built" and "Part 2". Ledger
 > `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`, code head
-> `c185a97`; nothing deployed; production = voice-uk-prod-00102-q9q @ 28b8111 (rollback target). LVX176
+> `eb60198`; nothing deployed; production = voice-uk-prod-00102-q9q @ 28b8111 (rollback target). LVX176
 > (`0fcd6f5`) ships in this deploy. (1) ONE deploy from the main checkout with a clean tracked tree (prod migration
 > checksums are CRLF — never an LF worktree): `migrate status` (none expected), then the service; env diff vs 00102 = only
 > `GIT_COMMIT_SHA` (check `VOICE_SPELL_MISS_CAP` unset); boot logs clean. The deploy is outward-facing: confirm with me
 > first. (2) Live calls on +18175803291 from my phone +14699338887, each script in its own message; wait for my "done",
 > then read that call's `live_call_summary.confirm` / `.closing` and its `save_confirmations` (free log read,
-> `CLOUDSDK_CONFIG=~/.gcloud-vetra2`): (a) leave a message → one summary, saved at once, only the "New customer request"
-> email, `confirm.refusals_by_gate` all 0; (b) book with a spelled surname → one letter-by-letter read-back, saved on the
+> `CLOUDSDK_CONFIG=~/.gcloud-vetra2`): (a) leave a message, then correct the number once ("no, it ends in …") → one summary, saved at once, ONE "New
+> customer request" email, ONE dashboard row holding the CORRECTED number, `customer_request_corrected` once in the log,
+> `confirm.refusals_by_gate` all 0; (b) book with a spelled surname → one letter-by-letter read-back, saved on the
 > first non-objection, `saves_over_one_readback` 0, `readback_spelled` 1; (c) the ending → "anything else?" → no →
 > goodbye, `backwards_goodbye` 0, no second farewell after a no_ask refusal; (d) silence: after the booking read-back say
 > nothing → hear "Hello? Are you still there?" → say "yes" → booked once; then a second short call silent throughout →
