@@ -234,7 +234,16 @@ const SABOTAGES = [
     why:
       "keys the echo on the tool and its arguments ALONE -- the obvious brake, and the one that loses bookings. A model that is refused, reads the details back and retries would get the stale refusal instead of the write it has now earned.",
     file: "lib/voice/live/tools.js",
-    find: "      Number(state?.callerTurnCount) || 0,\n      textFingerprint(state?.lastCallerText ?? \"\"),\n      textFingerprint(state?.lastReplyText ?? \"\"),",
+    // A1 part 3: the key also carries the A1 inputs (inTurnReplyText, the voiced
+    // wire); left in, a read-back still changed the key and this row read GREEN.
+    find:
+      "      Number(state?.callerTurnCount) || 0,\n      textFingerprint(state?.lastCallerText ?? \"\"),\n      textFingerprint(state?.lastReplyText ?? \"\"),\n" +
+      "      // Round A1 part 3 (F1, CAff059ed): the booking rule's own inputs. Without\n" +
+      "      // them \"said the handed sentence, called again\" -- the designed path --\n" +
+      "      // got the cached refusal five times and then the round cap, and a sound\n" +
+      "      // the transcript lost after a held read-back never reached the gate.\n" +
+      "      textFingerprint(state?.inTurnReplyText ?? \"\"),\n" +
+      "      typeof state?.callerVoicedSinceReply === \"boolean\" ? String(state.callerVoicedSinceReply) : \"null\",",
     replace: "      // SABOTAGE",
     red: [HAMMER],
   },

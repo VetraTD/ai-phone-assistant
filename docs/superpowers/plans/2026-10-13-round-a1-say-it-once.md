@@ -688,7 +688,12 @@ hand-verified RED; census 227.
 
 **Gate:** `gate-v4.sh 04d176a a1-p3 db fullsab`, launched 15:46 in its own mintty window; log
 `.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p3.log`. Pass = ROOT exit 0, census 227, DB exit 0,
-every sabotage row red except the 3 baseline x, 0 "could not be READ", gate tree clean. **Verdict: pending.**
+every sabotage row red except the 3 baseline x, 0 "could not be READ", gate tree clean. **Verdict: PASS (one
+stale row fixed).** ROOT exit 0, 320 files / 7,902 tests; census 227; DB exit 0, 51 files / 695; SAB 16:00–18:12,
+227 rows: 223 red + 4 green = the 3 baseline x + `hammer-brake-too-wide`, 0 "could not be READ", tree clean. That row
+stripped only 3 of the echo key's now-5 state fields, so a read-back still changed the key (F1 added the A1 inputs):
+code correct, row stale. Owner YES: the row now strips all five; hand-verified RED (liveWriteHammering 3 failed,
+incl. its own "does NOT echo once the model has read the details back"). Code to deploy stays `04d176a`.
 
 ## Part 3 sitting 2 starting message (paste into a fresh session — after the gate finishes)
 
@@ -703,9 +708,9 @@ table); ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P3 
 feat/outbound-stage4, code head 04d176a. Prod = voice-uk-prod-00103-nvc @ eb60198; rollback
 `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00103-nvc=100 --project=vetra-uk-edc8ca --region=europe-west2`.
 
-(1) Gate verdict: .superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p3.log — ROOT exit 0, census 227,
-DB exit 0, every sabotage row red except ask-branch-latch / ask-branch-in-turn / ask-latch-per-action, 0 "could not
-be READ", tree clean. Any red root test or green row is a finding: plain words + yes/no, fix red-first, ask me.
+(1) Gate verdict is already PASS at 04d176a (plan "Part 3 sitting 1"; one stale row fixed in docs/test commit
+after it). Confirm main checkout HEAD = 04d176a + docs/row commits only (git diff 04d176a HEAD -- lib services
+capabilities = empty).
 (2) Ask me before the redeploy: ONE deploy from the main checkout, clean tracked tree (CRLF checksums — never an LF
 worktree), migrate --status first, env diff vs 00103 = only GIT_COMMIT_SHA, boot logs clean; rollback said first.
 (3) Calls (approved, cap $2; each script in its own message; wait for "done"; read live_call_summary.confirm /
