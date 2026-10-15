@@ -193,6 +193,9 @@ describe("LVX53 end to end — owner F4: booked, and counted", () => {
     expect(functionResponse.response.gated).toBe(true);
     expect(functionResponse.response.message).toMatch(/ for Nithin, V-O-D-L-A, booking that now\./);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The write-order gate's look-ahead at the spelling gate (F2) decides
+    // only: nothing reached the spelling gate itself, so nothing is counted.
+    expect(getLatencyStats().turnTaking.write_name_on_file_unspoken).toBeFalsy();
   });
 
   it("the spelling ask is made once: the model does not ask again itself (owner F4)", async () => {

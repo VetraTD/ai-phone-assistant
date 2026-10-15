@@ -386,6 +386,28 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     expect(functionResponse.response.message).toContain("for Jon, D-O-D-L-A, booking that now.");
   });
 
+  // F2 (owner, A1 part 3, CAff059ed): the letters were lost on the line, the
+  // model was handed "...booking that now", said it, and only THEN was asked
+  // to spell. When both gates would hold, the spelling question goes first.
+  it("with nothing read back and the spelling still needed, asks for the spelling first -- no 'booking that now'", async () => {
+    const { functionResponse, stateEffects } = await book(
+      live({ spellingSettled: false, lastCallerText: "Marcus Bell, ten works" })
+    );
+    expect(functionResponse.response.gated).toBe(true);
+    expect(functionResponse.response.message).toMatch(/FULL name/);
+    expect(functionResponse.response.message).not.toMatch(/booking that now/);
+    expect(stateEffects.writeGateRefusal).toBe("spelling");
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("once spelled, the next attempt is handed the one sentence, letters inside it", async () => {
+    const { functionResponse, stateEffects } = await book(
+      live({ spellingSettled: true, callerSpelled: true, lastCallerText: "B, E, L, L" })
+    );
+    expect(stateEffects.writeGateRefusal).toBe("write_order");
+    expect(functionResponse.response.message).toContain("for Marcus, B-E-L-L, booking that now.");
+  });
+
   it("the model saying that sentence and calling again saves", async () => {
     const first = await book(live({ lastCallerText: "Ten works, book it" }));
     const said = first.stateEffects.toolResult.message;

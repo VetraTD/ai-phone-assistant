@@ -1037,6 +1037,10 @@ export async function executeToolCall(fc, ctx) {
           // HERE, before every gate below, so the write-order gate's proposal
           // key and the spelling gate both see the name that will be written.
           const nameOnFile = outboundNameOnFile(fc, ctx);
+          // Round A1 part 3 (F2): set where the write-order gate steps aside for
+          // the spelling gate, and read BY the spelling gate, so stepping aside
+          // can never let a write through with neither gate refusing it.
+          let spellFirst = false;
           if (nameOnFile?.fullName) {
             fc = { ...fc, args: { ...(fc.args || {}), client_name: nameOnFile.fullName } };
             bumpCounter("outbound_name_from_file");
@@ -2091,7 +2095,20 @@ export async function executeToolCall(fc, ctx) {
             // `write_consent_agreement_superseded` at the probe above, so the
             // rate is still measured after it stops deciding.
             // -----------------------------------------------------------------
-            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed)) {
+            // Round A1 part 3, F2 (owner, 2026-10-15, CAff059ed): the spelling
+            // question goes BEFORE the one read-back. With no read-back standing
+            // on the booking rule this gate hands the model "...booking that
+            // now"; when the spelling gate below would then hold the same write,
+            // the caller heard "booking that now" and THEN "could you spell
+            // that?". So step aside for it: the spelling is asked first, and
+            // the next attempt -- letters in -- is handed the sentence.
+            spellFirst =
+              a1Save.applies &&
+              a1Save.rule === "booking" &&
+              !readBackMade &&
+              a1Save.awaitingAnswer !== true &&
+              spellingGateWouldHold(fc, ctx, pack, nameOnFile);
+            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed) && !spellFirst) {
               bumpCounter("write_order_would_refuse");
               // LVX156. A read-back that was made and answered unreadably
               // reaches the ceiling a turn earlier than a write nobody was
@@ -2447,18 +2464,19 @@ export async function executeToolCall(fc, ctx) {
               severity: "warn",
             });
           } else if (
-            pendingName &&
-            gateRefusals < spellMissCap() &&
-            shouldConfirmSpelling({
-              name: pendingName,
-              callerContext: ctx?.callerContext,
-              spellingSettled: ctx?.spellingSettled,
-              policy: spellPolicy(),
-              // LVX53: an on-file name only silences the gate when the CALLER
-              // said it on this call. Absent on the cascade, which threads no
-              // transcript, so the bypass there is unchanged.
-              callerSaidThisCall: ctx?.callerSaidThisCall ?? null,
-            })
+            // The write-order gate stepped aside for this refusal (F2); it
+            // decided on the same inputs, so this only matters if they drift.
+            spellFirst ||
+            (pendingName &&
+              gateRefusals < spellMissCap() &&
+              shouldConfirmSpelling({
+                name: pendingName,
+                callerContext: ctx?.callerContext,
+                spellingSettled: ctx?.spellingSettled,
+                policy: spellPolicy(),
+                // Counted here (provenance), never asked for on file (F4).
+                callerSaidThisCall: ctx?.callerSaidThisCall ?? null,
+              }))
           ) {
             // Worded as an unfinished step, not a failure. LVX34: the model
             // read `success: false` as "this cannot be done" and told the
@@ -2754,6 +2772,29 @@ function writeAttemptBudget(ctx, packId, fc) {
     isNewTurn: scratch.writeAttemptRefusedTurn !== callerTurn,
     callerTurn,
   };
+}
+
+/**
+ * Would the spelling gate hold this write if it were reached? The same inputs
+ * as that gate's refusal branch, read without its counters. Round A1 part 3,
+ * F2: the write-order gate steps aside for it, so the spelling question comes
+ * BEFORE the one read-back ("...booking that now"), never after it.
+ */
+function spellingGateWouldHold(fc, ctx, pack, nameOnFile) {
+  if (!CONFIRM_HARD_NAMES || ctx?.lastChance === true || nameOnFile) return false;
+  const name = callerNameFromArgs(fc.args);
+  if (!name) return false;
+  const scratch = ctx?.capabilityState?.[pack?.id] || {};
+  if ((Number(scratch.spellingGateRefusals) || 0) >= spellMissCap()) return false;
+  if (writeAttemptBudget(ctx, pack?.id, fc).spent) return false;
+  return shouldConfirmSpelling({
+    name,
+    callerContext: ctx?.callerContext,
+    spellingSettled: ctx?.spellingSettled,
+    policy: spellPolicy(),
+    callerSaidThisCall: ctx?.callerSaidThisCall ?? null,
+    count: false,
+  });
 }
 
 /** The capabilityState patch every refusal must carry, from either gate. */
