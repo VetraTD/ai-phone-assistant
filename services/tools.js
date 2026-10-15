@@ -20,7 +20,7 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
-import { normalizeName, shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
+import { normalizeName, shouldConfirmSpelling, spellPolicy, nameIsOnFile } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
@@ -2220,7 +2220,10 @@ export async function executeToolCall(fc, ctx) {
                       toolName: fc.name,
                       args: fc.args || {},
                       config: ctx?.config,
-                      callerSpelled: ctx?.callerSpelled === true,
+                      // Owner F4 (A1 part 3): a surname taken from the record
+                      // is spelled too -- the statement that replaces asking.
+                      callerSpelled:
+                        ctx?.callerSpelled === true || nameIsOnFile(fc.args?.client_name, ctx?.callerContext),
                     })
                   : null;
                 // T5b: read back, then not a sound from the caller. Nothing to
@@ -2488,7 +2491,11 @@ export async function executeToolCall(fc, ctx) {
               `thing missing is the spelling. Ask them now and wait for their answer; do not call this ` +
               `function again until they have replied, then call it again with the same details. If they ` +
               `decline or tell you it is spelled how it sounds, accept that and record the name exactly ` +
-              `as you heard it.`;
+              // Owner F4 (A1 part 3, CAfbe569): the caller asked "Don't you
+              // already have the spelling?" and the model asked again.
+              `as you heard it. Ask them once: whatever they answer — letters, a no, or a question — do ` +
+              `not ask them to spell it again yourself; call this again and you will be told if anything ` +
+              `is still missing.`;
             // Counted, because until now this gate's entire accounting lived in
             // per-call capabilityState and no call could report how often it
             // fired or how often it ran out. The cap is the interesting half:

@@ -62,8 +62,15 @@ const ON_FILE = {
   ],
 };
 
-describe("shouldConfirmSpelling — the on-file bypass needs the caller behind it", () => {
-  it("does NOT trust the record when the caller never said the name (LVX53)", () => {
+describe("shouldConfirmSpelling — a name on file is never asked for", () => {
+  // OLD BEHAVIOUR (LVX53, 2026-09-03): the record was not trusted unless the
+  // caller said the name on this call, and the gate asked them to spell it.
+  // Owner, 2026-10-15 (round A1 part 3, F4, call CAfbe569): a name on file for
+  // the caller's number is never asked for; the ONE read-back spells its
+  // surname as a statement instead, so a wrong record or a different person on
+  // the same phone is heard and corrected without a question.
+  it("does not ask for a name on file even when the caller never said it (owner F4)", () => {
+    clearStats();
     expect(
       shouldConfirmSpelling({
         name: "Nithin Vodla",
@@ -71,7 +78,10 @@ describe("shouldConfirmSpelling — the on-file bypass needs the caller behind i
         // What the caller's turn actually transcribed to on that call.
         callerSaidThisCall: "Hay en el Tíndala. Yeah. Tuesday works.",
       })
-    ).toBe(true);
+    ).toBe(false);
+    // Still measured: the unspoken case is what LVX53 was about.
+    expect(getLatencyStats().turnTaking.write_name_on_file_unspoken).toBe(1);
+    expect(getLatencyStats().turnTaking.write_refused_name_provenance).toBeFalsy();
   });
 
   it("still trusts the record when the caller did say it", () => {
@@ -129,7 +139,7 @@ describe("shouldConfirmSpelling — the on-file bypass needs the caller behind i
   });
 });
 
-describe("LVX53 end to end — the booking is refused, not written", () => {
+describe("LVX53 end to end — owner F4: booked, and counted", () => {
   beforeEach(() => {
     clearStats();
     vi.clearAllMocks();
@@ -173,11 +183,43 @@ describe("LVX53 end to end — the booking is refused, not written", () => {
       c
     );
 
-  it("refuses a name lifted from the record and writes no row", async () => {
-    const { functionResponse } = await book(ctx("Hay en el Tíndala. Tuesday works."));
+  it("the one read-back spells a surname taken from the record, as a statement (owner F4)", async () => {
+    const { functionResponse } = await book({
+      ...ctx("Hay en el Tíndala. Tuesday works."),
+      lastReplyText: "Thanks. And which day suits you?",
+      lastCallerText: "Tuesday works",
+    });
     expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.gated).toBe(true);
+    expect(functionResponse.response.message).toMatch(/ for Nithin, V-O-D-L-A, booking that now\./);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
-    expect(getLatencyStats().turnTaking.write_refused_name_provenance).toBe(1);
+  });
+
+  it("the spelling ask is made once: the model does not ask again itself (owner F4)", async () => {
+    const { functionResponse } = await executeToolCall(
+      {
+        id: "fc1",
+        name: "book_appointment",
+        args: {
+          client_name: "Marcus Bell",
+          scheduled_at: `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`,
+          in_addition_to_existing: true,
+        },
+      },
+      ctx("it's Marcus Bell, Tuesday works")
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/ask (?:them )?once/i);
+    expect(functionResponse.response.message).toMatch(/do not ask (?:them )?(?:to spell it )?again/i);
+  });
+
+  // OLD BEHAVIOUR: refused, no row (LVX53). Owner F4 (2026-10-15): booked.
+  it("books a name on file the caller never said, and counts it", async () => {
+    const { functionResponse } = await book(ctx("Hay en el Tíndala. Tuesday works."));
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.write_name_on_file_unspoken).toBe(1);
+    expect(getLatencyStats().turnTaking.write_refused_name_provenance).toBeFalsy();
   });
 
   it("books normally for a caller who identified themselves", async () => {
