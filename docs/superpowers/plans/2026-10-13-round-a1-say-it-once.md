@@ -731,6 +731,16 @@ new ones from these calls):
      "Nithin Dodla", readback_spelled 1, one owner email.
  All: backwards_goodbye 0. A failed check = finding: plain words + yes/no, fix red-first, ask before any redeploy.
 
+Conserve usage and time WITHOUT compromising quality:
+- Read only the plan sections named above and the parts of files you need (grep/offset), not whole big files; don't
+  re-read what you already have; don't re-derive facts the plan or ledger already settles.
+- Batch independent reads/commands into one turn; one filtered log query per call, not many.
+- Use cheaper models (sonnet/haiku) for mechanical subagent work (log extraction, searches); keep opus for any code
+  review of a fix. Spawn subagents only when they save real work.
+- Never skip a check to save time: every call's numbers are read from the logs, every fix is red-first with a test and
+  census, and a fix gets the full gate before redeploy. If saving usage would cost quality, say so and ask.
+- Keep replies short and plain; put the detail in the ledger, not the chat.
+
 Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work in the main tree; long gates
 in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope: LVX167, LVX174, LVX175 (A2),
 LVX168–171. End with: verdict per fix and per call, "Part 3 as built" in the plan, ledger + memory updated, and what
