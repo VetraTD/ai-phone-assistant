@@ -155,6 +155,10 @@ const A1_CONFIRMAUDIT = "tests/liveConfirmAudit.test.js";
 const A1_E2E = "tests/liveWritePathEndToEnd.test.js";
 const A1_LIVESILENCE = "tests/liveSilence.test.js";
 const A1_CLOSINGORDER = "tests/closingOrder.test.js";
+// Round A1 S3 (2026-10-14): I3 -- a same-call correction updates; one email.
+const S3_REQUESTS = "tests/customerRequestCorrection.test.js";
+const S3_LIVEREQUESTS = "tests/liveCustomerRequestCorrection.test.js";
+const S3_LASTCHANCE = "tests/messageLastChance.test.js";
 // Batch-3 S2: the per-call clock (wrap-up 8:30, goodbye 9:00, hard end 9:30).
 const CLOCK = "tests/liveCallClock.test.js";
 const POLITE = "tests/livePoliteFailure.test.js";
@@ -2051,6 +2055,55 @@ const SABOTAGES = [
     find: "    !(save.rule === \"booking\" && save.slot) || readBackMentionsSlot(text, save.slot);",
     replace: "    true; // SABOTAGE",
     red: [A1_CONFIRMAUDIT],
+  },
+  // Round A1 S3 (2026-10-14): I3 + the last-chance write.
+  {
+    name: "request-correction-updates",
+    why: "round A1 S3 I3: a same-call correction ('no, it's 0 1 2 4') updates the row it corrects; broken, every correction files a second row and the first, wrong one stays.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "          if (!match) return null;",
+    replace: "          return null; // SABOTAGE",
+    red: [S3_REQUESTS, S3_LIVEREQUESTS],
+  },
+  {
+    name: "request-one-email",
+    why: "round A1 S3 I3: one owner email per message -- the corrected row is already in the inbox (the email is link-only), so a correction sends nothing.",
+    file: "capabilities/messages.js",
+    find: "        if (saved.corrected) {",
+    replace: "        if (false) { // SABOTAGE",
+    red: [S3_REQUESTS, S3_LIVEREQUESTS],
+  },
+  {
+    name: "request-one-email-quote",
+    why: "round A1 S3 I3: the quotes half of one-email-per-request.",
+    file: "capabilities/quotes.js",
+    find: "        if (saved.corrected) {",
+    replace: "        if (false) { // SABOTAGE",
+    red: [S3_REQUESTS],
+  },
+  {
+    name: "request-abrupt-end-emails",
+    why: "round A1 S3: a record (or a correction) whose turn never completed -- the line dropped -- is still written and emailed by finish(); broken, the caller was told 'passing that on' and nobody was.",
+    file: "lib/voice/live/index.js",
+    find: "        dispatchEffects(pendingCapabilityEffects);",
+    replace: "        void 0; // SABOTAGE",
+    red: [S3_LIVEREQUESTS],
+  },
+  {
+    name: "last-chance-dispatches-effects",
+    why: "round A1 S3 (owner: fix in S3): the message re-issued at close writes through its EFFECT; dropped, message_saved_last_chance counts a message with no row and no owner email.",
+    file: "lib/voice/live/index.js",
+    find: "          dispatchEffects(effects);",
+    replace: "          void effects; // SABOTAGE",
+    red: [S3_LASTCHANCE],
+  },
+  {
+    name: "last-chance-not-abandoned",
+    why: "round A1 S3: the post-call read derives `abandoned` at verify time; the finish()-time snapshot reports a last-chance message as abandoned and files a false 'may need a call back'.",
+    file: "lib/voice/live/index.js",
+    find: "        abandoned: [...refusedToolsThisCall].filter((n) => !completedToolsThisCall.has(n)),",
+    replace: "        abandoned: abandonedTools, // SABOTAGE",
+    red: [S3_LASTCHANCE],
   },
 ];
 
