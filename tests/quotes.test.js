@@ -51,6 +51,10 @@ function makeEngine(overrides = {}) {
     deps: {
       db: {
         createCustomerRequest: calls.createCustomerRequest,
+        // Round A1 S3: what a same-call correction is matched against
+        // (tests/customerRequestCorrection.test.js). Nothing filed yet.
+        listCallCustomerRequests: vi.fn().mockResolvedValue([]),
+        updateCustomerRequest: vi.fn().mockResolvedValue(null),
         // Models what withTenantSafe does: opens app.business_id for the
         // duration of fn. A capability write that never passes through here is
         // a write FORCE row-level security refuses outright.

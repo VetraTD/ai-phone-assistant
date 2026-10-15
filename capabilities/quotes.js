@@ -36,6 +36,7 @@ import {
 } from "../lib/capabilities/requirements.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
+import { saveCustomerRequest } from "../lib/capabilities/customerRequests.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -224,23 +225,29 @@ export default {
     //   tool_result success=true tool=record_customer_request
     //   db_error   new row violates row-level security policy for "customer_requests"
     // The caller was told their message had been taken. It had not.
-    engine.deps.db
-      .withTenantSafe(
-        businessId,
-        () =>
-          engine.deps.db.createCustomerRequest({
-            businessId,
-            callId,
-            requestType: "quote",
-            callerName: data.caller_name || null,
-            callbackNumber: data.callback_number || party.phone || null,
-            message: detail,
-            preferredTime: null,
-          }),
-        { operation: "createCustomerRequest", callSid }
-      )
-      .then((id) => {
-        if (!id) return;
+    //
+    // Round A1 S3 (I3): a same-call correction updates the quote it corrects
+    // and sends nothing -- see capabilities/messages.js and
+    // lib/capabilities/customerRequests.js.
+    saveCustomerRequest({
+      db: engine.deps.db,
+      businessId,
+      callId,
+      callSid,
+      row: {
+        requestType: "quote",
+        callerName: data.caller_name || null,
+        callbackNumber: data.callback_number || party.phone || null,
+        message: detail,
+        preferredTime: null,
+      },
+    })
+      .then((saved) => {
+        if (!saved) return;
+        if (saved.corrected) {
+          engine.deps.log.info("customer_request_corrected", { callSid, tool: "record_quote_request" });
+          return;
+        }
         engine.deps.notifications
           .notifyCustomerRequest({
             businessId,

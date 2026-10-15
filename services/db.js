@@ -1543,6 +1543,79 @@ export async function createCustomerRequest({
   return requestId;
 }
 
+/**
+ * The customer requests one call has already filed, of one type, newest first.
+ *
+ * Round A1 S3 (I3): what a same-call correction is matched against
+ * (lib/capabilities/customerRequests.js). Same rule as
+ * listAppointmentsByCallId: a call UUID is not a secret, so the business is
+ * required and in the WHERE as well as in the RLS scope.
+ *
+ * @param {string} callId - calls.id
+ * @param {string} businessId - REQUIRED
+ * @param {string} requestType
+ * @returns {Promise<Array<{id: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null}>|null>}
+ */
+export async function listCallCustomerRequests(callId, businessId, requestType) {
+  if (!pool || !callId) return null;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "listCallCustomerRequests" });
+    return null;
+  }
+  const res = await q(
+    `SELECT id, caller_name, callback_number, message, preferred_time
+       FROM customer_requests
+      WHERE call_id = $1 AND business_id = $2 AND request_type = $3
+      ORDER BY created_at DESC, id DESC`,
+    [callId, businessId, requestType || "message"]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "listCallCustomerRequests", error: res.error.message });
+    return null;
+  }
+  const list = res.rows || [];
+  noteAccess("listCallCustomerRequests", { resourceIds: list.map((r) => r.id), rowCount: list.length });
+  return list;
+}
+
+/**
+ * Apply a same-call correction to the customer request it corrects.
+ *
+ * A field the correction leaves out keeps its value: a re-record that names
+ * only the fixed number must not blank the message. Returns null when no row
+ * changed -- under FORCE RLS an unscoped UPDATE matches nothing and reports no
+ * error, so the row count is the only evidence it landed.
+ *
+ * @param {{ id: string, businessId: string, callerName?: string|null, callbackNumber?: string|null, message?: string|null, preferredTime?: string|null }} params
+ * @returns {Promise<string|null>} the row id, or null
+ */
+export async function updateCustomerRequest({ id, businessId, callerName, callbackNumber, message, preferredTime }) {
+  if (!pool || !id) return null;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "updateCustomerRequest" });
+    return null;
+  }
+  const res = await q(
+    `UPDATE customer_requests
+        SET caller_name = COALESCE($3, caller_name),
+            callback_number = COALESCE($4, callback_number),
+            message = COALESCE($5, message),
+            preferred_time = COALESCE($6, preferred_time)
+      WHERE id = $1 AND business_id = $2
+      RETURNING id`,
+    [id, businessId, callerName || null, callbackNumber || null, message || null, preferredTime || null]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "updateCustomerRequest", error: res.error.message });
+    captureException(new Error(res.error.message), { table: "customer_requests", op: "update" });
+    return null;
+  }
+  const row = one(res);
+  if (!row) return null;
+  noteAccess("updateCustomerRequest", { resourceIds: [row.id], rowCount: 1 });
+  return row.id;
+}
+
 // ---------------------------------------------------------------------------
 // Caller-facing SMS consent (migration 037, ledger O25)
 // ---------------------------------------------------------------------------

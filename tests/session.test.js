@@ -257,6 +257,9 @@ vi.mock("../services/db.js", () => ({
   addTranscriptEntry: vi.fn(async () => {
     H.writes.push({ op: "addTranscriptEntry", tenant: H.activeTenant });
   }),
+  // Round A1 S3: what a same-call correction is matched against. Nothing filed yet.
+  listCallCustomerRequests: vi.fn(async () => []),
+  updateCustomerRequest: vi.fn(async () => null),
   createCustomerRequest: vi.fn(async () => {
     H.writes.push({ op: "createCustomerRequest", tenant: H.activeTenant });
     return "req1";

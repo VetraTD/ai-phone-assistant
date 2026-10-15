@@ -21,6 +21,7 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
+import { saveCustomerRequest } from "../lib/capabilities/customerRequests.js";
 
 
 /**
@@ -220,22 +221,32 @@ export default {
     //   tool_result success=true tool=record_customer_request
     //   db_error   new row violates row-level security policy for "customer_requests"
     // The caller was told their message had been taken. It had not.
-    db.withTenantSafe(
+    //
+    // Round A1 S3 (I3): saveCustomerRequest opens that scope itself, and turns
+    // a same-call correction ("no, it's 0 1 2 4") into an UPDATE of the row it
+    // corrects. A corrected row is already in the owner's inbox -- the email
+    // is link-only and went out at the first save -- so a correction sends
+    // nothing: one email per message.
+    saveCustomerRequest({
+      db,
       businessId,
-      () =>
-        db.createCustomerRequest({
-          businessId,
-          callId,
-          requestType: args.request_type || "message",
-          callerName: args.caller_name || null,
-          callbackNumber: args.callback_number || null,
-          message: args.message || null,
-          preferredTime: args.preferred_time || null,
-        }),
-      { operation: "createCustomerRequest", callSid }
-    )
-      .then((id) => {
-        if (!id) return;
+      callId,
+      callSid,
+      row: {
+        requestType: args.request_type || "message",
+        callerName: args.caller_name || null,
+        callbackNumber: args.callback_number || null,
+        message: args.message || null,
+        preferredTime: args.preferred_time || null,
+      },
+    })
+      .then((saved) => {
+        if (!saved) return;
+        if (saved.corrected) {
+          // Names only: the message is the caller's own words (LVX24).
+          log.info("customer_request_corrected", { callSid, tool: "record_customer_request" });
+          return;
+        }
         notifications
           .notifyCustomerRequest({
             businessId,

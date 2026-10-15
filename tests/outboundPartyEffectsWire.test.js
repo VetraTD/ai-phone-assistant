@@ -118,6 +118,9 @@ function fakeDb() {
     }),
     fetchBusinessById: async () => ({ id: BIZ, name: CONFIG.businessName, timezone: CONFIG.timezone }),
     fetchBusinessCapabilities: async () => [],
+    // Round A1 S3: what a same-call correction is matched against. Nothing filed yet.
+    listCallCustomerRequests: vi.fn(async () => []),
+    updateCustomerRequest: vi.fn(async () => null),
     createCustomerRequest: vi.fn(async () => "req-1"),
     // Task 20: the outbound finish() hook's own half of post-call.
     finishAttemptSession: async () => {},
