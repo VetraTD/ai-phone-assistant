@@ -35,8 +35,21 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
+
+// Round A1 S3: the last-chance write's effect reaches the real messages pack,
+// whose owner email is this module.
+vi.mock("../services/notifications.js", () => ({
+  notifyAppointmentBooked: vi.fn(async () => {}),
+  notifyCustomerRequest: vi.fn(async () => {}),
+  notifyUnconfirmedClaim: vi.fn(async () => {}),
+  sendCallerSms: vi.fn(async () => {}),
+  MESSAGE_SLA_TEXT: "as soon as possible",
+}));
+
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+import messages from "../capabilities/messages.js";
+import * as notifications from "../services/notifications.js";
 
 class FakeSocket extends EventEmitter {
   constructor() {
@@ -186,5 +199,114 @@ describe("a promised message survives the end of the call", () => {
 
     expect(s.calls).toHaveLength(0);
     expect(c().message_saved_last_chance ?? 0).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round A1 S3 (owner, 2026-10-14): the re-issued write must actually WRITE.
+//
+// Every test above stubs `execute` with a bare success, so none of them could
+// see that saveOutstandingMessage only read the function response. The real
+// messages.execute does no write of its own -- it returns a capability effect
+// and onEffect writes the row and emails the owner -- and finish() had already
+// flushed its effects before the re-issued call came back. The counter said
+// message_saved_last_chance; customer_requests had no row and nobody was told.
+//
+// So here the last-chance attempt runs the REAL pack.
+// ---------------------------------------------------------------------------
+async function bootRealPack() {
+  const ws = new FakeSocket();
+  const live = fakeLive();
+  const rows = [];
+  const database = {
+    ...fakeDb(),
+    createCustomerRequest: vi.fn(async (r) => {
+      rows.push(r);
+      return `req-${rows.length}`;
+    }),
+    listCallCustomerRequests: vi.fn(async () => []),
+    updateCustomerRequest: vi.fn(async () => null),
+    addTranscriptEntry: async () => {},
+  };
+  const verify = vi.fn(async () => ({ verdict: "ok" }));
+  const execute = vi.fn(async (fc, ctx) => {
+    if (fc.name === "record_customer_request" && ctx?.lastChance !== true) {
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "spell it first" } },
+        stateEffects: {
+          capabilityState: { messages: { pendingWrite: { name: fc.name, args: fc.args || {} } } },
+        },
+      };
+    }
+    return messages.execute(fc, ctx);
+  });
+
+  await handleLiveSessionConnection(
+    ws,
+    {},
+    {
+      now: () => 0,
+      connect: live.connect,
+      database,
+      env: { POSTCALL_VERIFY: "count" },
+      execute,
+      verify,
+      recover: vi.fn(async () => ({ ran: false, booked: false })),
+      judge: vi.fn(async () => ({ ran: true, agreedAction: "none" })),
+    }
+  );
+  ws.deliver({
+    event: "start",
+    start: { callSid: "CA_msg_real", streamSid: "MZ1", customParameters: { businessPhone: "+441372656055" } },
+  });
+  await vi.waitFor(() => expect(live.connect).toHaveBeenCalled());
+  await new Promise((r) => setImmediate(r));
+
+  return {
+    rows,
+    verify,
+    async takeMessage() {
+      live.push({
+        toolCall: { functionCalls: [{ id: "m1", name: "record_customer_request", args: MESSAGE_ARGS }] },
+      });
+      await new Promise((r) => setTimeout(r, 25));
+    },
+    async hangUp() {
+      ws.emit("close");
+      await new Promise((r) => setTimeout(r, 60));
+    },
+  };
+}
+
+describe("the last-chance message reaches the database and the owner (S3)", () => {
+  beforeEach(() => {
+    clearStats();
+    vi.mocked(notifications.notifyCustomerRequest).mockClear();
+  });
+
+  it("writes the row and emails the owner once", async () => {
+    const s = await bootRealPack();
+    await s.takeMessage();
+    expect(s.rows).toHaveLength(0);
+
+    await s.hangUp();
+
+    expect(c().message_saved_last_chance).toBe(1);
+    expect(s.rows).toHaveLength(1);
+    expect(s.rows[0]).toMatchObject({ requestType: "callback", callerName: "Nithin Dodla", message: MESSAGE_ARGS.message });
+    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("the post-call read counts it as recorded, not abandoned", async () => {
+    const s = await bootRealPack();
+    await s.takeMessage();
+    await s.hangUp();
+    await vi.waitFor(() => expect(s.verify).toHaveBeenCalled());
+
+    const args = s.verify.mock.calls[0][0];
+    expect(args.messagesRecorded).toBe(1);
+    // An abandoned message write is what files "A caller may need a call
+    // back" -- a false alarm about a message that was in fact passed on.
+    expect(args.abandoned).not.toContain("record_customer_request");
   });
 });
