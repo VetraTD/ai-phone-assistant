@@ -600,7 +600,7 @@ one line whenever we move to the next step.
 
 Plan: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md — read "Part 2 as built" (F1–F4, call table) and "S2 as
 built" (the gate design). Ledger: .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (every Ruling + deferred
-minor; Part 2 lines at the end). Branch feat/outbound-stage4. Code head eb60198, docs head 1ef9de4.
+minor; Part 2 lines at the end). Branch feat/outbound-stage4. Code head eb60198 (only docs commits on top).
 Production = voice-uk-prod-00103-nvc @ eb60198 (LIVE since 10-15, owner chose fix-forward); rollback target
 voice-uk-prod-00102-q9q @ 28b8111. Test line +18175803291 (VetraTD Test Line tenant; dashboard login
 nithinjd06+testline@gmail.com). My handset +14699338887 now has a name on file ("Nithin Dodla") and two test bookings
