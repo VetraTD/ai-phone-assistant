@@ -379,7 +379,7 @@ Bash) so the memory reaper cannot kill it.
 of a booking now tells the model to call again (no second read-back, no yes; the retry keeps its strict rule) and a
 booking held awaiting its read-back's answer is stashed; **I2** a read-back that ASKS in the same breath as the tool
 call ("…shall I go ahead and book that?") waits for the answer — only the statement form saves at once (ruling on
-owner Q1, flagged); **I4** "Sorry, yes, make it four" objects again, and a yes that carries a change or question
+owner Q1 — **owner confirmed 2026-10-15**); **I4** "Sorry, yes, make it four" objects again, and a yes that carries a change or question
 ("Yeah, make it four") is held before the write-order gate (only that case — every other objection keeps the gate's
 ceiling). Also fixed for the part-2 numbers: `farewellRe` false positives ("take care of", "have a day in mind",
 "Good morning, thanks for calling") and booking read-backs tied to the saved slot in the confirm ledger. **Not fixed
@@ -508,7 +508,11 @@ failure with no correction loses it exactly as before S3; the durable fix is an 
 **Gates:** `eb63f83` root 320 files / 7,868 passed, census 200, test:db 51 / 695 (superseded). `eb60198`: see the
 ledger line "S3 gate @eb60198". 13 new sabotage rows (census 207), each hand-verified red; 2 read green on the first
 pass and their test cases were sharpened.
-**Full sabotage at `eb60198` (owner's Git Bash):** VERDICT PENDING.
+**Full sabotage at `eb60198` (separate Git Bash window, 09:41–11:48 on 10-15):** **PASS.** 207 rows: 204 red, and
+exactly the 3 known baseline x green (`ask-branch-latch`, `ask-branch-in-turn`, `ask-latch-per-action`); 0 rows
+"could not be READ" (0 not measured); all 13 S3 rows red; gate tree clean afterwards, no journal left. Log
+`.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-s3-final-sab.log`. The I2 ruling (a same-breath
+read-back phrased as a question waits for the answer) was confirmed by the owner on 10-15.
 
 ## Part 2 starting message (paste into a fresh session — AFTER S3)
 
