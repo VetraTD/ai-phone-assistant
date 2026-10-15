@@ -653,3 +653,81 @@ with what is left. Ask before anything not in these steps. Not in scope: LVX167,
 End with: verdict per fix and per call, "Part 3 as built" in the plan, ledger + memory updated, and what round A2
 starts with.
 ```
+
+## Part 3 sitting 1 (2026-10-15, 13:51–15:50 CDT) — fixes built, gate running
+
+Owner decisions: F4 option 2 (a name on file is never asked for; a NEW name keeps the second spelling ask only after a
+near-silent answer) · F4 read-back = spell the on-file surname as a statement · F1 fix set YES · F2 = ask before
+the read-back (a lost-letters save shows 2 refusals — accepted) · review I2 = prompt only, counted · calls approved,
+cap $2.
+
+**Causes (free log reads):** F1 — the model re-called `book_appointment` 5× in 3 s after the handed-sentence refusal;
+the refusal echo answered 4 (`live_write_refusal_replayed` carried no callSid, so part 2's filtered read saw "one
+tool"; the echo key lacked `inTurnReplyText`/`callerVoicedSinceReply`), round 6 hit the cap, whose "Too many tool
+calls…" made the model say it could not book. The model's own arg was "Nithin **Dodda**" — it misheard the letters
+too; the late spelling ask is what wrote "Dodla". F4 — LVX53 provenance (on-file name not said this call → spelling
+ask), after "booking that now"; the model re-asked on its own after "Don't you already have the spelling?".
+
+**Commits (code head `04d176a`):** `2abf3ae` + `071ad14` F1 · `2352d7f` F4 code · `f850697` F3+F4 prompts (snapshots
+regenerated once, 36 files) · `154d34e` F2 · `006e117` 15 rows · `04d176a` review round (I1 cap pass + "already said",
+I2 counter `confirm.onfile_saves` / `onfile_readback_unspelled`, M3). Opus review: 0 Critical, 2 Important (fixed /
+owner-ruled), 5 Minor (M3 fixed; M4/M5 deferred; M6 measured on call b). 20 new rows + 2 re-anchored, each
+hand-verified RED; census 227.
+
+**What exists now**
+- F1: echo key + the A1 inputs; past `MAX_TOOL_ROUNDS` a HELD write is answered gated with its caller-safe line (or
+  "ask what you were told to ask"), never "Too many tool calls"; once the handed sentence has been said, ONE capped call
+  per turn reaches the gate (`live_tool_rounds_cap_pass_said`), after that "already said, do not say it again";
+  handed-sentence refusal "Once you have said it, call this again"; callSid on `live_write_refusal_replayed`.
+- F4: `shouldConfirmSpelling` never asks for an on-file name (`write_name_on_file_unspoken` counts the LVX53 case);
+  the handed sentence spells an on-file surname; booking guardrail + message step 1 tell the model to; spelling
+  refusal "ask once… do not ask them to spell it again yourself".
+- F3: letters rule unconditional; message step 5 + guidance spell a spelled or on-file surname.
+- F2: `spellingGateWouldHold()` look-ahead; the A1 no-read-back branch steps aside so the spelling is asked first;
+  fail-closed (`spellFirst` read by the spelling gate).
+
+**Gate:** `gate-v4.sh 04d176a a1-p3 db fullsab`, launched 15:46 in its own mintty window; log
+`.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p3.log`. Pass = ROOT exit 0, census 227, DB exit 0,
+every sabotage row red except the 3 baseline x, 0 "could not be READ", gate tree clean. **Verdict: pending.**
+
+## Part 3 sitting 2 starting message (paste into a fresh session — after the gate finishes)
+
+```text
+Run receptionist round A1 "say it once" — part 3, sitting 2: read the gate verdict, ONE redeploy, live calls.
+
+FIRST, before any tool call that changes anything: reiterate in plain words (steps, what each call checks, hours, $)
+and ask me any questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
+
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 3 sitting 1" (+ "Part 2 as built" call
+table); ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P3 lines at the end). Branch
+feat/outbound-stage4, code head 04d176a. Prod = voice-uk-prod-00103-nvc @ eb60198; rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00103-nvc=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+(1) Gate verdict: .superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p3.log — ROOT exit 0, census 227,
+DB exit 0, every sabotage row red except ask-branch-latch / ask-branch-in-turn / ask-latch-per-action, 0 "could not
+be READ", tree clean. Any red root test or green row is a finding: plain words + yes/no, fix red-first, ask me.
+(2) Ask me before the redeploy: ONE deploy from the main checkout, clean tracked tree (CRLF checksums — never an LF
+worktree), migrate --status first, env diff vs 00103 = only GIT_COMMIT_SHA, boot logs clean; rollback said first.
+(3) Calls (approved, cap $2; each script in its own message; wait for "done"; read live_call_summary.confirm /
+.closing, save_confirmations, live_debug_assistant_turn; filter by callSid AND by time window — some lines carry no
+callSid). Handset +14699338887 has "Nithin Dodla" on file + bookings Mon 19 Oct 11:00, Tue 20 Oct 14:00 (and any
+new ones from these calls):
+ (b) new surname: "Hi, I'd like to book an appointment for my colleague, Wednesday the 21st at 10 a.m. Her name is
+     Priya Raman — R, A, M, A, N." (if asked "in addition?": "Yes, it's for my colleague.") Pass: ONE read-back that
+     spells R-A-M-A-N, saved on first non-objection, no "unable"/"temporary issue"/"spell" AFTER "booking that now",
+     saves_over_one_readback 0, refusals ≤ 1 (≤ 2 if the letters were lost — then the spelling ask must come BEFORE
+     the read-back; 3 = finding M6). live_tool_rounds_capped 0 or answered held.
+ (d1) on file: "Hi, I'd like to book another appointment, Thursday the 22nd at 2 p.m." Do NOT say your name. Answer
+     "in addition?" with "Yes." After the read-back stay SILENT ~10 s; on "Hello? Are you still there?" say "Yes."
+     Pass: no spelling ask; read-back spells D-O-D-L-A (confirm.onfile_readback_unspelled 0 — 1 = prompt did not
+     hold, report it); booked once; saves_over_one_readback 0; refusals ≤ 1; if the save waited, rung 1 heard first.
+ (a) message: "I'd like to leave a message. My name is Nithin Dodla — D, O, D, L, A. My number is 469 933 8887.
+     It's about an invoice." Pass: ONE summary spelling D-O-D-L-A + number digit by digit, saved at once, row
+     "Nithin Dodla", readback_spelled 1, one owner email.
+ All: backwards_goodbye 0. A failed check = finding: plain words + yes/no, fix red-first, ask before any redeploy.
+
+Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work in the main tree; long gates
+in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope: LVX167, LVX174, LVX175 (A2),
+LVX168–171. End with: verdict per fix and per call, "Part 3 as built" in the plan, ledger + memory updated, and what
+round A2 starts with.
+```
