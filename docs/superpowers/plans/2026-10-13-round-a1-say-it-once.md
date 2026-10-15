@@ -21,8 +21,9 @@ Owner decisions there are final.
 | Plan | exploration + plan + 4 owner answers | **done 2026-10-13** (~0.9 h) — `b19cc5c` |
 | S1 | T1 detectors, T2 save policy, T3 spell once, T7 replay/test updates | **done 2026-10-13** (~1.9 h active) — code head `a7d2d99`, see "S1 as built" |
 | S2 | T4 prompts, T5 closing, T5b silence (added after S1), T6 measure, T8 rows, T9 full gate + ONE sabotage + opus review | **built 2026-10-13** (~2.5 h active) — code head `c185a97`; full sabotage pending, see "S2 as built" |
-| S3 | I3: a same-call message correction updates the first message; one owner email (owner, after S2) | next (~1–1.5 h) — starting message under "S3" |
-| Part 2 | one deploy + live calls a–d | after S3 |
+| S3 | I3: a same-call message correction updates the first message; one owner email (owner, after S2) | **done 2026-10-15** — code head `eb60198`, full sabotage PASS, see "S3 as built" |
+| Part 2 | one deploy + live calls a–d | **done 2026-10-15** (~1.9 h) — LIVE `00103-nvc` @ `eb60198`; (a) (c) (d2) PASS, (b) FAIL, (d1) silence untested — see "Part 2 as built" |
+| Part 3 | fix F1/F3/F4 (+ F2 decision), gate, redeploy, re-run (b) + (d1) | next — starting message under "Part 3" |
 
 ## Owner answers (2026-10-13, planning)
 - Q1 same breath: **save in same breath**; when the read-back is not visible at tool time, refuse once with the
@@ -535,3 +536,69 @@ read-back phrased as a question waits for the answer) was confirmed by the owner
 > `live_silence_line` stages 1–3 in the log. Paid calls need my approval (state the cost first). A1 done-when on these
 > calls: saves_over_one_readback 0, gate refusals ≤ 1 per save, backwards_goodbye 0. Not in scope: LVX167, LVX174,
 > LVX175, LVX168–171 (round A2).
+
+## Part 2 as built (2026-10-15) — deploy + live calls
+
+**Deploy (gcloud, main checkout, clean tracked tree, HEAD `4977aa0` = docs on top of code `eb60198`):** build
+`0df473a1` (53 s), tag `:eb60198`, digest `sha256:f2ce0d4e…6b26`. Migrate job image → `:eb60198`; `migrate --status`
+(`-p62sn`): 53 applied, none pending, no "edited". LIVE **`voice-uk-prod-00103-nvc` @ `eb60198`**, 100% traffic. Env
+diff vs `00102-q9q` = only `GIT_COMMIT_SHA` 28b8111→eb60198 (44 = 44 vars, `VOICE_SPELL_MISS_CAP` unset, spec
+otherwise identical). Boot clean (`sms_channel_off` as expected; page shows `Build: eb60198`). Rollback:
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00102-q9q=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+Owner kept `00103` after the (b) failure (fix forward).
+
+**Ops done for the checks (owner YES):** second dashboard login `nithinjd06+testline@gmail.com` attached to the VetraTD
+Test Line (`scripts/onboard-tenant.js --phone +18175803291`, uid `tenant-a633d96206a8c76559217179`); the owner's main
+login resolves to Digile Media, so the Test Line rows were invisible to it. Test data left (owner): appointments Mon 19
+Oct 11:00 + Tue 20 Oct 14:00, customer_requests 3 → 4.
+
+**Calls** (owner handset → +18175803291; (c) folded into (b) by the owner; ≈5.1 call-min ≈ $0.70 incl. build, cap $2):
+
+| Call | CallSid | Verdict | Numbers |
+|---|---|---|---|
+| (a) message + one number correction | `CA25ae7250e03f478e57fde4eb2294c592` | **PASS** | saved at once (2 saves, rule message, 0 refusals); `refusals_by_gate` all 0; `customer_request_corrected` 1; rows 3→4; dashboard: ONE row "Nithin Dodole — 4699338887" (corrected); ONE "New customer request" email 17:32:48Z; no false "Unconfirmed booking" (LVX176 live ✓); `no_ask` 1 (end_call right after the summary, refused) → "updated, anything else?" → no → goodbye; `backwards_goodbye` 0 |
+| (b)+(c) booking, surname spelled | `CAff059ed83d190170d6cea4e9f306eac3` | **(b) FAIL, (c) PASS** | booked Mon 19 Oct 11:00 "Nithin Dodla"; readbacks 3, `max_readbacks_per_save` 2, `saves_over_one_readback` 1, gate refusals 2 (write_order 1, spelling 1), `readback_spelled` 0 / missing 1; caller heard "unable to finalize your booking right now" + "temporary issue" (F1); ending "anything else?" → no → goodbye, `backwards_goodbye` 0, `no_ask` 0 |
+| (d1) booking, silence after read-back | `CAfbe56923754b90d43679e12ed6a83163` | **silence UNTESTED; A1 checks FAIL** | name on file → "add Tuesday in addition?" → yes; booked Tue 20 Oct 14:00 (`in_addition_to_existing`); spelling asked for the name on file, twice (F4); gate refusals 3 (consent 1, spelling 1, write_order 1); `saves_over_one_readback` 1; letters said back ("Nithin, D-O-D-L-A"), `readback_spelled` 1; no silent pause after a read-back, ladder never fired |
+| (d2) silent throughout | `CAcb208fd214d78ea82c4aafe962f78d39` | **PASS** | `live_silence_line` nudge stage 0 "Hello? Are you still there?", nudge stage 1 = `nudgeIdentify` (the step's own rung-2 line; never a yes), goodbye stage 2 = `goodbyeNoPhone` (tenant has no main number); `live_silence_hangup` quiet 8,021 ms; 0 saves; `<no speech detected>` in the output transcript after "Bye for now" — owner: NOT spoken |
+
+**A1 done-when on these calls:** `saves_over_one_readback` 0 — **FAIL** (b 1, d1 1) · gate refusals ≤ 1 per save —
+**FAIL** (b 2, d1 3) · `backwards_goodbye` 0 — **PASS** (4 of 4). Messages and closing work; bookings do not yet.
+
+**Findings (Part 3 fixes them):**
+- **F1 (b) false "can't book" after the tool-round cap.** Live issued `book_appointment` before any read-back text
+  (`a1_readback` null) → write_order refusal handing the composed sentence (the designed one-refusal path). The model
+  spoke the sentence, but `toolRoundsThisTurn` reached 6 > `MAX_TOOL_ROUNDS` 5 at 17:57:31
+  (`lib/voice/live/index.js:6474`) and the cap's reply ("Too many tool calls in one turn. Stop calling tools and speak
+  to the caller now…") made it say it could not finalize, twice. **Cause not known:** only ONE tool ran in that turn
+  (one `tool_duration`); `onToolCall` has no silent early return between the cap and the runner (outbound aside).
+  Suspects to test first: toolCall messages with empty/duplicate `functionCalls`, or a previous turn whose turnComplete
+  never came. Prior cap hits: 6 calls 09-16→09-20 (`00061`–`00091`), none 09-20→10-15. The cap reply also breaks the
+  held-write rule "do not tell them anything went wrong".
+- **F2 (b) spelled letters lost upstream.** Caller said "Nithin Dodla — D, O, D, L, A"; Live's input transcript was
+  "diodo" → `callerSpelled` false → the spelling gate refused the next (in-turn) save and the model asked to spell
+  AFTER "booking that now" ([[live-transcript-is-lossy]]). Owner decision needed on any mitigation.
+- **F3 (a, b) letters not said back** (LVX172 agreed design: the ONE read-back spells the surname). Prompt makes it
+  conditional (`services/gemini.js:1466`: only when the letters do not look like a name or differ by one letter);
+  message step 5 (`capabilities/messages.js:81`) lists name/number/reason only. (a)'s row holds "Dodole" for D-O-D-L-A.
+- **F4 (d1) spelling forced for a name on file, and asked twice.** The prompt says a name from an earlier visit is
+  not spelled again; the spelling gate refused anyway, and after "Don't you already have the spelling?" the model asked
+  again. Plus a write_order refusal and an engine-retry `write_refused_no_consent` in the same save (3 refusals).
+- **Observations (not fixes):** the urgency question is the general take-message step 4 (owner asked; no tenant
+  setting) · (a)'s summary turn and the caller's "urgent" are missing from the transcript (`turns_reply_empty` 1), so the
+  confirm ledger read 0 read-backs for (a) · `live_silence_line` stages log 0–2 (plan said 1–3) · the owner's Digile
+  dashboard password was pasted in chat — owner told to change it.
+
+## Part 3 starting message (paste into a fresh session)
+
+> Run receptionist round A1 "say it once" — part 3: fix what the part-2 calls found, ONE redeploy, re-run calls. Plan:
+> `docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md` — read "Part 2 as built" (F1–F4) and "S2 as built" (the
+> gate design). Ledger `.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md`. Branch `feat/outbound-stage4`;
+> production = `voice-uk-prod-00103-nvc` @ `eb60198` (rollback `00102-q9q` @ `28b8111`). FIRST reiterate the task,
+> hours and $ and ask me questions. Then: (1) F1 systematic debugging — why 6 tool rounds with one tool run
+> (call `CAff059ed83d190170d6cea4e9f306eac3`, 17:57:21–17:57:41Z); prototype on the call's own events before editing;
+> explain the cause in plain words with a yes/no fix decision; the cap reply for a held write must not say it failed.
+> (2) F4 spelling for a name on file + the second ask. (3) F3 the one read-back always spells a surname the caller
+> spelled (bookings and messages). (4) F2: bring me the options, no fix without my yes. Each fix red-first, census,
+> sabotage rows, opus review, db gate + ONE full sabotage in its own mintty window; ask me before the redeploy. Then
+> calls: (b) booking with a spelled surname on a NEW name (not on file), (d1) silence after the read-back, and (a) if
+> F3 touched messages. Paid calls need my approval. Not in scope: LVX167, LVX174, LVX175 (A2), LVX168–171.
