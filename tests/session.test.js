@@ -2569,6 +2569,63 @@ describe("session.js — v2 pipeline orchestrator", () => {
     );
   });
 
+  // Round A1 S3 (I3), the cascade wire: the same correction through
+  // lib/voice/session.js's own dispatcher. The Live half is
+  // tests/liveCustomerRequestCorrection.test.js.
+  it("12c. a corrected message on the cascade updates the first row and emails the owner once", async () => {
+    const recorded = (callback_number) => ({
+      capability: "messages",
+      type: "recorded",
+      data: { request_type: "message", caller_name: "Sam", callback_number, message: "about the invoice" },
+    });
+    // The record and its correction in one reply: the cascade dispatches a
+    // turn's effects back to back, the shape the per-call chain exists for.
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "Sorry — 0 1 2 4. Passing that on now." },
+        {
+          type: "done",
+          reply: {
+            text: "Sorry — 0 1 2 4. Passing that on now.",
+            capabilityEffects: [recorded("214 555 0123"), recorded("214 555 0124")],
+            toolResults: [{ name: "record_customer_request", success: true }],
+          },
+        },
+      ]);
+
+    // One filed row, as the database would hold it after the first save.
+    const filed = [];
+    db.createCustomerRequest.mockImplementationOnce(async (r) => {
+      filed.push({ id: "req1", caller_name: r.callerName, callback_number: r.callbackNumber, message: r.message, call_id: r.callId });
+      return "req1";
+    });
+    db.listCallCustomerRequests
+      .mockImplementationOnce(async () => [])
+      .mockImplementationOnce(async (callId) => filed.filter((f) => f.call_id === callId));
+    db.updateCustomerRequest.mockImplementationOnce(async (u) => {
+      const row = filed.find((f) => f.id === u.id);
+      row.callback_number = u.callbackNumber;
+      return row.id;
+    });
+
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await flush();
+
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("please take a message.");
+    await vi.waitFor(() => expect(db.updateCustomerRequest).toHaveBeenCalled());
+    await flush();
+
+    expect(db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(db.updateCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(filed).toHaveLength(1);
+    expect(filed[0].callback_number).toBe("214 555 0124");
+    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("13. multilingual: languagesSpoken.length > 1 -> STT connects with language=multi + endpointing=100", async () => {
     db.loadConfig.mockReturnValueOnce({
       businessName: "Test Biz",
