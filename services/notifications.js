@@ -121,6 +121,7 @@ export async function loadBusinessNotificationConfig(businessId) {
 /**
  * Send an email via SMTP (e.g. Gmail). Logs errors; never throws.
  * @param {{ to: string, subject: string, text: string, html?: string }} opts
+ * @returns {Promise<boolean>} true when the relay accepted it
  */
 async function sendEmail({ to, subject, text, html }) {
   if (!mailTransport) {
@@ -129,7 +130,7 @@ async function sendEmail({ to, subject, text, html }) {
     // where it happens. Neither `to` nor `subject` is logged: both identify a
     // person, and reporting one PHI leak must not open a second.
     log.error("notification_dropped", { channel: "email", reason: "smtp_not_configured" });
-    return;
+    return false;
   }
   try {
     await mailTransport.sendMail({
@@ -139,12 +140,14 @@ async function sendEmail({ to, subject, text, html }) {
       text,
       html: html || text.replace(/\n/g, "<br>\n"),
     });
+    return true;
   } catch (err) {
     log.error("notification_email", { message: err?.message });
     // No `to` and no `subject`: a recipient address and a subject line that
     // named a patient and an appointment time. lib/sentry.js would drop them
     // now, but a leak the call site never produces cannot depend on that.
     captureException(err, { context: "notifications.sendEmail" });
+    return false;
   }
 }
 
@@ -313,21 +316,35 @@ export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null
 
 /**
  * Notify when a customer request (message/callback) is created.
+ *
+ * Round A1 S3: resolves whether the owner was REACHED -- an email the relay
+ * accepted, or an SMS -- because a same-call correction sends nothing on the
+ * strength of this first send (lib/capabilities/customerRequests.js), and
+ * re-sends only when it did not land.
+ *
  * @param {{ businessId: string, customerRequest: { request_type?: string, caller_name?: string, callback_number?: string, message?: string, preferred_time?: string }, call?: { callerNumber?: string } }} opts
+ * @returns {Promise<boolean>}
  */
 export async function notifyCustomerRequest({ businessId, customerRequest }) {
-  if (!NOTIFICATIONS_ENABLED || !customerRequest) return;
+  if (!NOTIFICATIONS_ENABLED || !customerRequest) return false;
   try {
-    if (!checkRateLimit(businessId)) return;
+    if (!checkRateLimit(businessId)) return false;
     const config = await loadBusinessNotificationConfig(businessId);
-    if (!config) return;
+    if (!config) return false;
     const sentence = "A caller left a message or a callback request.";
     const subject = `New customer request — ${config.businessName}`;
-    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
-    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
+    let reached = false;
+    if (config.email) {
+      reached = (await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) })) || reached;
+    }
+    if (config.phone) {
+      reached = (await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) })) === true || reached;
+    }
+    return reached;
   } catch (err) {
     log.error("notify_customer_request", { message: err?.message });
     captureException(err, { businessId });
+    return false;
   }
 }
 

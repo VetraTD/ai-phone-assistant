@@ -17,13 +17,14 @@ import { sameRequest } from "../lib/capabilities/customerRequests.js";
 import { STEPS } from "../lib/callState.js";
 
 /** An in-memory customer_requests table behind the three db functions the packs use. */
-function makeEngine({ callId = "call-1", businessId = "biz-1", failUpdate = false } = {}) {
+function makeEngine({ callId = "call-1", businessId = "biz-1", failUpdate = false, delivered = true } = {}) {
   const rows = [];
   let seq = 0;
   const calls = {
     rows,
     activeTenant: null,
-    notify: vi.fn().mockResolvedValue(undefined),
+    // notifyCustomerRequest resolves whether the owner was reached.
+    notify: vi.fn().mockResolvedValue(delivered),
     sms: vi.fn().mockResolvedValue(undefined),
     logs: [],
     errors: [],
@@ -121,11 +122,21 @@ describe("sameRequest -- a correction, or a different request?", () => {
     ["a corrected name", P("Jon", "2145550123", "about the invoice"), P("John", "2145550123", "about the invoice"), true],
     ["the model rewording the reason", P("Jon", "2145550123", "wants to discuss the invoice"), P("Jon", "2145550124", "about the invoice"), true],
     ["a reason filled in", P("Jon", "2145550123", null), P("Jon", "2145550123", "the invoice"), true],
-    ["detail added to the reason", P("Jon", "2145550123", "invoice"), P("Jon", "2145550123", "invoice 4471 is overdue"), true],
+    // Ruling (after the opus review): most of the words new -> a new request.
+    // Filed as new, nothing lost; merging would let "invoice" overwrite it.
+    ["detail added to the reason", P("Jon", "2145550123", "invoice"), P("Jon", "2145550123", "invoice 4471 is overdue"), false],
     ["a different reason", P("Jon", "2145550123", "running late for the appointment"), P("Jon", "2145550123", "needs a copy of the invoice"), false],
     ["a message for someone else", P("Jon", "2145550123", "tell Bob I'm running late"), P("Jon", "2145550123", "ask Sarah to send the contract"), false],
     ["half the reason changed", P("Jon", "2145550123", "tell billing about the invoice"), P("Jon", "2145550123", "tell sales about the invoice"), false],
     ["another person, same reason", P("Bob", "2145550123", "about the invoice"), P("Sarah", "9725550199", "about the invoice"), false],
+    // Opus review C1: each of these merged, and the update overwrote the first request.
+    ["the caller's name inside both messages", P("Jon Smith", "1", "Jon Smith wants a callback about his invoice"), P("Jon Smith", "1", "Jon Smith says the gate code changed"), false],
+    ["two Spanish messages", P("Ana", "1", "Quiere que le llamen sobre la factura"), P("Ana", "1", "Quiere que le llamen sobre la cita de su hija"), false],
+    ["two people on one phone", P("Jon", "2145550123", "schedule an appointment"), P("Jane", "2145550123", "schedule an appointment"), false],
+    // Ruling: a big name change is a different person, even if it was a
+    // correction -- filed as new, nothing lost.
+    ["Jon -> Jonathan", P("Jon", "2145550123", "about the invoice"), P("Jonathan", "2145550124", "about the invoice"), false],
+    ["a surname spelling fix", P("Ann Smith", "2145550123", "fence repair"), P("Ann Smyth", "2145550123", "fence repair"), true],
   ])("%s", (_label, prev, next, want) => {
     expect(sameRequest(prev, next)).toBe(want);
   });
@@ -187,6 +198,69 @@ describe("a correction on the same call updates the first message (I3)", () => {
     expect(calls.notify).toHaveBeenCalledTimes(1);
   });
 
+  it("a re-record that names no reason keeps the message it corrects", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded({ ...MESSAGE, message: "about invoice 4471" }), engine);
+    await settle();
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124", message: "wants a call back" }), engine);
+    await settle();
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message).toBe("about invoice 4471");
+    expect(calls.rows[0].callback_number).toBe("214 555 0124");
+  });
+
+  it("a quote correction keeps the number and address the caller gave", async () => {
+    const { engine, calls } = makeEngine();
+    const q = {
+      service_description: "replace a water heater",
+      caller_name: "Ann Smith",
+      callback_number: "214 555 0177",
+      service_address: "12 Oak Street",
+    };
+    quotes.onEffect(quoted(q), engine);
+    await settle();
+    // The re-record fixes the surname and repeats nothing else.
+    quotes.onEffect(quoted({ service_description: "replace a water heater", caller_name: "Ann Smyth" }), engine);
+    await settle();
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].caller_name).toBe("Ann Smyth");
+    // Not the caller ID (+12145550100): that fills a NEW row only.
+    expect(calls.rows[0].callback_number).toBe("214 555 0177");
+    expect(calls.rows[0].message).toBe("replace a water heater — Address: 12 Oak Street");
+    expect(calls.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("a correction sends the email the first save could not", async () => {
+    const { engine, calls } = makeEngine();
+    calls.notify.mockResolvedValueOnce(false); // SMTP refused, or the rate limit dropped it
+    messages.onEffect(recorded(MESSAGE), engine);
+    await settle();
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
+    await settle();
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.notify).toHaveBeenCalledTimes(2);
+    // The caller's acknowledgement is still sent once.
+    expect(calls.sms).toHaveBeenCalledTimes(1);
+  });
+
+  it("a correction while the first email is still sending waits for it: one email", async () => {
+    const { engine, calls } = makeEngine();
+    let land;
+    calls.notify.mockImplementationOnce(() => new Promise((r) => (land = r)));
+    messages.onEffect(recorded(MESSAGE), engine);
+    await settle();
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
+    await settle();
+    land(true);
+    await settle();
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.notify).toHaveBeenCalledTimes(1);
+  });
+
   it("a correction that cannot be written as an update is filed as new, never dropped", async () => {
     const { engine, calls } = makeEngine({ failUpdate: true });
     messages.onEffect(recorded(MESSAGE), engine);
@@ -219,6 +293,18 @@ describe("different requests on one call stay separate", () => {
     await settle();
 
     expect(calls.rows.map((r) => r.request_type).sort()).toEqual(["message", "quote"]);
+    expect(calls.notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("two quotes for one address are two jobs", async () => {
+    const { engine, calls } = makeEngine();
+    const at = { caller_name: "Ann", callback_number: "214 555 0177", service_address: "12 Oak Street" };
+    quotes.onEffect(quoted({ ...at, service_description: "roof repair" }), engine);
+    await settle();
+    quotes.onEffect(quoted({ ...at, service_description: "new fence" }), engine);
+    await settle();
+
+    expect(calls.rows).toHaveLength(2);
     expect(calls.notify).toHaveBeenCalledTimes(2);
   });
 

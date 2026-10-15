@@ -36,7 +36,7 @@ import {
 } from "../lib/capabilities/requirements.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
-import { saveCustomerRequest } from "../lib/capabilities/customerRequests.js";
+import { saveCustomerRequest, noteOwnerNotified, ownerNotifiedFor } from "../lib/capabilities/customerRequests.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -83,6 +83,28 @@ const QUOTE_GUIDANCE =
   `NEVER give a price, a range, or an estimate — not even "usually around". You do not have ` +
   `pricing, and a number you invent is one the business has to honor. If the caller pushes for ` +
   `a figure, say you'd rather have someone give them an accurate number than guess.`;
+
+// Round A1 S3: how a stored quote is matched and corrected. The stored text is
+// "<description> — Address: … — Urgency: …" (onEffect below).
+const DETAIL_SEP = " — ";
+
+function detailParts(detail) {
+  const [description, ...rest] = String(detail || "").split(DETAIL_SEP);
+  const field = (label) => rest.find((s) => s.startsWith(`${label}: `)) || null;
+  return { description, address: field("Address"), urgency: field("Urgency") };
+}
+
+/** What a quote is FOR. The "Address:"/"Urgency:" labels name no request: two jobs at one address are two quotes. */
+const quoteReason = (detail) => detailParts(detail).description;
+
+/** A correction keeps the address or urgency its re-record left out. */
+function mergeQuoteDetail(stored, next) {
+  const a = detailParts(stored);
+  const b = detailParts(next);
+  return [b.description || a.description, b.address || a.address, b.urgency || a.urgency]
+    .filter(Boolean)
+    .join(DETAIL_SEP);
+}
 
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
@@ -227,8 +249,10 @@ export default {
     // The caller was told their message had been taken. It had not.
     //
     // Round A1 S3 (I3): a same-call correction updates the quote it corrects
-    // and sends nothing -- see capabilities/messages.js and
-    // lib/capabilities/customerRequests.js.
+    // and sends nothing unless the first send never reached the owner -- see
+    // capabilities/messages.js and lib/capabilities/customerRequests.js. The
+    // number the caller rang from fills a NEW row only: a correction that
+    // names no number keeps the one they gave.
     saveCustomerRequest({
       db: engine.deps.db,
       businessId,
@@ -237,34 +261,41 @@ export default {
       row: {
         requestType: "quote",
         callerName: data.caller_name || null,
-        callbackNumber: data.callback_number || party.phone || null,
+        callbackNumber: data.callback_number || null,
         message: detail,
         preferredTime: null,
       },
+      fallbackNumber: party.phone || null,
+      reasonOf: quoteReason,
+      mergeMessage: mergeQuoteDetail,
     })
-      .then((saved) => {
+      .then(async (saved) => {
         if (!saved) return;
         if (saved.corrected) {
           engine.deps.log.info("customer_request_corrected", { callSid, tool: "record_quote_request" });
-          return;
+          if (await ownerNotifiedFor(saved.id)) return;
         }
-        engine.deps.notifications
-          .notifyCustomerRequest({
-            businessId,
-            customerRequest: {
-              request_type: "quote",
-              caller_name: data.caller_name || null,
-              callback_number: data.callback_number || party.phone || null,
-              message: detail,
-            },
-            call: { callerNumber: party.phone },
-          })
-          .catch((err) =>
-            engine.deps.log.error("notify_quote_failed", { reason: err?.message })
-          );
+        noteOwnerNotified(
+          saved.id,
+          engine.deps.notifications
+            .notifyCustomerRequest({
+              businessId,
+              customerRequest: {
+                request_type: "quote",
+                caller_name: data.caller_name || null,
+                callback_number: data.callback_number || party.phone || null,
+                message: detail,
+              },
+              call: { callerNumber: party.phone },
+            })
+            .catch((err) => {
+              engine.deps.log.error("notify_quote_failed", { reason: err?.message });
+              return false;
+            })
+        );
         // Owner decision D-c: every TEXT-SENDING effect on an outbound call
-        // requires party.verified.
-        if (party.verified) {
+        // requires party.verified. Once, at the first save.
+        if (!saved.corrected && party.verified) {
           engine.deps.notifications
             .sendCallerSms(config, party.phone, "message_received", {
               name_part: data.caller_name ? ` ${data.caller_name}` : "",

@@ -199,3 +199,28 @@ describe("DASHBOARD_URL unset", () => {
     void n;
   });
 });
+
+// Round A1 S3: a same-call correction sends nothing on the strength of the
+// first send, and re-sends only when it did not land -- so the first send must
+// say whether it reached the owner (lib/capabilities/customerRequests.js).
+describe("notifyCustomerRequest says whether the owner was reached", () => {
+  const request = { businessId: "biz-1", customerRequest: { request_type: "message" } };
+
+  it("true when the email was accepted", async () => {
+    const n = await loadNotifications();
+    await expect(n.notifyCustomerRequest(request)).resolves.toBe(true);
+  });
+
+  it("true when the email failed but the text went", async () => {
+    const n = await loadNotifications();
+    sendMailMock.mockRejectedValueOnce(new Error("535 auth"));
+    await expect(n.notifyCustomerRequest(request)).resolves.toBe(true);
+  });
+
+  it("false when neither reached the owner", async () => {
+    const n = await loadNotifications();
+    sendMailMock.mockRejectedValueOnce(new Error("535 auth"));
+    messagesCreateMock.mockRejectedValueOnce(new Error("21610"));
+    await expect(n.notifyCustomerRequest(request)).resolves.toBe(false);
+  });
+});

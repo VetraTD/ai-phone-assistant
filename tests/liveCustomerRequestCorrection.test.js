@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../services/notifications.js", () => ({
   notifyAppointmentBooked: vi.fn(async () => {}),
-  notifyCustomerRequest: vi.fn(async () => {}),
+  // Resolves whether the owner was reached (round A1 S3).
+  notifyCustomerRequest: vi.fn(async () => true),
   notifyUnconfirmedClaim: vi.fn(async () => {}),
   sendCallerSms: vi.fn(async () => {}),
   MESSAGE_SLA_TEXT: "as soon as possible",

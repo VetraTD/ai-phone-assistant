@@ -2593,6 +2593,8 @@ describe("session.js — v2 pipeline orchestrator", () => {
         },
       ]);
 
+    // The first save's email reached the owner.
+    notifications.notifyCustomerRequest.mockResolvedValueOnce(true);
     // One filed row, as the database would hold it after the first save.
     const filed = [];
     db.createCustomerRequest.mockImplementationOnce(async (r) => {

@@ -21,7 +21,7 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
-import { saveCustomerRequest } from "../lib/capabilities/customerRequests.js";
+import { saveCustomerRequest, noteOwnerNotified, ownerNotifiedFor } from "../lib/capabilities/customerRequests.js";
 
 
 /**
@@ -226,7 +226,9 @@ export default {
     // a same-call correction ("no, it's 0 1 2 4") into an UPDATE of the row it
     // corrects. A corrected row is already in the owner's inbox -- the email
     // is link-only and went out at the first save -- so a correction sends
-    // nothing: one email per message.
+    // nothing: one email per message. Unless that first send never reached the
+    // owner (SMTP refused it, the rate limit dropped it): then the correction
+    // sends it, as its own email always used to.
     saveCustomerRequest({
       db,
       businessId,
@@ -240,23 +242,30 @@ export default {
         preferredTime: args.preferred_time || null,
       },
     })
-      .then((saved) => {
+      .then(async (saved) => {
         if (!saved) return;
         if (saved.corrected) {
           // Names only: the message is the caller's own words (LVX24).
           log.info("customer_request_corrected", { callSid, tool: "record_customer_request" });
-          return;
+          if (await ownerNotifiedFor(saved.id)) return;
         }
-        notifications
-          .notifyCustomerRequest({
-            businessId,
-            customerRequest: args,
-            call: { callerNumber: party.phone },
-          })
-          .catch((err) => log.error("notify_request_failed", { callSid, reason: err?.message }));
+        noteOwnerNotified(
+          saved.id,
+          notifications
+            .notifyCustomerRequest({
+              businessId,
+              customerRequest: args,
+              call: { callerNumber: party.phone },
+            })
+            .catch((err) => {
+              log.error("notify_request_failed", { callSid, reason: err?.message });
+              return false;
+            })
+        );
         // Owner decision D-c: every TEXT-SENDING effect on an outbound call
-        // requires party.verified.
-        if (party.verified) {
+        // requires party.verified. The caller's acknowledgement goes once, at
+        // the first save.
+        if (!saved.corrected && party.verified) {
           notifications
             .sendCallerSms(config, party.phone, "message_received", {
               name_part: args.caller_name ? ` ${args.caller_name}` : "",
