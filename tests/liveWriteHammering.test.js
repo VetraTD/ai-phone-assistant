@@ -215,6 +215,23 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     expect(s.store.scheduled()).toHaveLength(0);
   });
 
+  it("past the round cap, a write held for a SPELLING comes back held too -- no line of its own to hand", async () => {
+    process.env.VOICE_SPELL_POLICY = "always";
+    const s = await boot();
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.assistantTurn("Thanks. And the name for the booking?");
+    await s.callerSays("Marcus Bell.");
+    await s.assistantSays(SENTENCE);
+    const all = [];
+    for (let i = 0; i < 6; i += 1) all.push(await s.callTool("book_appointment", ARGS));
+    expect(all[0][0].response.message).toMatch(/FULL name/);
+    expect(counters().live_tool_rounds_capped).toBe(1);
+    const capped = all[5][0].response;
+    expect(capped.gated).toBe(true);
+    expect(capped.message).not.toMatch(/too many|with what you already have/i);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
   it("the refusal says to say it FIRST, then call -- not 'straight away'", async () => {
     const s = await boot();
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
