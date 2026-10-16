@@ -61,8 +61,11 @@ const BOOK_APPOINTMENT_DECLARATION = {
     // Round A1: was "Call this only after confirmation" — a wait for a yes
     // after the read-back. One read-back, then book unless they object.
     "Book an appointment. Read the day, the time and the name back ONCE as " +
-    "you book it — e.g. \"Tuesday at 3 for Jon Doe, booking that now\" — and " +
-    "call this in that same response; book it unless the caller objects.",
+    "you book it — e.g. \"Tuesday at 3 p.m. for Jon Doe, booking that now\" — and " +
+    "call this in that same response; book it unless the caller objects. " +
+    // Round A1 part 4 (owner): questions come BEFORE the read-back.
+    "Never say \"booking that now\" while a spelling or an extra-or-move " +
+    "question is still open: ask it first.",
   parameters: {
     type: "object",
     properties: {
@@ -654,9 +657,11 @@ function existingAppointmentContextRules(policy) {
   return [
     "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
       "another one — this applies just as much when YOU are the one raising it as when they ask. " +
-      "If a new appointment would otherwise be the natural next step, mention the one they already " +
-      "have and ask whether anything should be added to it. Book a second appointment only if they " +
-      "explicitly ask for one as well, after you have told them about the existing one.",
+      "If they ask to book one themselves and their words make it clear it is an extra one — " +
+      "\"another\", \"also\", \"as well\", \"a second one\" — or it is for someone else, do not ask — " +
+      "book it with in_addition_to_existing set to true. Otherwise ask in your very next reply, before " +
+      "you look at times, whether it is an extra one or a move of what they already have, and never " +
+      "say \"booking that now\" while that is still open.",
   ];
 }
 
@@ -690,7 +695,7 @@ function bookingGuidance(config, now, canCheck) {
       // Round A1 (owner, 2026-10-13): was "7. Read all details back and ask a
       // clear yes/no ... 8. Do NOT call book_appointment until the caller
       // clearly confirms" — the second yes the owner heard.
-      `7. Read the day, the time and the name back ONCE and book it in the same breath — for example "Tuesday at 3 for Jon Doe, booking that now" — calling book_appointment in that same response. If they spelled their name, say the letters in that one read-back. Do not ask "shall I go ahead?" first.\n` +
+      `7. Read the day, the time and the name back ONCE and book it in the same breath — for example "Tuesday at 3 p.m. for Jon Doe, booking that now" — calling book_appointment in that same response. If they spelled their name, say the letters in that one read-back. Do not ask "shall I go ahead?" first. Never say "booking that now" while a spelling or an extra-or-move question is still open: ask it first.\n` +
       `8. If the caller objects, asks a question or changes something, deal with that and read back only what changed. Never ask them to confirm the same details twice. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
     );
   }
@@ -701,7 +706,7 @@ function bookingGuidance(config, now, canCheck) {
     `1. Ask whether they prefer mornings or afternoons.\n` +
     `2. Ask if any specific days of the week don't work for them.\n` +
     `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then read the details back ONCE (name, date, time, service) and book it in the same breath — "Thursday at 2 for Marcus Webb, booking that now" — calling book_appointment in that same response.\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then read the details back ONCE (name, date, time, service) and book it in the same breath — "Thursday at 2 p.m. for Marcus Webb, booking that now" — calling book_appointment in that same response. Never say "booking that now" while a spelling or an extra-or-move question is still open: ask it first.\n` +
     `5. Book it unless the caller objects; never ask them to confirm the same details twice.\n` +
     `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
   );

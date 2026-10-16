@@ -1137,6 +1137,20 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
     // another" line keeps the adjacency to the appointment list that it was
     // deliberately moved up to get.
     ctx += `\nWhen you mention one of these, use only the relative word written beside it. If none is written, name the weekday and the date — never call a day "today" or "tomorrow" unless it says so above.`;
+    // Round A1 part 4, G2 (owner, 2026-10-15). With several on file the model
+    // named one of them (d1b: three on file, "you already have Thursday the
+    // 22nd"). One or two are named; three or more are a count and the next
+    // one, handed over as the sentence to say.
+    if (appts.length >= 3) {
+      const next = [...callerContext.upcomingAppointments].sort(
+        (x, y) => Date.parse(x.scheduled_at) - Date.parse(y.scheduled_at)
+      )[0];
+      const nextRel = relativeDayLabel(next.scheduled_at, timezone, nowMs);
+      const nextWhen = `${nextRel ? `${nextRel}, ` : ""}${speakableDateTime(next.scheduled_at, timezone, profile)}`;
+      ctx += `\nWhen you tell them what they already have, say: "You have ${appts.length} upcoming appointments; the next is ${nextWhen}." Do not list them all unless they ask.`;
+    } else {
+      ctx += `\nWhen you tell them what they already have, name each one by its day and time.`;
+    }
   }
   // "reference their upcoming appointment if relevant" used to sit in the first
   // sentence. It was removed, not trimmed: it is the direct contradiction of the
@@ -1312,7 +1326,7 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // one rule for every write: read back, then wait for a clear "yes". The
     // gate now saves a message as soon as it is called, and a booking after
     // ONE read-back unless the caller objects; cancellations keep the yes.
-    `Before saving anything, read the details back ONCE, then do it. A message or quote request: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: say the day, the time and the name once as you book it — for example "Tuesday at 3 for Jon Doe, booking that now" — and book it unless the caller objects. A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
+    `Before saving anything, read the details back ONCE, then do it. A message or quote request: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: say the day, the time and the name once as you book it — for example "Tuesday at 3 p.m. for Jon Doe, booking that now" — and book it unless the caller objects. A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
     // From a live call: asked about "my wife Sarah", the assistant went looking
     // for a third party's booking by name — and on another it read the name
     // OUT of the record and asked the caller to confirm it, which is
@@ -1470,7 +1484,20 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   // and LVX172's agreed design is that the one read-back spells the surname
   // whenever the caller spelled it, so the caller hears the letters the
   // business will get.
-  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too: whenever the caller has spelled their surname, say it back one letter at a time inside your one read-back of the booking or message — "Tuesday at 3 for Nithin, D-O-D-L-A, booking that now" — not as a separate question. If the caller corrects a letter, use what they tell you. Never ask them to spell it a second time from scratch.\n`;
+  toolContract += `- When a caller spells a name, the letters normally win: if the spelling disagrees with how the name first sounded, rebuild the name from the letters and use THAT everywhere after — when you read it back, and in every tool call. You are listening to a phone line, and a name you only heard once is the thing most likely to be wrong. But you are hearing the letters down the same line, so they can be misheard too: whenever the caller has spelled their surname, say it back one letter at a time inside your one read-back of the booking or message — "Tuesday at 3 p.m. for Nithin, D-O-D-L-A, booking that now" — not as a separate question. If the caller corrects a letter, use what they tell you. Never ask them to spell it a second time from scratch.\n`;
+  // Round A1 part 4, F-A (owner, 2026-10-15): ASK NOW. On Live the system
+  // instruction is built once, at the greeting, so the step-scoped SPELLING
+  // NOT YET CONFIRMED block never reached the model, and on call b the
+  // spelling ask came after its own "...booking that now". The rule is
+  // general; the spelling half is the one the gate holds writes for, so it is
+  // said only where that gate asks (not outbound: a contact's name on file
+  // has its own rule there).
+  toolContract +=
+    `- When the caller says something you need to check, check it in your very next reply — not later, and never after you have started booking.` +
+    (!outbound && spellPolicy() !== "off"
+      ? ` A name you are going to write down that is not already on their record, and that they have not spelled for you: ask them to spell it in your very next reply — before you look up times and before any read-back. Ask once; if they decline or carry on, use it as you heard it.`
+      : "") +
+    ` Never say "booking that now" while a question like that is still open.\n`;
   toolContract += `- Only describe an action as done if its tool returned success=true (see non-negotiable rule 2).\n`;
   // M5 (checkpoint 2b review): "take their details for follow-up" is the
   // same phantom-tool shape as NNR 1 above, on outbound only.
