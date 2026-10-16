@@ -315,3 +315,53 @@ describe("readBackMentionsSlot — part 4: forms match whole words only", () => 
     expect(readBackMentionsSlot("Friday at noon.", FRI23("12:00"))).toBe(true);
   });
 });
+
+// Round A1 part 4, opus review I1 (owner 2026-10-16). Hour 7 had two readings
+// inside the old 07:00-19:59 window; the window is now 08:00-18:59, where every
+// bare hour has one. Only a date may sit between the weekday and the hour, and
+// a part of the day after it ("in the evening") is not this slot.
+describe("readBackMentionsSlot — part 4 review: one reading only", () => {
+  it("never reads a bare 7, morning or evening", () => {
+    expect(readBackMentionsSlot("Wednesday at 7 for Priya, booking that now.", WED("07:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 7 for Priya, booking that now.", WED("19:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at seven for Priya, booking that now.", WED("19:00"))).toBe(false);
+    // The meridiem still reads, as before.
+    expect(readBackMentionsSlot("Wednesday at 7 p.m. for Priya, booking that now.", WED("19:00"))).toBe(true);
+  });
+
+  it("reads the window's edges, 8 a.m. and 6 p.m.", () => {
+    expect(readBackMentionsSlot("Wednesday at 8 for Priya, booking that now.", WED("08:00"))).toBe(true);
+    expect(readBackMentionsSlot("Wednesday at 6 for Priya, booking that now.", WED("18:00"))).toBe(true);
+  });
+
+  it("refuses a part of the day between the weekday and the hour", () => {
+    expect(readBackMentionsSlot("Wednesday evening at 10 for Priya, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday morning at 3 for Priya, booking that now.", WED("15:00"))).toBe(false);
+  });
+
+  it("refuses a part of the day after the hour", () => {
+    expect(readBackMentionsSlot("Wednesday at 10 in the evening, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 6 in the morning, booking that now.", WED("18:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 9 tonight, booking that now.", WED("09:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 8 at night, booking that now.", WED("08:00"))).toBe(false);
+  });
+
+  it("open text: a bare hour that is the last word proves nothing yet", () => {
+    const open = { open: true };
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten for Priya", WED("10:00"), open)).toBe(true);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten.", WED("10:00"), open)).toBe(true);
+    // At turn end the text is whole, and the same words read.
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten", WED("10:00"))).toBe(true);
+  });
+});
+
+// Opus review M8: whole-word matching dropped a form with a colon or quote at
+// its edge.
+describe("readBackMentionsSlot — part 4 review: edge punctuation", () => {
+  it("reads '3 pm:' and a quoted '3 pm'", () => {
+    expect(readBackMentionsSlot("Friday at 3 pm: is that right?", FRI23("15:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at '3 pm' for Jon.", FRI23("15:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at 3 o'clock for Jon.", FRI23("15:00"))).toBe(true);
+  });
+});
