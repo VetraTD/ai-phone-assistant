@@ -226,3 +226,64 @@ describe("spokenTimeForms", () => {
     expect(spokenTimeForms(null)).toBe(null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round A1 part 4, F-C (call CAdefce6ab, 2026-10-16). The model's own
+// read-back was "Wednesday at 10 for Priya Raman, R-A-M-A-N, booking that
+// now." -- a bare hour, which no form above matches, so the write-order gate
+// never saw it (readBackMade false at any timing) and handed sentence S on
+// top of it: the caller heard the read-back twice. The flow steps taught that
+// very shape ("Tuesday at 3 for Jon Doe").
+//
+// A bare hour is accepted ONLY anchored to the slot's own weekday ("<weekday>
+// [<date>] at <hour>"), only on the hour, only for a daytime slot (07:00 to
+// 19:59, where a bare hour has one reading), and only when no minute or
+// meridiem follows it -- a following one was already checked above and
+// disagreed. Word-bounded, so "at 1" never matches "at 10".
+// ---------------------------------------------------------------------------
+// 2026-10-21 is a Wednesday.
+const WED = (hhmm) => `2026-10-21T${hhmm}`;
+
+describe("readBackMentionsSlot — part 4: the weekday-anchored bare hour", () => {
+  it("reads call b's own read-back (verbatim)", () => {
+    expect(
+      readBackMentionsSlot("Wednesday at 10 for Priya Raman, R-A-M-A-N, booking that now.", WED("10:00"))
+    ).toBe(true);
+  });
+
+  it("reads the word form and a date between the weekday and the hour", () => {
+    expect(readBackMentionsSlot("Wednesday at ten for Priya Raman, booking that now.", WED("10:00"))).toBe(true);
+    expect(
+      readBackMentionsSlot("Wednesday, October 21 at 10 for Priya Raman, booking that now.", WED("10:00"))
+    ).toBe(true);
+    expect(readBackMentionsSlot("Wednesday the 21st at 2 for Maya, booking that now.", WED("14:00"))).toBe(true);
+  });
+
+  it("never lets 'at 1' match 'at 10' (word-bounded)", () => {
+    expect(readBackMentionsSlot("Wednesday at 10 for Priya Raman, booking that now.", WED("13:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 10 for Priya Raman, booking that now.", WED("01:00"))).toBe(false);
+  });
+
+  it("refuses a following minute or a contradicting meridiem", () => {
+    expect(readBackMentionsSlot("Wednesday at 10 30 for Priya, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at ten thirty for Priya, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("Wednesday at 10 p.m. for Priya, booking that now.", WED("10:00"))).toBe(false);
+  });
+
+  it("refuses a night slot, where a bare hour has two readings", () => {
+    expect(readBackMentionsSlot("Wednesday at 10 for Priya Raman, booking that now.", WED("22:00"))).toBe(false);
+  });
+
+  it("refuses the wrong weekday, and a bare hour with no weekday at all", () => {
+    expect(readBackMentionsSlot("Thursday at 10 for Priya Raman, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("At 10 for Priya Raman, booking that now.", WED("10:00"))).toBe(false);
+    expect(readBackMentionsSlot("I can do 10 if that suits.", WED("10:00"))).toBe(false);
+  });
+
+  it("still emits no bare hour form from spokenTimeForms", () => {
+    for (const form of spokenTimeForms(WED("10:00"))) {
+      expect(form).not.toMatch(/^(?:\d{1,2}|ten)$/);
+      expect(form).not.toMatch(/ at /);
+    }
+  });
+});

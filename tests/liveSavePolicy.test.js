@@ -339,6 +339,19 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     }
   );
 
+  // Round A1 part 4, F-C (CAdefce6ab): the model said its OWN read-back with a
+  // bare hour -- "Wednesday at 10 for Priya Raman, booking that now." -- and
+  // the gate could not read it, so it handed sentence S on top: the caller
+  // heard the read-back twice. Anchored to the slot's weekday, it now saves.
+  it("saves on a same-breath read-back that names the weekday and a bare hour", async () => {
+    const weekday = new Date(`${DAY}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+    const { functionResponse } = await book(
+      live({ inTurnReplyText: `${weekday} at 10 for Marcus Bell, booking that now.`, lastCallerText: "Ten works." })
+    );
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
+  });
+
   it("holds a booking whose read-back is a question asked in the same breath", async () => {
     const asked = `Just to confirm, ${SAID.replace(/, booking that now\.$/, "")}. Shall I go ahead and book that?`;
     const { functionResponse } = await book(live({ inTurnReplyText: asked, lastCallerText: "Ten works." }));

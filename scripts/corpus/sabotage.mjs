@@ -2388,6 +2388,38 @@ const SABOTAGES = [
     replace: "    if (false) { // SABOTAGE",
     red: ["tests/a1AskNow.test.js"],
   },
+  {
+    name: "p4-weekday-bare-hour",
+    why: "A1 part 4 F-C (CAdefce6ab): 'Wednesday at 10 for Priya Raman, booking that now' must read as a read-back of a Wed 10:00 slot -- the gate missed it and handed S on top (read-back twice); the confirm counter missed it too.",
+    file: "lib/voice/slotMention.js",
+    find: "return forms.some((form) => haystack.includes(normalize(form))) || weekdayBareHour(haystack, naive);",
+    replace: "return forms.some((form) => haystack.includes(normalize(form))); // SABOTAGE",
+    red: ["tests/slotMention.test.js","tests/liveSavePolicy.test.js"],
+  },
+  {
+    name: "p4-bare-hour-word-bounded",
+    why: "A1 part 4 F-C: the bare hour is word-bounded -- without it 'Wednesday at 10' authorises a write at 1 p.m.",
+    file: "lib/voice/slotMention.js",
+    find: "      `(?= |$)(?! (?:a m|p m|am|pm|",
+    replace: "      `(?! (?:a m|p m|am|pm|",
+    red: ["tests/slotMention.test.js"],
+  },
+  {
+    name: "p4-bare-hour-daytime-only",
+    why: "A1 part 4 F-C: a bare hour is read only for a daytime slot (07:00-19:59), where it has one reading; 'Wednesday at 10' must not authorise 10 p.m.",
+    file: "lib/voice/slotMention.js",
+    find: "hour24 < 7 || hour24 > 19",
+    replace: "hour24 < 0 || hour24 > 23",
+    red: ["tests/slotMention.test.js"],
+  },
+  {
+    name: "p4-bare-hour-no-minute-after",
+    why: "A1 part 4 F-C: a minute after the bare hour ('Wednesday at 10 30', 'ten thirty') is a different time; it was already checked against the minute forms and disagreed.",
+    file: "lib/voice/slotMention.js",
+    find: "|o'clock|oclock|\\\\d+|${minuteWords})",
+    replace: "|o'clock|oclock)",
+    red: ["tests/slotMention.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
