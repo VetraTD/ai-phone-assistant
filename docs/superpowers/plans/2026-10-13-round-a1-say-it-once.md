@@ -1081,7 +1081,7 @@ right after a save MOVES that booking; an "umm" must not make it talk at all, no
 FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
 questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
 
-Read: docs/receptionist-backlog.md LVX179 + LVX180 (grep, the file is large); docs/superpowers/plans/
+Read: docs/receptionist-backlog.md LVX179 + LVX180 + LVX181 (grep, the file is large); docs/superpowers/plans/
 2026-10-13-round-a1-say-it-once.md "Part 4 sitting 3 as built"; ledger
 .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P4 S3 lines). Branch feat/outbound-stage4. Prod =
 voice-uk-prod-00105-mw4 @ 5c15583; rollback
