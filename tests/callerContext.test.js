@@ -125,7 +125,7 @@ describe("fetchCallerContext", () => {
     expect(ctx.upcomingAppointments).toHaveLength(5);
     // Round A1 part 4, G2: the count is every upcoming booking, so "You have
     // 9 upcoming appointments" is right although only five are listed.
-    expect(ctx.upcomingTotal).toBe(9);
+    expect(ctx.upcomingOverflow).toBe(4);
   });
 
   it("returns the empty shape without querying when the caller number is missing", async () => {

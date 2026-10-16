@@ -1141,9 +1141,10 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
     // named one of them (d1b: three on file, "you already have Thursday the
     // 22nd"). One or two are named; three or more are a count and the next
     // one, handed over as the sentence to say.
-    // The count is the database's (fetchCallerContext's upcomingTotal): only
+    // The count is the live list plus the database's overflow
+    // (fetchCallerContext's upcomingOverflow): only
     // five are listed above, and a sixth must still be counted.
-    const total = Math.max(appts.length, Number(callerContext.upcomingTotal) || 0);
+    const total = appts.length + Math.max(0, Number(callerContext.upcomingOverflow) || 0);
     if (total >= 3) {
       const next = [...callerContext.upcomingAppointments].sort(
         (x, y) => Date.parse(x.scheduled_at) - Date.parse(y.scheduled_at)

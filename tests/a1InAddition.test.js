@@ -35,7 +35,7 @@ vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));
 vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 
 import { executeToolCall } from "../services/tools.js";
-import { inAdditionWouldRefuse } from "../capabilities/appointments.js";
+import appointmentsPack, { inAdditionWouldRefuse } from "../capabilities/appointments.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const DAY_MS = 86_400_000;
@@ -102,6 +102,14 @@ describe("inAdditionWouldRefuse — one predicate for the guard and the gate", (
     // keeps these the same person (no surname to fall back on).
     expect(inAdditionWouldRefuse({ client_name: "Nitin" }, ctx(ON_FILE), {})).toBe(true);
     expect(inAdditionWouldRefuse({ client_name: "Nitin Dodda" }, ctx(ON_FILE), {})).toBe(true);
+  });
+  it("review M7: the same person in another name format still asks; a clearly different one does not", () => {
+    const onFile = (client_name) => ctx({ upcomingAppointments: [{ ...upcoming(4), client_name }] });
+    const asks = (onFileName, booking) => inAdditionWouldRefuse({ client_name: booking }, onFile(onFileName), {});
+    expect(asks("Dodla, Nithin", "Nithin Dodla")).toBe(true); // surname first
+    expect(asks("Mr Dodla", "Nithin Dodla")).toBe(true); // title + surname
+    expect(asks("Nithin Dodla", "Maya Okafor")).toBe(false); // still different
+    expect(asks("Dr Patel", "Dr Okafor")).toBe(false); // a shared title is not a shared name
   });
   it("a past booking does not count", () => {
     const past = { upcomingAppointments: [{ id: "p", client_name: "Nithin Dodla", scheduled_at: "2020-01-01T10:00:00" }] };
@@ -174,8 +182,48 @@ describe("G2 — the guard names the bookings on file", () => {
   it("more than five on file: the count is the database's, not the prompt's five", async () => {
     const appts = [upcoming(4), upcoming(5), upcoming(6), upcoming(7), upcoming(8)];
     const { stateEffects } = await book(
-      live({ callerContext: { callCount: 3, upcomingAppointments: appts, upcomingTotal: 7 } })
+      live({ callerContext: { callCount: 3, upcomingAppointments: appts, upcomingOverflow: 2 } })
     );
     expect(stateEffects.toolResult.message).toMatch(/^You have 7 upcoming appointments; the next is /);
+  });
+});
+
+describe("review M6 — the count follows the call, not the call-start snapshot", () => {
+  // Drive the pack's own onEffect, as the engine does, and feed the next
+  // snapshot to the guard.
+  function afterEffects(start, effects) {
+    let cc = start;
+    const engine = {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: () => {},
+      addHistoryNote: () => {},
+      setCallerContext: (n) => {
+        cc = n;
+      },
+      call: { get callerContext() { return cc; }, config: {} },
+    };
+    for (const e of effects) appointmentsPack.onEffect({ capability: "appointments", ...e }, engine);
+    return cc;
+  }
+
+  it("3 on file, one cancelled this call: the guard names the 2 left, not '3 upcoming'", async () => {
+    const appts = [upcoming(4), upcoming(5), upcoming(6)];
+    const cc = afterEffects(
+      { callCount: 3, upcomingAppointments: appts, upcomingOverflow: 0 },
+      [{ type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a6" } }]
+    );
+    const { stateEffects } = await book(live({ callerContext: cc }));
+    expect(stateEffects.toolResult.message).toMatch(/^You already have .+ and .+ — shall I book/);
+    expect(stateEffects.toolResult.message).not.toMatch(/upcoming appointments/);
+  });
+
+  it("7 on file (5 listed + 2 more), one booked this call: 8", async () => {
+    const appts = [upcoming(4), upcoming(5), upcoming(6), upcoming(7), upcoming(8)];
+    const cc = afterEffects(
+      { callCount: 3, upcomingAppointments: appts, upcomingOverflow: 2 },
+      [{ type: "booked", data: { scheduled_at: `${day(9)}T11:00:00`, client_name: "Nithin Dodla", id: "n1" } }]
+    );
+    const { stateEffects } = await book(live({ callerContext: cc }));
+    expect(stateEffects.toolResult.message).toMatch(/^You have 8 upcoming appointments; the next is /);
   });
 });

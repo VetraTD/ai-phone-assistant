@@ -604,6 +604,15 @@ function withinOneEdit(a, b) {
   return edits + (a.length - i) + (b.length - j) <= 1;
 }
 
+const NAME_TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "prof", "sir"]);
+
+/** The name's words, titles dropped ("Mr Dodla" -> ["dodla"]); a lone title is kept. */
+function nameWords(raw) {
+  const all = (normalizeName(raw) || "").split(" ").filter(Boolean);
+  const bare = all.filter((w) => !NAME_TITLES.has(w));
+  return bare.length > 0 ? bare : all;
+}
+
 /**
  * Round A1 part 4, F-E (owner, call b): a booking for a DIFFERENT person than
  * the ones on file can never be a move of theirs, so it is never asked about.
@@ -612,13 +621,16 @@ function withinOneEdit(a, b) {
  * (misheard), or the same surname (family) all count as the same person.
  */
 function samePersonBookings(name, list) {
-  const words = (normalizeName(name) || "").split(" ").filter(Boolean);
+  const words = nameWords(name);
   if (words.length === 0) return list;
   return list.filter((a) => {
-    const theirs = (normalizeName(a?.client_name) || "").split(" ").filter(Boolean);
+    const theirs = nameWords(a?.client_name);
     if (theirs.length === 0) return true;
     if (withinOneEdit(words[0], theirs[0])) return true;
-    return words.length > 1 && theirs.length > 1 && words[words.length - 1] === theirs[theirs.length - 1];
+    if (words.length > 1 && theirs.length > 1 && words[words.length - 1] === theirs[theirs.length - 1]) return true;
+    // Review M7: any shared name word of 2+ letters -- the surname written
+    // first ("Dodla, Nithin") or behind a title ("Mr Dodla").
+    return words.some((w) => w.length >= 2 && theirs.includes(w));
   });
 }
 
@@ -656,15 +668,16 @@ export function inAdditionWouldRefuse(args, ctx, config) {
 
 /**
  * G2 (owner, 2026-10-15): one or two bookings are named; three or more are a
- * count and the next one. The count is the database's (`upcomingTotal`) when
- * nothing was filtered out, so a sixth booking -- never in the prompt's five
- * -- is still counted.
+ * count and the next one. The count is the live list plus the database's
+ * overflow (`upcomingOverflow`: bookings beyond the five listed) when nothing
+ * was filtered out, so a sixth booking -- never in the prompt's five -- is
+ * still counted, and a booking made or cancelled this call moves the count.
  */
 function existingSpoken(existing, all, ctx, config) {
   const sorted = [...existing].sort((x, y) => Date.parse(x.scheduled_at) - Date.parse(y.scheduled_at));
   const say = (a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config));
-  const dbTotal = Number(ctx?.callerContext?.upcomingTotal) || 0;
-  const total = existing.length === (all || existing).length ? Math.max(existing.length, dbTotal) : existing.length;
+  const overflow = Math.max(0, Number(ctx?.callerContext?.upcomingOverflow) || 0);
+  const total = existing.length === (all || existing).length ? existing.length + overflow : existing.length;
   if (total >= 3) {
     return { count: total, sentence: `You have ${total} upcoming appointments; the next is ${say(sorted[0])}` };
   }

@@ -1770,8 +1770,11 @@ export async function fetchCallerContext(businessId, callerNumber) {
     rowCount: calls.length + upcomingAppointments.length,
   });
   // Round A1 part 4, G2: every upcoming booking counted, not only the five
-  // listed -- "You have 7 upcoming appointments" must be the real number.
-  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingTotal: (apptRows || []).length };
+  // listed -- "You have 7 upcoming appointments" must be the real number. The
+  // OVERFLOW is stored, not the total: consumers add it to the live list, which
+  // a booking or cancellation this call changes (review M6).
+  const upcomingOverflow = Math.max(0, (apptRows || []).length - upcomingAppointments.length);
+  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow };
 }
 
 /**
