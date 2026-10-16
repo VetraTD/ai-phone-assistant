@@ -746,3 +746,90 @@ in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in
 LVX168–171. End with: verdict per fix and per call, "Part 3 as built" in the plan, ledger + memory updated, and what
 round A2 starts with.
 ```
+
+## Part 3 as built (2026-10-15, sitting 2, 18:25–19:55 CDT) — deploy + live calls
+
+**Deploy (gcloud, main checkout, tracked tree clean, HEAD `15dfa09` = `04d176a` + docs/row commits, code diff empty):**
+build `06af2a35` (29 s), tag `:04d176a`, digest `sha256:39c19239…57a9`, all smoke steps loaded. Migrate job →
+`:04d176a`; `migrate --status` (`-fvpqt`): 53 applied, none pending, no "edited". LIVE **`voice-uk-prod-00104-n6b` @
+`04d176a`**, 100% traffic. Env diff vs `00103-nvc` = only `GIT_COMMIT_SHA` eb60198→04d176a (44 = 44,
+`VOICE_SPELL_MISS_CAP` unset, spec otherwise identical). Boot clean (0 WARNING+; `sms_channel_off` expected). Rollback:
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00103-nvc=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+Kept: 00104 is strictly better than 00103 on what was tested (F1 and the F4 spelling ask both gone).
+
+**Owner decisions this sitting:** call order d1 → b → a (b first would put Priya on file and muddy d1) · keep test
+rows · F5 + F2-on-Live + F6 = ONE design next sitting · silence re-run as d1b · **a name already on file is said, NOT
+spelled** ("it can just say the name"; spelling it on d1 "felt weird") — reverses F4's read-back half · D1 folded
+into next sitting.
+
+**Calls** (owner handset → +18175803291; 331 s ≈ 5.5 call-min ≈ $0.72 + build, cap $2; `scripts/call-report.js` is
+blind to Live calls):
+
+| Call | CallSid | Verdict | Numbers |
+|---|---|---|---|
+| (d1) on file, nameless | `CA6bf6e2894fd6df32fd9a5b618db79290` | **A1 checks PASS; silence UNTESTED; F5** | spell_asks 0, spelling refusals 0; read-back "…for Nithin, D-O-D-L-A, booking that now" (`onfile_readback_unspelled` 0); booked Thu 22 once; gate refusals 1 (write_order); `saves_over_one_readback` 0; no cap hit; `backwards_goodbye` 0. Owner's mumbled "yes" to "in addition?" heard as "No" → "Understood, anything else?" → caller had to ask "did you book it?"; then the tool's in-addition guard refused AFTER "booking that now" (F5) |
+| (d1b) silence re-run | `CA046f67282bcad0aa9dac67eaea34b55b` | **silence PASS; name not said; F6** | in-addition asked FIRST (right order) → yes → booked Fri 23 once, gate refusals 1; within-turn `live_repeat_cut` (260 chars) right after the save wiped the turn's text (`turns_reply_empty` 1 → `onfile_readback_unspelled` 1 is blind); ~15 s quiet → "Hello? Are you still there?" → yes → "anything else?" → goodbye. Owner: no name heard in the read-back |
+| (b) new surname | `CAdefce6ab506bbf25c8b579ee06c72e80` | **FAIL (F2 on Live, F6, F5, M6)** | booked Wed 21 once "Priya Raman", no "unable", no cap hit, `backwards_goodbye` 0; caller heard "Wednesday at 10 for Priya Raman, booking that now. Before I finalize that, could you please spell…" then, in ONE turn, "…Priya Raman, R-A-M-A-N, booking that now. Wednesday, October 21 at 10:00 AM for Priya Raman, booking that now. You already have appointments… add or reschedule?"; gate refusals 3 (spelling 2 + write_order 1) + 1 tool in-addition refusal; counter `saves_over_one_readback` 0 is WRONG (counts turns) |
+| (a) message | `CAbada737cd5227daee3438414ab08accc` | **PASS** | saved at once (0 refusals); ONE summary "So that's Nithin, D-O-D-L-A, on four six nine, nine three three, eight eight eight seven about an invoice"; dashboard row "Nithin Dodla"; ONE "New customer request" email 00:38:37Z; `backwards_goodbye` 0; `readback_spelled` 0 = instrument blind (caller's letters never reached the transcript) |
+
+Emails: one "New appointment" each for d1/d1b/b, one "New customer request" for a, no "Unconfirmed booking".
+
+**Verdict per fix:** F1 **PASS** live (0 cap hits in 3 bookings, no failure words; `live_write_refusal_replayed` now
+carries callSid). F2 **FAIL on Live** (the gate order is right, but the model says its OWN "…booking that now" in the
+same breath as the call; Live delivers the call before the words, so the spelling refusal is spoken after). F3
+**PASS** by ear/text (b R-A-M-A-N, a D-O-D-L-A; counter blind). F4 **PASS** (no spelling ask for a name on file, d1 +
+d1b); its read-back half is superseded by the owner's "say, don't spell". M6 **confirmed** (b: 3 refusals).
+**A1 done-when:** `backwards_goodbye` 0 PASS (4/4) · refusals ≤ 1 per save FAIL (b 3) · one read-back FAIL by ear on b
+(counter can't see it).
+
+**Findings (next sitting fixes them, as ONE design):**
+- **Root:** on Live the model's words arrive AFTER its tool call; every gate judges "what has been said" before the
+  words exist, and its question/sentence is spoken after "booking that now".
+- **F2-on-Live** spelling ask after the model's own read-back (b). **F5** the tool's in-addition guard
+  (`capabilities/appointments.js:2159`) runs after the gates, so its question follows "booking that now" (d1, b).
+  **F6** write_order sees `readBackMade` false and hands sentence S although the model is already saying its own
+  read-back → read-back twice in one turn (b; d1b's repeat cut).
+- **Instrument:** `saves_over_one_readback` counts read-back TURNS (a doubled read-back in one turn reads 1);
+  `readBackIsFor` slot match missed "Wednesday at 10"; `readback_spelled` counts only captured spellings.
+- **On-file name rule** (owner): say the name, never spell it — drop the letters from `composeReadBack`, the booking
+  guardrail, message step 1/guidance; replace `onfile_readback_unspelled` with a count of on-file read-backs that NAME
+  the person (d1b said no name at all).
+- **D1 dashboard:** the Calls list hides calls after 00:00 UTC of the local "today" (7 PM CDT) until the next day —
+  `frontend/src/App.jsx:444` sends local `to`, `backend/src/routes/calls.js:107` casts it in UTC; "Last 24 hours" too.
+- **G2 (backlog, not next sitting):** with several bookings on file the model names only one (the prompt lists all ≤5).
+
+## Part 4 starting message (paste into a fresh session)
+
+```text
+Run receptionist round A1 "say it once" — part 4: the "words arrive after the call" design + on-file name rule + D1.
+
+FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
+questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
+
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 3 as built" (findings + call table) and "Part 3
+sitting 1" (what exists); ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P3 lines from
+"sitting 2" on). Branch feat/outbound-stage4. Prod = voice-uk-prod-00104-n6b @ 04d176a; rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+Design first (brainstorm with me, then a short plan section), ONE fix set:
+ (1) prompt: settle the spelling (new name, not spelled yet) and "in addition?" (bookings on file) BEFORE any
+     read-back; never say "booking that now" while either is open.
+ (2) code: when the write call arrives before the read-back text, give the words a short window to arrive (measure
+     the gap on CAdefce6ab / CA046f67 first); accept an arriving read-back instead of handing a second sentence (F6).
+ (3) code: in-addition look-ahead beside spellingGateWouldHold so its question comes first (F5).
+ (4) counters: read-back SENTENCES per save (not turns); on-file read-back names the person; fix readBackIsFor's
+     "Wednesday at 10" miss.
+ (5) owner rule: a name already on file is SAID, not spelled (composeReadBack, booking guardrail, message step 1).
+ (6) D1: Calls list date filter in the business timezone (frontend App.jsx:444 + backend calls.js:107), with a test
+     for a 7–11:59 PM call.
+Every fix red-first with a test + census rows hand-verified RED; opus review; full gate (gate-v4 db fullsab) in its
+own mintty window; ask before ONE redeploy. Calls after (cap $2, scripts in the plan): b (new surname, spelled only
+when asked), d1 (on file, nameless, "Yes, in addition"), d1b silence; all: ONE read-back by ear, refusals ≤ 1.
+
+Conserve usage and time WITHOUT compromising quality: read only named sections and needed parts of files; batch
+independent reads; cheaper models for mechanical subagent work, opus for code review; never skip a check; short plain
+replies, detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted
+work; long gates in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope: LVX167,
+LVX174, LVX175 (A2), LVX168–171, G2. End with: verdict per fix and per call, "Part 4 as built" in the plan, ledger +
+memory updated, and what round A2 starts with.
+```
