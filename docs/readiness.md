@@ -163,7 +163,13 @@ voicemail.
   does), test that reproduces it first. On the test call also prove a blocked or
   bounced call sends NO "Missed call" email.
 - [ ] **Deploy the current dashboard** (2–3 h, rough). The live dashboard backend
-  is from 2026-09-08. Hide the outbound-only setting cards first.
+  is from 2026-09-08. Hide the outbound-only setting cards first. (2026-10-16:
+  only the D1 Calls-list date fix went live, as a backend hotfix on that base:
+  `dashboard-api-uk-prod-00003-hc7` @ `f130aee`, branch `hotfix/d1-dashboard-bounds`.
+  Its frontend half ships with this deploy.)
+- [ ] **LVX179 (P0): the receptionist booked a time the caller never chose**
+  (2026-10-16 call b), then turned the correction into a second booking.
+  Fix before first paying clients. See `docs/receptionist-backlog.md`.
 - [ ] **Merge `feat/outbound-stage4` into `main`, then shut down Railway and
   Supabase** once nothing points at them (1–2 h, rough). Production is built
   from this branch, 283 commits ahead of `main`. `main` still has backlog O1

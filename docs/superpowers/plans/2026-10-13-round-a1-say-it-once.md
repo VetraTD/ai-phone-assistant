@@ -1022,3 +1022,63 @@ Conserve usage and time WITHOUT compromising quality; cheaper models for mechani
 detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;
 owner decisions final; stop and ask at 2 h. Not in scope: LVX167, LVX174, LVX175 (A2), LVX168–171.
 ```
+
+## Part 4 sitting 3 as built (2026-10-16, ~10:50–15:05 CDT incl. a long owner break, ~$0.65)
+
+**Gate** `gate-a1-p4` @ `55d73c6`: PASS. ROOT exit 0 (7991 passed), CENSUS 292 clean, DB exit 0 (700), sabotage 289
+red + exactly the 3 baseline x, 0 "could not be READ", no dirty tree.
+
+**Voice deploy (owner YES):** build `f7135f25` (main checkout, tracked tree clean, `5c15583..55d73c6` docs-only) →
+`voice:5c15583` digest `sha256:9e8dea9b…381d`, all smoke steps; migrate job → `:5c15583`, `--status` 53 applied, none
+pending, no "edited". LIVE **`voice-uk-prod-00105-mw4` @ `5c15583`**, 100%. Env diff vs `00104-n6b` = only
+`GIT_COMMIT_SHA` (44 = 44, spec identical, `VOICE_READBACK_WAIT_MS` unset = 2000). Boot 0 WARNING+. Rollback:
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+Owner KEPT 00105 after call b (the defect path pre-dates part 4).
+
+**D1 (owner: backend-only hotfix).** The live dashboard API was `dashboard:e1419d9` (09-08); HEAD would ship 22
+dashboard commits incl. 4 outbound-only Settings cards (readiness: hide first). Branch `hotfix/d1-dashboard-bounds`
+= `e1419d9` + 8e28026's backend files only, commit `f130aee` (local, not pushed); backend 15 files 149 passed; the
+D1 test red 5/6 with the fix reversed. LIVE **`dashboard-api-uk-prod-00003-hc7`** @ `dashboard:f130aee`, env/spec
+unchanged, /health 200. Rollback: `gcloud run services update-traffic dashboard-api-uk-prod --to-revisions=dashboard-api-uk-prod-00002-mlr=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+Frontend half (presets send no `to`) NOT deployed — it ships with the full dashboard deploy.
+
+**Calls** (owner handset → +18175803291, order d1 → d1b → b by owner; ≈ 309 s ≈ $0.65):
+
+| Call | CallSid | Verdict | Numbers |
+|---|---|---|---|
+| (d1) "another", nameless | `CA7c0d50b0672a602767c9e9f8ac0cf38c` | **A1 PASS; in-addition asked anyway (LVX180)** | asked "You have 5 upcoming appointments; the next is Monday, October 19 at 11 AM…in addition…or move?" (G2 wording right, ask wrong after "another"); booked Thu 29 14:00 once, 0 refusals; heard "Thursday at 2 PM for Nithin Dodla, booking that now. I've booked that for Thursday, October 29 at 2 PM under Nithin Dodla"; `onfile_readback_named` 1, `saves_over_one_readback` 0, spell asks 0, `backwards_goodbye` 0; odd ending ("location information") from garbled caller text |
+| (d1b) ambiguous + silence | `CAb3e55b61be728cc99f4e8994f5d160e3` | **booking + silence PASS; wording + name ask FAIL (LVX180)** | extra-or-move asked before the read-back but in generic wording, after "That time is available"; asked an on-file caller's full name; booked Fri 30 14:00 once, in addition, 0 refusals; one read-back naming Nithin; nudge "Hello? Are you still there?" at +8 s → yes → "What else…?" → goodbye |
+| (b) colleague, new surname | `CA70682e3219cb227353f4681b25119586` | **FAIL — LVX179 (P0)** | spelling asked right after the name (PASS); first name misheard (Amara → Maja); after listing 9/1/4:30 the model booked 9 AM itself (same-breath save, `slot_listed_only`); the caller's "10 a.m." became a SECOND booking via an in-addition ask; DB has both; `live_readback_wait` {timeout, 2000 ms} on the 10 AM save; claims 0 |
+
+**Per fix:** F-A partly (ask-now spelling PASS on b; in-addition "ask only when unclear" FAIL on d1) · F-B PASS (name
+said, never spelled, d1 + d1b) · F-C/M not observable · F-D fired once (timeout) without harm · F-E PASS for a
+different person (no ask on b's first booking), G2 wording 1 of 2 · F-F counters read sensibly on d1/d1b · D1 live
+(owner to eye-check Custom 10-15 → 10-15).
+**A1 done-when:** one read-back per save PASS on d1/d1b · refusals ≤ 1 PASS (0, 0, 0) · `backwards_goodbye` 0 PASS ·
+but b booked something nobody agreed to, so A1 is not done until LVX179 is fixed.
+
+## Next session starting message (paste into a fresh session)
+
+```text
+Fix LVX179 (P0): the receptionist booked a time the caller never chose, then made the correction a second booking.
+
+FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
+questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
+
+Read: docs/receptionist-backlog.md LVX179 + LVX180 (grep, the file is large); docs/superpowers/plans/
+2026-10-13-round-a1-say-it-once.md "Part 4 sitting 3 as built"; ledger
+.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P4 S3 lines). Branch feat/outbound-stage4. Prod =
+voice-uk-prod-00105-mw4 @ 5c15583; rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+Design with me first (plain words, then a short plan section): (1) a slot only WE listed and the caller never said
+is not saved on a same-breath read-back -- it waits for the caller's yes (find where slot_listed_only is known vs
+the A1 same-breath save; replay CA70682e first); (2) a correction right after a save moves that booking, never
+adds one; (3) the in-addition question names what is on file. Optional, my call: LVX180 prompt items. Each
+red-first + a hand-verified RED row; opus review; gate-v4 db fullsab in mintty; ask before ONE redeploy; then calls
+(cap $2): b again (new colleague name, pick from the list only when asked) + one "no, 10 instead" correction call.
+
+Conserve usage and time WITHOUT compromising quality; cheaper models for mechanical work; short plain replies,
+detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;
+owner decisions final; stop and ask at 2 h. Round A2 (LVX167, LVX174, LVX175) comes after this.
+```

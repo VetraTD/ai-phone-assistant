@@ -17309,3 +17309,29 @@ the same counters plus the backwards-order count.
 - a message call sends only "New customer request" (no "may need a call back");
 - a booking with a spelled surname reads it back once, letter by letter, and saves on the first non-objection;
 - the call ends "anything else?" → caller says no → goodbye, never backwards.
+
+## A1 part 4 live calls, 2026-10-16 (prod `voice-uk-prod-00105-mw4` @ `5c15583`): one serious new defect
+
+### LVX179 · The receptionist booked a time the caller never chose, then turned the correction into a second booking · **OPEN · P0** `[medium]` ~1.5–2.5 h + gate + deploy + 1–2 live calls
+Call b `CA70682e3219cb227353f4681b25119586` (2026-10-16 19:55Z, Test Line). The model listed "9 00 AM, 1 00 PM and
+4 30 PM. Which of those works best for Maja?". In its NEXT turn, with the caller saying nothing ("What? No, I didn't
+even say anything"), it booked 9:00 AM itself. The A1 same-breath rule saved it: `write_consent_probe`
+`a1_readback: "in_turn"`, `agreed_after_readback: true`, `a1_voiced: true`; `write_target` `slot_listed_only: true`,
+`point_verified_slots: 0`. The caller then asked for 10 a.m. The model asked "an additional one beyond the ones
+already booked, correct?" (no slot named), the caller said yes, and 10 AM was booked as an EXTRA. DB: two rows,
+"Maja Okafor" Wed 28 Oct 9:00 (unrequested, kept as evidence) and 10:00. The caller never heard a "booked" claim
+(claims 0; turn text cut, `turns_reply_empty` 3).
+- **Why:** the gates check "was it read back?" and "did any voice follow?", never "did the CALLER pick this slot?".
+  This path pre-dates part 4 (no read-back wait ran on that save), so 00104 has it too. The owner kept 00105.
+- **Fix to design (owner, next session):** a booking whose slot came only from our own list and that the caller never
+  said is not saved on a same-breath read-back; it waits for the caller's yes. A correction right after a save
+  ("no, 10 instead") moves that booking; it does not add one. The in-addition question names what is on file.
+- Also seen on b: first name misheard ("Amara", then "Maja" for Maya); only the surname is ever spelled.
+
+### LVX180 · Prompt rules the model skipped on the same day · **OPEN · P2** `[cheap]` (watch first; N=1 each)
+- d1 `CA7c0d50b0672a602767c9e9f8ac0cf38c`: the caller said "book ANOTHER appointment" and was asked "in addition…or
+  move?" anyway (rule in `capabilities/appointments.js` `existingAppointmentContextRules`). That block opens with "Do
+  NOT offer to book … another one", which may read against the "another → no ask" line.
+- d1b `CAb3e55b61be728cc99f4e8994f5d160e3`: the in-addition question came in generic wording, not "You have N upcoming
+  appointments; the next is …" (d1 used it), and after "That time is available". It also asked an on-file caller for
+  their full name (owner rule: a name on file is never asked).
