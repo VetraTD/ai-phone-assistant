@@ -1057,10 +1057,24 @@ different person (no ask on b's first booking), G2 wording 1 of 2 · F-F counter
 **A1 done-when:** one read-back per save PASS on d1/d1b · refusals ≤ 1 PASS (0, 0, 0) · `backwards_goodbye` 0 PASS ·
 but b booked something nobody agreed to, so A1 is not done until LVX179 is fixed.
 
+**Owner decisions after the calls (2026-10-16, after a plain explanation of where 9 AM came from):**
+- **Confirm = always ask once, as a question.** "So that's Monday the 19th at 9 a.m. for Nithin Dodla, is that
+  right?" Any answer that is not a no saves it (a mangled yes still saves). Then only "Done, you're all set" — never
+  the details again. This REPLACES the S2 ruling "same-breath statement read-back saves" ("booking that now"); the
+  wait for the answer becomes CODE (today the question-form wait is prompt-only, the I2 ruling).
+- **Spelling = the full name, one ask, new people only.** "Could you spell the first and last name for me?" A name on
+  file is never asked for and never spelled (unchanged). Reason: "Maja"/"Maya" sound the same, so a read-back cannot
+  catch a first name; only spelling can.
+- **A correction right after a save moves that booking**, never adds one. When unsure, ask naming it: "Move your 9
+  a.m. to 10?"
+
 ## Next session starting message (paste into a fresh session)
 
 ```text
 Fix LVX179 (P0): the receptionist booked a time the caller never chose, then made the correction a second booking.
+Owner decisions (2026-10-16, in the plan "Part 4 sitting 3 as built"): always confirm ONCE as a question, save on
+anything but a no, then only "Done, you're all set"; spell the FULL name of a new person in one ask; a correction
+right after a save MOVES that booking.
 
 FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
 questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
@@ -1071,12 +1085,15 @@ Read: docs/receptionist-backlog.md LVX179 + LVX180 (grep, the file is large); do
 voice-uk-prod-00105-mw4 @ 5c15583; rollback
 `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
 
-Design with me first (plain words, then a short plan section): (1) a slot only WE listed and the caller never said
-is not saved on a same-breath read-back -- it waits for the caller's yes (find where slot_listed_only is known vs
-the A1 same-breath save; replay CA70682e first); (2) a correction right after a save moves that booking, never
-adds one; (3) the in-addition question names what is on file. Optional, my call: LVX180 prompt items. Each
-red-first + a hand-verified RED row; opus review; gate-v4 db fullsab in mintty; ask before ONE redeploy; then calls
-(cap $2): b again (new colleague name, pick from the list only when asked) + one "no, 10 instead" correction call.
+Design with me first (plain words, then a short plan section): (1) booking confirm = ONE question read-back; the
+write is refused in code until that question was spoken in an earlier model turn AND the caller has answered with
+anything but a no (Live sends the call WITH the words -- the same-breath statement save goes; replay CA70682e and
+the d1/d1b calls first; list which existing rows/tests encode the old same-breath rule); after the save only
+"Done, you're all set"; (2) prompt + spelling gate: a new person spells first AND last name in one ask; (3) a
+correction right after a save moves that booking, never adds one; the in-addition question names what is on file.
+Optional, my call: LVX180 prompt items. Each red-first + a hand-verified RED row; opus review; gate-v4 db fullsab in
+mintty; ask before ONE redeploy; then calls (cap $2): b again (new colleague, pick from the list only when asked),
+one "no, 10 instead" correction call, one on-file booking (one question, one yes, "you're all set").
 
 Conserve usage and time WITHOUT compromising quality; cheaper models for mechanical work; short plain replies,
 detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;

@@ -17323,9 +17323,11 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 (claims 0; turn text cut, `turns_reply_empty` 3).
 - **Why:** the gates check "was it read back?" and "did any voice follow?", never "did the CALLER pick this slot?".
   This path pre-dates part 4 (no read-back wait ran on that save), so 00104 has it too. The owner kept 00105.
-- **Fix to design (owner, next session):** a booking whose slot came only from our own list and that the caller never
-  said is not saved on a same-breath read-back; it waits for the caller's yes. A correction right after a save
-  ("no, 10 instead") moves that booking; it does not add one. The in-addition question names what is on file.
+- **Owner decisions (2026-10-16):** confirm every booking with ONE question read-back ("…Monday the 19th at 9 a.m.
+  for Nithin Dodla, is that right?"), save on any answer that is not a no, then only "Done, you're all set"; the
+  same-breath statement save ("booking that now") goes and the wait for the answer becomes code. A new person spells
+  first AND last name in one ask. A correction right after a save moves that booking, never adds one; the in-addition
+  question names what is on file.
 - Also seen on b: first name misheard ("Amara", then "Maja" for Maya); only the surname is ever spelled.
 
 ### LVX180 · Prompt rules the model skipped on the same day · **OPEN · P2** `[cheap]` (watch first; N=1 each)
