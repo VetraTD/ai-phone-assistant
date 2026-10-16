@@ -796,7 +796,8 @@ d1b); its read-back half is superseded by the owner's "say, don't spell". M6 **c
   the person (d1b said no name at all).
 - **D1 dashboard:** the Calls list hides calls after 00:00 UTC of the local "today" (7 PM CDT) until the next day —
   `frontend/src/App.jsx:444` sends local `to`, `backend/src/routes/calls.js:107` casts it in UTC; "Last 24 hours" too.
-- **G2 (backlog, not next sitting):** with several bookings on file the model names only one (the prompt lists all ≤5).
+- **G2 (owner: in part 4):** with several bookings on file the model names only one (the prompt lists all ≤5; a 6th
+  never reaches the prompt). Same sentence F5 moves, so fixed together.
 
 ## Part 4 starting message (paste into a fresh session)
 
@@ -822,6 +823,8 @@ Design first (brainstorm with me, then a short plan section), ONE fix set:
  (5) owner rule: a name already on file is SAID, not spelled (composeReadBack, booking guardrail, message step 1).
  (6) D1: Calls list date filter in the business timezone (frontend App.jsx:444 + backend calls.js:107), with a test
      for a 7–11:59 PM call.
+ (7) G2: when a caller already has bookings, name them properly -- my choice in the design talk: list all vs
+     count + next (e.g. "You have 4 upcoming appointments; the next is Monday at 11"); handle more than 5 on file.
 Every fix red-first with a test + census rows hand-verified RED; opus review; full gate (gate-v4 db fullsab) in its
 own mintty window; ask before ONE redeploy. Calls after (cap $2, scripts in the plan): b (new surname, spelled only
 when asked), d1 (on file, nameless, "Yes, in addition"), d1b silence; all: ONE read-back by ear, refusals ≤ 1.
@@ -830,6 +833,6 @@ Conserve usage and time WITHOUT compromising quality: read only named sections a
 independent reads; cheaper models for mechanical subagent work, opus for code review; never skip a check; short plain
 replies, detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted
 work; long gates in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope: LVX167,
-LVX174, LVX175 (A2), LVX168–171, G2. End with: verdict per fix and per call, "Part 4 as built" in the plan, ledger +
+LVX174, LVX175 (A2), LVX168–171. End with: verdict per fix and per call, "Part 4 as built" in the plan, ledger +
 memory updated, and what round A2 starts with.
 ```
