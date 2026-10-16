@@ -244,20 +244,20 @@ describe("spelling", () => {
   });
 });
 
-// Round A1 part 3, review I2 (owner 2026-10-15: prompt only, COUNTED). A name
-// on file is never asked for; the one read-back should spell its surname. The
-// code hands that sentence only when the model calls before speaking, so a
-// model that reads back on its own may leave the letters out -- counted here,
-// read on the live call.
-describe("an on-file name: was its surname spelled in the read-back?", () => {
+// Round A1 part 4, F-F (owner 2026-10-15/16): a name on file is SAID, never
+// spelled, and either half of it counts as saying it. Replaces part 3's
+// onfile_readback_unspelled. d1b (CA046f67) said no name at all. Counted
+// both ways, so a clean call and an uncounted one do not read the same.
+describe("an on-file name: did the read-back say it?", () => {
   const ON_FILE = { upcomingAppointments: [{ id: "a0", client_name: "Jon Dodla", scheduled_at: "2026-09-21T15:00:00Z" }] };
   const bootOnFile = (callSid) =>
     bootLive({ config: CONFIG, callSid, database: { ...fakeDb(CONFIG, "biz-1"), fetchCallerContext: async () => ON_FILE } });
   const BOOK = { ...ARGS, in_addition_to_existing: true };
+  const NAMELESS = "Friday, September 18 at 2:00 PM, booking that now.";
 
-  it("a read-back with no letters is counted", async () => {
+  it("a read-back that says the name is named", async () => {
     const { summary } = await record(async () => {
-      const s = await bootOnFile("CA_conf_onfile_plain");
+      const s = await bootOnFile("CA_conf_onfile_named");
       await availability(s);
       await s.assistantTurn(READ_BACK);
       await s.callerSays("Yes.");
@@ -267,34 +267,197 @@ describe("an on-file name: was its surname spelled in the read-back?", () => {
     });
     expect(summary.confirm.saves).toBe(1);
     expect(summary.confirm.onfile_saves).toBe(1);
-    expect(summary.confirm.onfile_readback_unspelled).toBe(1);
+    expect(summary.confirm.onfile_readback_named).toBe(1);
+    expect(summary.confirm.onfile_readback_nameless).toBe(0);
+    expect(summary.confirm).not.toHaveProperty("onfile_readback_unspelled");
   });
 
-  it("a read-back that spells it is not", async () => {
+  it("a read-back with no name is nameless (d1b)", async () => {
     const { summary } = await record(async () => {
-      const s = await bootOnFile("CA_conf_onfile_spelled");
+      const s = await bootOnFile("CA_conf_onfile_nameless");
       await availability(s);
-      await s.assistantTurn(SPELLED_READ_BACK);
+      await s.assistantTurn(NAMELESS);
       await s.callerSays("Yes.");
       await s.callTool("book_appointment", BOOK);
       await s.assistantTurn("You're all set.");
       await s.hangUp();
     });
     expect(summary.confirm.onfile_saves).toBe(1);
-    expect(summary.confirm.onfile_readback_unspelled).toBe(0);
+    expect(summary.confirm.onfile_readback_named).toBe(0);
+    expect(summary.confirm.onfile_readback_nameless).toBe(1);
+  });
+
+  it("a read-back in the same breath as the save is read for the name too", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootOnFile("CA_conf_onfile_breath");
+      await availability(s);
+      await s.assistantSays(READ_BACK);
+      await s.callTool("book_appointment", BOOK);
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.onfile_saves).toBe(1);
+    expect(summary.confirm.onfile_readback_named).toBe(1);
+    expect(summary.confirm.onfile_readback_nameless).toBe(0);
+  });
+
+  it("a first name alone is the name said", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootOnFile("CA_conf_onfile_first");
+      await availability(s);
+      await s.assistantTurn("Friday, September 18 at 2:00 PM for Jon, booking that now.");
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", BOOK);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.onfile_readback_named).toBe(1);
+    expect(summary.confirm.onfile_readback_nameless).toBe(0);
   });
 
   it("a name not on file is neither", async () => {
     const { summary } = await record(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_onfile_none" });
       await availability(s);
-      await s.assistantTurn(READ_BACK);
+      await s.assistantTurn(NAMELESS);
       await s.callerSays("Yes.");
       await s.callTool("book_appointment", ARGS);
       await s.assistantTurn("You're all set.");
       await s.hangUp();
     });
     expect(summary.confirm.onfile_saves).toBe(0);
-    expect(summary.confirm.onfile_readback_unspelled).toBe(0);
+    expect(summary.confirm.onfile_readback_named).toBe(0);
+    expect(summary.confirm.onfile_readback_nameless).toBe(0);
+  });
+});
+
+// Round A1 part 4, F-F. Call b (CAdefce6ab) heard the read-back twice in ONE
+// turn -- its own and the handed sentence, glued -- and the counter, counting
+// turns, read 0. A booking's read-backs are now the SENTENCES that name its
+// slot (lib/voice/readBackCount.js).
+describe("read-backs are counted by sentence", () => {
+  const DOUBLED = `Friday at 2 PM for Jon Dodla, booking that now.${READ_BACK}`;
+
+  it("a doubled read-back in the same breath as the save counts twice", async () => {
+    const { summary, saves } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_doubled_breath" });
+      await availability(s);
+      await s.assistantSays(DOUBLED);
+      await s.callTool("book_appointment", ARGS);
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(saves[0].readbacks).toBe(2);
+    expect(summary.confirm.max_readbacks_per_save).toBe(2);
+    expect(summary.confirm.saves_over_one_readback).toBe(1);
+  });
+
+  it("a doubled read-back a turn before the save counts twice", async () => {
+    const { summary, saves } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_doubled_prior" });
+      await availability(s);
+      await s.assistantTurn(DOUBLED);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(saves[0].readbacks).toBe(2);
+    expect(summary.confirm.saves_over_one_readback).toBe(1);
+  });
+
+  it("an offer and its trailing question are one read-back", async () => {
+    const { summary, saves } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_offer_tail" });
+      await availability(s);
+      await s.assistantTurn(OFFER);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(saves[0].readbacks).toBe(1);
+    expect(summary.confirm.saves_over_one_readback).toBe(0);
+  });
+});
+
+// Round A1 part 4, F-F. d1b (CA046f67): the vendor's `interrupted` arrived
+// after the save (interrupted_without_local_barge 1), and its handler clears
+// the turn's text without the audit ever reading it -- the save read 0
+// read-backs and turns_reply_empty 1.
+describe("an interrupted turn's words are still counted", () => {
+  it("a read-back spoken before an interrupt belongs to the save", async () => {
+    const { saves } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_interrupted" });
+      await availability(s);
+      await s.assistantSays(READ_BACK);
+      await s.callTool("book_appointment", ARGS);
+      s.live.push({ serverContent: { interrupted: true } });
+      await s.settle();
+      await s.turnEnds();
+      await s.assistantTurn("Great. Is there anything else I can help you with?");
+      await s.hangUp();
+    });
+    expect(saves).toHaveLength(1);
+    expect(saves[0].readbacks).toBe(1);
+  });
+
+  it("a read-back interrupted with no save yet is still counted", async () => {
+    // The audit only: whether the write gate may lean on a read-back the
+    // caller cut off is the gate's question, not this counter's.
+    const { summary } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_interrupted_prior" });
+      await availability(s);
+      await s.assistantSays(READ_BACK);
+      s.live.push({ serverContent: { interrupted: true } });
+      await s.settle();
+      await s.hangUp();
+    });
+    expect(summary.confirm.readbacks).toBe(1);
+  });
+});
+
+// Round A1 part 4, F-F. Call b's spelling ask came AFTER the model's own
+// read-back ("...booking that now.Before I finalize that, could you please
+// spell..."). The ask-now rule (F-A) puts it first; this counts when it isn't.
+describe("spell_ask_after_readback", () => {
+  it("an ask after a read-back in the same turn (call b)", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_spell_after" });
+      await availability(s);
+      await s.assistantTurn(`${READ_BACK}Before I finalize that, could you please spell your last name for me?`);
+      await s.callerSays("D O D L A.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.spell_asks).toBe(1);
+    expect(summary.confirm.spell_ask_after_readback).toBe(1);
+  });
+
+  it("an ask a turn after a read-back that is still standing", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_spell_next" });
+      await availability(s);
+      await s.assistantTurn(READ_BACK);
+      await s.callerSays("Yes.");
+      await s.assistantTurn("Could you spell your last name for me?");
+      await s.hangUp();
+    });
+    expect(summary.confirm.spell_ask_after_readback).toBe(1);
+  });
+
+  it("an ask before any read-back is not counted", async () => {
+    const { summary } = await record(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_conf_spell_first" });
+      await availability(s);
+      await s.assistantTurn("Could you spell your last name for me?");
+      await s.callerSays("D O D L A.");
+      await s.assistantTurn(SPELLED_READ_BACK);
+      await s.callerSays("Yes.");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantTurn("You're all set.");
+      await s.hangUp();
+    });
+    expect(summary.confirm.spell_asks).toBe(1);
+    expect(summary.confirm.spell_ask_after_readback).toBe(0);
   });
 });
