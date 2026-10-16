@@ -17,6 +17,7 @@ import {
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
+import { inAdditionWouldRefuse } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
@@ -2108,7 +2109,22 @@ export async function executeToolCall(fc, ctx) {
               !readBackMade &&
               a1Save.awaitingAnswer !== true &&
               spellingGateWouldHold(fc, ctx, pack, nameOnFile);
-            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed) && !spellFirst) {
+            // Round A1 part 4, F-E (F5, call d1 CA6bf6e2): the same for the
+            // in-addition question. book_appointment's own guard asks it, and
+            // that guard runs after every gate -- so with no read-back standing
+            // the caller heard this gate's "...booking that now" and THEN
+            // "you already have one -- in addition?". Step aside when the guard
+            // would ask (the same predicate it reads): the question comes first,
+            // and its own caller line names the new slot, so a yes releases the
+            // stashed write with the flag set (LVX160).
+            const inAdditionFirst =
+              a1Save.applies &&
+              a1Save.rule === "booking" &&
+              !readBackMade &&
+              a1Save.awaitingAnswer !== true &&
+              fc.name === "book_appointment" &&
+              inAdditionWouldRefuse(fc.args || {}, ctx, ctx?.config || {});
+            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
               bumpCounter("write_order_would_refuse");
               // LVX156. A read-back that was made and answered unreadably
               // reaches the ceiling a turn earlier than a write nobody was

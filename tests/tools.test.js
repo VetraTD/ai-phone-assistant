@@ -1410,7 +1410,9 @@ describe("services/tools.js — book_appointment guards against a second appoint
     // A caller-safe line is mandatory: without one a text-free turn falls
     // through to the generic can'"'"'t-complete apology, which would be a lie.
     expect(stateEffects.toolResult.callerSafe).toBe(true);
-    expect(stateEffects.toolResult.message).toMatch(/already have an appointment/i);
+    // OLD BEHAVIOUR: "You already have an appointment with us -- shall I...".
+    // Round A1 part 4, G2 (owner): the line names what they have.
+    expect(stateEffects.toolResult.message).toMatch(/^You already have .+ — shall I book this additional one for .+ as well\?$/);
   });
 
   it("confirm: books once the caller has confirmed they want a second one", async () => {

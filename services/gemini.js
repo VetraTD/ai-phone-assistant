@@ -1141,13 +1141,16 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
     // named one of them (d1b: three on file, "you already have Thursday the
     // 22nd"). One or two are named; three or more are a count and the next
     // one, handed over as the sentence to say.
-    if (appts.length >= 3) {
+    // The count is the database's (fetchCallerContext's upcomingTotal): only
+    // five are listed above, and a sixth must still be counted.
+    const total = Math.max(appts.length, Number(callerContext.upcomingTotal) || 0);
+    if (total >= 3) {
       const next = [...callerContext.upcomingAppointments].sort(
         (x, y) => Date.parse(x.scheduled_at) - Date.parse(y.scheduled_at)
       )[0];
       const nextRel = relativeDayLabel(next.scheduled_at, timezone, nowMs);
       const nextWhen = `${nextRel ? `${nextRel}, ` : ""}${speakableDateTime(next.scheduled_at, timezone, profile)}`;
-      ctx += `\nWhen you tell them what they already have, say: "You have ${appts.length} upcoming appointments; the next is ${nextWhen}." Do not list them all unless they ask.`;
+      ctx += `\nWhen you tell them what they already have, say: "You have ${total} upcoming appointments; the next is ${nextWhen}." Do not list them all unless they ask.`;
     } else {
       ctx += `\nWhen you tell them what they already have, name each one by its day and time.`;
     }

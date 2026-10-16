@@ -50,6 +50,8 @@ import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
+import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
+import { getStrings } from "../lib/voice/strings.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -575,6 +577,98 @@ function upcomingForCaller(ctx) {
     const t = Date.parse(a?.scheduled_at);
     return Number.isFinite(t) && t > now;
   });
+}
+
+/** One edit apart (Nitin / Nithin): the model is the ASR and mishears names. */
+function withinOneEdit(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1 || Math.min(a.length, b.length) < 3) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    edits += 1;
+    if (edits > 1) return false;
+    if (a.length > b.length) i += 1;
+    else if (b.length > a.length) j += 1;
+    else {
+      i += 1;
+      j += 1;
+    }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+/**
+ * Round A1 part 4, F-E (owner, call b): a booking for a DIFFERENT person than
+ * the ones on file can never be a move of theirs, so it is never asked about.
+ * "Different" has to be clearly different -- failing toward asking: no name
+ * given, an on-file row with no name, the same first name one edit apart
+ * (misheard), or the same surname (family) all count as the same person.
+ */
+function samePersonBookings(name, list) {
+  const words = (normalizeName(name) || "").split(" ").filter(Boolean);
+  if (words.length === 0) return list;
+  return list.filter((a) => {
+    const theirs = (normalizeName(a?.client_name) || "").split(" ").filter(Boolean);
+    if (theirs.length === 0) return true;
+    if (withinOneEdit(words[0], theirs[0])) return true;
+    return words.length > 1 && theirs.length > 1 && words[words.length - 1] === theirs[theirs.length - 1];
+  });
+}
+
+/**
+ * The bookings the in-addition guard is about: under `block` every upcoming
+ * booking on this number (the business's own rule), otherwise the same
+ * person's. Empty under `allow`.
+ */
+function inAdditionExisting(args, ctx, config) {
+  const policy = existingAppointmentPolicy(capabilityConfig(config, "appointments"));
+  // `allow` still hands back the full list: the write path tells the model
+  // about it afterwards ("also has an existing upcoming appointment").
+  if (policy === "allow") return { policy, all: upcomingForCaller(ctx), existing: [] };
+  const all = upcomingForCaller(ctx);
+  return { policy, all, existing: policy === "block" ? all : samePersonBookings(args?.client_name, all) };
+}
+
+/**
+ * Round A1 part 4, F-E. Would book_appointment's in-addition guard refuse
+ * this booking? ONE predicate, read by the guard itself and by the
+ * write-order gate's look-ahead (services/tools.js), which steps aside so the
+ * question is asked BEFORE any "...booking that now" (call d1, F5). Two
+ * copies would drift -- the F2 look-ahead's own recorded risk.
+ *
+ * @param {object} args - book_appointment arguments
+ * @param {object} ctx
+ * @param {object} config
+ * @returns {boolean}
+ */
+export function inAdditionWouldRefuse(args, ctx, config) {
+  const { policy, existing } = inAdditionExisting(args, ctx, config);
+  if (existing.length === 0) return false;
+  return policy === "block" || args?.in_addition_to_existing !== true;
+}
+
+/**
+ * G2 (owner, 2026-10-15): one or two bookings are named; three or more are a
+ * count and the next one. The count is the database's (`upcomingTotal`) when
+ * nothing was filtered out, so a sixth booking -- never in the prompt's five
+ * -- is still counted.
+ */
+function existingSpoken(existing, all, ctx, config) {
+  const sorted = [...existing].sort((x, y) => Date.parse(x.scheduled_at) - Date.parse(y.scheduled_at));
+  const say = (a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config));
+  const dbTotal = Number(ctx?.callerContext?.upcomingTotal) || 0;
+  const total = existing.length === (all || existing).length ? Math.max(existing.length, dbTotal) : existing.length;
+  if (total >= 3) {
+    return { count: total, sentence: `You have ${total} upcoming appointments; the next is ${say(sorted[0])}` };
+  }
+  return { count: total, sentence: `You already have ${sorted.map(say).join(" and ")}` };
 }
 
 /** The what-you-can-do clauses for the CAPABILITIES line. */
@@ -2145,25 +2239,39 @@ async function bookAppointment(fc, ctx) {
         // Internal calendar only: callerContext is read from OUR appointments
         // table, so this says nothing about an EHR's book. book_appointment_in_ehr
         // goes through executeViaEhr and never reaches here.
-        const policy = existingAppointmentPolicy(capabilityConfig(config, "appointments"));
-        const allUpcoming = upcomingForCaller(ctx);
-        const existing = policy === "allow" ? [] : allUpcoming;
+        // Round A1 part 4, F-E: the same predicate the write-order gate's
+        // look-ahead reads, so the two cannot drift. A booking for a different
+        // person than the ones on file is not asked about (owner, call b).
+        const { policy, all: allUpcoming, existing } = inAdditionExisting(args, ctx, config);
 
         if (existing.length > 0) {
           // What the model may say. Times only — no id, no phone, no stored
           // name, matching lookupCallerAppointments' projection discipline. The
           // lookup tool stays the single source of appointment ids and the only
-          // route to a change.
-          const spoken = existing
-            .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
-            .join("; ");
+          // route to a change. G2: one or two named, three or more a count +
+          // the next one.
+          const g2 = existingSpoken(existing, allUpcoming, ctx, config);
+          const spoken =
+            g2.count >= 3
+              ? `${g2.count} in all. Tell them: "${g2.sentence}."`
+              : g2.sentence.replace(/^You already have /, "");
 
           // `block` ignores the flag entirely — it is never advertised under
           // this policy (see tools()), and honouring it would make an opt-in
           // parameter a bypass for the business's own rule.
-          const blocked = policy === "block" || args.in_addition_to_existing !== true;
+          const blocked = inAdditionWouldRefuse(args, ctx, config);
 
           if (blocked) {
+            // Round A1 part 4, F-E: a question that still lands after a
+            // read-back of this slot (the model said its own first) is the F5
+            // shape the look-ahead cannot prevent; counted so it is seen.
+            const readBackOf = (text) =>
+              typeof text === "string" &&
+              Boolean(getStrings(config).readBackStatementRe?.test(text) || getStrings(config).confirmReadBackRe?.test(text)) &&
+              readBackMentionsSlot(text, args.scheduled_at);
+            if (policy !== "block" && (readBackOf(ctx?.inTurnReplyText) || readBackOf(ctx?.lastReplyText))) {
+              bumpCounter("in_addition_asked_after_readback");
+            }
             const modelMessage =
               policy === "block"
                 ? `This caller already has an upcoming appointment: ${spoken}. This business does not ` +
@@ -2205,7 +2313,7 @@ async function bookAppointment(fc, ctx) {
                         // Naming the new time makes this an ordinary read-back,
                         // so the caller's "yes" releases the stash below through
                         // exactly the machinery every other held write uses.
-                        `You already have an appointment with us — shall I book this additional one for ` +
+                        `${g2.sentence} — shall I book this additional one for ` +
                         `${speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config))} as well?`,
                   callerSafe: true,
                 },

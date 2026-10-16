@@ -1769,7 +1769,9 @@ export async function fetchCallerContext(businessId, callerNumber) {
     resourceIds: calls.map((c) => c.id),
     rowCount: calls.length + upcomingAppointments.length,
   });
-  return { callCount: calls.length, lastCallSummary, upcomingAppointments };
+  // Round A1 part 4, G2: every upcoming booking counted, not only the five
+  // listed -- "You have 7 upcoming appointments" must be the real number.
+  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingTotal: (apptRows || []).length };
 }
 
 /**

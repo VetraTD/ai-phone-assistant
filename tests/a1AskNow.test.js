@@ -111,6 +111,11 @@ describe("part 4 F-A — G2: how existing bookings are named", () => {
     expect(t).toMatch(/"You have 3 upcoming appointments; the next is [^"]+\."/);
   });
 
+  it("more than five on file: the count is the database's, not the five listed", () => {
+    const t = liveTail(avail, [appt(4), appt(5), appt(6), appt(7), appt(8)], { upcomingTotal: 7 });
+    expect(t).toMatch(/"You have 7 upcoming appointments; the next is [^"]+\."/);
+  });
+
   it("no bookings: nothing about naming them", () => {
     const t = liveTail(avail, []);
     expect(t).not.toMatch(/upcoming appointments; the next is/);
