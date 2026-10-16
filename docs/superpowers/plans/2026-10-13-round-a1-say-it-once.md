@@ -1053,7 +1053,7 @@ Frontend half (presets send no `to`) NOT deployed — it ships with the full das
 **Per fix:** F-A partly (ask-now spelling PASS on b; in-addition "ask only when unclear" FAIL on d1) · F-B PASS (name
 said, never spelled, d1 + d1b) · F-C/M not observable · F-D fired once (timeout) without harm · F-E PASS for a
 different person (no ask on b's first booking), G2 wording 1 of 2 · F-F counters read sensibly on d1/d1b · D1 live
-(owner to eye-check Custom 10-15 → 10-15).
+(owner VERIFIED: Custom 10-15 → 10-15 now lists the evening calls).
 **A1 done-when:** one read-back per save PASS on d1/d1b · refusals ≤ 1 PASS (0, 0, 0) · `backwards_goodbye` 0 PASS ·
 but b booked something nobody agreed to, so A1 is not done until LVX179 is fixed.
 
