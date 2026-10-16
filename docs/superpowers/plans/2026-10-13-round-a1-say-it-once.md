@@ -887,3 +887,68 @@ Raman Wed 21 10:00 is on file now**, so b needs a new name):
 - (d1b) "Can I book Friday the 30th at 2 p.m.?" Pass: extra-or-move asked FIRST in G2 count + next wording; "Yes,
   in addition"; ONE read-back saying the name; silent ~10 s → "Hello? Are you still there?" → "Yes".
 - All: `backwards_goodbye` 0; `live_readback_wait` outcomes read; each call read by callSid AND time window.
+
+## Part 4 sitting 1 as built (2026-10-15, 20:50–23:10 CDT, $0)
+
+**Commits:** `0940920` design · `1067209` F-B · `07539cb` F-A · `aebaeda` F-C · `e41a6c0` F-E · `af5a5e5` F-D. 33 new p4 rows + 4 re-anchored, every one hand-verified RED (scratchpad
+`verify-rows.mjs`, maxBuffer 512 MB); census 255. Not yet run: the full root suite, the gate.
+
+**Findings that changed the design**
+- **On Live the system instruction is built ONCE, at the greeting** (`lib/voice/live/index.js` ~8697
+  `buildSystemInstruction(state.step, …)`), so the step-scoped SPELLING NOT YET CONFIRMED block never reached the
+  model, and the static guardrail said "do not ask them to spell anything unless you are told to". That — not only
+  ordering — is why call b's spelling ask came after the model's own read-back. F-A puts the ask-now rule in the
+  tool contract (static prefix) + the book_appointment declaration (always carried).
+- **Bare hour:** call b's own read-back ("Wednesday at 10") was unreadable to the gate at any timing (F-C).
+- **F-D must not yield before the gate** when nothing is waited for: an `await` with nothing ahead lets a
+  turnComplete delivered right behind the call roll the turn first (caught by `liveClaimGuardRefusedWrite`). And a
+  wait can END on the words in the same message as turnComplete, so the gate's continuation runs after the roll:
+  the turn state is frozen when the wait ends (`frozenTurnState`, read by the runner's `turnState`).
+- **F-E regression caught before commit:** under `allow` the helper dropped the full list → booking threw.
+- **Two rows read GREEN first** (cases too easy: a shared surname rescued a misheard first name; no guard-level
+  flag-set write) — sharpened. The verifier's 1 MB spawnSync buffer cut the REPLAY suite ("no tally") — fixed.
+
+**What exists now:** F-A (ask-now rule, meridiem examples, in-addition rule rewritten, G2 prompt sentence) · F-B (on
+file said) · F-C (`weekdayBareHour`) · F-D (`VOICE_READBACK_WAIT_MS` default 2000/0 = off, `live_readback_wait`
+{tool, waited_ms, outcome ∈ arrived|timeout|turn_end|interrupted}, booking writes chained, state frozen) · F-E
+(`inAdditionWouldRefuse` shared by guard + gate `inAdditionFirst`, different person never asked, G2 in the guard,
+`upcomingTotal`, counter `in_addition_asked_after_readback`).
+
+**Left for part 4:** F-F counters · F-G D1 · **11 pm/1 pm slot-matcher fix (owner: IN part 4)** — digit forms match
+by substring, so "1 pm" is found inside "11 pm" and a read-back of 11 p.m. vouches for a 1 p.m. write; make the
+forms whole-word · opus review of `0940920..HEAD` · fix round · full gate · deploys · calls.
+
+## Part 4 sitting 2 starting message (paste into a fresh session)
+
+```text
+Run receptionist round A1 "say it once" — part 4, sitting 2: F-F counters, F-G D1, the 11pm/1pm matcher fix, opus
+review, fix round, then launch the full gate.
+
+FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
+questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
+
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 4 design" + "Part 4 sitting 1 as built";
+ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P4 lines). Branch feat/outbound-stage4. Prod
+= voice-uk-prod-00104-n6b @ 04d176a (nothing of part 4 deployed); rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+Build (each red-first + a hand-verified RED row; the scratchpad verifier needs maxBuffer >= 512 MB for REPLAY):
+ (F-F) confirm audit counts read-back SENTENCES per save (prototype the splitter on call b's real text first:
+     "...booking that now.Wednesday, October 21 at 10:00 AM..." = 2; "a.m." must not split); a within-turn repeat
+     cut must not wipe the turn's text from the audit (d1b turns_reply_empty); onfile_readback_nameless replaces
+     onfile_readback_unspelled; spell_ask_after_readback counter.
+ (F-G) D1: AI-phone-dashboard/backend/src/routes/calls.js bounds in the business timezone (analytics.js pattern,
+     index-friendly `($d::date::timestamp AT TIME ZONE $tz)`), presets send no `to` (frontend App.jsx); test a 21:30
+     CDT call; confirm the gate runs the dashboard suites, else run them as an explicit step.
+ (M) slotMention digit/word forms matched whole-word ("1 pm" must not match "11 pm").
+Then: opus code review of 0940920..HEAD (named risks: F-C write side, F-D chain/freeze/interrupt, F-E predicate +
+same-person rule, F-F splitter, D1 bounds) → fix round → commit → `gate-v4.sh <sha> a1-p4 db fullsab` in its own
+mintty window (pass = ROOT exit 0, census N, DB exit 0, every row red except the 3 baseline x, 0 "could not be
+READ", tree clean). Deploys + calls are the NEXT sitting (scripts in "Part 4 design").
+
+Conserve usage and time WITHOUT compromising quality: read only named sections and needed parts of files; batch
+independent reads; cheaper models for mechanical subagent work, opus for code review; never skip a check; short
+plain replies, detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over
+uncommitted work; long gates in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope:
+LVX167, LVX174, LVX175 (A2), LVX168–171.
+```
