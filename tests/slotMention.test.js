@@ -365,3 +365,25 @@ describe("readBackMentionsSlot — part 4 review: edge punctuation", () => {
     expect(readBackMentionsSlot("Friday at 3 o'clock for Jon.", FRI23("15:00"))).toBe(true);
   });
 });
+
+// Opus RE-review M2/M4: open text (the read-back wait) needs a whole next word
+// that cannot begin a minute, meridiem or part of the day still arriving, and
+// a full stop right after a digit does not close it ("at 10." may be "10.30").
+describe("readBackMentionsSlot — part 4 re-review: open text", () => {
+  const open = { open: true };
+  it("waits on a part of the day, a meridiem or a minute that is still arriving", () => {
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10 in", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10 in the", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10 p", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten thir", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10 for", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10 for Priya", WED("10:00"), open)).toBe(true);
+  });
+
+  it("a full stop after a digit does not close open text; after a word it does", () => {
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10.", WED("10:00"), open)).toBe(false);
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at ten.", WED("10:00"), open)).toBe(true);
+    // Finished text reads as before.
+    expect(readBackMentionsSlot("I'll book you in for Wednesday at 10.", WED("10:00"))).toBe(true);
+  });
+});

@@ -111,6 +111,11 @@ describe("inAdditionWouldRefuse — one predicate for the guard and the gate", (
     expect(asks("Nithin Dodla", "Maya Okafor")).toBe(false); // still different
     expect(asks("Dr Patel", "Dr Okafor")).toBe(false); // a shared title is not a shared name
   });
+  it("re-review M7: a title alone is no name -- treated as the same person (asks)", () => {
+    const onFile = (client_name) => ctx({ upcomingAppointments: [{ ...upcoming(4), client_name }] });
+    expect(inAdditionWouldRefuse({ client_name: "Nithin Dodla" }, onFile("Mrs"), {})).toBe(true);
+    expect(inAdditionWouldRefuse({ client_name: "Mr" }, onFile("Nithin Dodla"), {})).toBe(true);
+  });
   it("a past booking does not count", () => {
     const past = { upcomingAppointments: [{ id: "p", client_name: "Nithin Dodla", scheduled_at: "2020-01-01T10:00:00" }] };
     expect(inAdditionWouldRefuse({ client_name: "Nithin Dodla" }, ctx(past), {})).toBe(false);
@@ -225,5 +230,16 @@ describe("review M6 — the count follows the call, not the call-start snapshot"
     );
     const { stateEffects } = await book(live({ callerContext: cc }));
     expect(stateEffects.toolResult.message).toMatch(/^You have 8 upcoming appointments; the next is /);
+  });
+
+  it("re-review M6: 7 on file, one BEYOND the listed five cancelled: 6, not 7", async () => {
+    const appts = [upcoming(4), upcoming(5), upcoming(6), upcoming(7), upcoming(8)];
+    const cc = afterEffects(
+      { callCount: 3, upcomingAppointments: appts, upcomingOverflow: 2 },
+      [{ type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a-unlisted" } }]
+    );
+    expect(cc.upcomingOverflow).toBe(1);
+    const { stateEffects } = await book(live({ callerContext: cc }));
+    expect(stateEffects.toolResult.message).toMatch(/^You have 6 upcoming appointments; the next is /);
   });
 });

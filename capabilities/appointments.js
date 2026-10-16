@@ -561,6 +561,17 @@ function applyToCallerSnapshot(effect, engine) {
     );
   } else if (data.appointmentId) {
     next = list.filter((a) => a?.id !== data.appointmentId);
+    // Re-review M6: a cancelled row beyond the five listed (the model can list
+    // and cancel any of them) leaves the list as it was; the overflow is what
+    // shrinks, or the count stays one high.
+    if (next.length === list.length && Number(base.upcomingOverflow) > 0) {
+      engine.setCallerContext({
+        ...base,
+        upcomingAppointments: next,
+        upcomingOverflow: Number(base.upcomingOverflow) - 1,
+      });
+      return;
+    }
   } else {
     return; // a "changed" effect carrying no id — nothing can be said about which row moved
   }
@@ -606,11 +617,13 @@ function withinOneEdit(a, b) {
 
 const NAME_TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "prof", "sir"]);
 
-/** The name's words, titles dropped ("Mr Dodla" -> ["dodla"]); a lone title is kept. */
+/**
+ * The name's words, titles dropped ("Mr Dodla" -> ["dodla"]). A title alone
+ * ("Mrs") is no name at all (re-review M7): [] sends it down the no-name
+ * branches, which treat it as the same person -- failing toward asking.
+ */
 function nameWords(raw) {
-  const all = (normalizeName(raw) || "").split(" ").filter(Boolean);
-  const bare = all.filter((w) => !NAME_TITLES.has(w));
-  return bare.length > 0 ? bare : all;
+  return (normalizeName(raw) || "").split(" ").filter((w) => w && !NAME_TITLES.has(w));
 }
 
 /**

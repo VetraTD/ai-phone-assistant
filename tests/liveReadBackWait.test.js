@@ -323,3 +323,61 @@ describe("F-D review — the wait ends on close (M5)", () => {
     expect(events[0]).toMatchObject({ outcome: "closed" });
   });
 });
+
+describe("F-D re-review — the skip-the-wait check reads arriving text too (M3)", () => {
+  it("a bare hour that ends the words said before the call does not skip the wait", async () => {
+    let s;
+    const events = await waits(async () => {
+      s = await bootLive({ config: CONFIG, callSid: "CA_wait_skip_open" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.assistantSays("I'll book you in for Friday at two");
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays(" thirty for Jon Dodla.");
+      await vi.advanceTimersByTimeAsync(2100);
+      await s.settle();
+      await s.settle();
+    });
+    const r = s.responsesFor("book_appointment");
+    expect(r).toHaveLength(1);
+    expect(r[0].response.success).toBe(false);
+    expect(events[0]).toMatchObject({ outcome: "timeout" });
+  });
+});
+
+describe("F-D re-review — saved_then_asked counts any question but the closing one (M5)", () => {
+  it("'Does that work for you?' after the saved read-back is counted", async () => {
+    const { summary } = await summaryOf(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_work" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays(READ_BACK);
+      await s.settle();
+      await s.settle();
+      await s.assistantSays(" Does that work for you?");
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.saved_then_asked).toBe(1);
+  });
+
+  it("after an interrupt, the next turn's question is not counted against the old read-back", async () => {
+    const { summary } = await summaryOf(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_interrupt" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays(READ_BACK);
+      await s.settle();
+      await s.settle();
+      s.live.push({ serverContent: { interrupted: true } });
+      await s.settle();
+      await s.callerSays("Sorry, one more thing.");
+      await s.assistantSays("Of course. What else can I do for you today, and would you like a reminder text?");
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.saved_then_asked).toBe(0);
+  });
+});
