@@ -2757,8 +2757,8 @@ const SABOTAGES = [
     name: "p4-retry-defers-to-waited-booking",
     why: "A1 part 4 review I2: the turn-end retry fires while the model's own booking waits for its read-back, so the stashed (unspelled) write and the model's call race for the slot.",
     file: "lib/voice/live/index.js",
-    find: "    if (bookingWriteChain) {\n      bumpCounter(\"write_retry_deferred_booking_in_flight\");",
-    replace: "    if (false) {\n      bumpCounter(\"write_retry_deferred_booking_in_flight\");",
+    find: "    if (bookingWriteChain) {\n      if (queuedRetry) return queuedRetry;",
+    replace: "    if (false) {\n      if (queuedRetry) return queuedRetry;",
     red: ["tests/liveWriteRetry.test.js"],
   },
   {
@@ -2792,6 +2792,14 @@ const SABOTAGES = [
     find: "    if (readBackWaiter) readBackWaiter.finish(\"closed\");",
     replace: "    // SABOTAGE",
     red: ["tests/liveReadBackWait.test.js"],
+  },
+  {
+    name: "p4-retry-queued-not-dropped",
+    why: "A1 part 4 re-review I1 (LVX160): the turn-end retry is dropped, not queued, behind a booking in flight -- the caller's yes to the in-addition question is lost when the model's flagless call is refused.",
+    file: "lib/voice/live/index.js",
+    find: "          await runHeldWrite({ frozen, modelSpokeThisTurn, seq });",
+    replace: "          // SABOTAGE",
+    red: ["tests/liveWriteRetry.test.js"],
   },
 ];
 

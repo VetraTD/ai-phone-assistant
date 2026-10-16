@@ -97,7 +97,13 @@ const BOOK = { scheduled_at: "2026-09-07T16:30:00", client_name: "Nitin Dodla", 
 // `reason` says WHICH gate held the write. A spelling-gate stash carries the
 // unspelled name and must never be re-issued on a caller's "yes"; a
 // write-order stash was held for that yes and nothing else.
-function gateExecutor({ stash = true, retryFails = false, retryGated = false, reason = null } = {}) {
+function gateExecutor({
+  stash = true,
+  retryFails = false,
+  retryGated = false,
+  reason = null,
+  modelRefusedSlow = false,
+} = {}) {
   const calls = [];
   let bookAttempts = 0;
   const execute = vi.fn(async (fc) => {
@@ -133,6 +139,16 @@ function gateExecutor({ stash = true, retryFails = false, retryGated = false, re
     }
 
     bookAttempts += 1;
+    // A1 part 4 re-review I1: the model's own later call, refused (the
+    // in-addition guard: it left the flag off) and still running when its turn
+    // ends -- a refusal takes a few database round trips.
+    if (modelRefusedSlow && bookAttempts > 1 && !String(fc.id).startsWith("retry_")) {
+      await new Promise((r) => setTimeout(r, 60));
+      return {
+        functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "in addition?" } },
+        stateEffects: { toolResult: { name: fc.name, success: false, message: "in addition?" } },
+      };
+    }
     if (bookAttempts === 1) {
       return {
         functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "spell it" } },
@@ -713,5 +729,36 @@ describe("A1 part 4 review I2 — the turn-end retry never races a waited bookin
     expect(c().write_retry_deferred_booking_in_flight).toBe(1);
     expect(s.bookCalls()).toHaveLength(2);
     expect(s.bookCalls()[1].args.client_name).toBe("Nithin Dodla");
+  });
+});
+
+// Round A1 part 4, opus RE-review I1. The first I2 fix stood the retry down
+// whenever ANY booking was still running at turn end -- and a refused call
+// usually is (turnComplete lands ~17 ms after it). LVX160's shape: the caller
+// says yes to the in-addition question, the model re-calls WITHOUT the flag,
+// that call is refused, and the held write (which carries the flag) was the
+// only thing that could book it. The retry now queues behind the call.
+describe("A1 part 4 re-review I1 — a yes is not lost behind a refused call", () => {
+  beforeEach(() => clearStats());
+
+  it("the held in-addition write goes out after the model's refused call ends", async () => {
+    // The stub stashes the FIRST call's args; LVX160 stashes them with the flag
+    // set, so the first call carries it here. The model's re-call leaves it off.
+    const s = await boot({
+      reason: "in_addition",
+      modelRefusedSlow: true,
+      args: { ...BOOK, in_addition_to_existing: true },
+    });
+    await s.book();
+    const pause = () => new Promise((r) => setTimeout(r, 25));
+    s.live.push({ serverContent: { inputTranscription: { text: "yes, book both" } } });
+    await pause();
+    s.live.push({ toolCall: { functionCalls: [{ id: "m", name: "book_appointment", args: BOOK }] } });
+    s.live.push({ serverContent: { turnComplete: true } });
+    for (let i = 0; i < 6; i++) await pause();
+
+    expect(c().write_retry_deferred_booking_in_flight).toBe(1);
+    expect(c().write_retry_attempted).toBe(1);
+    expect(s.bookCalls().map((f) => f.id)).toEqual(["1", "m", "retry_book_appointment"]);
   });
 });
