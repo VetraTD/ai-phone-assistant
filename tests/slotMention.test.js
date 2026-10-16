@@ -287,3 +287,31 @@ describe("readBackMentionsSlot — part 4: the weekday-anchored bare hour", () =
     }
   });
 });
+
+// Round A1 part 4 (M, owner: in part 4). The digit forms were found by
+// SUBSTRING, so "1 pm" sat inside "11 pm" and a read-back of 11 p.m. vouched
+// for a 1 p.m. write (likewise 12 -> 2, 11:00 -> 1:00, 1130pm -> 130pm). Every
+// form is now matched as whole words in the normalized read-back.
+// 2026-10-23 is a Friday.
+const FRI23 = (hhmm) => `2026-10-23T${hhmm}`;
+
+describe("readBackMentionsSlot — part 4: forms match whole words only", () => {
+  it("never lets an 11 or a 12 vouch for a 1 or a 2", () => {
+    expect(readBackMentionsSlot("Friday at 11 pm, booking that now.", FRI23("13:00"))).toBe(false);
+    expect(readBackMentionsSlot("Friday at 11:00 p.m., booking that now.", FRI23("13:00"))).toBe(false);
+    expect(readBackMentionsSlot("Friday at 11 o'clock, booking that now.", FRI23("13:00"))).toBe(false);
+    expect(readBackMentionsSlot("Friday at 12 pm, booking that now.", FRI23("14:00"))).toBe(false);
+    expect(readBackMentionsSlot("Friday at 12:30 p.m., booking that now.", FRI23("14:30"))).toBe(false);
+    expect(readBackMentionsSlot("Friday at 1130pm, booking that now.", FRI23("13:30"))).toBe(false);
+  });
+
+  it("still reads each slot's own form, wherever it sits in the sentence", () => {
+    expect(readBackMentionsSlot("Friday at 1 pm, booking that now.", FRI23("13:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at 1:00 p.m., booking that now.", FRI23("13:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at one p.m., booking that now.", FRI23("13:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at 11 pm, booking that now.", FRI23("23:00"))).toBe(true);
+    expect(readBackMentionsSlot("1:30 pm on Friday, booking that now.", FRI23("13:30"))).toBe(true);
+    expect(readBackMentionsSlot("Booking Friday at 2 p.m.", FRI23("14:00"))).toBe(true);
+    expect(readBackMentionsSlot("Friday at noon.", FRI23("12:00"))).toBe(true);
+  });
+});

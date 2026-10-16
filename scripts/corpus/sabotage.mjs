@@ -2392,8 +2392,8 @@ const SABOTAGES = [
     name: "p4-weekday-bare-hour",
     why: "A1 part 4 F-C (CAdefce6ab): 'Wednesday at 10 for Priya Raman, booking that now' must read as a read-back of a Wed 10:00 slot -- the gate missed it and handed S on top (read-back twice); the confirm counter missed it too.",
     file: "lib/voice/slotMention.js",
-    find: "return forms.some((form) => haystack.includes(normalize(form))) || weekdayBareHour(haystack, naive);",
-    replace: "return forms.some((form) => haystack.includes(normalize(form))); // SABOTAGE",
+    find: " || weekdayBareHour(haystack, naive);",
+    replace: "; // SABOTAGE",
     red: ["tests/slotMention.test.js","tests/liveSavePolicy.test.js"],
   },
   {
@@ -2555,6 +2555,14 @@ const SABOTAGES = [
     find: "      if (bookingEntry?.prior) await bookingEntry.prior;",
     replace: "      await bookingEntry?.prior; // SABOTAGE",
     red: ["tests/liveClaimGuardRefusedWrite.test.js"],
+  },
+  {
+    name: "p4-slot-forms-whole-word",
+    why: "the slot matcher finds time forms by substring again: '1 pm' inside '11 pm', so a read-back of 11 p.m. vouches for a 1 p.m. write (round A1 part 4, M).",
+    file: "lib/voice/slotMention.js",
+    find: "return forms.some((form) => padded.includes(` ${normalize(form)} `))",
+    replace: "return forms.some((form) => haystack.includes(normalize(form)))",
+    red: ["tests/slotMention.test.js"],
   },
 ];
 
