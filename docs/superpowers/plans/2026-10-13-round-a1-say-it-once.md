@@ -836,3 +836,54 @@ work; long gates in their own Git Bash window; owner decisions final; stop and a
 LVX174, LVX175 (A2), LVX168–171. End with: verdict per fix and per call, "Part 4 as built" in the plan, ledger +
 memory updated, and what round A2 starts with.
 ```
+
+## Part 4 design (2026-10-15, 20:50 CDT — owner-approved)
+
+**Measured (free log reads):** a refused book call → read-back text in `turnReplyText`: ≤1.1 s (b, 00:27:02.43 →
+03.56), ≤1.5 s (d1b, 00:10:46.28 → 47.74). Upper bounds (no per-chunk log), and the text may be the handed S, not the
+model's own. **New cause on b:** the model said "Wednesday **at 10**" — `readBackMentionsSlot` never matches a bare
+hour (slotMention.js header), so the gate could not see that read-back at any timing. Our own flow steps teach the
+form ("Tuesday at 3 for Jon Doe").
+
+**Owner decisions:** G2 = name 1–2 bookings, 3+ → "You have N upcoming appointments; the next is Monday at 11 a.m."
+(N from the DB, a 6th+ never dropped) · wait window ≤ 2 s, only when the model sent audio this turn, ends when a
+read-back arrives, logged · D1 dashboard deploy in the same sitting as the voice deploy, asked separately ·
+**in-addition: ask only when unclear, and right away** — no ask when the words say it (another / also / as well /
+second: the model sets the flag), no ask when the booking is for a different person than those on file (CODE
+rule), else ask once the moment the booking is asked for, before times and the read-back · **ask-now rule,
+general:** "when the caller says something you need to check, check it in your very next reply"; code-backed +
+counted where late asks hurt (spelling, in-addition) · a name on file is said, never spelled; a surname spelled this
+call keeps its letters.
+
+**Fix set (each red-first + a hand-verified RED sabotage row):**
+- **F-A** ask-now prompt: general line in the tool contract; spelling block asks right after a new name;
+  caller-context asks extra-or-move right away (G2 wording); flow-step examples get a meridiem; never "booking that
+  now" while spelling or extra-or-move is open. Snapshots regenerated once.
+- **F-B** on-file said: `composeReadBack` spells only `ctx.callerSpelled`; guardrail + message step 1/5/guidance.
+- **F-C** detector: `"<weekday> at <h>"` / hour word, minute 0, 07:00–19:59 only (gate sight + counter miss).
+- **F-D** wait for the words: `onToolCall` waits ≤ 2 s before the gate for a booking-rule write when model audio
+  arrived this turn and no read-back of the slot is in `turnReplyText`/`lastReplyText`; early exit on a matching
+  chunk / turnComplete / interrupt / close; a second write waits behind it; `live_readback_wait` {waited_ms, outcome}.
+- **F-E** in-addition: one exported predicate (guard + gate, no drift); different first name from every booking on
+  file → no ask; write_order steps aside (beside `spellFirst`) so the tool's question comes before any S; refusal
+  text in G2 wording + "if extra, read it back once and call again in that same response with the flag";
+  `upcomingTotal` from the DB; counter `in_addition_asked_after_readback`.
+- **F-F** counters: read-back SENTENCES per save; pre-cut text when a repeat cut wipes a turn;
+  `onfile_readback_nameless` replaces `onfile_readback_unspelled`; `spell_ask_after_readback`.
+- **F-G** D1: calls.js bounds in the business timezone (analytics.js pattern, index-friendly); presets send no `to`;
+  test for a 21:30 CDT call.
+
+**Order:** S1 (tonight) F-B → F-A → F-C · S2 F-E → F-D · S3 F-F → F-G → rows → opus review · S4 fix round + commit +
+`gate-v4.sh <sha> a1-p4 db fullsab` in mintty · S5 ask → voice redeploy → ask → dashboard deploy → calls. ≈ 9.5 h
+active; $0 build; calls ≈ $0.40–0.60 (cap $2).
+
+**Calls after** (handset on file: Nithin Dodla Mon 19 11:00, Tue 20 14:00, Thu 22 14:00, Fri 23 14:00; **Priya
+Raman Wed 21 10:00 is on file now**, so b needs a new name):
+- (b) "Book an appointment for my colleague, Wednesday the 28th at 10 a.m. Her name is Maya Okafor." Spell
+  O-K-A-F-O-R only when asked. Pass: spelling asked right after the name, before any read-back; NO in-addition ask;
+  ONE read-back with the letters; refusals ≤ 1; `saves_over_one_readback` 0 (sentences).
+- (d1) nameless: "I'd like to book another appointment, Thursday the 29th at 2 p.m." Pass: no in-addition ask, no
+  spelling ask, ONE read-back that SAYS Nithin (no letters), refusals ≤ 1.
+- (d1b) "Can I book Friday the 30th at 2 p.m.?" Pass: extra-or-move asked FIRST in G2 count + next wording; "Yes,
+  in addition"; ONE read-back saying the name; silent ~10 s → "Hello? Are you still there?" → "Yes".
+- All: `backwards_goodbye` 0; `live_readback_wait` outcomes read; each call read by callSid AND time window.
