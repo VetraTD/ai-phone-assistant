@@ -20,7 +20,7 @@ import { packForTool } from "../capabilities/index.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
-import { normalizeName, shouldConfirmSpelling, spellPolicy, nameIsOnFile } from "../lib/nameQuality.js";
+import { normalizeName, shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
 import { spellMissCap } from "../lib/voice/replyState.js";
 import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
@@ -2237,10 +2237,10 @@ export async function executeToolCall(fc, ctx) {
                       toolName: fc.name,
                       args: fc.args || {},
                       config: ctx?.config,
-                      // Owner F4 (A1 part 3): a surname taken from the record
-                      // is spelled too -- the statement that replaces asking.
-                      callerSpelled:
-                        ctx?.callerSpelled === true || nameIsOnFile(fc.args?.client_name, ctx?.callerContext),
+                      // Owner, A1 part 4 (call d1, "felt weird"): a name on file
+                      // is SAID, not spelled. Letters only for a surname the
+                      // caller spelled on this call (LVX172).
+                      callerSpelled: ctx?.callerSpelled === true,
                     })
                   : null;
                 // T5b: read back, then not a sound from the caller. Nothing to

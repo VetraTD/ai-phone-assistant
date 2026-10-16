@@ -183,7 +183,10 @@ describe("LVX53 end to end — owner F4: booked, and counted", () => {
       c
     );
 
-  it("the one read-back spells a surname taken from the record, as a statement (owner F4)", async () => {
+  // OLD BEHAVIOUR (part 3, F4): the handed sentence spelled an on-file surname
+  // ("for Nithin, V-O-D-L-A"). Owner, part 4 (2026-10-15, call d1): a name on
+  // file is SAID, not spelled -- spelling it back "felt weird".
+  it("the one read-back says a name taken from the record, without spelling it (owner, part 4)", async () => {
     const { functionResponse } = await book({
       ...ctx("Hay en el Tíndala. Tuesday works."),
       lastReplyText: "Thanks. And which day suits you?",
@@ -191,7 +194,8 @@ describe("LVX53 end to end — owner F4: booked, and counted", () => {
     });
     expect(functionResponse.response.success).toBe(false);
     expect(functionResponse.response.gated).toBe(true);
-    expect(functionResponse.response.message).toMatch(/ for Nithin, V-O-D-L-A, booking that now\./);
+    expect(functionResponse.response.message).toMatch(/ for Nithin Vodla, booking that now\./);
+    expect(functionResponse.response.message).not.toMatch(/V-O-D-L-A/);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
     // The write-order gate's look-ahead at the spelling gate (F2) decides
     // only: nothing reached the spelling gate itself, so nothing is counted.

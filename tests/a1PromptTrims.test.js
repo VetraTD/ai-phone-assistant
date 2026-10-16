@@ -155,14 +155,21 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
     }
   });
 
-  it("F4: a name on file is never asked for, and its surname is spelled in the one read-back (booking + message)", () => {
+  // OLD BEHAVIOUR (part 3, F4): the read-back spelled an on-file surname as a
+  // statement. Owner, part 4 (2026-10-15, call d1 "felt weird"): a name on
+  // file is SAID, not spelled; only a surname spelled this call gets letters.
+  it("part 4: a name on file is never asked for and is said, not spelled, in the one read-back (booking + message)", () => {
     const p = prefix(avail);
     const both = p.match(/If their name is already on their record from an earlier visit[^\n]*/g) || [];
     expect(both.length).toBeGreaterThanOrEqual(2);
     for (const line of both) {
       expect(line).toMatch(/do not ask them to spell it again/);
-      expect(line).toMatch(/surname one letter at a time too/);
-      expect(line).toMatch(/a statement, not a question/);
+      expect(line).toMatch(/just say the name/);
+      expect(line).not.toMatch(/one letter at a time/);
+    }
+    expect(p).not.toMatch(/or one from their record, one letter at a time/);
+    for (const intent of ["take_message", "callback_request"]) {
+      expect(tail(avail, "gather_details", intent)).not.toMatch(/or one from their record, one letter at a time/);
     }
   });
 });
