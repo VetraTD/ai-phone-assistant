@@ -952,3 +952,73 @@ plain replies, detail in the ledger. Rules as before: paid runs need my yes; nev
 uncommitted work; long gates in their own Git Bash window; owner decisions final; stop and ask at 2 h. Not in scope:
 LVX167, LVX174, LVX175 (A2), LVX168–171.
 ```
+
+## Part 4 sitting 2 as built (2026-10-16, 00:08–~02:10 CDT, $0)
+
+**Commits (on `974df80`):** `f0d5031` M · `0824b9b` F-F · `8e28026` F-G/D1 (sonnet, worktree, cherry-picked) ·
+`633af07` review I1+M8 · `5418ff4` review M6+M7 (sonnet, worktree) · `47efa2c` review I2/I3/I4/M5 · `6bda465`
+re-review I1 · `5c15583` re-review M2–M7 · docs. Every new row hand-verified RED; census **292**. Root suite at
+`5c15583` (clean tree): 325 files, 7993 passed. Dashboard suites (the gate does NOT run them): backend 17 files 165
+passed, frontend 10 files 68 passed.
+
+**What was built**
+- **M:** time forms match whole words — "1 pm" no longer found inside "11 pm" (also 12→2, 11:00→1:00, 1130→130).
+- **F-F:** `lib/voice/readBackCount.js`. A booking save's read-backs = read-back SENTENCES that name its slot (min 1
+  per read-back turn): call b counts 2; the 10 corpus turns shaped "X at 2 PM. Shall I go ahead?" count 1. d1b's
+  lost read-back was the vendor `interrupted` handler clearing the turn's text unaudited (not the repeat cut) — it is
+  audited there now. `onfile_readback_named/_nameless` (first name OR surname, whole word) replace `_unspelled`;
+  `spell_ask_after_readback`; counting-only "could you please spell" alternation.
+- **D1:** calls list bounds in the business timezone (`AI-phone-dashboard/backend/src/callDateBounds.js`); presets
+  send no `to` (`frontend/src/callsQueryParams.js`). Real-Postgres test: a 21:30 CDT call is listed under its day.
+- **Opus review (0 C / 4 I / 6 M) + re-review (0 C / 1 I / 5 M), all I fixed:** bare hour only 08:00–18:59 (owner:
+  a plain "at 7" never counts), only a date between weekday and hour, part-of-day phrases refuse; the read-back wait
+  reads arriving text as OPEN (a bare hour needs a whole next word that cannot start a minute/meridiem/part of day;
+  "at 10." after a digit stays open); the turn-end retry QUEUES behind an in-flight booking (dropping it lost
+  LVX160's yes — caught by the re-review); frozen turn state passed per call; close ends the wait;
+  `confirm.saved_then_asked` (owner: keep saving on arrival, count a question after it); live upcoming count;
+  same person on any shared name word, titles stripped.
+
+**Owner decisions (2026-10-16):** D1 by sonnet in parallel · on-file name said = first OR surname · bare-hour window
+08:00–18:59 (after a plain re-explanation) · trailing question: keep saving, count it.
+
+**Declined / parked:** review M9 (refusal text "call again with the flag") declined — the flag rides in the LVX160
+stash; a re-call instruction adds a second write path · M10 counter attribution after a roll (counters only) · a
+second arrival in one turn orphans the first `saved_then_asked` marker (rare, counter only) · **ask the owner:** the
+shared `spellRequestRe` misses "could you please spell…" (call b + 3 corpus asks) — the reducer's spelling cap is
+blind to those asks · analytics.js chart series still UTC days · "1:30pm" (no space) has no form · UK date order
+("Wednesday 28th October at 10") never read as a bare hour.
+
+**Gate:** `gate-v4.sh <docs sha> a1-p4 db fullsab` launched in its own mintty window via
+`.superpowers/sdd/2026-10-13-round-a1-say-it-once/run-gate-a1-p4.sh <sha>`; log
+`.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p4.log`. ~3 h machine (292 rows).
+
+## Part 4 sitting 3 starting message (paste into a fresh session)
+
+```text
+Run receptionist round A1 "say it once" — part 4, sitting 3: read the gate, then (each asked separately) voice
+redeploy, dashboard deploy (D1), and the three live calls.
+
+FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
+questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
+
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 4 design" (calls b/d1/d1b + pass lines),
+"Part 3 as built" (deploy procedure), "Part 4 sitting 2 as built"; ledger
+.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P4 lines). Branch feat/outbound-stage4. Prod =
+voice-uk-prod-00104-n6b @ 04d176a; rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+1. Gate: one-shot read of .superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-a1-p4.log. Pass = ROOT exit 0,
+   CENSUS 292 clean, DB exit 0, every row red except the 3 baseline x (ask-branch-latch, ask-branch-in-turn,
+   ask-latch-per-action), 0 "could not be READ", tree clean. Any other GREEN row = a finding: stop and report.
+2. Ask -> voice redeploy (build from the MAIN checkout, never an LF worktree; tracked tree clean; diff env vs
+   00104-n6b first; VOICE_READBACK_WAIT_MS unset = 2000).
+3. Ask -> dashboard deploy (D1).
+4. Calls (cap $2; paid -> my yes): b (Maya Okafor, Wed 28th 10 a.m.), d1 (another, Thu 29th 2 p.m.), d1b (Fri 30th
+   2 p.m. + 10 s silence). Read each by callSid AND time window. New numbers: confirm.saves_over_one_readback (now
+   per sentence), saved_then_asked, spell_ask_after_readback, onfile_readback_named/_nameless; live_readback_wait
+   outcomes; write_retry_deferred_booking_in_flight. Dashboard: the calls show under today after 7 p.m. CDT.
+
+Conserve usage and time WITHOUT compromising quality; cheaper models for mechanical work; short plain replies,
+detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;
+owner decisions final; stop and ask at 2 h. Not in scope: LVX167, LVX174, LVX175 (A2), LVX168–171.
+```
