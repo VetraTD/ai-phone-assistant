@@ -5,10 +5,8 @@ const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 
-// The timezone a business gets when its row does not name one. Same value the
-// breakdown endpoint below already falls back to, and the same one the column
-// defaults to in schema.sql — three places agreeing by having one constant.
-const DEFAULT_TIMEZONE = "America/Chicago";
+// The timezone a business gets when its row does not name one (shared with the calls list).
+const { DEFAULT_TIMEZONE } = require("../callDateBounds");
 
 // Analytics for the authenticated user's business
 //

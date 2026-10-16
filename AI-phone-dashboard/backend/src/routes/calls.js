@@ -5,6 +5,7 @@ const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
 const { sanitizeString } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
+const { loadBusinessTimezone, callDateClauses } = require("../callDateBounds");
 
 // Calls list with filters (scoped to the authenticated user's business)
 // Supports query params:
@@ -96,15 +97,11 @@ if (needs_followup === "true") {
   `);
 }
 
-    // Date filtering
-    // from/to are YYYY-MM-DD strings
-    if (from) {
-      where.push(`started_at >= ${addParam(from)}::date`);
-    }
-
-    if (to) {
-      // include the full "to" day by using < (to + 1 day)
-      where.push(`started_at < (${addParam(to)}::date + interval '1 day')`);
+    // Date filtering: from/to are YYYY-MM-DD in the BUSINESS timezone (see
+    // callDateBounds.js for why not the database's).
+    if (from || to) {
+      const tz = await loadBusinessTimezone((sql, p) => pool.query(sql, p), userBusinessId);
+      where.push(...callDateClauses({ from, to, tz, addParam }));
     }
 
     // Only calls that have appointments

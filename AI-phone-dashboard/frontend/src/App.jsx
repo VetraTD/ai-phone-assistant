@@ -12,6 +12,7 @@ import SettingsPage from "./settings/SettingsPage";
 import CallOutcomeAnswers from "./components/CallOutcomeAnswers";
 import { humanise } from "./callOutcome";
 import { buildCallsCsv } from "./callsCsv";
+import { buildCallsQueryParams } from "./callsQueryParams";
 
 function formatDateYYYYMMDD(d) {
   const yyyy = d.getFullYear();
@@ -552,19 +553,11 @@ function App() {
   }, [activePage, businessId]);
 
   const callsQueryParams = useMemo(() => {
-    const params = { limit: 200, offset: 0 };
-    if (businessId) params.business_id = businessId;
-    if (status !== "all") params.status = status;
-    if (callerSearch.trim()) params.caller = callerSearch.trim();
-    if (fromDate) params.from = fromDate;
-    if (toDate) params.to = toDate;
-    if (hasAppointments) params.has_appointments = "true";
-    if (sentiment !== "all") params.sentiment = sentiment;
-    if (hasSummary !== "all") params.has_summary = hasSummary;
-    if (needsFollowUp) params.needs_followup = "true";
-    if (direction !== "all") params.direction = direction;
-    return params;
-  }, [businessId, status, callerSearch, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp, direction]);
+    return buildCallsQueryParams({
+      businessId, status, callerSearch, datePreset, fromDate, toDate,
+      hasAppointments, sentiment, hasSummary, needsFollowUp, direction,
+    });
+  }, [businessId, status, callerSearch, datePreset, fromDate, toDate, hasAppointments, sentiment, hasSummary, needsFollowUp, direction]);
 
   const hasActiveCallFilters = useMemo(() => {
     const caller = callerSearch.trim();
