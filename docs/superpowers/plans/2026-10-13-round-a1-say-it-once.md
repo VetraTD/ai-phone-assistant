@@ -1072,9 +1072,11 @@ but b booked something nobody agreed to, so A1 is not done until LVX179 is fixed
 
 ```text
 Fix LVX179 (P0): the receptionist booked a time the caller never chose, then made the correction a second booking.
+AND LVX181 (P1, same incident, owner: same session): it answers a thinking "umm" (or a tiny noise) as if the caller
+had finished -- the 9 AM booking came 1.2 s after a ~1.3 s "umm" that followed "Which of those works best?".
 Owner decisions (2026-10-16, in the plan "Part 4 sitting 3 as built"): always confirm ONCE as a question, save on
 anything but a no, then only "Done, you're all set"; spell the FULL name of a new person in one ask; a correction
-right after a save MOVES that booking.
+right after a save MOVES that booking; an "umm" must not make it talk at all, not only not book.
 
 FIRST, before any tool call that changes anything: reiterate in plain words (steps, hours, $) and ask me any
 questions (AskUserQuestion; recommended first). Re-state where we are in one line at each step.
@@ -1091,9 +1093,14 @@ anything but a no (Live sends the call WITH the words -- the same-breath stateme
 the d1/d1b calls first; list which existing rows/tests encode the old same-breath rule); after the save only
 "Done, you're all set"; (2) prompt + spelling gate: a new person spells first AND last name in one ask; (3) a
 correction right after a save moves that booking, never adds one; the in-addition question names what is on file.
-Optional, my call: LVX180 prompt items. Each red-first + a hand-verified RED row; opus review; gate-v4 db fullsab in
-mintty; ask before ONE redeploy; then calls (cap $2): b again (new colleague, pick from the list only when asked),
-one "no, 10 instead" correction call, one on-file booking (one question, one yes, "you're all set").
+(4) LVX181: FIRST measure ($0, ~30 min) how often a model turn followed a short wordless caller sound across recent
+calls (live_utterance voiced_ms/transcript_chars vs the next turn; 3.8 probe in docs/gemini-38-live-analysis.md §6
+covered mid-sentence trail-off only); then pick with me among endOfSpeechSensitivity LOW, silenceDurationMs
+1000-1200 (1600 cost +512 ms/turn in Sept), a prompt line "after a question a lone um/uh is not an answer"; watch
+reply_after_last_voice_ms_p50 so replies don't get slower. Optional, my call: LVX180 prompt items. Each red-first + a
+hand-verified RED row; opus review; gate-v4 db fullsab in mintty; ask before ONE redeploy; then calls (cap $2): b
+again (new colleague, pick from the list only when asked, with a real "ummm" pause before choosing), one "no, 10
+instead" correction call, one on-file booking (one question, one yes, "you're all set") with "uhh" pauses.
 
 Conserve usage and time WITHOUT compromising quality; cheaper models for mechanical work; short plain replies,
 detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;

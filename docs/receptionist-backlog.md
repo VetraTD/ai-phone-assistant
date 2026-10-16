@@ -17337,3 +17337,30 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - d1b `CAb3e55b61be728cc99f4e8994f5d160e3`: the in-addition question came in generic wording, not "You have N upcoming
   appointments; the next is …" (d1 used it), and after "That time is available". It also asked an on-file caller for
   their full name (owner rule: a name on file is never asked).
+
+### LVX181 · It answers a thinking "umm" as if the caller had finished · **OPEN · P1** `[medium]` measure first (~0.5 h, $0), then one setting test (~1 h + 2–3 calls)
+Owner, 2026-10-16: "whenever I was saying 'uhhh' or 'ummmm' it would interject and say something when I was just
+thinking." Seen in the logs:
+- b `CA70682e3219cb227353f4681b25119586`: right after "…openings at 9, 1 and 4:30. Which of those works best?", the
+  caller made a ~1.3 s sound (utterance 8, voiced 1,260 ms, closed 19:57:17.9Z). 1.2 s later the model booked 9 AM
+  (LVX179). The A1 gate counted that sound as "voice after the read-back". So the 9 AM booking and this complaint are
+  the same incident.
+- d1 `CA7c0d50b0672a602767c9e9f8ac0cf38c`: a 40 ms sound (utterance 4, heard as "A") got "I'm sorry, I didn't quite
+  catch that…".
+- **Not new in 00105:** no turn-taking change in `04d176a..5c15583`; the vendor's own end-of-speech setting has been
+  in force since `LIVE_VAD_SILENCE_MS` was unset on `00087-k6b` (2026-09-19). Reply timing on 00105 matches
+  00103/00104. Earlier scripted test calls had no thinking pauses, so it rarely showed.
+- **Why code can't just spot "umm":** Gemini decides when the caller has stopped. The caller's words reach us seconds
+  late (`input_transcript_lag_ms_p50` 5.8 s on d1, 10.9 s on d1b), too late to hold a reply.
+- **Options to measure:** (a) the vendor's end-of-speech sensitivity set to LOW (untested here); (b) a longer silence
+  wait — 1600 ms was tried 09-16→09-19 and added +512 ms to every reply without fewer interruptions
+  ([[vad-override-cost-half-a-second]] in memory); (c) a prompt line "a lone um/uh is not an answer — wait, or say
+  'take your time'" (prompt-only, weak). First count how often a reply follows a short sound with no words in it
+  across recent calls (`live_utterance` voiced_ms vs the next model turn).
+- Once LVX179's ask-once confirm is live, an "umm" can no longer BOOK anything. It can still interrupt.
+- **Owner (2026-10-16): interrupting is the defect too, not only booking.** Why it looked solved: the 3.8 probe
+  (`docs/gemini-38-live-analysis.md` §6) measured 0 of 10 cut-ins on a caller trailing off MID-SENTENCE. Today's case
+  is different: a filler right AFTER the receptionist asked a question ("Which of those works best?" → "umm"), and a
+  40 ms noise. Turn end is sound-and-silence (`silenceDurationMs` default ~800 ms), not meaning; the model then
+  chose to act. Untested here: `endOfSpeechSensitivity` LOW, a modest silence bump (1000–1200 ms, not 1600), and a
+  prompt line for "after a question, a lone um/uh is not an answer".
