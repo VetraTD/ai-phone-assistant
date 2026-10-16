@@ -213,3 +213,113 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
     expect((s.store.appointments || []).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round A1 part 4, opus review (owner decisions 2026-10-16).
+// ---------------------------------------------------------------------------
+async function summaryOf(run) {
+  const lines = [];
+  const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    if (typeof chunk === "string") lines.push(...chunk.split("\n"));
+    return true;
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  const parse = (ev) => lines.filter((l) => l.includes(`"event":"${ev}"`)).map((l) => JSON.parse(l));
+  return { summary: parse("live_call_summary")[0], waits: parse("live_readback_wait") };
+}
+
+describe("F-D review — the wait reads text that is still arriving", () => {
+  it("I3: a bare hour that ends a chunk is not a read-back yet ('at two', then ' thirty')", async () => {
+    let s;
+    const events = await waits(async () => {
+      s = await bootLive({ config: CONFIG, callSid: "CA_wait_open_end" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays("I'll book you in for Friday at two");
+      await s.settle();
+      expect(s.responsesFor("book_appointment")).toHaveLength(0);
+      await s.assistantSays(" thirty for Jon Dodla.");
+      await vi.advanceTimersByTimeAsync(2100);
+      await s.settle();
+      await s.settle();
+    });
+    const r = s.responsesFor("book_appointment");
+    expect(r).toHaveLength(1);
+    expect(r[0].response.success).toBe(false);
+    expect(events[0]).toMatchObject({ outcome: "timeout" });
+  });
+
+  it("I3: the same bare hour, once a word follows it, is the read-back", async () => {
+    let s;
+    const events = await waits(async () => {
+      s = await bootLive({ config: CONFIG, callSid: "CA_wait_open_then" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays("I'll book you in for Friday at two");
+      await s.assistantSays(" for Jon Dodla.");
+      await s.settle();
+      await s.settle();
+    });
+    const r = s.responsesFor("book_appointment");
+    expect(r).toHaveLength(1);
+    expect(r[0].response.success).toBe(true);
+    expect(events[0]).toMatchObject({ outcome: "arrived" });
+  });
+});
+
+describe("F-D review — saved on the words, then the turn asked (I3: counted)", () => {
+  it("a confirming question after the saved read-back is counted", async () => {
+    const { summary } = await summaryOf(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_asked" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays(READ_BACK);
+      await s.settle();
+      await s.settle();
+      expect(s.responsesFor("book_appointment")[0].response.success).toBe(true);
+      await s.assistantSays(" Is that right?");
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.saved_then_asked).toBe(1);
+  });
+
+  it("the closing question is not counted", async () => {
+    const { summary } = await summaryOf(async () => {
+      const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_tic" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.assistantSays(READ_BACK);
+      await s.settle();
+      await s.settle();
+      await s.assistantSays(" Is there anything else I can help you with?");
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.saved_then_asked).toBe(0);
+  });
+});
+
+describe("F-D review — the wait ends on close (M5)", () => {
+  it("hanging up while waiting ends it at once", async () => {
+    let s;
+    const events = await waits(async () => {
+      s = await bootLive({ config: CONFIG, callSid: "CA_wait_close" });
+      await upToTheBooking(s);
+      speakAudio(s, 3000);
+      await s.callTool("book_appointment", ARGS);
+      await s.hangUp();
+      await s.settle();
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ outcome: "closed" });
+  });
+});

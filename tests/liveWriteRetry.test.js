@@ -676,3 +676,42 @@ describe("a real failure does not put the retry to the caller", () => {
     expect(note).toMatch(/Do NOT tell the caller it is booked/i);
   });
 });
+
+// Round A1 part 4, opus review I2. The read-back wait (F-D) can hold the
+// model's own booking until the turn ends -- and the turn-end retry bypasses
+// the booking chain, so the stashed write (the UNSPELLED name) and the model's
+// call (the spelled one) would race for the slot. The model's call wins; the
+// retry stands down while it is in flight.
+describe("A1 part 4 review I2 — the turn-end retry never races a waited booking", () => {
+  beforeEach(() => clearStats());
+
+  it("defers while the model's own booking waits for its read-back words", async () => {
+    const s = await boot();
+    await s.book();
+    const pause = () => new Promise((r) => setTimeout(r, 25));
+    const samples = 24000 * 3;
+    const pcm = Buffer.alloc(samples * 2);
+    for (let i = 0; i < samples; i++) pcm.writeInt16LE(i % 2 ? 8000 : -8000, i * 2);
+    s.live.push({ serverContent: { inputTranscription: { text: "n i t h i n  d o d l a" } } });
+    await pause();
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm.toString("base64") } }] } } });
+    s.live.push({
+      toolCall: { functionCalls: [{ id: "m", name: "book_appointment", args: { ...BOOK, client_name: "Nithin Dodla" } }] },
+    });
+    await pause();
+    s.live.push({
+      serverContent: {
+        outputTranscription: { text: "Monday, September 7 at 4:30 PM for Nithin Dodla, booking that now." },
+        turnComplete: true,
+      },
+    });
+    await pause();
+    await pause();
+    await pause();
+
+    expect(c().write_retry_attempted).toBe(0);
+    expect(c().write_retry_deferred_booking_in_flight).toBe(1);
+    expect(s.bookCalls()).toHaveLength(2);
+    expect(s.bookCalls()[1].args.client_name).toBe("Nithin Dodla");
+  });
+});

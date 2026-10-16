@@ -358,3 +358,29 @@ describe("a completed action clears the pack's write-order proposal", () => {
     expect(runner.capabilityState.appointments.writeOrderProposalKey).toBeNull();
   });
 });
+
+// Round A1 part 4, review I4. The state a read-back wait froze belongs to the
+// ONE call that waited: it is passed to handleToolCall, never shared, so any
+// other call in flight (a hang-up's saveOutstandingMessage) reads live state.
+describe("Live tool context — a frozen state is per call (A1 part 4, review I4)", () => {
+  it("a call given a frozen state is judged on it; the next call reads live state", async () => {
+    const execute = vi.fn(async (fc) => ({
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+    }));
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+14699338887", callId: "c1" },
+      execute,
+      turnState: () => ({ step: "gather_details", callerTurnCount: 5, lastCallerText: "live" }),
+    });
+    const call = { functionCalls: [{ id: "1", name: "record_customer_request", args: { request_type: "message" } }] };
+    await runner.handleToolCall(call, {
+      turnState: { step: "gather_details", callerTurnCount: 2, lastCallerText: "frozen" },
+    });
+    await runner.handleToolCall({
+      functionCalls: [{ id: "2", name: "record_customer_request", args: { request_type: "callback" } }],
+    });
+    expect(execute.mock.calls[0][1]).toMatchObject({ callerTurnCount: 2, lastCallerText: "frozen" });
+    expect(execute.mock.calls[1][1]).toMatchObject({ callerTurnCount: 5, lastCallerText: "live" });
+  });
+});
