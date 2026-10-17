@@ -1205,3 +1205,146 @@ sha, rollback), probe $ and the chosen setting, anything left for me, and the 3 
 booking with "uhh" pauses; call b with a new colleague and a real "ummm" before choosing; "no, 10 instead" right after
 a save) with the cap of $2.
 ```
+
+## Part 5 OVERNIGHT full prompt (supersedes the overnight block above; owner wants to call on waking)
+
+```text
+OVERNIGHT, UNATTENDED -- finish LVX179 + LVX181 and deploy, so that when I wake up I can make the 3 test calls
+straight away. I am asleep: do not wait for me except for something not covered below (then park it in the morning
+report and carry on with everything else).
+
+WHERE WE ARE
+- Branch feat/outbound-stage4. S1 code is committed at 1e78dc1 (docs after it), NOT deployed.
+- Prod = voice-uk-prod-00105-mw4 @ 5c15583. Rollback before your deploy:
+  gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2
+  After your deploy, the rollback target is voice-uk-prod-00105-mw4.
+- The full root suite at 1e78dc1 is already running in a mintty window (gate label p5-root, log
+  .superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-p5-root.log). Read its verdict first. Its census will
+  show 11 drifted sabotage rows: expected, you repoint them in step 4.
+
+READ FIRST (briefly)
+- docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md: "Part 5 sitting 1 as built" and "Part 5 sitting 2
+  starting message".
+- The plan ~/.claude/plans/pasted-content-id-ff3e-fix-lvx179-deep-mitten.md (Fix 3, LVX181 A-C, Proof, Deploy).
+- The ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P5 lines).
+- docs/receptionist-backlog.md: grep LVX179, LVX180, LVX181.
+
+MY DECISIONS FOR TONIGHT (final, do not re-ask)
+1. The LVX181 probe may run. Hard cap $0.80; report the exact $.
+2. You pick the LVX181 setting by the pre-registered rule: fewest replies to an "umm", with the normal-reply delay
+   no more than 150 ms above today's. If no arm clearly wins (prompt line must beat default by >= 3/10), change
+   nothing and say why.
+3. DEPLOY tonight if, and only if, the gate passes.
+4. The 2 h stop is lifted tonight only.
+Standing owner decisions (unchanged): every booking is confirmed with ONE question and saved on anything but a no,
+then only "Done, you're all set"; a new person spells first AND last name in one ask; the one question spells every
+name they spelled; an answer already given carries over (never ask again for something already answered); a
+correction right after a save MOVES that booking; an "umm" must not make it talk at all.
+
+DO, IN ORDER
+0. Read the p5-root verdict (root exit, failing files). Fix any straggler red-first and commit.
+1. FIX 3: a correction right after a save moves that booking, never adds one. In capabilities/appointments.js'
+   book path, before the in-addition guard: scratch(ctx).lastBooked exists this call, same person
+   (samePersonBookings), different time. Classify the caller's words SINCE that save (store the callerSaidThisCall
+   length on lastBooked at save time):
+   - correction cue (no / instead / actually / change / move / make it / rather / meant) and no addition cue ->
+     MOVE lastBooked to the new time through the existing reschedule path (rescheduleAppointment: identity check,
+     validateBookingTime, adapter). Never insert. Success reply ends in Say only: "Done, you're all set." Update
+     lastBooked.
+   - addition cue (another / also / too / as well / second / both / extra / in addition / keep both) and no
+     correction cue -> treat as in_addition_to_existing = true (no question).
+   - neither, both, or words not transcribed yet -> refuse, naming it: ask "Move your <old time> to <new time>, or
+     keep both?". Re-classify on the next attempt; the caller's answer ("move it" / "keep both") lands in the words
+     since the save.
+   - Check whether a move should notify the owner like a booking does. If it doesn't today, say so in the report;
+     don't build an outbox.
+   Red-first replay rows in tests/lvx179Replay.test.js: "no, 10 instead" right after a save -> one row, moved;
+   "also one at 3" -> two rows; unclear -> the named question, then "move it" -> moved; a different person -> the
+   normal path.
+2. LVX181 A ($0, ~45 min): from Cloud Logging (CLOUDSDK_CONFIG=~/.gcloud-vetra2, project vetra-uk-edc8ca, service
+   voice-uk-prod), revisions 00087 -> 00105. For each live_utterance with transcript_chars <= 6 and voiced_ms < 1500,
+   did a model turn start within 2.5 s of its close? Count per CALL (calls with >= 1 / calls), with examples. Also
+   record the baseline reply_after_last_voice_ms_p50 on 00105 from live_call_summary. Watch the Norton TLS trap
+   (memory norton-tls-inflates-latency) and gcloud quoting on Windows (fetch from bash).
+3. LVX181 B (paid, cap $0.80): new scripts/probes/lvx181-umm.mjs, reusing scripts/probes/lib/geminiSession.js,
+   lib/audio.js and lib/spendLive.js (reserve/commit, so the cap is enforced in code). gemini-3.8-live, the same
+   setup production uses. The context ends on the receptionist asking "Which works best -- 9, 1 or 4:30?"; caller
+   audio is an "ummm" of ~1.3 s, then 4 s of silence. Plus a complete-answer fixture ("Ten works") as the cost arm.
+   - Arms: default; silenceDurationMs 1000; silenceDurationMs 1200; default + a prompt line ("After you ask a
+     question, a lone um or uh is the caller thinking -- say nothing and wait.").
+   - N = 10 umm + 5 complete per arm.
+   - Instrument check: default must reply to the umm in >= 3/10, or the probe is blind -> stop and report.
+   - Look for an existing filler/umm fixture in test-audio/ or scripts/probes first. If you must synthesise one,
+     say so and treat the result as weaker.
+   Then 3C: apply the pick. Silence -> env LIVE_VAD_SILENCE_MS on the deploy (no code). Prompt line -> static
+   prompt, plus a test and a snapshot update.
+4. PROOF:
+   - Repoint the 11 drifted census rows.
+   - Add a sabotage row for every new guard: in-turn statement holds; question required; voiced required;
+     Done-only prefix; full-name spelling; carry-over set / supersede / cancel / spent; engine retry needs its own
+     slot; the time comparer; Fix 3 move / add / ask; the LVX181 prompt line if added.
+   - Hand-verify each row RED with a scratchpad script (String.replace, restore, run the red suites). Remember that
+     `$` in a replace string expands, and never import sabotage.mjs.
+   - Census clean.
+5. OPUS REVIEW (one opus subagent) of 5c15583..HEAD with named risks:
+   - double read-back
+   - a held write lost
+   - cascade or text-channel drift
+   - a move applied to the wrong person or appointment
+   - transcript lag ("no" arriving late)
+   - letters never read back when spelling comes after the yes
+   - English-only "please confirm"
+   - the engine-retry veto dropping a legitimate write
+   Fix every real finding red-first; re-review the fixes.
+6. GATE in mintty:
+   bash .superpowers/sdd/2026-10-13-round-a1-say-it-once/run-gate-p5.sh <sha> p5-final db fullsab
+   launched with PowerShell Start-Process mintty, as tonight's p5-root was.
+   - PASS = ROOT exit 0, CENSUS clean, DB exit 0, every sabotage row red except the 3 known baseline x
+     (ask-branch-latch, ask-branch-in-turn, ask-latch-per-action), 0 "could not be READ", no dirty tree.
+   - Match the phrase "could not be READ" (the row name `unreadable-after-readback` also matches "unreadable").
+   - If it fails with time left, fix and re-gate. If it can't pass by ~07:00 CDT, do NOT deploy; report.
+7. DEPLOY (only on PASS). Follow the voice deploy recorded in "Part 4 sitting 3 as built" and memory
+   terraform-broken-deploy-route:
+   - Build from the MAIN checkout with a clean tracked tree (prod-migration-checksums-crlf: never an LF worktree).
+   - Image voice:<sha> + digest; run all smoke steps.
+   - Migrate job --status: none pending, nothing "edited".
+   - New revision at 100%.
+   - Env diff vs 00105 = only GIT_COMMIT_SHA, plus LIVE_VAD_SILENCE_MS if 3C picked it
+     (config-only-in-one-environment).
+   - Boot logs: 0 WARNING+. /health 200.
+   - Do NOT touch the dashboard service.
+   Record revision, sha, digest and rollback in the plan, ledger and memory.
+8. MORNING HANDOFF, so I can call immediately:
+   - Put the report at the TOP of your final message.
+   - Write docs: plan "Part 5 S2 + overnight as built"; backlog LVX179/180/181 status; ledger; memory
+     round-a1-say-it-once + MEMORY.md. Commit (never push).
+   - Final message:
+     1. Status in 3 lines: deployed or not (revision, sha, rollback command), gate result, probe $ and the chosen
+        setting.
+     2. The 3 call scripts, exact words for me to say, numbered, owner handset -> +18175803291. Order: on-file
+        first, then the new name, then the correction. Each says what I should hear, and what counts as a
+        pass or a fail:
+        (a) On-file booking with "uhh" pauses: one question, one yes, "Done, you're all set", and no reply to the uhh.
+        (b) Booking for a new colleague with a new name I spell on request. Pick a time only when asked, with a
+            real "ummm" before choosing. Expect: no reply to the umm, one full-name spelling ask, one question
+            that spells both names, saved once.
+        (c) Book, then right after "you're all set" say "no, 10 instead": one booking, moved, no second row.
+     3. After-call check: what you'll read (readcall.sh by time window, db-inspect --appointments --names via the
+        migrate job, write_consent_probe a1_readback, reply_after_last_voice_ms_p50 vs the baseline). Total cap $2.
+     4. Anything parked for me.
+
+RULES
+- Long jobs (root, gate, sabotage) run in mintty via run-gate-p5.sh, never a Claude Code background shell: the
+  memory reaper killed one tonight.
+- Keep this session active with foreground wait loops (<= 9 min each), waiting on anchored markers
+  (grep -q '^ALL-DONE').
+- One vitest at a time (the gate's waitvitest also waits on yours).
+- Never git checkout/restore over uncommitted work.
+- Use Write'd .cjs scripts or the Edit tool for edits containing regex or backslashes, never node -e through bash
+  (it turned \b into a backspace character tonight).
+- Run the census after editing index.js, tools.js or strings.js.
+- Paid runs beyond the $0.80 probe need my yes.
+- Owner decisions are final.
+- Cheaper models for mechanical work; opus for the review.
+- Detail goes in the ledger, not in chat.
+```
