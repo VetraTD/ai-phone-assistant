@@ -1421,3 +1421,14 @@ voice service has no `/health` route (404 on 00105 too); `GET /` 200. Dashboard 
 `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00105-mw4=100 --project=vetra-uk-edc8ca --region=europe-west2`.
 
 **Next:** the owner's 3 calls (scripts in the overnight report / ledger), then Round A2 + the backlog follow-ups.
+
+**Morning calls (owner handset -> +18175803291; Test Line on file 05:15: Nithin Dodla Mon 19 11:00, Tue 20 14:00,
+Thu 22 14:00, Fri 23 14:00, Thu 29 14:00, Fri 30 14:00; Priya Raman Wed 21 10:00; Maja Okafor Wed 28 09:00 + 10:00):**
+(a) on-file, "uhh" pauses: "another appointment for myself" -> Tue 20th 11 a.m. -> ONE question naming Nithin Dodla
+(said, not spelled) -> "Yes" -> only "Done, you're all set." (b) new colleague "Leila Hartmann" (L-E-I-L-A,
+H-A-R-T-M-A-N-N), day only (Wed 21st), a real "ummm" before picking 11 a.m. from the list -> one full-name spelling
+ask, ONE question spelling both names, saved once; a reply to the umm is EXPECTED (LVX181 unfixed) but no booking on
+it. (c) "another appointment for myself, Monday the 26th at 9 a.m." -> yes -> "Done, you're all set." -> "No, 10
+instead." -> ONE move question -> plain "Yes" -> one row Mon 26 10:00, none at 9:00. After: readcall.sh by time
+window, db-inspect --appointments --names via the migrate job, write_consent_probe a1_readback,
+booking_correction_* counters, reply_after_last_voice_ms_p50 vs 1,378 ms.
