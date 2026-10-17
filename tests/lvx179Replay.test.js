@@ -404,3 +404,71 @@ describe("LVX179 Fix 3: a correction right after a save moves that booking", () 
     expect(rows).toEqual([local(AT_9), local(AT_10)]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sabotage-row coverage (scripts/corpus/sabotage.mjs, p5- rows): the carried
+// answer's own rules, the engine's retry, and a SPOKEN different time. Each
+// case below is decided by exactly one guard line.
+// ---------------------------------------------------------------------------
+describe("LVX179 carry-over rules and the engine's retry", () => {
+  const Q2 = "So that's Friday, September 18 at 2 PM for Ada Moss, is that right?";
+  const Q10 = "So that's Friday, September 18 at 10 AM for Ada Moss, is that right?";
+
+  it("a newer question about another time clears the carried answer BEFORE it is answered", async () => {
+    const s = await boot("CA_carry_cleared_open");
+    await s.assistantTurn(Q2);
+    await s.callerSays("Yes.");
+    await s.assistantTurn(Q10);
+    const [two] = await s.callTool("book_appointment", book(AT_14));
+    expect(two.response.success).toBe(false);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  it("a cancellation's yes is never carried to a booking of the same time", async () => {
+    const s = await boot("CA_carry_cancel_never");
+    await s.assistantTurn(Q2);
+    await s.callerSays("Yes.");
+    const [first] = await s.callTool("book_appointment", book(AT_14));
+    expect(first.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    await s.callerSays("Actually, I need to cancel that one.");
+    await s.assistantTurn("So that's cancelling your Friday, September 18 at 2 PM appointment for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [gone] = await s.callTool("cancel_appointment_db", { appointment_id: s.store.scheduled()[0].id });
+    expect(gone.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("All done with that. Anything else today?");
+    await s.callerSays("Yes please.");
+    const [r] = await s.callTool("book_appointment", book(AT_14, "Bo Lin"));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  it("the engine's retry of a booking needs a question about ITS slot, not another one's", async () => {
+    const s = await boot("CA_retry_own_slot");
+    await s.assistantTurn(Q2);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10), { id: "retry_book_appointment" });
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+
+  it("...and the same retry for the slot that was asked about is saved", async () => {
+    const s = await boot("CA_retry_own_slot_ok");
+    await s.assistantTurn(Q10);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10), { id: "retry_book_appointment" });
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+
+  it("a yes that names a SPOKEN different time is a change, not a yes", async () => {
+    const s = await boot("CA_spoken_other_time");
+    await s.assistantTurn(Q2);
+    await s.callerSays("Yeah, ten o'clock works.");
+    const [r] = await s.callTool("book_appointment", book(AT_14));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+});

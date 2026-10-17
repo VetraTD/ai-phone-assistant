@@ -146,6 +146,8 @@ const TRANSFERRESULT = "tests/transferResult.test.js";
 const SESSION_CASCADE = "tests/session.test.js";
 // Round A1 "say it once" (2026-10-13, S2 T8).
 const A1_SAVEPOLICY = "tests/liveSavePolicy.test.js";
+// LVX179 + Fix 3 (round A1 part 5): the replay of the three live calls and the one-question rule.
+const LVX179_REPLAY = "tests/lvx179Replay.test.js";
 const A1_SAVEWIRE = "tests/liveSavePolicyWire.test.js";
 const A1_READBACKSTMT = "tests/readBackStatement.test.js";
 const A1_SPELLONCE = "tests/spellOnce.test.js";
@@ -196,11 +198,11 @@ const SABOTAGES = [
   {
     name: "supersession-veto",
     why:
-      "puts `supersededHere` back into the write-order gate's refusal disjunction. This is the exact state that refused five booking attempts on CA03558d and four on CA919b69.",
+      "puts `supersededHere` back into the write-order gate's refusal disjunction. This is the exact state that refused five booking attempts on CA03558d and four on CA919b69. RETARGETED (LVX179): the gate's condition is now `(a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed)`; the veto is OR-ed onto the whole decision.",
     file: "services/tools.js",
-    find: "if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {",
+    find: "if (hasTarget && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {",
     replace:
-      "if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed || agreementSuperseded(ctx)) && !spellFirst && !inAdditionFirst) { // SABOTAGE",
+      "if (hasTarget && !consentLatched && ((a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) || agreementSuperseded(ctx)) && !spellFirst && !inAdditionFirst) { // SABOTAGE",
     red: [REPLAY],
   },
   {
@@ -1778,18 +1780,18 @@ const SABOTAGES = [
   },
   {
     name: "booking-garbled-answer-saves",
-    why: "round A1: a booking read back once is saved unless the caller objects; a garbled or untranscribed answer is not a no (73% of LVX177's refusals were on saves that later went through). Back to the clear-yes rule.",
+    why: "round A1: a booking read back once is saved unless the caller objects; a garbled or untranscribed answer is not a no (73% of LVX177's refusals were on saves that later went through). Back to the clear-yes rule. RETARGETED (LVX179): the objection is now computed in the previous-turn QUESTION branch of decideSave (`yesNamingATime`/times), not one line; garble that is not a yes is made an objection there.",
     file: "lib/voice/savePolicy.js",
-    find: "const objection = callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) });",
-    replace: "const objection = !/^\\s*(?:yes|yeah|yep|sure|ok(?:ay)?)\\b/i.test(lastCallerText || \"\") || callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) }); // SABOTAGE",
+    find: "      callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) || times === \"same\" });",
+    replace: "      (callerObjects(lastCallerText, { restatedSlot: Boolean(callerRestatedSlot) || times === \"same\" }) || !/^\\s*(?:yes|yeah|yep|sure|ok(?:ay)?)\\b/i.test(lastCallerText || \"\")); // SABOTAGE",
     red: [A1_SAVEPOLICY, A1_SILENCEREADBACK],
   },
   {
     name: "booking-objection-refuses",
-    why: "round A1: 'save unless it HEARS a no' -- a no, a question or a change after the read-back holds the booking. Ignores the objection, so 'No.' books.",
+    why: "round A1: 'save unless it HEARS a no' -- a no, a question or a change after the read-back holds the booking. Ignores the objection, so 'No.' books. RETARGETED (LVX179): anchored on the previous-turn question branch (readBackSource \"previous\"); the answered_earlier branch has its own identical line.",
     file: "lib/voice/savePolicy.js",
-    find: "agreed: !objection, objection, awaitingAnswer: false };",
-    replace: "agreed: true, objection, awaitingAnswer: false }; // SABOTAGE",
+    find: "readBackSource: \"previous\", agreed: !objection, objection, awaitingAnswer: false };",
+    replace: "readBackSource: \"previous\", agreed: true, objection, awaitingAnswer: false }; // SABOTAGE",
     red: [A1_SAVEPOLICY],
   },
   {
@@ -1979,10 +1981,10 @@ const SABOTAGES = [
   // Round A1 final-review fix round (2026-10-13).
   {
     name: "in-turn-question-awaits",
-    why: "round A1 final review I2: a read-back that ASKS ('…shall I go ahead and book that?') in the same breath as the tool call waits for the answer; only the statement form ('…booking that now') saves at once. Saving before the answer is the CA6b662e / LVX95 shape.",
+    why: "LVX179 (retargeted from the S2 `asks` regex): a read-back QUESTION in the turn being spoken waits for the answer (awaitingAnswer true, readBackSource in_turn). Saving before the answer is the CA6b662e / LVX95 shape.",
     file: "lib/voice/savePolicy.js",
-    find: "    const asks = /\\?/.test(inTurnReplyText) || !strings?.readBackStatementRe?.test(inTurnReplyText);",
-    replace: "    const asks = false; // SABOTAGE",
+    find: "    if (asksAboutThisSlot(inTurnReplyText)) {",
+    replace: "    if (false) { // SABOTAGE",
     red: [A1_SAVEPOLICY],
   },
   {
@@ -2035,11 +2037,200 @@ const SABOTAGES = [
   },
   {
     name: "awaiting-booking-stashed",
-    why: "round A1 final review I1: a booking held awaiting the answer to its statement read-back is stashed, so the caller's answer can re-issue it (confirmReadBackRe never sees the statement form).",
+    why: "round A1 final review I1: a booking held awaiting the answer to its statement read-back is stashed, so the caller's answer can re-issue it (confirmReadBackRe never sees the statement form). RETARGETED (LVX179): the `|| awaitingAnswer` disjunct is redundant now (an awaiting decision always has readBackStanding true), so the break removes the whole stash condition for the A1 booking path.",
     file: "services/tools.js",
-    find: "                    ...(probeReadBack || a1Save.awaitingAnswer === true",
-    replace: "                    ...(probeReadBack // SABOTAGE",
+    find: "                    ...((a1Save.applies && a1Save.rule === \"booking\" ? a1Save.readBackStanding : probeReadBack) ||",
+    replace: "                    ...(false && // SABOTAGE",
     red: [A1_SAVEPOLICY],
+  },
+  {
+    name: "p5-in-turn-statement-holds",
+    why:
+      "LVX179: a statement read-back in the turn being spoken ('...booking that now') has not been answered by anyone; it HOLDS (agreed false, the caller still has to be asked). Saving on it is the S2 same-breath save that booked 9 AM on call b.",
+    file: "lib/voice/savePolicy.js",
+    find: "readBackStanding: false, readBackSource: \"in_turn_statement\", agreed: false, objection: false, awaitingAnswer: false };",
+    replace: "readBackStanding: true, readBackSource: \"in_turn_statement\", agreed: true, objection: false, awaitingAnswer: false }; // SABOTAGE",
+    red: [LVX179_REPLAY, A1_SAVEPOLICY],
+  },
+  {
+    name: "p5-question-required",
+    why:
+      "LVX179: a previous-turn read-back saves only when it was a QUESTION about this slot (asksAboutThisSlot). A statement ('...booking that now') in the previous turn is held and the caller is handed the question; reading statements as questions books a time nobody was asked about.",
+    file: "lib/voice/savePolicy.js",
+    find: "  if (asksAboutThisSlot(lastReplyText)) {",
+    replace: "  if (readsBackThisSlot(lastReplyText)) { // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-voiced-required",
+    why:
+      "T5b + LVX179: a question asked and met by NO sound from the caller is held awaiting the answer; whatever lastCallerText holds was said before the question. Without it the stale pre-question text reads as agreement.",
+    file: "lib/voice/savePolicy.js",
+    find: "    if (callerVoicedSinceReply === false) {",
+    replace: "    if (false) { // SABOTAGE",
+    red: [A1_SAVEPOLICY, LVX179_REPLAY],
+  },
+  {
+    name: "p5-done-only-book",
+    why:
+      "LVX179: after a booking the tool reply tells the model to say ONLY 'Done, you're all set.' -- repeating day, time and name is the second read-back A1 removes.",
+    file: "capabilities/appointments.js",
+    find: "'. Say only: \"Done, you\\'re all set.\" Do not repeat the day, the time or the name, ' +",
+    replace: "'. Tell the caller the day, the time and the name. ' + // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-done-only-reschedule",
+    why:
+      "LVX179: the same 'Done, you're all set' only-reply after a reschedule.",
+    file: "capabilities/appointments.js",
+    find: "message: 'Rescheduled. Say only: \"Done, you\\'re all set.\" Do not repeat the day, the time or the name.',",
+    replace: "message: 'Rescheduled. Tell the caller the day, the time and the name.', // SABOTAGE",
+    red: [TOOLSGATE],
+  },
+  {
+    name: "p5-full-name-spelled",
+    why:
+      "LVX179 owner rule 2: when the caller spelled the name, the one question spells EVERY word of it, first name too ('Maja' and 'Maya' sound the same). Back to spelling the last word only.",
+    file: "lib/voice/savePolicy.js",
+    find: "who = words.map((w) => (spelled(w) ? `${w}, ${spelled(w)}` : w)).join(\", \");",
+    replace: "who = words.map((w, i) => (i === words.length - 1 && spelled(w) ? `${w}, ${spelled(w)}` : w)).join(\", \"); // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-spell-ask-full-name",
+    why:
+      "LVX179 owner rule 2: the ask-now prompt line asks for the FIRST AND LAST name in one go ('Could you spell the first and last name for me?'). Back to the surname only.",
+    file: "services/gemini.js",
+    find: "ask them to spell the first AND last name in one go, in your very next reply — \"Could you spell the first and last name for me?\"",
+    replace: "ask them to spell the last name in one go, in your very next reply — \"Could you spell the last name for me?\"",
+    red: ["tests/a1AskNow.test.js"],
+  },
+  {
+    name: "p5-carry-set",
+    why:
+      "LVX179: a booking question the caller answered with anything but a no is remembered (a1AnsweredReadBack) so a spelling or extra-or-move exchange between the answer and the write does not make the model ask again (CA03558d). Never set = asked again.",
+    file: "lib/voice/live/index.js",
+    find: "a1AnsweredReadBack = changed || A1_CANCEL_RE.test(lastReplyText) ? null : lastReplyText;",
+    replace: "a1AnsweredReadBack = null; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-carry-superseded",
+    why:
+      "LVX179: a newer question that names a time or a day clears the carried answer at once, so the old yes cannot stand for a different proposal (the yes now stands for 10, not 2).",
+    file: "lib/voice/live/index.js",
+    find: "        if (replyText && namesTimeOrDay(replyText) && asksReadBack(replyText, getStrings(state.config))) {",
+    replace: "        if (false) { // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-carry-cancel-never",
+    why:
+      "LVX179 / CA8c019c: a cancellation question's yes is never carried to a booking.",
+    file: "lib/voice/live/index.js",
+    find: "a1AnsweredReadBack = changed || A1_CANCEL_RE.test(lastReplyText) ? null : lastReplyText;",
+    replace: "a1AnsweredReadBack = changed ? null : lastReplyText; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-carry-spent",
+    why:
+      "LVX179: any completed action spends the carried answer, so the booking it authorised cannot authorise a second person at the same time.",
+    file: "lib/voice/live/index.js",
+    find: "        // booking it authorised, or any other, after which it is stale.\n        a1AnsweredReadBack = null;",
+    replace: "        // booking it authorised, or any other, after which it is stale.\n        // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-engine-retry-own-slot",
+    why:
+      "LVX179: the engine's own retry (fc.id retry_*) of a booking is dropped unless the one-question rule passes for ITS slot; otherwise a retry rides an answer given to a different question.",
+    file: "services/tools.js",
+    find: "            if (!a1Own.agreed) {",
+    replace: "            if (false) { // SABOTAGE",
+    red: [RETRY, LVX179_REPLAY],
+  },
+  {
+    name: "p5-time-comparer-different",
+    why:
+      "LVX179 / CA94817d: a yes that names a DIFFERENT time ('Yeah, they're correct. 10:00 a.m. works.') is a change, not a yes. timesAgainst must say 'different'.",
+    file: "lib/voice/savePolicy.js",
+    find: "return said.every((t) => against.some((o) => same(t, o))) ? \"same\" : \"different\";",
+    replace: "return said.every((t) => against.some((o) => same(t, o))) ? \"same\" : \"same\"; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-time-reader-spoken",
+    why:
+      "LVX179: clockTimesIn must read spoken times ('ten o'clock works') as well as digits, or a spoken change rides on a yes.",
+    file: "lib/voice/savePolicy.js",
+    find: "  for (const m of text.matchAll(SPOKEN_TIME_RE)) {",
+    replace: "  for (const m of \"\".matchAll(SPOKEN_TIME_RE)) { // SABOTAGE",
+    red: [LVX179_REPLAY, A1_SAVEPOLICY],
+  },
+  {
+    name: "p5-after-save-move",
+    why:
+      "LVX179 Fix 3: a correction cue and no addition cue right after a save classifies as 'move' (the booking just made goes to the new time). Back to asking.",
+    file: "capabilities/appointments.js",
+    find: "  if (move && !add) return \"move\";",
+    replace: "  if (move && !add) return \"ask\"; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-after-save-add",
+    why:
+      "LVX179 Fix 3: an addition cue and no correction cue ('also one at 2') classifies as 'add' -- an extra booking, no move question.",
+    file: "capabilities/appointments.js",
+    find: "  if (add && !move) return \"add\";",
+    replace: "  if (add && !move) return \"ask\"; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-after-save-ask",
+    why:
+      "LVX179 Fix 3: neither cue (or both) -> 'ask': ONE named move-or-keep question. Defaulting to 'move' silently moves a booking the caller may have wanted kept.",
+    file: "capabilities/appointments.js",
+    find: "  if (add && !move) return \"add\";\n  return \"ask\";",
+    replace: "  if (add && !move) return \"add\";\n  return \"move\"; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-after-save-same-person",
+    why:
+      "LVX179 Fix 3: only the SAME person's booking is corrected (samePersonBookings); a different person right after the save is an ordinary second booking, nothing moved.",
+    file: "capabilities/appointments.js",
+    find: "  if (samePersonBookings(args?.client_name, [last]).length === 0) return null;",
+    replace: "  // SABOTAGE: any name counts as the same person",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-after-save-move-dispatch",
+    why:
+      "LVX179 Fix 3: a 'move' verdict calls moveJustBooked, which reschedules the row just written and never inserts. Without the dispatch the correction falls through to the in-addition path and becomes a SECOND booking (call b).",
+    file: "capabilities/appointments.js",
+    find: "        if (afterSave?.kind === \"move\") return moveJustBooked(fc, ctx, afterSave.last, anchoredScheduledAt);",
+    replace: "        if (false) return moveJustBooked(fc, ctx, afterSave.last, anchoredScheduledAt); // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-after-save-look-ahead-stays",
+    why:
+      "LVX179 Fix 3: when Fix 3 decides a same-person booking right after a save, the write-order gate's in-addition look-ahead must NOT step aside for it (it let the move or extra one land with no question). Only `block` + add still refuses.",
+    file: "capabilities/appointments.js",
+    find: "  if (after && (after.kind !== \"add\" || policy !== \"block\")) return false;",
+    replace: "  // SABOTAGE: look-ahead ignores Fix 3",
+    red: [LVX179_REPLAY, "tests/a1InAddition.test.js"],
+  },
+  {
+    name: "p5-a1question-move",
+    why:
+      "LVX179 Fix 3: the A1 gate hands the model the MOVE question (afterSaveQuestion) for a second booking right after a save, so the caller hears one question rather than a read-back and then a move/keep ask.",
+    file: "services/tools.js",
+    find: "  const after = fc.name === \"book_appointment\" ? afterSaveQuestion(fc.args || {}, ctx) : null;",
+    replace: "  const after = null; // SABOTAGE",
+    red: [LVX179_REPLAY],
   },
   {
     name: "farewell-not-take-care-of",
@@ -2222,10 +2413,10 @@ const SABOTAGES = [
   },
   {
     name: "p3-say-it-then-call",
-    why: "A1 part 3 F1: the handed-sentence refusal says call again ONCE IT IS SAID; 'straight away' invited the five-call hammer before any audio.",
+    why: "A1 part 3 F1 (retargeted, LVX179 wording): the handed-question refusal says to STOP and WAIT for the answer, not to call again in the same breath; 'call this straight away' invites the five-call hammer before any audio.",
     file: "services/tools.js",
-    find: '"${a1Sentence}" Once you have said it, call this ` +',
-    replace: '"${a1Sentence}" Then call this straight away ` + // SABOTAGE',
+    find: 'Then stop talking and wait for their answer -- do ` +\n    `not call this again in the same breath. When',
+    replace: 'Then call this straight away. ` + // SABOTAGE\n    `When',
     red: ["tests/liveWriteHammering.test.js"],
   },
   {
@@ -2262,10 +2453,10 @@ const SABOTAGES = [
   },
   {
     name: "p3-letters-said-back-always",
-    why: "A1 part 3 F3 (LVX172): a surname the caller spelled is ALWAYS said back letter by letter inside the one read-back, not only when the letters look wrong.",
+    why: "A1 part 3 F3 (LVX172, LVX179 wording): a name the caller spelled is ALWAYS said back letter by letter inside the one question, not only when the letters look wrong.",
     file: "services/gemini.js",
-    find: "so they can be misheard too: whenever the caller has spelled their surname, say it back one letter at a time",
-    replace: "so they can be misheard too: if the letters look wrong, say them back one letter at a time",
+    find: "so they can be misheard too: whenever the caller has spelled a name, say it back one letter at a time inside your one question",
+    replace: "so they can be misheard too: if the letters look wrong, say them back one letter at a time inside your one question",
     red: ["tests/a1PromptTrims.test.js"],
   },
   {
@@ -2278,18 +2469,18 @@ const SABOTAGES = [
   },
   {
     name: "p4-on-file-said-in-prompt",
-    why: "A1 part 4 (owner): the booking guardrail has the model SAY a name on file in its one read-back, never spell it. Re-anchors p3-on-file-spelled-in-prompt.",
+    why: "A1 part 4 (owner): the booking guardrail has the model SAY a name on file in its one read-back, never spell it. Re-anchors p3-on-file-spelled-in-prompt. RETARGETED (LVX179): wording is now 'In your one question'; the surname-spelled clause covers a name spelled on this call.",
     file: "capabilities/appointments.js",
-    find: ' In your one read-back, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a surname they spelled for you on this call.',
-    replace: ' In your one read-back, say that surname one letter at a time too — "for Nithin, D-O-D-L-A" — so a mistake on file can be heard; that is a statement, not a question.',
+    find: ' In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call.',
+    replace: ' In your one question, say that name one letter at a time too — "for Nithin, N-I-T-H-I-N, Dodla, D-O-D-L-A" — so a mistake on file can be heard.',
     red: ["tests/a1PromptTrims.test.js"],
   },
   {
     name: "p4-on-file-said-in-message",
-    why: "A1 part 4 (owner): message step 1 has the model SAY a name on file in its one summary, never spell it.",
+    why: "A1 part 4 (owner): message step 1 has the model SAY a name on file in its one summary, never spell it. RETARGETED (LVX179): wording is now 'In your one question'.",
     file: "capabilities/messages.js",
-    find: ' In your one read-back, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a surname they spelled for you on this call.',
-    replace: ' In your one read-back, say that surname one letter at a time too — "for Nithin, D-O-D-L-A" — so a mistake on file can be heard; that is a statement, not a question.',
+    find: ' In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call.',
+    replace: ' In your one question, say that name one letter at a time too — "for Nithin, N-I-T-H-I-N, Dodla, D-O-D-L-A" — so a mistake on file can be heard.',
     red: ["tests/a1PromptTrims.test.js"],
   },
   {
@@ -2358,25 +2549,25 @@ const SABOTAGES = [
   },
   {
     name: "p4-meridiem-in-declaration",
-    why: "A1 part 4 F-A (call b): the example teaches the read-back form; a bare 'Tuesday at 3' is one the gate's slot matcher cannot read, so the model's own read-back went unseen and S was handed twice.",
+    why: "A1 part 4 F-A (call b): the example teaches the read-back form; a bare 'Tuesday at 3' is one the gate's slot matcher cannot read, so the model's own read-back went unseen and S was handed twice. RETARGETED (LVX179): the declaration's example is now the one QUESTION 'So that's Tuesday at 3 p.m. for Jon Doe, is that right?'.",
     file: "capabilities/appointments.js",
-    find: "e.g. \\\"Tuesday at 3 p.m. for Jon Doe, booking that now\\\"",
-    replace: "e.g. \\\"Tuesday at 3 for Jon Doe, booking that now\\\"",
+    find: "e.g. \\\"So that's Tuesday at 3 p.m. for Jon Doe, is that right?\\\"",
+    replace: "e.g. \\\"So that's Tuesday at 3 for Jon Doe, is that right?\\\"",
     red: ["tests/a1AskNow.test.js"],
   },
   {
     name: "p4-no-booking-now-while-open",
-    why: "A1 part 4 F-A (calls b, d1): the book_appointment declaration -- which Live always carries -- says never 'booking that now' while a spelling or extra-or-move question is open.",
+    why: "A1 part 4 F-A, retargeted (LVX179 dropped 'booking that now'): the book_appointment declaration -- which Live always carries -- says to ask any spelling or extra-or-move question BEFORE the one question.",
     file: "capabilities/appointments.js",
-    find: "    \"Never say \\\"booking that now\\\" while a spelling or an extra-or-move \" +",
-    replace: "    \"\" +",
+    find: "    \"Ask any spelling or extra-or-move question BEFORE that one question.\",",
+    replace: "    \"\",",
     red: ["tests/a1AskNow.test.js"],
   },
   {
     name: "p4-in-addition-when-clear",
-    why: "A1 part 4 F-A (owner, d1 'another appointment' was still asked): no in-addition ask when the caller's words make it clear or it is for someone else; the model sets the flag.",
+    why: "A1 part 4 F-A (owner, d1 'another appointment' was still asked): no in-addition ask when the caller's words make it clear or it is for someone else; the model sets the flag. RETARGETED (LVX179): the clear-cue list now includes 'one more'.",
     file: "capabilities/appointments.js",
-    find: "      \"\\\"another\\\", \\\"also\\\", \\\"as well\\\", \\\"a second one\\\" — or it is for someone else, do not ask — \" +",
+    find: "      \"\\\"another\\\", \\\"also\\\", \\\"as well\\\", \\\"one more\\\", \\\"a second one\\\" — or it is for someone else, \" +",
     replace: "      \"\" +",
     red: ["tests/a1AskNow.test.js"],
   },
@@ -2446,9 +2637,9 @@ const SABOTAGES = [
   },
   {
     name: "p4-guard-reads-the-predicate",
-    why: "A1 part 4 F-E: the guard decides with the same predicate the gate's look-ahead reads; a guard with its own copy drifts (the F2 look-ahead's recorded risk).",
+    why: "A1 part 4 F-E: the guard decides with the same predicate the gate's look-ahead reads; a guard with its own copy drifts (the F2 look-ahead's recorded risk). RETARGETED: the guard passes guardArgs (Fix 3 may set in_addition_to_existing).",
     file: "capabilities/appointments.js",
-    find: "          const blocked = inAdditionWouldRefuse(args, ctx, config);",
+    find: "          const blocked = inAdditionWouldRefuse(guardArgs, ctx, config);",
     replace: "          const blocked = true; // SABOTAGE",
     red: ["tests/a1InAddition.test.js"],
   },
