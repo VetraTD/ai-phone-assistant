@@ -1176,3 +1176,32 @@ and ask at 2 h. S3 = gate verdict, ONE redeploy (ask), 3 calls (cap $2), docs.
 Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work; owner decisions final;
 short plain replies, detail in the ledger; cheaper models for mechanical work.
 ```
+
+## Part 5 OVERNIGHT starting message (owner, 2026-10-16 ~21:10 -- paste into a fresh session; supersedes the S2 message)
+
+```text
+OVERNIGHT, unattended: finish LVX179 + LVX181 (Part 5 S2 + gate + deploy) by morning. I am asleep -- do not wait
+for me except where noted. S1 is committed (1e78dc1, feat/outbound-stage4), NOT deployed; prod
+voice-uk-prod-00105-mw4 @ 5c15583; rollback `gcloud run services update-traffic voice-uk-prod
+--to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2` (after deploy, roll back
+to 00105-mw4 instead).
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 5 sitting 1 as built" + "Part 5 sitting 2
+starting message" (the task list); plan ~/.claude/plans/pasted-content-id-ff3e-fix-lvx179-deep-mitten.md; ledger
+.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P5 lines).
+My decisions for tonight (final): (1) the LVX181 probe may run, hard cap $0.80, report exact $; (2) you pick the
+LVX181 setting by the pre-registered rule (fewest replies to an umm with normal-reply delay <= today +150 ms; no clear
+winner -> change nothing, say why); (3) DEPLOY overnight if the gate passes (build from the main checkout, env diff,
+smoke, keep the rollback ready); (4) the 2 h stop is lifted tonight only -- stop only for an owner decision not
+covered here, and leave it in the morning report.
+Already running: the full root suite at 1e78dc1 in a mintty window (gate label p5-root, log
+.superpowers/sdd/2026-10-10-batch3-launch-guards/gates/gate-p5-root.log; launcher
+.superpowers/sdd/2026-10-13-round-a1-say-it-once/run-gate-p5.sh <sha> <label> [modes]). Census will show 11 drifted
+rows -- expected, repoint them in step 3.
+Run every long job (root, gate, sabotage) in mintty via run-gate-p5.sh, never a Claude Code background shell (the
+memory reaper killed one tonight); keep this session active with foreground wait loops (<= 9 min each, anchored
+markers). Serialize vitest runs. Never git checkout/restore over uncommitted work. Cheaper models for mechanical work;
+opus for the review. Write detail to the ledger; end with a short morning report: what passed, what deployed (revision,
+sha, rollback), probe $ and the chosen setting, anything left for me, and the 3 call scripts for the morning (on-file
+booking with "uhh" pauses; call b with a new colleague and a real "ummm" before choosing; "no, 10 instead" right after
+a save) with the cap of $2.
+```
