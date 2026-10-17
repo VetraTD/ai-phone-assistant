@@ -589,5 +589,81 @@ describe("LVX179 Fix 3 review: never a silent move", () => {
     expect(classifyOrKeepAnswer("Yes please.")).toBe("move");
     expect(classifyOrKeepAnswer("Yes, both.")).toBe("add");
     expect(classifyOrKeepAnswer("Hmm.")).toBeNull();
+    // Re-review #2: the latest answer, and "just / only / cancel" name the move.
+    expect(classifyOrKeepAnswer("No, just the ten.")).toBe("move");
+    expect(classifyOrKeepAnswer("No, I only need one.")).toBe("move");
+    expect(classifyOrKeepAnswer("Move it. Can you also text me?")).toBe("move");
+    expect(classifyOrKeepAnswer("Don't move it.")).toBe("add");
+    expect(classifyOrKeepAnswer("Keep the nine as well.")).toBe("add");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3, opus RE-review (2026-10-17): the question the caller answered decides.
+// ---------------------------------------------------------------------------
+describe("LVX179 Fix 3 re-review: the question answered decides", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+  async function savedAt9(callSid) {
+    const s = await boot(callSid);
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    const [saved] = await s.callTool("book_appointment", book(AT_9));
+    expect(saved.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    return s;
+  }
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+
+  it("a move question WITH an alternative, answered 'keep the nine as well': two rows, never a move (Critical)", async () => {
+    const s = await savedAt9("CA_fix3rr_keep_as_well");
+    await s.callerSays("What about 10 too?");
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m., or keep the 9 as well?");
+    await s.callerSays("Keep the nine as well.");
+    const [r] = await s.callTool("book_appointment", { ...book(AT_10), in_addition_to_existing: true });
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at).sort()).toEqual([local(AT_9), local(AT_10)]);
+  });
+
+  it("'I won't move your 9 -- an extra one at 10?' answered yes: an extra one, never a move", async () => {
+    const s = await savedAt9("CA_fix3rr_wont_move");
+    await s.callerSays("And one at 10 please.");
+    await s.assistantTurn("I won't move your 9 a.m., so that's an extra one on Friday, September 18 at 10 AM, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at).sort()).toEqual([local(AT_9), local(AT_10)]);
+  });
+
+  it("'No, just the ten' to move-or-keep, then the move question answered yes: ONE row, moved (#2)", async () => {
+    const s = await savedAt9("CA_fix3rr_just_ten");
+    await s.callerSays("What about 10?");
+    await s.callTool("book_appointment", book(AT_10));
+    await s.turnEnds();
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9:00 AM to 10:00 AM, or keep both?");
+    await s.callerSays("No, just the ten.");
+    await s.callTool("book_appointment", book(AT_10));
+    await s.turnEnds();
+    await s.assistantTurn("So that's moving your Friday, September 18 at 9 AM to 10 AM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("a Fix 3 question is handed ONCE: a paraphrased plain read-back answered yes keeps both, no second ask (#3)", async () => {
+    const s = await savedAt9("CA_fix3rr_once");
+    await s.callerSays("No, 10 instead.");
+    const [ask] = await s.callTool("book_appointment", book(AT_10));
+    expect(String(ask.response.message)).toMatch(/So that's moving your/);
+    await s.turnEnds();
+    await s.assistantTurn("So that's Friday, September 18 at 10 AM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(2);
   });
 });

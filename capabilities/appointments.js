@@ -713,31 +713,65 @@ export function inAdditionWouldRefuse(args, ctx, config) {
 // booking silently. So: the same person means the same name (a misheard
 // first name of 4+ letters with the same surname, or the surname dropped,
 // still counts); Live only (the cascade has no words-since-save and asked
-// forever); after the move/keep question only the answer counts (askedAtLen,
-// for that slot only), and if the answer is unclear or not transcribed yet the
-// model's own choice stands (in_addition_to_existing) -- it heard the answer.
+// forever). Re-review (2026-10-17, Critical): a move question with an
+// alternative ("..., or keep the 9 as well?") is an either/or decided by the
+// caller's LATEST answer, never a move by itself; see fix3QuestionKind.
 // ---------------------------------------------------------------------------
 const AFTER_SAVE_MOVE_RE =
   /\b(?:no|nope|instead|actually|change|move|moving|make\s+it|rather|meant|switch|en\s+vez|mejor|cambi\w*|mueva|mover)\b/i;
 const AFTER_SAVE_ADD_RE =
   /\b(?:another|also|too|as\s+well|second|both|extra|in\s+addition|keep|tambi[eé]n|adem[aá]s|las\s+dos|ambas|mantener|mantenga)(?![\p{L}])/iu;
 
-const MOVE_QUESTION_RE = /\b(?:moving\s+your|move\s+your|muevo\s+su|la\s+mueva)\b/i;
-const OR_KEEP_RE = /\bor\s+keep\s+both\b|\bmantenga\s+las\s+dos\b/i;
+// The question the caller answered decides (opus re-review, 2026-10-17): a
+// move only on a SINGLE-alternative move question; an either/or ("..., or keep
+// both?" / "..., or keep the 9 as well?") is decided by the caller's LATEST
+// answer; a question that says "extra" / "as well" -- or says it will NOT move
+// -- is an extra one. Anything else falls to the words since the save, and a
+// Fix 3 question is handed at most ONCE per slot (handedFor): after it, a
+// plain read-back answered yes keeps both -- a second booking is visible to the
+// business, a silent move loses one the caller believes they still have.
+const FIX3_MOVE_WORD_RE = /\b(?:move|moving|moved|reschedul\w*|change|changing|switch\w*|muevo|mueva|mover|cambio|cambiar)\b/i;
+const FIX3_ALT_RE =
+  /\b(?:or|keep|both|as\s+well|extra|additional|another|also|in\s+addition|second|mantenga|mantener|ambas|las\s+dos|adem[aá]s|tambi[eé]n|otra)\b|\bo\b(?!')/i;
+const FIX3_NEG_MOVE_RE =
+  /\b(?:won'?t|will\s+not|wouldn'?t|not|don'?t|do\s+not|no\s+need\s+to)\s+(?:be\s+)?(?:move|moving|moved|change|changing|reschedul\w*|cancel\w*)\b/i;
+const OR_KEEP_NEG_MOVE_RE =
+  /\b(?:don'?t|do\s+not|no\s+need\s+to|not)\s+(?:move|change|cancel)\b|\bno\s+lo\s+mueva\b/i;
+const OR_KEEP_MOVE_RE =
+  /\b(?:move|moving|change|switch|instead|replace|cancel\w*|only|just\s+(?:the|one|that)|one\s+(?:appointment|is\s+enough)|not\s+both|mueva(?:la)?|mu[eé]vala|c[aá]mbiela|cambie|s[oó]lo)(?![\p{L}])/iu;
 const OR_KEEP_ADD_RE =
   /\b(?:keep|both|another|also|extra|add|second|as\s+well|las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])/iu;
-const OR_KEEP_MOVE_RE = /\b(?:move|moving|change|switch|instead|replace|mueva(?:la)?|c[aá]mbiela|cambie)(?![\p{L}])/iu;
 const OR_KEEP_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|s[ií]|claro)(?![\p{L}])/iu;
 
 /**
- * The answer to "Shall I move your X to Y, or keep both?". "No" means do not
- * move (keep both); "No, just move it" names the move. Null = unclear.
+ * What the confirming question the caller answered was asking:
+ * "move" (one alternative: move it), "or_keep" (move it OR keep / add),
+ * "add" (an extra one, or "I won't move your 9"), "plain" (a read-back that
+ * says neither), "none".
+ */
+export function fix3QuestionKind(text) {
+  const q = typeof text === "string" ? text : "";
+  if (!q.trim()) return "none";
+  if (FIX3_NEG_MOVE_RE.test(q)) return "add";
+  const move = FIX3_MOVE_WORD_RE.test(q);
+  const alt = FIX3_ALT_RE.test(q);
+  if (move && alt) return "or_keep";
+  if (move) return "move";
+  if (alt) return "add";
+  return "plain";
+}
+
+/**
+ * The caller's LATEST answer to an either/or move question. "No" means do not
+ * move (keep both); "No, just the ten" / "only one" / "cancel the nine" name
+ * the move; "don't move it" keeps both. Null = unclear.
  */
 export function classifyOrKeepAnswer(text) {
   const t = typeof text === "string" ? text : "";
   if (!t.trim()) return null;
-  if (OR_KEEP_ADD_RE.test(t)) return "add";
+  if (OR_KEEP_NEG_MOVE_RE.test(t)) return "add";
   if (OR_KEEP_MOVE_RE.test(t)) return "move";
+  if (OR_KEEP_ADD_RE.test(t)) return "add";
   if (/^\s*(?:no|nope|nah)\b/i.test(t)) return "add";
   if (OR_KEEP_YES_RE.test(t)) return "move";
   return null;
@@ -783,16 +817,18 @@ function callerSaidLen(ctx) {
   return typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall.length : null;
 }
 
-/** lastBooked + "the move/keep question for THIS slot was put here" (review #6: scoped to the slot). */
-function askedPatch(last, args, ctx) {
-  let askedFor = null;
+function slotMs(args, ctx) {
   try {
     const v = validateBookingTime(args?.scheduled_at, ctx?.config || {}, ctx?.deps);
-    askedFor = v?.ok ? Date.parse(v.scheduledAt) : null;
+    return v?.ok ? Date.parse(v.scheduledAt) : null;
   } catch {
-    askedFor = null;
+    return null;
   }
-  return { ...last, askedAtLen: callerSaidLen(ctx), askedFor };
+}
+
+/** lastBooked + "a Fix 3 question for THIS slot was handed" -- at most once per slot. */
+function handedPatch(last, args, ctx) {
+  return { ...last, handedFor: slotMs(args, ctx) };
 }
 
 /**
@@ -801,7 +837,7 @@ function askedPatch(last, args, ctx) {
  * @param {object} args - book_appointment arguments
  * @param {object} ctx
  * @param {string} scheduledAtInstant - the anchored (offset-bearing) new slot
- * @returns {null | { kind: "move"|"add"|"ask"|"wait", last: object }}
+ * @returns {null | { kind: "move"|"add"|"ask"|"confirm_move", last: object }}
  */
 export function correctionAfterSave(args, ctx, scheduledAtInstant) {
   // Live only (review #3): the cascade has no words-since-save.
@@ -812,30 +848,21 @@ export function correctionAfterSave(args, ctx, scheduledAtInstant) {
   const newMs = Date.parse(scheduledAtInstant ?? "");
   if (!Number.isFinite(lastMs) || !Number.isFinite(newMs) || lastMs === newMs) return null;
   if (!samePersonForMove(args?.client_name, last.client_name)) return null;
-  const said = ctx.callerSaidThisCall;
-  const asked = answeredQuestionFor(args, ctx);
-  const askedHere = Number.isFinite(last.askedAtLen) && last.askedFor === newMs;
-  if (askedHere || OR_KEEP_RE.test(asked)) {
-    const answer = askedHere ? said.slice(last.askedAtLen) : ctx?.lastCallerText || "";
-    const kind = classifyOrKeepAnswer(answer) || (args?.in_addition_to_existing === true ? "add" : "move");
-    return { kind, last };
+  const handed = last.handedFor === newMs;
+  const qk = fix3QuestionKind(answeredQuestionFor(args, ctx));
+  if (qk === "move") return { kind: "move", last };
+  if (qk === "add") return { kind: "add", last };
+  if (qk === "or_keep") {
+    const k = classifyOrKeepAnswer(ctx?.lastCallerText);
+    if (k) return { kind: k, last };
+    return { kind: handed || args?.in_addition_to_existing === true ? "add" : "confirm_move", last };
   }
-  // Moved ONLY on an answer to a question that named the move (review #1).
-  if (MOVE_QUESTION_RE.test(asked)) return { kind: "move", last };
-  const words = Number.isFinite(last.callerSaidLen) ? said.slice(last.callerSaidLen) : "";
+  const words = Number.isFinite(last.callerSaidLen) ? ctx.callerSaidThisCall.slice(last.callerSaidLen) : "";
   const k = classifyAfterSave(words);
-  return { kind: k === "add" ? "add" : k === "move" ? "confirm_move" : "ask", last };
+  if (k === "add" || handed) return { kind: "add", last };
+  return { kind: k === "move" ? "confirm_move" : "ask", last };
 }
 
-/**
- * The A1 gate's question when Fix 3 applies (services/tools.js), so the caller
- * hears ONE question: the move/keep question in the unclear case, the move
- * read-back for a clear correction. Null = the ordinary read-back.
- * `lastBooked` is the state patch that records the move/keep question was
- * put (askedAtLen), so only the answer is read afterwards.
- *
- * @returns {null | { sentence: string, lastBooked: object|null }}
- */
 function afterSaveDecision(args, ctx) {
   try {
     if (!args?.scheduled_at) return null;
@@ -846,6 +873,15 @@ function afterSaveDecision(args, ctx) {
   }
 }
 
+/**
+ * The A1 gate's question when Fix 3 applies (services/tools.js), so the caller
+ * hears ONE question: move-or-keep when the words do not say which, the move
+ * read-back for a clear correction. Null = the ordinary read-back.
+ * `lastBooked` is the state patch recording that a Fix 3 question was handed
+ * for this slot (handedFor), so it is never handed twice.
+ *
+ * @returns {null | { sentence: string, lastBooked: object|null }}
+ */
 export function afterSaveQuestion(args, ctx) {
   try {
     const config = ctx?.config || {};
@@ -860,7 +896,7 @@ export function afterSaveQuestion(args, ctx) {
         config,
         orKeep,
       }),
-      lastBooked: orKeep ? askedPatch(d.last, args, ctx) : null,
+      lastBooked: handedPatch(d.last, args, ctx),
     };
   } catch {
     return null;
@@ -878,10 +914,15 @@ async function moveJustBooked(fc, ctx, last, anchoredScheduledAt) {
   if (typeof adapter.checkAvailability === "function") {
     let full = false;
     try {
+      // The row being moved still sits at the old time: when it overlaps the
+      // new one (9:00 -> 9:15 on 30-minute slots) it counts against the slot,
+      // so it gets one place back (re-review #4).
+      const ownOverlap =
+        Math.abs(Date.parse(anchoredScheduledAt) - Date.parse(last.scheduled_at)) < (avail.length || 30) * 60_000;
       const { available } = await adapter.checkAvailability(ctx, {
         startISO: anchoredScheduledAt,
         lengthMinutes: avail.length,
-        capacity: avail.capacity,
+        capacity: avail.capacity + (ownOverlap ? 1 : 0),
       });
       full = !available;
     } catch (err) {
@@ -988,7 +1029,7 @@ function moveOrKeepResult(fc, ctx, config, last, kind) {
     stateEffects: {
       toolResult: { name: fc.name, success: false, message: question, callerSafe: true },
       toolCallEvent: { name: fc.name, args, silent: true },
-      ...(orKeep ? { capabilityState: { appointments: { lastBooked: askedPatch(last, args, ctx) } } } : {}),
+      capabilityState: { appointments: { lastBooked: handedPatch(last, args, ctx) } },
     },
   };
 }

@@ -2237,8 +2237,8 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3 (opus review #1, Critical): correction words alone never move a booking -- after a plain read-back the move is ASKED ('confirm_move'). Sabotaged, a stray 'no' said to 'anything else?' silently moves the first booking.",
     file: "capabilities/appointments.js",
-    find: '  return { kind: k === "add" ? "add" : k === "move" ? "confirm_move" : "ask", last };',
-    replace: '  return { kind: k === "add" ? "add" : k === "move" ? "move" : "ask", last }; // SABOTAGE',
+    find: '  return { kind: k === "move" ? "confirm_move" : "ask", last };',
+    replace: '  return { kind: k === "move" ? "move" : "ask", last }; // SABOTAGE',
     red: [LVX179_REPLAY],
   },
   {
@@ -2246,7 +2246,7 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3 (opus review #5): an answer to a question that NAMED the move ('Shall I move your 9 to 10?', the model's own or the gate's) moves the booking -- one question. Sabotaged, the caller is asked a second time.",
     file: "capabilities/appointments.js",
-    find: '  if (MOVE_QUESTION_RE.test(asked)) return { kind: "move", last };',
+    find: '  if (qk === "move") return { kind: "move", last };',
     replace: "  // SABOTAGE: a move question is not read",
     red: [LVX179_REPLAY],
   },
@@ -2282,8 +2282,44 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3: after the move-or-keep question the caller's ANSWER decides ('keep both' adds, 'move it' moves); the model's flag only fills in when the answer is unclear or not transcribed yet.",
     file: "capabilities/appointments.js",
-    find: '    const kind = classifyOrKeepAnswer(answer) || (args?.in_addition_to_existing === true ? "add" : "move");',
-    replace: '    const kind = args?.in_addition_to_existing === true ? "add" : "move"; // SABOTAGE',
+    find: "    const k = classifyOrKeepAnswer(ctx?.lastCallerText);",
+    replace: "    const k = null; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-or-keep-alternative-not-move",
+    why:
+      "LVX179 Fix 3 (opus re-review, Critical): a move question WITH an alternative ('..., or keep the 9 as well?') is an either/or decided by the caller's answer, never a move by itself. Sabotaged, 'keep the nine as well' silently moves the 9 to 10.",
+    file: "capabilities/appointments.js",
+    find: '  if (move && alt) return "or_keep";',
+    replace: "  // SABOTAGE: an either/or reads as a move",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-neg-move-is-add",
+    why:
+      "LVX179 Fix 3 (opus re-review): 'I won't move your 9 -- so that's an extra one at 10?' is an extra one. Sabotaged, the negated move reads as an either/or and a yes moves the booking.",
+    file: "capabilities/appointments.js",
+    find: '  if (FIX3_NEG_MOVE_RE.test(q)) return "add";',
+    replace: "  // SABOTAGE: a negated move is not read",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-handed-once",
+    why:
+      "LVX179 Fix 3 (opus re-review #3): a Fix 3 question is handed at most ONCE per slot; a paraphrased plain read-back answered yes then keeps both. Sabotaged, the move question is handed again (a loop if the model keeps paraphrasing).",
+    file: "capabilities/appointments.js",
+    find: '  if (k === "add" || handed) return { kind: "add", last };',
+    replace: '  if (k === "add") return { kind: "add", last }; // SABOTAGE',
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-or-keep-move-before-add",
+    why:
+      "LVX179 Fix 3 (opus re-review #2): in the answer to move-or-keep, a word naming the move ('just the ten', 'only one', 'move it') outranks an addition word said in passing ('can you also text me').",
+    file: "capabilities/appointments.js",
+    find: '  if (OR_KEEP_MOVE_RE.test(t)) return "move";\n  if (OR_KEEP_ADD_RE.test(t)) return "add";',
+    replace: '  if (OR_KEEP_ADD_RE.test(t)) return "add"; // SABOTAGE\n  if (OR_KEEP_MOVE_RE.test(t)) return "move";',
     red: [LVX179_REPLAY],
   },
   {
