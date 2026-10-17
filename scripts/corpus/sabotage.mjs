@@ -2246,8 +2246,8 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3 (opus review #5): an answer to a question that NAMED the move ('Shall I move your 9 to 10?', the model's own or the gate's) moves the booking -- one question. Sabotaged, the caller is asked a second time.",
     file: "capabilities/appointments.js",
-    find: '  if (qk === "move") return { kind: "move", last };',
-    replace: "  // SABOTAGE: a move question is not read",
+    find: '    return { kind: "move", last };\n  }\n  if (qk === "add")',
+    replace: '    return { kind: "ask", last }; // SABOTAGE\n  }\n  if (qk === "add")',
     red: [LVX179_REPLAY],
   },
   {
@@ -2291,8 +2291,8 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3 (opus re-review, Critical): a move question WITH an alternative ('..., or keep the 9 as well?') is an either/or decided by the caller's answer, never a move by itself. Sabotaged, 'keep the nine as well' silently moves the 9 to 10.",
     file: "capabilities/appointments.js",
-    find: '  if (move && alt) return "or_keep";',
-    replace: "  // SABOTAGE: an either/or reads as a move",
+    find: '  if (at >= 0) return /\\bor\\b/i.test(q.slice(at)) ? "or_keep" : "move";',
+    replace: '  if (at >= 0) return "move"; // SABOTAGE',
     red: [LVX179_REPLAY],
   },
   {
@@ -2300,8 +2300,8 @@ const SABOTAGES = [
     why:
       "LVX179 Fix 3 (opus re-review): 'I won't move your 9 -- so that's an extra one at 10?' is an extra one. Sabotaged, the negated move reads as an either/or and a yes moves the booking.",
     file: "capabilities/appointments.js",
-    find: '  if (FIX3_NEG_MOVE_RE.test(q)) return "add";',
-    replace: "  // SABOTAGE: a negated move is not read",
+    find: '  if (FIX3_ADD_Q_RE.test(q)) return "add";',
+    replace: "  // SABOTAGE: an extra / won't-move question is not read",
     red: [LVX179_REPLAY],
   },
   {
@@ -2320,6 +2320,24 @@ const SABOTAGES = [
     file: "capabilities/appointments.js",
     find: '  if (OR_KEEP_MOVE_RE.test(t)) return "move";\n  if (OR_KEEP_ADD_RE.test(t)) return "add";',
     replace: '  if (OR_KEEP_ADD_RE.test(t)) return "add"; // SABOTAGE\n  if (OR_KEEP_MOVE_RE.test(t)) return "move";',
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-move-answer-keeps",
+    why:
+      "LVX179 Fix 3 (opus re-review 2, Critical): 'keep both please' (or the model's in_addition flag) after 'So that's moving your 9 to 10?' is never a move. The A1 gate saves unless it hears a no, so the answer must be read here.",
+    file: "capabilities/appointments.js",
+    find: '    if (answer === "add" || args?.in_addition_to_existing === true) return { kind: "add", last };',
+    replace: "    // SABOTAGE: the answer to the move question is not read",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-same-person-exact",
+    why:
+      "LVX179 Fix 3 (opus re-review 2): the same person means the same name; a first name one letter away (Ana / Ada, Mark / Mary) is someone else, so it is never offered as a move of the first booking.",
+    file: "capabilities/appointments.js",
+    find: "  return (a.length === 1 || b.length === 1) && a[0] === b[0];",
+    replace: "  return ((a.length === 1 || b.length === 1) && a[0] === b[0]) || withinOneEdit(a[0], b[0]); // SABOTAGE",
     red: [LVX179_REPLAY],
   },
   {

@@ -667,3 +667,78 @@ describe("LVX179 Fix 3 re-review: the question answered decides", () => {
     expect(s.store.scheduled()).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix 3, opus RE-review #2 (2026-10-17): a move needs OUR move wording, no
+// alternative after it, an answer with no keep/both word, no in_addition flag,
+// and the same name.
+// ---------------------------------------------------------------------------
+describe("LVX179 Fix 3 re-review 2: a move needs the move question and a plain yes", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+  async function savedAt9(callSid) {
+    const s = await boot(callSid);
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    const [saved] = await s.callTool("book_appointment", book(AT_9));
+    expect(saved.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    return s;
+  }
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+  const adaAt9 = (s) => s.store.scheduled().some((r) => r.client_name === "Ada Moss" && at(r) === local(AT_9));
+
+  it("'So that's moving your 9 to 10?' answered 'keep both please': two rows, never a move (Critical)", async () => {
+    const s = await savedAt9("CA_fix3r2_keep_both");
+    await s.callerSays("No, 10 instead.");
+    await s.assistantTurn("So that's moving your Friday, September 18 at 9 AM to 10 AM for Ada Moss, is that right?");
+    await s.callerSays("Keep both please.");
+    const [r] = await s.callTool("book_appointment", { ...book(AT_10), in_addition_to_existing: true });
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at).sort()).toEqual([local(AT_9), local(AT_10)]);
+  });
+
+  it("an ordinary 'or would you like to change anything?' read-back is not a move question", async () => {
+    const s = await savedAt9("CA_fix3r2_change_anything");
+    await s.callerSays("Also one at 2, please.");
+    await s.assistantTurn("So that's Friday, September 18 at 2 PM for Ada Moss. Does that sound right, or would you like to change anything?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_14));
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at).sort()).toEqual([local(AT_9), local(AT_14)]);
+  });
+
+  it("a spelled name in the move question (M-O-S-S) does not stop the move", async () => {
+    const s = await savedAt9("CA_fix3r2_spelled");
+    await s.callerSays("No, 10 instead.");
+    await s.assistantTurn("So that's moving your Friday, September 18 at 9 AM to 10 AM for Ada Moss, M-O-S-S, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("a different first name one letter away (Ana / Ada) is never offered as a move of Ada's booking", async () => {
+    const s = await savedAt9("CA_fix3r2_ana");
+    await s.callerSays("And my sister Ana Moss at 10, no wait, make it for Ana.");
+    await s.assistantTurn("So that's Friday, September 18 at 10 AM for Ana Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10, "Ana Moss"));
+    expect(String(r.response.message)).not.toMatch(/moving your|Moved the appointment/);
+    expect(adaAt9(s)).toBe(true);
+  });
+
+  it("an either/or with no 'keep' wording, answered unclearly: asked, never moved", async () => {
+    const s = await savedAt9("CA_fix3r2_either_or");
+    await s.callerSays("What about 10?");
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m., or book 10 a.m. as a separate visit?");
+    await s.callerSays("The separate visit, please.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(adaAt9(s)).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+  });
+});

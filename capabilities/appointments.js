@@ -722,19 +722,21 @@ const AFTER_SAVE_MOVE_RE =
 const AFTER_SAVE_ADD_RE =
   /\b(?:another|also|too|as\s+well|second|both|extra|in\s+addition|keep|tambi[eé]n|adem[aá]s|las\s+dos|ambas|mantener|mantenga)(?![\p{L}])/iu;
 
-// The question the caller answered decides (opus re-review, 2026-10-17): a
-// move only on a SINGLE-alternative move question; an either/or ("..., or keep
-// both?" / "..., or keep the 9 as well?") is decided by the caller's LATEST
-// answer; a question that says "extra" / "as well" -- or says it will NOT move
-// -- is an extra one. Anything else falls to the words since the save, and a
-// Fix 3 question is handed at most ONCE per slot (handedFor): after it, a
-// plain read-back answered yes keeps both -- a second booking is visible to the
-// business, a silent move loses one the caller believes they still have.
-const FIX3_MOVE_WORD_RE = /\b(?:move|moving|moved|reschedul\w*|change|changing|switch\w*|muevo|mueva|mover|cambio|cambiar)\b/i;
-const FIX3_ALT_RE =
-  /\b(?:or|keep|both|as\s+well|extra|additional|another|also|in\s+addition|second|mantenga|mantener|ambas|las\s+dos|adem[aá]s|tambi[eé]n|otra)\b|\bo\b(?!')/i;
-const FIX3_NEG_MOVE_RE =
-  /\b(?:won'?t|will\s+not|wouldn'?t|not|don'?t|do\s+not|no\s+need\s+to)\s+(?:be\s+)?(?:move|moving|moved|change|changing|reschedul\w*|cancel\w*)\b/i;
+// The question the caller answered decides (opus re-reviews, 2026-10-17).
+// Recognised by its EXACT wording only -- ours (composeMoveQuestion) or the
+// declaration's "Shall I move your 9 a.m. to 10 a.m.?" -- because free-form
+// matching misread ordinary read-backs ("…, or would you like to change
+// anything?") and spelled names ("M-O-S-S") as move questions. A move needs
+// that question, no alternative after it, and an answer with no keep / both /
+// also word and no in_addition flag. An either/or ("…, or keep both?") is
+// decided by the caller's LATEST answer. Anything else falls to the words
+// since the save, and a Fix 3 question is handed at most ONCE per slot
+// (handedFor): after it a plain yes keeps both -- a second booking is visible
+// to the business, a silent move loses one the caller believes they still have.
+const FIX3_MOVE_Q_RE = /\b(?:so\s+that['’]?s\s+moving\s+your|(?:shall|should|can|may)\s+i\s+move\s+your|entonces\s+muevo\s+su\s+cita)\b/gi;
+const FIX3_OR_KEEP_Q_RE = /\bor\s+keep\s+(?:both|the)\b|\bo\s+que\s+mantenga\b/i;
+const FIX3_ADD_Q_RE =
+  /\b(?:an?\s+extra|additional|as\s+well|in\s+addition|another\s+(?:one|appointment)|(?:won['’]?t|will\s+not|without)\s+mov\w*)\b/i;
 const OR_KEEP_NEG_MOVE_RE =
   /\b(?:don'?t|do\s+not|no\s+need\s+to|not)\s+(?:move|change|cancel)\b|\bno\s+lo\s+mueva\b/i;
 const OR_KEEP_MOVE_RE =
@@ -752,12 +754,11 @@ const OR_KEEP_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead
 export function fix3QuestionKind(text) {
   const q = typeof text === "string" ? text : "";
   if (!q.trim()) return "none";
-  if (FIX3_NEG_MOVE_RE.test(q)) return "add";
-  const move = FIX3_MOVE_WORD_RE.test(q);
-  const alt = FIX3_ALT_RE.test(q);
-  if (move && alt) return "or_keep";
-  if (move) return "move";
-  if (alt) return "add";
+  if (FIX3_OR_KEEP_Q_RE.test(q)) return "or_keep";
+  let at = -1;
+  for (const m of q.matchAll(FIX3_MOVE_Q_RE)) at = m.index;
+  if (at >= 0) return /\bor\b/i.test(q.slice(at)) ? "or_keep" : "move";
+  if (FIX3_ADD_Q_RE.test(q)) return "add";
   return "plain";
 }
 
@@ -783,15 +784,10 @@ function samePersonForMove(name, theirs) {
   const b = nameWords(theirs);
   if (a.length === 0 || b.length === 0) return false;
   if (a.join(" ") === b.join(" ")) return true;
-  if ((a.length === 1 || b.length === 1) && a[0] === b[0]) return true;
-  return (
-    a.length > 1 &&
-    b.length > 1 &&
-    a[a.length - 1] === b[b.length - 1] &&
-    a[0].length >= 4 &&
-    b[0].length >= 4 &&
-    withinOneEdit(a[0], b[0])
-  );
+  // The surname dropped ("Ada" for "Ada Moss"). A misheard first name is NOT
+  // the same person here (Mark/Mary, John/Joan): it falls to the old
+  // in-addition question, which asks -- never a silent move.
+  return (a.length === 1 || b.length === 1) && a[0] === b[0];
 }
 
 /** The confirming question the caller just answered about THIS slot, or "". */
@@ -850,7 +846,13 @@ export function correctionAfterSave(args, ctx, scheduledAtInstant) {
   if (!samePersonForMove(args?.client_name, last.client_name)) return null;
   const handed = last.handedFor === newMs;
   const qk = fix3QuestionKind(answeredQuestionFor(args, ctx));
-  if (qk === "move") return { kind: "move", last };
+  if (qk === "move") {
+    // "Keep both please" / "Yes, and keep the 9 too" to a move question, or the
+    // model's own in_addition flag: never a move (re-review #1).
+    const answer = classifyOrKeepAnswer(ctx?.lastCallerText);
+    if (answer === "add" || args?.in_addition_to_existing === true) return { kind: "add", last };
+    return { kind: "move", last };
+  }
   if (qk === "add") return { kind: "add", last };
   if (qk === "or_keep") {
     const k = classifyOrKeepAnswer(ctx?.lastCallerText);
