@@ -2350,6 +2350,15 @@ const SABOTAGES = [
     red: [LVX179_REPLAY],
   },
   {
+    name: "p5-keep-words-about-booking",
+    why:
+      "LVX179 Fix 3 (opus re-review 4, High): only keep-words ABOUT THE BOOKING mean 'keep both'. A bare 'also' / 'still' / 'plus' / 'one more' opens everyday asides ('Yes. One more thing...'); read as keep, a yes to the move question became a second booking (call b).",
+    file: "capabilities/appointments.js",
+    find: "  String.raw`\\b(?:keep|both|",
+    replace: "  String.raw`\\b(?:also|still|plus|one\\s+more|keep|both|",
+    red: [LVX179_REPLAY],
+  },
+  {
     name: "farewell-not-take-care-of",
     why: "LVX178 counter accuracy: 'I'll take care of that… anything else?' is not a goodbye; counted, it fails a target of 0 on a clean call.",
     file: "lib/voice/strings.js",

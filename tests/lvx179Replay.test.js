@@ -599,7 +599,14 @@ describe("LVX179 Fix 3 review: never a silent move", () => {
     expect(classifyOrKeepAnswer("Yes, and the 9 too.")).toBe("add");
     expect(classifyOrKeepAnswer("I meant in addition.")).toBe("add");
     expect(classifyOrKeepAnswer("Yes, I still want the 9.")).toBe("add");
-    expect(classifyOrKeepAnswer("Yeah, one more.")).toBe("add");
+    // Re-review 4 (High): everyday asides after a yes are NOT "keep both".
+    expect(classifyOrKeepAnswer("Yes. One more thing, do you have parking?")).toBe("move");
+    expect(classifyOrKeepAnswer("Yeah, that's right. Is it still with Dr Lee?")).toBe("move");
+    expect(classifyOrKeepAnswer("Yes, plus can you text me?")).toBe("move");
+    expect(classifyOrKeepAnswer("Yes, also can you text me the address?")).toBe("move");
+    expect(classifyOrKeepAnswer("Yes, the nine o'clock too.")).toBe("add");
+    // A word naming the move outranks a keep-word said on the way to it.
+    expect(classifyOrKeepAnswer("Hmm, both? No wait, just move it.")).toBe("move");
   });
 });
 

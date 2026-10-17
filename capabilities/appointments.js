@@ -741,8 +741,16 @@ const OR_KEEP_NEG_MOVE_RE =
   /\b(?:don'?t|do\s+not|no\s+need\s+to|not)\s+(?:move|change|cancel)\b|\bno\s+lo\s+mueva\b/i;
 const OR_KEEP_MOVE_RE =
   /\b(?:move|moving|change|switch|instead|replace|cancel\w*|only|just\s+(?:the|one|that)|one\s+(?:appointment|is\s+enough)|not\s+both|mueva(?:la)?|mu[eé]vala|c[aá]mbiela|cambie|s[oó]lo)(?![\p{L}])/iu;
-const OR_KEEP_ADD_RE =
-  /\b(?:keep|both|another|also|extra|add|additionally|second|as\s+well|too|still|plus|one\s+more|in\s+addition|las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])/iu;
+// Keep-words ABOUT THE BOOKING only (opus re-review 4, High): a bare "too",
+// "still", "plus", "also" or "one more" also open everyday asides ("Yes. One
+// more thing...", "Is it still with Dr Lee?") and turned a yes to the move
+// question into a second booking -- call b's defect.
+const OR_KEEP_ADD_RE = new RegExp(
+  String.raw`\b(?:keep|both|as\s+well|in\s+addition|additionally|extra|another\s+(?:one|appointment|booking)|a\s+second\s+(?:one|appointment|booking)|add\s+(?:it|one|that|the)|still\s+want|` +
+    String.raw`(?:\d{1,2}(?::\d{2})?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?:a\.?\s?m\.?|p\.?\s?m\.?|o['’]clock)?\s+(?:one\s+)?too|` +
+    String.raw`las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])`,
+  "iu"
+);
 const OR_KEEP_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|s[ií]|claro)(?![\p{L}])/iu;
 
 /**
