@@ -295,6 +295,9 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     const capped = all[4][0].response;
     expect(capped.gated).toBe(true);
     expect(capped.message).not.toMatch(/booking that now/i);
+    // LVX179: the earlier hold's sentence is now the ONE question ("…, is that
+    // right?"); handed at the cap it would come ahead of the spelling ask.
+    expect(capped.message).not.toMatch(/is that right\?/i);
   });
 
   it("a hold carried into a LATER model turn is still held at the cap", async () => {
