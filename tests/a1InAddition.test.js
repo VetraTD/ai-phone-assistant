@@ -71,7 +71,9 @@ const book = (c, args = {}) =>
   );
 const weekdayOf = (naive) =>
   new Date(`${naive.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
-const SAID = (name = "Nithin Dodla") => `${weekdayOf(SLOT)} at 2 p.m. for ${name}, booking that now.`;
+// LVX179: the ONE read-back is a question, answered in the next caller turn.
+const SAID = (name = "Nithin Dodla") => `${weekdayOf(SLOT)} at 2 p.m. for ${name}, is that right?`;
+const answered = (said) => ({ lastReplyText: said, lastCallerText: "Yes.", callerVoicedSinceReply: true });
 
 beforeEach(() => {
   clearStats();
@@ -124,7 +126,7 @@ describe("inAdditionWouldRefuse — one predicate for the guard and the gate", (
 
 describe("the guard: a booking for someone else is written without the question (call b)", () => {
   it("writes Maya Okafor's booking although Nithin Dodla has one on file", async () => {
-    const { functionResponse } = await book(live({ inTurnReplyText: SAID("Maya Okafor") }), {
+    const { functionResponse } = await book(live(answered(SAID("Maya Okafor"))), {
       client_name: "Maya Okafor",
     });
     expect(functionResponse.response.success).toBe(true);
@@ -134,7 +136,7 @@ describe("the guard: a booking for someone else is written without the question 
 
 describe("the guard: the flag set and read back once -- written", () => {
   it("books the same person a second appointment when the flag says it is extra", async () => {
-    const { functionResponse } = await book(live({ inTurnReplyText: SAID() }), { in_addition_to_existing: true });
+    const { functionResponse } = await book(live(answered(SAID())), { in_addition_to_existing: true });
     expect(functionResponse.response.success).toBe(true);
     expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
   });
@@ -154,11 +156,11 @@ describe("the write-order gate steps aside so the in-addition question comes fir
   it("the flag already set: the gate hands its one read-back as before", async () => {
     const { functionResponse } = await book(live(), { in_addition_to_existing: true });
     expect(functionResponse.response.success).toBe(false);
-    expect(functionResponse.response.message).toMatch(/booking that now/);
+    expect(functionResponse.response.message).toMatch(/is that right\?/);
   });
 
   it("counts a question that still lands after a read-back (the model said its own first)", async () => {
-    const { functionResponse } = await book(live({ inTurnReplyText: SAID() }));
+    const { functionResponse } = await book(live(answered(SAID())));
     expect(functionResponse.response.success).toBe(false);
     expect(functionResponse.response.message).toMatch(/already has an upcoming appointment/);
     expect(getLatencyStats().turnTaking.in_addition_asked_after_readback).toBe(1);

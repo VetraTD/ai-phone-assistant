@@ -51,15 +51,19 @@ beforeEach(() => {
 });
 
 describe("A1 wires, end to end through a real Live session", () => {
-  it("a read-back spoken in the turn in progress saves the booking (inTurnReplyText)", async () => {
+  // LVX179: the turn in progress is read (inTurnReplyText) -- and a question
+  // in it HOLDS, because nobody has answered it yet. Sabotaging the wire to ""
+  // makes the gate see no read-back at all and hand the question a second time.
+  it("a question spoken in the turn in progress is seen, and holds the booking (inTurnReplyText)", async () => {
     const s = await bootLive({ config: CONFIG, callSid: "CA_a1_inturn" });
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
     await s.callerSays("Friday at two works.");
     // The model speaks first and calls the tool in the same turn.
     await s.assistantSays(composeReadBack({ toolName: "book_appointment", args: ARGS, config: CONFIG }));
     const [r] = await s.callTool("book_appointment", ARGS);
-    expect(r.response.success).toBe(true);
-    expect(s.store.scheduled()).toHaveLength(1);
+    expect(r.response.success).toBe(false);
+    expect(r.response.message).toMatch(/you have ALREADY read these details back/);
+    expect(s.store.scheduled()).toHaveLength(0);
   });
 
   it("with nothing read back, the handed sentence spells a surname the caller spelled (callerSpelled)", async () => {
@@ -70,7 +74,7 @@ describe("A1 wires, end to end through a real Live session", () => {
     await s.callerSays("Great, book it.");
     const [r] = await s.callTool("book_appointment", ARGS);
     expect(r.response.success).toBe(false);
-    expect(r.response.message).toContain("for Jon, D-O-D-L-A, booking that now.");
+    expect(r.response.message).toContain("for Jon, J-O-N, Dodla, D-O-D-L-A, is that right?");
     expect(s.store.scheduled()).toHaveLength(0);
   });
 });

@@ -56,7 +56,7 @@
   },
   {
     "name": "book_appointment",
-    "description": "Book an appointment. Read the day, the time and the name back ONCE as you book it — e.g. \"Tuesday at 3 p.m. for Jon Doe, booking that now\" — and call this in that same response; book it unless the caller objects. Never say \"booking that now\" while a spelling or an extra-or-move question is still open: ask it first.",
+    "description": "Book an appointment. First ask ONE question that names the day, the time and the name — e.g. \"So that's Tuesday at 3 p.m. for Jon Doe, is that right?\" — and wait for the answer. Call this only after they answer with anything but a no, never in the same response as that question. Ask any spelling or extra-or-move question BEFORE that one question.",
     "parameters": {
       "type": "object",
       "properties": {

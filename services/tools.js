@@ -27,7 +27,7 @@ import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 import { skipOnOutbound, PLATFORM_PACKS } from "../lib/outbound/policy.js";
 import { OUTBOUND_CLOSING_RULE } from "../lib/outbound/prompt.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
-import { decideSave, composeReadBack } from "../lib/voice/savePolicy.js";
+import { decideSave, composeReadBack, saveRuleFor } from "../lib/voice/savePolicy.js";
 import {
   stripFillers,
   isHesitationOnly,
@@ -270,6 +270,30 @@ function a1AwaitingMessage(toolName) {
     `have gone quiet, just check they are still there. As soon as they answer and do ` +
     `not object, call this again with the same details. Do not tell them anything ` +
     `went wrong and do not offer a callback.`
+  );
+}
+
+/**
+ * LVX179 (owner, 2026-10-16): a booking whose ONE question has not been asked
+ * yet. The model is handed the question, built from the arguments that will be
+ * written, and told to WAIT for the answer -- the write is refused in code
+ * until it comes. `source` "in_turn_statement" / "previous_statement" means
+ * the model TOLD the caller it was booking ("…booking that now") without
+ * asking; that is said to the model so it does not repeat the statement.
+ */
+function a1AskMessage(toolName, sentence, source) {
+  const told =
+    source === "in_turn_statement" || source === "previous_statement"
+      ? `You told the caller you were booking it, but they have not been asked yet. `
+      : "";
+  return (
+    heldWritePreamble(toolName) +
+    told +
+    `this is still going ahead once they say so. Ask them ONCE, in exactly these words and ` +
+    `with nothing before them: "${sentence}" Then stop talking and wait for their answer -- do ` +
+    `not call this again in the same breath. When they answer with anything but a no, call this ` +
+    `again with the same details. If they say no, ask a question or change something, sort ` +
+    `that out first. Do not tell them anything went wrong, and do not offer a callback.`
   );
 }
 
@@ -1230,6 +1254,8 @@ export async function executeToolCall(fc, ctx) {
             // boolean counts; an absent wire is null and is not read as silence.
             callerVoicedSinceReply:
               typeof ctx?.callerVoicedSinceReply === "boolean" ? ctx.callerVoicedSinceReply : null,
+            // LVX179: the booking question answered earlier on this call.
+            answeredReadBack: typeof ctx?.a1AnsweredReadBack === "string" ? ctx.a1AnsweredReadBack : null,
             strings: probeStrings,
           });
           // TRUST THE AI AFTER A PROPER READ-BACK (owner, 2026-10-02, O3
@@ -1288,7 +1314,15 @@ export async function executeToolCall(fc, ctx) {
               ? "last_chance"
               : gateRan
                 ? "gate_ran"
-                : probeToken
+                : // LVX179: on the booking rule the ONE question decides, never
+                  // an earlier agreement token -- the token is action-blind and
+                  // a turn with no caller text yet is most turns on Live (the
+                  // transcript lags 5-10 s).
+                  a1Save.applies && a1Save.rule === "booking"
+                  ? a1Save.agreed
+                    ? "a1_save_unless_no"
+                    : "refused_no_consent"
+                  : probeToken
                   ? "allowed_token"
                   : // A1: a message, or a booking whose one read-back of this
                     // slot is standing and has not been objected to. Nothing
@@ -1378,6 +1412,67 @@ export async function executeToolCall(fc, ctx) {
           }
 
           // -------------------------------------------------------------------
+          // LVX179: THE ENGINE'S RETRY OF A BOOKING NEEDS ITS OWN QUESTION.
+          //
+          // retryPendingWrite re-issues a stashed write on the caller's next
+          // clear yes, and the old rule it keeps reads any "…, correct?" as the
+          // read-back. CA94817d's replay: the 4:30 write was held ("…4:30 PM.
+          // Please confirm" -> "Yeah, they're correct. 10:00 a.m. works."), the
+          // model asked about 10 AM, the caller said "Yes, that works." -- and
+          // the retry booked 4:30 on it. So a retried booking must ALSO pass
+          // the one-question rule for its own slot (stricter, never looser:
+          // the old rule still runs after this), and a stale one is dropped,
+          // not re-stashed.
+          if (
+            typeof fc.id === "string" &&
+            fc.id.startsWith("retry_") &&
+            ctx?.callerSaidThisCall != null &&
+            ctx?.lastChance !== true &&
+            saveRuleFor(fc.name) === "booking"
+          ) {
+            const a1Own = decideSave({
+              toolName: fc.name,
+              onLive: true,
+              lastChance: false,
+              engineRetry: false,
+              writeSlot,
+              lastReplyText: probeReply,
+              inTurnReplyText: typeof ctx?.inTurnReplyText === "string" ? ctx.inTurnReplyText : "",
+              lastCallerText,
+              callerRestatedSlot,
+              callerVoicedSinceReply:
+                typeof ctx?.callerVoicedSinceReply === "boolean" ? ctx.callerVoicedSinceReply : null,
+              answeredReadBack: typeof ctx?.a1AnsweredReadBack === "string" ? ctx.a1AnsweredReadBack : null,
+              strings: probeStrings,
+            });
+            if (!a1Own.agreed) {
+              bumpCounter("a1_engine_retry_dropped");
+              log.info("a1_engine_retry_dropped", {
+                callSid: ctx?.callSid ?? null,
+                tool: fc.name,
+                a1_readback: a1Own.readBackSource,
+              });
+              return {
+                functionResponse: {
+                  id: fc.id,
+                  name: fc.name,
+                  response: {
+                    success: false,
+                    gated: true,
+                    message:
+                      heldWritePreamble(fc.name) +
+                      `the caller's last yes was not to a question about this time. Nothing to do now.`,
+                  },
+                },
+                stateEffects: {
+                  writeGateRefusal: "consent",
+                  toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+                },
+              };
+            }
+          }
+
+          // -------------------------------------------------------------------
           // LVX117. A WRITE THE CALLER HAS AGREED TO NOTHING ABOUT.
           //
           // Confirmed in production on CA422f58, the call that opened this work.
@@ -1448,6 +1543,17 @@ export async function executeToolCall(fc, ctx) {
                   // a second time whether to go ahead.
                   message: a1Save.awaitingAnswer === true
                     ? a1AwaitingMessage(fc.name)
+                    : a1Save.applies && a1Save.rule === "booking"
+                    ? a1AskMessage(
+                        fc.name,
+                        composeReadBack({
+                          toolName: fc.name,
+                          args: fc.args || {},
+                          config: ctx?.config,
+                          callerSpelled: ctx?.callerSpelled === true,
+                        }),
+                        a1Save.readBackSource
+                      )
                     : heldWritePreamble(fc.name) +
                     `this is still ` +
                     `going ahead. The caller has not answered you: their last turn carried no speech ` +
@@ -1501,7 +1607,8 @@ export async function executeToolCall(fc, ctx) {
                     // answer to its one read-back is stashed too -- the read-back
                     // happened (statement form, which confirmReadBackRe does not
                     // see), so the caller's answer may re-issue it.
-                    ...(probeReadBack || a1Save.awaitingAnswer === true
+                    ...((a1Save.applies && a1Save.rule === "booking" ? a1Save.readBackStanding : probeReadBack) ||
+                    a1Save.awaitingAnswer === true
                       ? { pendingWrite: { name: fc.name, args: fc.args || {}, reason: "write_order" } }
                       : {}),
                   },
@@ -1712,9 +1819,15 @@ export async function executeToolCall(fc, ctx) {
             // Round A1: OR the booking rule's read-back (a statement such as
             // "...booking that now", or one in the turn being spoken), always
             // tied to this slot; a message needs none. See savePolicy.js.
-            const readBackMade =
-              Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText)) ||
-              (a1Save.applies && a1Save.readBackStanding);
+            // LVX179: on the booking rule ONLY the question about this slot
+            // counts. confirmReadBackRe is action-blind: call b booked a second
+            // slot on "Just to confirm, this appointment is an additional one
+            // ..., correct?" -- a question that never named 10 AM.
+            const a1Decides = a1Save.applies && a1Save.rule === "booking";
+            const readBackMade = a1Decides
+              ? a1Save.readBackStanding
+              : Boolean(lastReplyText && S.confirmReadBackRe?.test(lastReplyText)) ||
+                (a1Save.applies && a1Save.readBackStanding);
 
             // -----------------------------------------------------------------
             // LVX144. SAYING THE TIME BACK IS AGREEING TO IT.
@@ -2124,7 +2237,7 @@ export async function executeToolCall(fc, ctx) {
               a1Save.awaitingAnswer !== true &&
               fc.name === "book_appointment" &&
               inAdditionWouldRefuse(fc.args || {}, ctx, ctx?.config || {});
-            if (hasTarget && !consentLatched && (!readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
+            if (hasTarget && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
               bumpCounter("write_order_would_refuse");
               // LVX156. A read-back that was made and answered unreadably
               // reaches the ceiling a turn earlier than a write nobody was
@@ -2171,7 +2284,12 @@ export async function executeToolCall(fc, ctx) {
               if (everReadBackThisProposal && !readBackMade) {
                 bumpCounter("write_order_ceiling_kept_by_history");
               }
-              if (orderRefusals >= orderCeiling) {
+              // LVX179 (owner, 2026-10-16): a booking is refused until its ONE
+              // question was asked and answered with anything but a no, so no
+              // ceiling releases it. Every hold on that rule has a way out the
+              // caller controls -- the handed question, the answer, a change --
+              // and a release here would book a slot nobody was asked about.
+              if (!a1Decides && orderRefusals >= orderCeiling) {
                 // THE CEILING RELEASES THE WRITE, and says so. A gate that can
                 // refuse forever holds a caller on the line over our own
                 // vocabulary; LVX21 is what a hair trigger on this path costs.
@@ -2195,7 +2313,7 @@ export async function executeToolCall(fc, ctx) {
                   refusals: orderRefusals,
                   severity: "warn",
                 });
-              } else if (attemptBudget.spent) {
+              } else if (!a1Decides && attemptBudget.spent) {
                 // NOT this gate's own ceiling -- the caller has now been
                 // refused three times for this one booking, by whichever gates
                 // happened to be looking. See writeAttemptMaxRefusals.
@@ -2269,15 +2387,10 @@ export async function executeToolCall(fc, ctx) {
                     ? heldWritePreamble(fc.name) +
                       `the caller did not agree to what you read back: they said no, asked a question ` +
                       `or changed something. Answer them or make the change. If the details change, ` +
-                      `read the new ones back once in one sentence and call this again; otherwise call ` +
-                      `this again once they are happy. Do not ask them to confirm a second time, do not ` +
-                      `tell them anything went wrong, and do not offer a callback.`
-                    : heldWritePreamble(fc.name) +
-                      `this is still going ahead. Read it back to the caller ONCE, in exactly these ` +
-                      `words and with nothing before them: "${a1Sentence}" Once you have said it, call this ` +
-                      `again with the same details. If they say no, ask a question or change something, ` +
-                      `sort that out first. Do not ask them to confirm a second time, do not tell them ` +
-                      `anything went wrong, and do not offer a callback.`
+                      `ask about the new ones ONCE, as one question ending "is that right?", and wait for ` +
+                      `the answer before calling this again; otherwise call this again once they are ` +
+                      `happy. Do not tell them anything went wrong, and do not offer a callback.`
+                    : a1AskMessage(fc.name, a1Sentence, a1Save.readBackSource)
                   : readBackMade
                   ? heldWritePreamble(fc.name) +
                     `you have ALREADY read these details back to the caller; do not read them back ` +

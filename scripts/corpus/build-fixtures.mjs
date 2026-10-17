@@ -669,21 +669,21 @@ const EXPECTATIONS = {
       { expect: "refuse", why: "reschedule read back, caller had not answered." },
       { expect: "refuse", why: "re-fired seconds later, still no answer." },
       {
-        expect: "write",
-        why: "again, inside the same caller turn -- a tool round is not a caller turn and must not spend the budget, which is why this cost nothing in production. In the replay it is the second ask at a proposal already read back, so LVX156's ceiling releases it.",
+        expect: "refuse",
+        why: "CHANGED write -> refuse 2026-10-16 (LVX179, owner: a booking-rule write is refused until its ONE question was answered with anything but a no, and no ceiling releases it). The question 'Shall I proceed with this change?' was answered 'Ayo, ¿qué?' -- a question back, not a yes. Was: LVX156's ceiling released it as the second ask at a proposal already read back.",
       },
       {
-        expect: "write",
-        why: "and again. THE FALSE CLAIM FOLLOWS THIS ONE in production: 'Your appointment has been successfully rescheduled to Tuesday 22nd at 2 30 PM' with nothing written. Under LVX156 the write lands here instead, which is the sentence becoming true rather than being corrected.",
+        expect: "refuse",
+        why: "CHANGED write -> refuse 2026-10-16 (LVX179), the same answer, the same rule. THE FALSE CLAIM FOLLOWED THIS ONE in production; the claim guard, not a ceiling release, is what answers that now.",
       },
       {
-        expect: "write",
-        why: "the caller agreed but no read-back was standing -- the assistant had moved on. Released here on the count accumulated from the asks above rather than on this turn's own consent.",
+        expect: "refuse",
+        why: "CHANGED write -> refuse 2026-10-16 (LVX179). The standing reply was the model's own false claim, not a question, so nothing was answered; the gate hands the question instead. Was: released on the count accumulated from the asks above rather than on this turn's own consent -- the release LVX179 removes.",
       },
       {
-        expect: "write",
+        expect: "refuse",
         why:
-          "IN PRODUCTION this was the SILENT-TURN gate: the caller's turn carried no speech at all, so there was nothing that could be consent, and that gate refused it before the write-order gate ever ran. The harness does not reproduce a silent turn, so the write-order gate answers instead and releases. NOT a bypass, and the ordering is a code-level guarantee rather than an assumption: the silent-turn refusal returns at services/tools.js:1081 and the ceiling is at :1671, so a genuinely silent turn can never reach it.",
+          "CHANGED write -> refuse 2026-10-16 (LVX179: no ceiling releases a booking-rule write), which now matches production. IN PRODUCTION this was the SILENT-TURN gate: the caller's turn carried no speech at all, so there was nothing that could be consent, and that gate refused it before the write-order gate ever ran. The harness does not reproduce a silent turn, so the write-order gate answers instead and releases. NOT a bypass, and the ordering is a code-level guarantee rather than an assumption: the silent-turn refusal returns at services/tools.js:1081 and the ceiling is at :1671, so a genuinely silent turn can never reach it.",
       },
       { expect: "write", why: "read back and agreed. The reschedule that finally landed." },
       {

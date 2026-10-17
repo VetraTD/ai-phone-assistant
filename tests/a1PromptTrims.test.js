@@ -47,11 +47,14 @@ describe("non-negotiable rule 3 — read back once, by kind", () => {
     expect(prefix(avail)).not.toMatch(/Before writing or changing anything \(booking, cancellation, message\)/);
   });
 
-  it("states the per-kind rule: message saved at once, booking unless they object, cancel on a clear yes", () => {
+  // LVX179 (owner, 2026-10-16): a booking asks ONE question and books on any
+  // answer that is not a no; then only "Done, you're all set".
+  it("states the per-kind rule: message saved at once, booking on one question, cancel on a clear yes", () => {
     const p = prefix(avail);
     expect(p).toMatch(/read the details back ONCE/);
-    expect(p).toMatch(/booking that now/);
-    expect(p).toMatch(/unless the caller objects/i);
+    expect(p).not.toMatch(/booking that now/);
+    expect(p).toMatch(/So that's Tuesday at 3 p\.m\. for Jon Doe, is that right\?/);
+    expect(p).toMatch(/when they answer with anything but a no; then say only "Done, you're all set\."/);
     expect(p).toMatch(/cancell?ation[^.]*clear "yes"/i);
     expect(p).toMatch(/Never ask for the same yes twice/i);
   });
@@ -63,7 +66,7 @@ describe("non-negotiable rule 3 — read back once, by kind", () => {
   });
 });
 
-describe("booking steps — one read-back, booked in the same breath", () => {
+describe("booking steps — ONE question, booked on the answer (LVX179)", () => {
   for (const [name, f] of [["availability", avail], ["db", db]]) {
     it(`${name}: no "shall I go ahead" question and no wait for a clear confirmation`, () => {
       const t = tail(f, "gather_details", "book_appointment");
@@ -71,15 +74,19 @@ describe("booking steps — one read-back, booked in the same breath", () => {
       expect(t).not.toMatch(/Shall I go ahead and book that\?/);
       expect(t).not.toMatch(/Does that sound right\?/);
       expect(t).not.toMatch(/until the caller clearly confirms/);
-      expect(t).toMatch(/booking that now/);
+      expect(t).not.toMatch(/booking that now/);
+      expect(t).toMatch(/is that right\?/);
+      expect(t).toMatch(/do not call book_appointment in that same response/);
+      expect(t).toMatch(/Done, you're all set/);
     });
   }
 
   it("the book_appointment declaration no longer says 'only after confirmation'", () => {
     const d = bookDecl(avail);
     expect(d.description).not.toMatch(/Call this only after confirmation/);
-    expect(d.description).toMatch(/booking that now/);
-    expect(d.description).toMatch(/unless the caller objects/i);
+    expect(d.description).not.toMatch(/booking that now/);
+    expect(d.description).toMatch(/ONE question/);
+    expect(d.description).toMatch(/never in the same response as that question/);
   });
 
   it("keeps the 'do not re-check availability before booking' rule", () => {
@@ -144,8 +151,10 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
     const p = prefix(avail);
     expect(p).not.toMatch(/does not look like a name, or they differ from what you heard by a single letter/);
     expect(p).toMatch(
-      /whenever the caller has spelled their surname, say it back one letter at a time inside your one read-back/
+      /whenever the caller has spelled a name, say it back one letter at a time inside your one question about the booking/
     );
+    // LVX179 (owner): the first name too -- "Maja" and "Maya" sound the same.
+    expect(p).toMatch(/for Nithin, N-I-T-H-I-N, Dodla, D-O-D-L-A, is that right\?/);
   });
 
   it("F3: the message summary spells a surname they spelled (prefix step 5 and the step guidance)", () => {
@@ -163,7 +172,8 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
     const both = p.match(/If their name is already on their record from an earlier visit[^\n]*/g) || [];
     expect(both.length).toBeGreaterThanOrEqual(2);
     for (const line of both) {
-      expect(line).toMatch(/do not ask them to spell it again/);
+      // LVX180 (d1b CAb3e55): an on-file caller was asked their full name.
+      expect(line).toMatch(/do not ask them for it at all — not even their full name — or ask them to spell it/);
       expect(line).toMatch(/just say the name/);
       expect(line).not.toMatch(/one letter at a time/);
     }

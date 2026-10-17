@@ -17329,6 +17329,10 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
   first AND last name in one ask. A correction right after a save moves that booking, never adds one; the in-addition
   question names what is on file.
 - Also seen on b: first name misheard ("Amara", then "Maja" for Maya); only the surname is ever spelled.
+- **2026-10-16 Part 5 S1 (code, NOT deployed):** fixes 1-2 + carry-over built — see the round-A1 plan "Part 5 sitting
+  1 as built". Fix 3 (correction moves), sabotage rows, review, gate, deploy and calls remain (S2/S3).
+- Pre-existing, found in S1: `npm run corpus:build` rewrites derived targets in CA240834/CA299f23/CA6dcec7/CAec2309
+  at HEAD, so `corpus:check` fails; the gate does not run it. Left as committed. `[cheap]`
 
 ### LVX180 · Prompt rules the model skipped on the same day · **OPEN · P2** `[cheap]` (watch first; N=1 each)
 - d1 `CA7c0d50b0672a602767c9e9f8ac0cf38c`: the caller said "book ANOTHER appointment" and was asked "in addition…or

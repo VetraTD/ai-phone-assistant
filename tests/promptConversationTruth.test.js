@@ -242,7 +242,9 @@ describe("LVX62 — 'the letters win' keeps the rule and drops the false reason"
     // a spelled surname is ALWAYS said back inside the one read-back, which
     // covers the suspect case (the caller hears the letters and can correct
     // one) without the model judging which letters look like a name.
-    expect(prefix()).toContain("say it back one letter at a time inside your one read-back");
+    // LVX179 (2026-10-16): inside the ONE question about the booking, and
+    // every name spelled, first name too.
+    expect(prefix()).toContain("say it back one letter at a time inside your one question about the booking");
     expect(prefix()).toContain("If the caller corrects a letter, use what they tell you");
     expect(prefix()).not.toContain("confirm those letters");
   });

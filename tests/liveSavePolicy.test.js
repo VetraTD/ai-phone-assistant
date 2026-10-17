@@ -4,9 +4,12 @@
 // "Save unless it HEARS a no" replaces "save only once it hears a clear yes":
 //
 //   message / quote request  no read-back gate; saved when the model calls it
-//   booking / reschedule     one read-back (the previous turn OR the turn in
-//                            progress), then saved unless the answer is a no,
-//                            a question or a change; silence/garble = save
+//   booking / reschedule     ONE question read-back of this slot in the
+//                            previous turn, then saved on any sound that is not
+//                            a no, a question or a change; garble = save,
+//                            silence = held. A read-back in the turn being
+//                            spoken, or a statement ("…booking that now"),
+//                            only ever holds (LVX179, owner 2026-10-16).
 //   cancel                   UNCHANGED -- confirm once, ask again if unreadable
 //   everything else          unchanged
 //
@@ -50,7 +53,11 @@ const OTHER_SLOT = `${new Date(Date.now() + 31 * 86_400_000).toISOString().slice
 // What the composed read-back says for SLOT, so a fixture that reads it back
 // names the slot exactly as the engine would.
 const SAID = composeReadBack({ toolName: "book_appointment", args: { client_name: "Marcus Bell", scheduled_at: SLOT }, config: {}, callerSpelled: false });
-const CANCEL_READ_BACK = `Just to confirm, you'd like to cancel your appointment on ${SAID.split(" for ")[0]}?`;
+// The day and time alone, as the engine says them ("Friday, … at 10:00 AM").
+const WHEN = SAID.replace(/^So that's /, "").split(" for ")[0];
+const CANCEL_READ_BACK = `Just to confirm, you'd like to cancel your appointment on ${WHEN}?`;
+// The S2 same-breath STATEMENT form, which LVX179 retired as a confirmation.
+const STATEMENT = `${WHEN} for Marcus Bell, booking that now.`;
 
 const live = (over = {}) => ({
   businessId: "biz-1",
@@ -164,10 +171,11 @@ describe("decideSave — the pure decision", () => {
     expect(d).toMatchObject({ readBackSource: "previous", agreed: true, awaitingAnswer: false });
   });
 
-  it("silence does not hold an in-turn read-back, a message, or touch a cancel", () => {
+  it("silence holds an in-turn read-back; it does not hold a message or touch a cancel", () => {
     expect(decideSave({ ...base, inTurnReplyText: SAID, callerVoicedSinceReply: false })).toMatchObject({
       readBackSource: "in_turn",
-      agreed: true,
+      agreed: false,
+      awaitingAnswer: true,
     });
     expect(
       decideSave({ ...base, toolName: "record_customer_request", writeSlot: null, callerVoicedSinceReply: false })
@@ -178,19 +186,35 @@ describe("decideSave — the pure decision", () => {
     ).toBe(false);
   });
 
-  // Final review I2. "Same breath" saves a STATEMENT read-back ("…booking that
-  // now"). A read-back that ASKS ("…shall I go ahead and book that?") has asked
-  // for an answer; saving before it comes is the CA6b662e / LVX95 shape. Held,
-  // awaiting the answer -- and the read-back then stands for the next turn.
+  // Final review I2 + LVX179. A read-back that ASKS, in the same breath as the
+  // tool call, has asked for an answer; saving before it comes is the CA6b662e
+  // / LVX95 shape. Held, awaiting the answer -- and it stands next turn.
   it("an in-turn read-back that asks a question awaits the answer", () => {
-    const asked = `Just to confirm, ${SAID.replace(/, booking that now\.$/, "")}. Shall I go ahead and book that?`;
+    const asked = `Just to confirm, ${WHEN} for Marcus Bell. Shall I go ahead and book that?`;
     const d = decideSave({ ...base, inTurnReplyText: asked });
     expect(d).toMatchObject({ readBackSource: "in_turn", readBackStanding: true, agreed: false, awaitingAnswer: true });
   });
 
-  it("an in-turn statement read-back still saves (owner Q1)", () => {
-    const d = decideSave({ ...base, inTurnReplyText: SAID });
-    expect(d).toMatchObject({ readBackSource: "in_turn", agreed: true, awaitingAnswer: false });
+  // LVX179 (call b CA70682e): the same-breath statement booked 9 AM, a time
+  // nobody chose. A statement tells the caller; it does not ask them.
+  it("an in-turn STATEMENT read-back never saves: held, and the caller still has to be asked", () => {
+    const d = decideSave({ ...base, inTurnReplyText: STATEMENT, callerVoicedSinceReply: true, lastCallerText: "umm" });
+    expect(d).toMatchObject({ readBackSource: "in_turn_statement", readBackStanding: false, agreed: false, awaitingAnswer: false });
+  });
+
+  it("a previous-turn STATEMENT read-back is not the question, whatever the caller said", () => {
+    const d = decideSave({ ...base, lastReplyText: STATEMENT, lastCallerText: "Okay.", callerVoicedSinceReply: true });
+    expect(d).toMatchObject({ readBackSource: "previous_statement", readBackStanding: false, agreed: false });
+  });
+
+  it("a question answered in the previous turn saves even if the model says the statement as it calls", () => {
+    const d = decideSave({ ...base, lastReplyText: SAID, lastCallerText: "Yes.", callerVoicedSinceReply: true, inTurnReplyText: STATEMENT });
+    expect(d).toMatchObject({ readBackSource: "previous", agreed: true });
+  });
+
+  it("'booking that now. Anything else?' asks nothing about the booking", () => {
+    const d = decideSave({ ...base, lastReplyText: `${STATEMENT} Is there anything else?`, lastCallerText: "No.", callerVoicedSinceReply: true });
+    expect(d).toMatchObject({ readBackSource: "previous_statement", agreed: false });
   });
 
   it("an absent wire (null) is not read as silence", () => {
@@ -206,9 +230,9 @@ describe("decideSave — the pure decision", () => {
     }
   );
 
-  it("a read-back in the turn in progress saves -- nobody has answered it yet", () => {
+  it("a read-back in the turn in progress never saves -- nobody has answered it yet", () => {
     const d = decideSave({ ...base, inTurnReplyText: SAID, lastCallerText: "Could I do the 10 o'clock?" });
-    expect(d).toMatchObject({ readBackSource: "in_turn", agreed: true });
+    expect(d).toMatchObject({ readBackSource: "in_turn", agreed: false, awaitingAnswer: true });
   });
 
   it("a read-back of a DIFFERENT slot is no read-back at all", () => {
@@ -224,33 +248,34 @@ describe("decideSave — the pure decision", () => {
   });
 });
 
-describe("composeReadBack — the one sentence the model is handed", () => {
-  it("names the slot and the caller, and ends with what it is doing", () => {
-    expect(SAID).toMatch(/ at 10:00 AM for Marcus Bell, booking that now\.$/);
-    expect(EN.readBackStatementRe.test(SAID)).toBe(true);
+describe("composeReadBack — the ONE question the model is handed (LVX179)", () => {
+  it("names the slot and the caller, and ASKS", () => {
+    expect(SAID).toMatch(/^So that's .* at 10:00 AM for Marcus Bell, is that right\?$/);
+    expect(EN.confirmReadBackRe.test(SAID)).toBe(true);
+    expect(EN.readBackStatementRe.test(SAID)).toBe(false);
     expect(EN.completionClaimRe.test(SAID)).toBe(false);
   });
 
-  it("spells the surname letter by letter when the caller spelled it (LVX172)", () => {
+  it("spells every name letter by letter when the caller spelled it (LVX172, LVX179)", () => {
     const s = composeReadBack({
       toolName: "book_appointment",
       args: { client_name: "Jon Dodla", scheduled_at: SLOT },
       config: {},
       callerSpelled: true,
     });
-    expect(s).toMatch(/ for Jon, D-O-D-L-A, booking that now\.$/);
+    expect(s).toMatch(/ for Jon, J-O-N, Dodla, D-O-D-L-A, is that right\?$/);
     expect(EN.spelledLettersRe.test(s)).toBe(true);
   });
 
   it("does not spell a name the caller never spelled", () => {
     const s = composeReadBack({ toolName: "book_appointment", args: { client_name: "Jon Dodla", scheduled_at: SLOT }, config: {} });
-    expect(s).toMatch(/ for Jon Dodla, booking that now\.$/);
+    expect(s).toMatch(/ for Jon Dodla, is that right\?$/);
   });
 
   it("reads a reschedule as a move", () => {
     const s = composeReadBack({ toolName: "reschedule_appointment_db", args: { new_scheduled_at: SLOT }, config: {} });
-    expect(s).toMatch(/^Moving your appointment to .* at 10:00 AM, moving it now\.$/);
-    expect(EN.readBackStatementRe.test(s)).toBe(true);
+    expect(s).toMatch(/^So that's moving your appointment to .* at 10:00 AM, is that right\?$/);
+    expect(EN.confirmReadBackRe.test(s)).toBe(true);
   });
 });
 
@@ -271,7 +296,7 @@ describe("messages and quote requests are not gated (owner: no read-back gate)",
   });
 });
 
-describe("bookings: one read-back, then saved unless the caller objects", () => {
+describe("bookings: ONE question, then saved on anything but a no (LVX179)", () => {
   it.each(["da, ja, das", "", "[inaudible]", "에레는"])(
     "saves after a previous-turn read-back answered %j",
     async (said) => {
@@ -340,20 +365,33 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
   );
 
   // Round A1 part 4, F-C (CAdefce6ab): the model said its OWN read-back with a
-  // bare hour -- "Wednesday at 10 for Priya Raman, booking that now." -- and
-  // the gate could not read it, so it handed sentence S on top: the caller
-  // heard the read-back twice. Anchored to the slot's weekday, it now saves.
-  it("saves on a same-breath read-back that names the weekday and a bare hour", async () => {
+  // bare hour -- "Wednesday at 10 for Priya Raman, …" -- and the gate could not
+  // read it, so it handed sentence S on top: the caller heard the read-back
+  // twice. Anchored to the slot's weekday, the model's own QUESTION counts.
+  it("saves on the model's own question that names the weekday and a bare hour", async () => {
     const weekday = new Date(`${DAY}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
     const { functionResponse } = await book(
-      live({ inTurnReplyText: `${weekday} at 10 for Marcus Bell, booking that now.`, lastCallerText: "Ten works." })
+      live({ lastReplyText: `${weekday} at 10 for Marcus Bell, is that right?`, lastCallerText: "Yes.", callerVoicedSinceReply: true })
     );
     expect(functionResponse.response.success).toBe(true);
     expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
   });
 
+  // LVX179 (call b CA70682e): the same shape said as a statement in the same
+  // breath as the call booked 9 AM, a time nobody chose. Now held.
+  it("holds a same-breath STATEMENT read-back, however well it names the slot", async () => {
+    const weekday = new Date(`${DAY}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+    const { functionResponse } = await book(
+      live({ inTurnReplyText: `${weekday} at 10 for Marcus Bell, booking that now.`, lastCallerText: "Ten works." })
+    );
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toContain(SAID);
+    expect(functionResponse.response.message).toMatch(/You told the caller you were booking it/);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
   it("holds a booking whose read-back is a question asked in the same breath", async () => {
-    const asked = `Just to confirm, ${SAID.replace(/, booking that now\.$/, "")}. Shall I go ahead and book that?`;
+    const asked = `Just to confirm, ${WHEN} for Marcus Bell. Shall I go ahead and book that?`;
     const { functionResponse } = await book(live({ inTurnReplyText: asked, lastCallerText: "Ten works." }));
     expect(functionResponse.response.success).toBe(false);
     expect(functionResponse.response.message).toMatch(/WAIT/);
@@ -372,14 +410,16 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
   it("an objection is answered, not re-confirmed", async () => {
     const { functionResponse } = await book(live({ lastReplyText: SAID, lastCallerText: "What time was that?" }));
     expect(functionResponse.response.message).toMatch(/did not agree/);
-    expect(functionResponse.response.message).toMatch(/do not ask them to confirm a second time/i);
+    expect(functionResponse.response.message).not.toContain(SAID);
   });
 
-  it("saves when the read-back is in the turn being spoken right now", async () => {
+  it("holds when the question is in the turn being spoken right now -- nobody has answered it", async () => {
     const { functionResponse } = await book(
       live({ inTurnReplyText: SAID, lastCallerText: "Can I come in at ten that day?" })
     );
-    expect(functionResponse.response.success).toBe(true);
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.message).toMatch(/WAIT/);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
 
   it("with nothing read back, refuses once and hands the model the sentence to say", async () => {
@@ -391,12 +431,12 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
     expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
 
-  it("the handed sentence spells the surname when the caller spelled it", async () => {
+  it("the handed question spells every name when the caller spelled it", async () => {
     const { functionResponse } = await book(
       live({ lastCallerText: "Ten works", callerSpelled: true }),
       { client_name: "Jon Dodla" }
     );
-    expect(functionResponse.response.message).toContain("for Jon, D-O-D-L-A, booking that now.");
+    expect(functionResponse.response.message).toContain("for Jon, J-O-N, Dodla, D-O-D-L-A, is that right?");
   });
 
   // F2 (owner, A1 part 3, CAff059ed): the letters were lost on the line, the
@@ -418,19 +458,27 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
       live({ spellingSettled: true, callerSpelled: true, lastCallerText: "B, E, L, L" })
     );
     expect(stateEffects.writeGateRefusal).toBe("write_order");
-    expect(functionResponse.response.message).toContain("for Marcus, B-E-L-L, booking that now.");
+    expect(functionResponse.response.message).toContain("for Marcus, M-A-R-C-U-S, Bell, B-E-L-L, is that right?");
   });
 
-  it("the model saying that sentence and calling again saves", async () => {
+  it("the model asking that question holds until the caller answers, then saves", async () => {
     const first = await book(live({ lastCallerText: "Ten works, book it" }));
     const said = first.stateEffects.toolResult.message;
-    const { functionResponse } = await book(
+    // Asked and called in one breath: nobody has answered yet.
+    const second = await book(
       live({ lastCallerText: "Ten works, book it", inTurnReplyText: said, capabilityState: first.stateEffects.capabilityState })
     );
+    expect(second.functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The caller answers it -- with anything but a no.
+    const { functionResponse } = await book(
+      live({ lastReplyText: said, lastCallerText: "Yeah.", callerVoicedSinceReply: true, capabilityState: second.stateEffects.capabilityState })
+    );
     expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalledTimes(1);
   });
 
-  it("a reschedule read back as a statement saves on a silent answer", async () => {
+  it("a reschedule asked about once saves on an answer the transcript lost", async () => {
     const said = composeReadBack({ toolName: "reschedule_appointment_db", args: { new_scheduled_at: OTHER_SLOT }, config: {} });
     const { functionResponse } = await executeToolCall(
       { id: "r1", name: "reschedule_appointment_db", args: { appointment_id: "a1", new_scheduled_at: OTHER_SLOT } },
@@ -453,8 +501,12 @@ describe("bookings: one read-back, then saved unless the caller objects", () => 
   // two rules apart -- its read-back names no slot, so A1 refuses it too. This
   // one can: the SAME read-back of this slot and the same mangled answer save
   // when the model calls, and are held when the engine retries.
+  // LVX179: SAID is now a question, which the old rule also recognises, and
+  // the old rule's own O3 leniency then accepts "da, ja, das". The case that
+  // still separates them: a sound with no words yet (the transcript lags 5-10 s
+  // on Live). The model heard it and called; code has nothing to go on.
   it("the same answer that saves the model's call is held on the engine's retry", async () => {
-    const ctx = () => live({ lastReplyText: SAID, lastCallerText: "da, ja, das" });
+    const ctx = () => live({ lastReplyText: SAID, lastCallerText: "", callerVoicedSinceReply: true });
     const retried = await book(ctx(), {}, "retry_book_appointment");
     expect(retried.functionResponse.response.success).toBe(false);
     expect(mockCreateAppointment).not.toHaveBeenCalled();

@@ -10,6 +10,10 @@
 // Read-backs are attributed to the save they precede; a read-back spoken in
 // the same breath as the save (tool first, words after, which is the usual
 // Live order) belongs to that save, not the next one. Ladder lines never count.
+//
+// LVX179 (owner, 2026-10-16): a booking saves only after its ONE question was
+// answered in an earlier turn, so a same-breath read-back is now a REPEAT
+// after the yes -- exactly what saves_over_one_readback exists to catch.
 // ---------------------------------------------------------------------------
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
@@ -82,6 +86,12 @@ async function availability(s) {
   await s.callerSays("Friday at two works.");
 }
 
+/** LVX179: the one question, answered -- what a save now needs. */
+async function askedAndAnswered(s, question = READ_BACK) {
+  await s.assistantTurn(question);
+  await s.callerSays("Yes.");
+}
+
 describe("the confirm block", () => {
   it("one read-back, one save: nothing over one", async () => {
     const { summary, saves } = await record(async () => {
@@ -121,10 +131,11 @@ describe("the confirm block", () => {
     expect(saves[0].readbacks).toBe(2);
   });
 
-  it("a read-back spoken in the same breath as the save belongs to that save", async () => {
+  it("a read-back spoken in the same breath as the save belongs to that save (a repeat after the yes)", async () => {
     const { summary, saves } = await record(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_breath" });
       await availability(s);
+      await askedAndAnswered(s);
       // Words, then the tool, in ONE turn: the read-back is still being
       // spoken (turnReplyText) when the tool fires, and the turn ends after.
       await s.assistantSays(READ_BACK);
@@ -133,9 +144,9 @@ describe("the confirm block", () => {
       await s.hangUp();
     });
     expect(saves).toHaveLength(1);
-    expect(saves[0].readbacks).toBe(1);
-    expect(summary.confirm.readbacks).toBe(1);
-    expect(summary.confirm.saves_over_one_readback).toBe(0);
+    expect(saves[0].readbacks).toBe(2);
+    expect(summary.confirm.readbacks).toBe(2);
+    expect(summary.confirm.saves_over_one_readback).toBe(1);
   });
 
   it("counts each refusal by its gate, on the call and on the save", async () => {
@@ -206,7 +217,7 @@ describe("spelling", () => {
       await availability(s);
       await s.assistantTurn("Could you spell your last name for me?");
       await s.callerSays("It's Jon, D O D L A.");
-      await s.assistantSays(SPELLED_READ_BACK);
+      await askedAndAnswered(s, SPELLED_READ_BACK);
       await s.callTool("book_appointment", ARGS);
       await s.turnEnds();
       await s.hangUp();
@@ -221,7 +232,7 @@ describe("spelling", () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_unspelled" });
       await availability(s);
       await s.callerSays("It's Jon, D O D L A.");
-      await s.assistantSays(READ_BACK);
+      await askedAndAnswered(s);
       await s.callTool("book_appointment", ARGS);
       await s.turnEnds();
       await s.hangUp();
@@ -253,7 +264,7 @@ describe("an on-file name: did the read-back say it?", () => {
   const bootOnFile = (callSid) =>
     bootLive({ config: CONFIG, callSid, database: { ...fakeDb(CONFIG, "biz-1"), fetchCallerContext: async () => ON_FILE } });
   const BOOK = { ...ARGS, in_addition_to_existing: true };
-  const NAMELESS = "Friday, September 18 at 2:00 PM, booking that now.";
+  const NAMELESS = "So that's Friday, September 18 at 2:00 PM, is that right?";
 
   it("a read-back that says the name is named", async () => {
     const { summary } = await record(async () => {
@@ -291,6 +302,7 @@ describe("an on-file name: did the read-back say it?", () => {
     const { summary } = await record(async () => {
       const s = await bootOnFile("CA_conf_onfile_breath");
       await availability(s);
+      await askedAndAnswered(s, NAMELESS);
       await s.assistantSays(READ_BACK);
       await s.callTool("book_appointment", BOOK);
       await s.turnEnds();
@@ -305,7 +317,7 @@ describe("an on-file name: did the read-back say it?", () => {
     const { summary } = await record(async () => {
       const s = await bootOnFile("CA_conf_onfile_first");
       await availability(s);
-      await s.assistantTurn("Friday, September 18 at 2:00 PM for Jon, booking that now.");
+      await s.assistantTurn("So that's Friday, September 18 at 2:00 PM for Jon, is that right?");
       await s.callerSays("Yes.");
       await s.callTool("book_appointment", BOOK);
       await s.assistantTurn("You're all set.");
@@ -342,13 +354,15 @@ describe("read-backs are counted by sentence", () => {
     const { summary, saves } = await record(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_doubled_breath" });
       await availability(s);
+      await askedAndAnswered(s);
       await s.assistantSays(DOUBLED);
       await s.callTool("book_appointment", ARGS);
       await s.turnEnds();
       await s.hangUp();
     });
-    expect(saves[0].readbacks).toBe(2);
-    expect(summary.confirm.max_readbacks_per_save).toBe(2);
+    // The answered question + the two glued sentences after the yes.
+    expect(saves[0].readbacks).toBe(3);
+    expect(summary.confirm.max_readbacks_per_save).toBe(3);
     expect(summary.confirm.saves_over_one_readback).toBe(1);
   });
 
@@ -390,6 +404,7 @@ describe("an interrupted turn's words are still counted", () => {
     const { saves } = await record(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_conf_interrupted" });
       await availability(s);
+      await askedAndAnswered(s);
       await s.assistantSays(READ_BACK);
       await s.callTool("book_appointment", ARGS);
       s.live.push({ serverContent: { interrupted: true } });
@@ -399,7 +414,8 @@ describe("an interrupted turn's words are still counted", () => {
       await s.hangUp();
     });
     expect(saves).toHaveLength(1);
-    expect(saves[0].readbacks).toBe(1);
+    // The answered question + the repeat spoken before the interrupt.
+    expect(saves[0].readbacks).toBe(2);
   });
 
   it("a read-back interrupted with no save yet is still counted", async () => {

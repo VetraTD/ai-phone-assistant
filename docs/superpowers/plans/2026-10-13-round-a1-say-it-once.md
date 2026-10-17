@@ -1106,3 +1106,73 @@ Conserve usage and time WITHOUT compromising quality; cheaper models for mechani
 detail in the ledger. Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work;
 owner decisions final; stop and ask at 2 h. Round A2 (LVX167, LVX174, LVX175) comes after this.
 ```
+
+## Part 5 sitting 1 as built (2026-10-16, 19:04–~21:05 CDT, $0) — LVX179 fixes 1–2 + LVX180 prompt + carry-over
+
+Plan: `~/.claude/plans/pasted-content-id-ff3e-fix-lvx179-deep-mitten.md`. Owner answers at the start: the one question
+SPELLS BOTH names for a new person; a paid LVX181 probe is OK (exact $ first); LVX180 prompt items folded in.
+Owner mid-sitting (AskUserQuestion): an answer the caller already gave carries over — "it should not ask again for
+anything it already got the answer to". Not deployed; prod still `voice-uk-prod-00105-mw4` @ `5c15583`.
+
+**What changed (code):**
+- `lib/voice/savePolicy.js` `decideSave` (booking rule): saves only on a QUESTION about this slot in the previous turn
+  (`asksReadBack`: confirmReadBackRe or "please confirm", not ending on a statement) + a sound since + no objection;
+  any read-back in the turn being spoken HOLDS (question → awaiting; statement → `in_turn_statement`); a previous
+  statement → `previous_statement` held. A yes that names a DIFFERENT time is a change (`clockTimesIn`/`timesAgainst`,
+  CA94817d). New source `answered_earlier` = the carry-over. `composeReadBack` = "So that's … for Maya, M-A-Y-A,
+  Okafor, O-K-A-F-O-R, is that right?" (every name spelled when the caller spelled).
+- `services/tools.js`: on the booking rule the A1 decision is authoritative — `readBackMade` = the slot question only
+  (b's 10 AM rode an action-blind "Just to confirm … additional one, correct?"); refusal iff not agreed (slot-tied
+  latch kept); write-order ceiling + attempt budget NEVER release a booking-rule write; silent-turn verdict decides
+  before the action-blind token; stash only on a slot question; new `a1AskMessage` hands the question and says WAIT;
+  an ENGINE retry of a booking must also pass the one-question rule for its own slot, else it is dropped
+  (`a1_engine_retry_dropped`; CA94817d's replay booked the stale 4:30 on the caller's yes to 10 AM).
+- `lib/voice/live/index.js`: `a1AnsweredReadBack` — the booking question (asks + names a time/day) judged ONCE per
+  question at EVERY turn end; kept unless the answer is a no / question / change / a time it did not name, or the
+  question is a cancellation; cleared by a newly asked time question and by any completed action. Runner copies it
+  (`lib/voice/live/tools.js`, also in the refusal-echo key). Cap pass-said accepts the question form.
+- Success replies (book + reschedule): `Say only: "Done, you're all set."`.
+- Prompt (`capabilities/appointments.js`, `capabilities/messages.js`, `services/gemini.js`): ONE question, wait,
+  never call in that breath, then only "Done, you're all set"; ask-now spelling = "Could you spell the first and last
+  name for me?"; on-file caller never asked for a name, "not even their full name" (LVX180); "another / also / one
+  more" = extra, no ask, opener no longer reads against it (LVX180); "Never ask the caller again for something they
+  have already answered on this call".
+
+**Proof so far:** `tests/lvx179Replay.test.js` (18 rows: b/d1/d1b replays, previous statement, just-to-confirm hole,
+clear no, full-name spelling, prompt, 5 carry-over rows) RED 5/7 at HEAD before the fix. 58 old-rule tests updated
+deliberately (listed in the ledger P5 S1 lines); CA954592 #2-4 expectations CHANGED write→refuse (no ceiling release).
+Tests caught three defects of my own before commit: CA94817d (yes + different time booked 4:30), a cancellation's yes
+carried to a booking, an older answer surviving a newer unanswered proposal — all fixed, each has a row.
+
+**Not done (S2):** full root suite on a still tree; sabotage census has 11 drifted rows + new rows to add and
+hand-verify RED; Fix 3 (correction moves); LVX181 (count → probe → pick); opus review; gate. Pre-existing, not mine:
+`corpus:build` rewrites derived targets in CA240834/CA299f23/CA6dcec7/CAec2309 at HEAD (gate does not run
+`corpus:check`) — left as committed, backlog note.
+
+**Residual risks to put to the reviewer:** (1) a "no" whose transcript arrives after the turn ends is judged as
+"answered" (same lag A1 already lives with; the model heard it and must still call); (2) when spelling is asked AFTER
+the question was answered, the letters are never read back (owner rule: never ask again wins); (3) `PLEASE_CONFIRM_RE`
+is English-only; (4) the time comparer over-reads (safe direction: one more ask).
+
+## Part 5 sitting 2 starting message (paste into a fresh session)
+
+```text
+Continue LVX179 + LVX181, sitting 2 of 3. S1 code is committed on feat/outbound-stage4, NOT deployed (prod
+voice-uk-prod-00105-mw4 @ 5c15583; rollback `gcloud run services update-traffic voice-uk-prod
+--to-revisions=voice-uk-prod-00104-n6b=100 --project=vetra-uk-edc8ca --region=europe-west2`).
+Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 5 sitting 1 as built"; plan
+~/.claude/plans/pasted-content-id-ff3e-fix-lvx179-deep-mitten.md (Fix 3, LVX181 A-C, Proof); ledger
+.superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P5 S1 lines).
+FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion).
+Order: (0) full root suite on a still tree (~17 min, background) -- fix stragglers; (1) Fix 3: a correction right
+after a save MOVES that booking (lastBooked + words since the save: correction cue -> move via the reschedule path;
+"another/also/too" -> add; unclear -> "Move your 9 a.m. to 10, or keep both?"), red-first rows; (2) LVX181 A: $0 log
+count of replies after a short wordless caller sound + baseline reply_after_last_voice_ms_p50 on 00105; B: the probe
+(state exact $ and wait for my yes); C: pick with me; (3) sabotage: repoint the 11 drifted census rows, add rows for
+every new guard (in-turn statement holds, question-required, voiced-required, Done-only prefix, full-name spelling,
+carry-over set/supersede/cancel/spent, engine-retry own-slot, time comparer, correction move/add/ask), hand-verify
+each RED; (4) opus review with the residual risks listed in "S1 as built"; (5) gate-v4 db fullsab in mintty. Stop
+and ask at 2 h. S3 = gate verdict, ONE redeploy (ask), 3 calls (cap $2), docs.
+Rules as before: paid runs need my yes; never git checkout/restore over uncommitted work; owner decisions final;
+short plain replies, detail in the ledger; cheaper models for mechanical work.
+```

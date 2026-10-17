@@ -60,14 +60,15 @@ import { getStrings } from "../lib/voice/strings.js";
 const BOOK_APPOINTMENT_DECLARATION = {
   name: "book_appointment",
   description:
-    // Round A1: was "Call this only after confirmation" — a wait for a yes
-    // after the read-back. One read-back, then book unless they object.
-    "Book an appointment. Read the day, the time and the name back ONCE as " +
-    "you book it — e.g. \"Tuesday at 3 p.m. for Jon Doe, booking that now\" — and " +
-    "call this in that same response; book it unless the caller objects. " +
+    // LVX179 (owner, 2026-10-16): ONE question, then book on any answer
+    // that is not a no. Was "read it back as you book it ... in that same
+    // response" -- the same-breath save that booked 9 AM on call b.
+    "Book an appointment. First ask ONE question that names the day, the time " +
+    "and the name — e.g. \"So that's Tuesday at 3 p.m. for Jon Doe, is that right?\" — " +
+    "and wait for the answer. Call this only after they answer with anything but " +
+    "a no, never in the same response as that question. " +
     // Round A1 part 4 (owner): questions come BEFORE the read-back.
-    "Never say \"booking that now\" while a spelling or an extra-or-move " +
-    "question is still open: ask it first.",
+    "Ask any spelling or extra-or-move question BEFORE that one question.",
   parameters: {
     type: "object",
     properties: {
@@ -774,14 +775,17 @@ function existingAppointmentContextRules(policy) {
     ];
   }
 
+  // LVX180 (d1 CA7c0d50): "book ANOTHER appointment" still got the
+  // extra-or-move question. The old opener ("Do NOT offer to book ... another
+  // one") read against the "another -> no ask" line below it.
   return [
-    "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
-      "another one — this applies just as much when YOU are the one raising it as when they ask. " +
+    "This caller already has an upcoming appointment. Never be the one to suggest booking another. " +
       "If they ask to book one themselves and their words make it clear it is an extra one — " +
-      "\"another\", \"also\", \"as well\", \"a second one\" — or it is for someone else, do not ask — " +
-      "book it with in_addition_to_existing set to true. Otherwise ask in your very next reply, before " +
-      "you look at times, whether it is an extra one or a move of what they already have, and never " +
-      "say \"booking that now\" while that is still open.",
+      "\"another\", \"also\", \"as well\", \"one more\", \"a second one\" — or it is for someone else, " +
+      "that is already answered: do not ask whether it is extra — book it with " +
+      "in_addition_to_existing set to true. Otherwise ask in your very next reply, before you look at " +
+      "times, whether it is an extra one or a move of what they already have, and ask that before your " +
+      "one confirming question.",
   ];
 }
 
@@ -815,8 +819,10 @@ function bookingGuidance(config, now, canCheck) {
       // Round A1 (owner, 2026-10-13): was "7. Read all details back and ask a
       // clear yes/no ... 8. Do NOT call book_appointment until the caller
       // clearly confirms" — the second yes the owner heard.
-      `7. Read the day, the time and the name back ONCE and book it in the same breath — for example "Tuesday at 3 p.m. for Jon Doe, booking that now" — calling book_appointment in that same response. If they spelled their name, say the letters in that one read-back. Do not ask "shall I go ahead?" first. Never say "booking that now" while a spelling or an extra-or-move question is still open: ask it first.\n` +
-      `8. If the caller objects, asks a question or changes something, deal with that and read back only what changed. Never ask them to confirm the same details twice. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
+      // LVX179 (owner, 2026-10-16): ONE question, then the booking on any
+      // answer that is not a no, then only "Done, you're all set".
+      `7. Ask ONE question that names the day, the time and the name — for example "So that's Tuesday at 3 p.m. for Jon Doe, is that right?" — and stop there: do not call book_appointment in that same response. If they spelled the name, say its letters in that question. Ask any spelling or extra-or-move question BEFORE it.\n` +
+      `8. When they answer with anything but a no, call book_appointment straight away — do NOT check availability one last time first; the system re-checks at booking time on its own — and then say only "Done, you're all set." If they object, ask a question or change something, deal with that and ask about only what changed, once. Never ask them to confirm the same details twice. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
     );
   }
 
@@ -826,8 +832,8 @@ function bookingGuidance(config, now, canCheck) {
     `1. Ask whether they prefer mornings or afternoons.\n` +
     `2. Ask if any specific days of the week don't work for them.\n` +
     `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
-    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then read the details back ONCE (name, date, time, service) and book it in the same breath — "Thursday at 2 p.m. for Marcus Webb, booking that now" — calling book_appointment in that same response. Never say "booking that now" while a spelling or an extra-or-move question is still open: ask it first.\n` +
-    `5. Book it unless the caller objects; never ask them to confirm the same details twice.\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then ask ONE question with the details (name, date, time, service) — "So that's Thursday at 2 p.m. for Marcus Webb, is that right?" — and wait for the answer; do not call book_appointment in that same response. Ask any spelling or extra-or-move question BEFORE it.\n` +
+    `5. When they answer with anything but a no, call book_appointment, then say only "Done, you're all set." Never ask them to confirm the same details twice.\n` +
     `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
   );
 }
@@ -1253,7 +1259,7 @@ const OUTBOUND_BOOKING_GUARDRAIL =
   `- When booking: read the day, the time and their name back, and book only after a clear yes. Use their first name naturally; if a booking needs their full name, ask for it once and read it back.\n`;
 
 const BOOKING_CONFIRMATION_GUARDRAIL =
-  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them to spell it again. In your one read-back, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a surname they spelled for you on this call. Do not ask them to spell anything unless you are told to.\n`;
+  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them for it at all — not even their full name — or ask them to spell it. In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call. Do not ask them to spell anything unless you are told to.\n`;
 
 /**
  * Availability check — a READ (like get_available_slots), registered only when a
@@ -2457,11 +2463,17 @@ async function bookAppointment(fc, ctx) {
               // rather than from what it remembers asking for. On CA163f2fe4 it
               // announced "all set" seven seconds before the write; it cannot
               // have these values before there is a row to take them from.
+              // LVX179 (owner, 2026-10-16): after the save ONLY "Done, you're
+              // all set" -- the caller has just answered a question that named
+              // the day, the time and the name, so saying them again is the
+              // second read-back A1 exists to remove. The facts stay in the
+              // reply for the model, never for the caller.
               bookMessage =
-                "Booked. Tell the caller, in one short sentence, that it is booked for " +
+                "Booked: " +
                 speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config)) +
                 (args.client_name ? " under " + args.client_name : "") +
-                ". Do not add anything you were not told here.";
+                '. Say only: "Done, you\'re all set." Do not repeat the day, the time or the name, ' +
+                "and do not add anything you were not told here.";
               // BUILT HERE, one line below the insert, from the value that was
               // written. Not from what the model asked for and not from what it
               // believes happened -- `anchoredScheduledAt` is what went into the
@@ -2481,7 +2493,7 @@ async function bookAppointment(fc, ctx) {
                 const alsoHas = allUpcoming
                   .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
                   .join("; ");
-                bookMessage += ` This caller also has an existing upcoming appointment on ${alsoHas} — that one still stands.`;
+                bookMessage += ` For you only, not to say unless they ask: this caller also has an existing upcoming appointment on ${alsoHas}, and that one still stands.`;
               }
             }
           } catch (err) {
@@ -3328,7 +3340,11 @@ async function rescheduleAppointment(fc, ctx) {
       id: fc.id,
       name: fc.name,
       response: ok
-        ? { success: true, message: "Rescheduled." }
+        ? {
+            success: true,
+            // LVX179 (owner, 2026-10-16): after the save only "Done, you're all set".
+            message: 'Rescheduled. Say only: "Done, you\'re all set." Do not repeat the day, the time or the name.',
+          }
         : { success: false, message: "Couldn't reschedule." },
     },
     stateEffects: {

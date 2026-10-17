@@ -307,7 +307,9 @@ describe("the Live write path, end to end, asserted on the row", () => {
 
     // Book one of the alternatives the taken-check put on the table.
     const alt = "2026-09-07T14:30:00";
-    await s.assistantTurn(READ_BACK);
+    // LVX179: the one question must name the slot written (it used to pass on
+    // the action-blind "Just to confirm" of a different time).
+    await s.assistantTurn(READ_BACK.replace("2 00 PM", "2 30 PM"));
     await s.callerSays("Yes.");
     await s.book({ scheduled_at: alt, client_name: CLIENT });
 

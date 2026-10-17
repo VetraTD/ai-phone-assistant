@@ -49,20 +49,22 @@ describe("part 4 F-A — the ask-now rule reaches the static prefix (what Live i
     expect(prefix(avail)).toMatch(/When the caller says something you need to check, check it in your very next reply/);
   });
 
-  it("asks a new name's spelling straight away, before times and before any read-back", () => {
+  // LVX179 (owner, 2026-10-16): the FULL name, one ask -- call b's "spell it"
+  // got the surname only, and "Maja" was written for Maya.
+  it("asks a new name's spelling straight away -- first AND last name, one ask -- before times and any read-back", () => {
     expect(prefix(avail)).toMatch(
-      /ask them to spell it in your very next reply — before you look up times and before any read-back/
+      /ask them to spell the first AND last name in one go, in your very next reply — "Could you spell the first and last name for me\?" — before you look up times and before any read-back/
     );
   });
 
   it("does not tell the model to ask for spellings when the spelling policy is off", () => {
     process.env.VOICE_SPELL_POLICY = "off";
-    expect(prefix({ ...avail, config: { ...avail.config } })).not.toMatch(/ask them to spell it in your very next reply/);
+    expect(prefix({ ...avail, config: { ...avail.config } })).not.toMatch(/ask them to spell the first AND last name/);
   });
 
-  it("never 'booking that now' while a question is still open", () => {
-    expect(prefix(avail)).toMatch(/Never say "booking that now" while a question like that is still open/);
-    expect(bookDecl(avail).description).toMatch(/never say "booking that now" while/i);
+  it("never the one confirming question while another question is still open", () => {
+    expect(prefix(avail)).toMatch(/Never ask your one confirming question while a question like that is still open/);
+    expect(bookDecl(avail).description).toMatch(/Ask any spelling or extra-or-move question BEFORE that one question/);
   });
 });
 
@@ -77,16 +79,19 @@ describe("part 4 F-A — read-back examples carry a meridiem (the bare 'at 3' fo
     for (const t of texts) {
       expect(t).not.toMatch(/(?:Tuesday at 3|Thursday at 2) for /);
     }
-    expect(texts[0]).toMatch(/Tuesday at 3 p\.m\. for Jon Doe, booking that now/);
+    expect(texts[0]).toMatch(/So that's Tuesday at 3 p\.m\. for Jon Doe, is that right\?/);
   });
 });
 
 describe("part 4 F-A — in addition: ask only when unclear, and straight away (default policy)", () => {
   it("no ask when their words make it clear, or the booking is for someone else", () => {
     const t = liveTail(avail, [appt(4)]);
-    expect(t).toMatch(/"another", "also", "as well", "a second one"/);
+    expect(t).toMatch(/"another", "also", "as well", "one more", "a second one"/);
     expect(t).toMatch(/for someone else/);
-    expect(t).toMatch(/do not ask — book it with in_addition_to_existing set to true/);
+    expect(t).toMatch(/do not ask whether it is extra — book it with in_addition_to_existing set to true/);
+    // LVX180 (d1 CA7c0d50): the old opener "Do NOT offer to book ... another
+    // one" read against the "another -> no ask" line.
+    expect(t).not.toMatch(/Do NOT offer to book, schedule, or arrange/);
     // The old "only after you have told them about the existing one" is what
     // made d1 ask a caller who had said "another appointment".
     expect(t).not.toMatch(/after you have told them about the existing one/);

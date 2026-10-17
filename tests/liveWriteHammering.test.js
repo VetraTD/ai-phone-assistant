@@ -193,13 +193,21 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     return s;
   }
 
-  it("said in the same turn, then called again, reaches the gate and books", async () => {
+  // LVX179 (owner, 2026-10-16): the handed sentence is now the ONE question.
+  // Asked and called in the same breath, it reaches the gate (the echo must
+  // not answer it) and WAITS for the caller; their answer books it.
+  it("said in the same turn, then called again, reaches the gate and waits; the answer books", async () => {
     const s = await heldOnce();
     await s.assistantSays(SENTENCE);
     const [second] = await s.callTool("book_appointment", ARGS);
-    expect(second.response.success).toBe(true);
-    expect(s.store.scheduled()).toHaveLength(1);
+    expect(second.response.success).toBe(false);
+    expect(second.response.message).toMatch(/you have ALREADY read these details back/);
     expect(counters().live_write_refusal_replayed).toBeFalsy();
+    await s.turnEnds();
+    await s.callerSays("Yes.");
+    const [third] = await s.callTool("book_appointment", ARGS);
+    expect(third.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
   });
 
   it("past the round cap, a held booking comes back held with its sentence -- never 'too many tool calls'", async () => {
@@ -221,7 +229,8 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
     await s.assistantTurn("Thanks. And the name for the booking?");
     await s.callerSays("Marcus Bell.");
-    await s.assistantSays(SENTENCE);
+    // LVX179: no question said in this breath -- one said would let round 6
+    // through the cap to the gate (cap_pass_said), which is not this case.
     const all = [];
     for (let i = 0; i < 6; i += 1) all.push(await s.callTool("book_appointment", ARGS));
     expect(all[0][0].response.message).toMatch(/FULL name/);
@@ -235,13 +244,19 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
   // Review I1: the model calls four more times BEFORE speaking, then says the
   // sentence and calls -- round 6. Handing the sentence again would have it
   // said twice and the booking held for a sound from the caller.
-  it("past the cap, once the handed sentence HAS been said, that one call reaches the gate and books", async () => {
+  it("past the cap, once the handed sentence HAS been said, that one call reaches the gate (and waits for the answer)", async () => {
     const s = await heldOnce();
     for (let i = 0; i < 4; i += 1) await s.callTool("book_appointment", ARGS);
     await s.assistantSays(SENTENCE);
     const [sixth] = await s.callTool("book_appointment", ARGS);
     expect(counters().live_tool_rounds_cap_pass_said).toBe(1);
-    expect(sixth.response.success).toBe(true);
+    // The gate's own answer, not the cap's: asked in this breath, so it waits.
+    expect(sixth.response.success).toBe(false);
+    expect(sixth.response.message).toMatch(/you have ALREADY read these details back/);
+    await s.turnEnds();
+    await s.callerSays("Yes.");
+    const [next] = await s.callTool("book_appointment", ARGS);
+    expect(next.response.success).toBe(true);
     expect(s.store.scheduled()).toHaveLength(1);
   });
 
@@ -302,7 +317,9 @@ describe("round A1 part 3: the handed sentence (CAff059ed)", () => {
     await s.callerSays("Marcus Bell.");
     const [first] = await s.callTool("book_appointment", ARGS);
     expect(first.response.message).not.toMatch(/straight away/i);
-    expect(first.response.message).toMatch(/once you have said it/i);
+    // LVX179: ask, then WAIT -- never the call in the same breath.
+    expect(first.response.message).toMatch(/wait for their answer/i);
+    expect(first.response.message).toMatch(/do not call this again in the same breath/i);
   });
 
   it("the echo's log line names the call, so a filtered read finds it", async () => {

@@ -54,6 +54,7 @@ vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 
 import { shouldConfirmSpelling } from "../lib/nameQuality.js";
 import { executeToolCall } from "../services/tools.js";
+import { composeReadBack } from "../lib/voice/savePolicy.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const ON_FILE = {
@@ -161,7 +162,12 @@ describe("LVX53 end to end — owner F4: booked, and counted", () => {
     // above the spelling gate: checking whose name is on a write nobody
     // authorised is checking a decision that was never made.
     lastCallerText: "Yes, Tuesday works",
-    lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
+    // LVX179: the ONE question names the slot being written.
+    lastReplyText: composeReadBack({
+      toolName: "book_appointment",
+      args: { client_name: "Nithin Vodla", scheduled_at: `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00` },
+      config: {},
+    }),
   });
 
   const book = (c) =>
@@ -194,7 +200,7 @@ describe("LVX53 end to end — owner F4: booked, and counted", () => {
     });
     expect(functionResponse.response.success).toBe(false);
     expect(functionResponse.response.gated).toBe(true);
-    expect(functionResponse.response.message).toMatch(/ for Nithin Vodla, booking that now\./);
+    expect(functionResponse.response.message).toMatch(/ for Nithin Vodla, is that right\?/);
     expect(functionResponse.response.message).not.toMatch(/V-O-D-L-A/);
     expect(mockCreateAppointment).not.toHaveBeenCalled();
     // The write-order gate's look-ahead at the spelling gate (F2) decides
