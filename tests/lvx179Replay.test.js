@@ -20,6 +20,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { correctionAfterSave, classifyOrKeepAnswer } from "../capabilities/appointments.js";
 
 const OPEN = { open: "09:00", close: "18:00", closed: false };
 const CONFIG = {
@@ -470,5 +471,123 @@ describe("LVX179 carry-over rules and the engine's retry", () => {
     const [r] = await s.callTool("book_appointment", book(AT_14));
     expect(r.response.success).toBe(false);
     expect(s.store.scheduled()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 3, opus review (2026-10-16): a row moves ONLY on an answer to a question
+// that named the move; the same person means the same name; Live only; a full
+// slot is never moved into; a transcript that lags the answer defers to the
+// model, which heard it.
+// ---------------------------------------------------------------------------
+describe("LVX179 Fix 3 review: never a silent move", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+  async function savedAt9(callSid, opts = {}) {
+    const s = opts.seedAppointments
+      ? await bootLive({ config: CONFIG, callSid, seedAppointments: opts.seedAppointments })
+      : await boot(callSid);
+    if (opts.seedAppointments) {
+      for (const at of [AT_9, AT_10, AT_14]) await s.callTool("check_appointment_availability", { requested_at: at });
+      await s.turnEnds();
+    }
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    const [saved] = await s.callTool("book_appointment", book(AT_9));
+    expect(saved.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    return s;
+  }
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+  const adaAt9 = (s) => s.store.scheduled().some((r) => r.client_name === "Ada Moss" && at(r) === local(AT_9));
+
+  it("a daughter with the same surname is never a move of the first booking (review #1)", async () => {
+    const s = await savedAt9("CA_fix3r_daughter");
+    await s.callerSays("No, that's it. Oh actually, my daughter Mia Moss needs one at 10.");
+    await s.assistantTurn("So that's Friday, September 18 at 10 AM for Mia Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10, "Mia Moss"));
+    expect(String(r.response.message)).not.toMatch(/Moved the appointment/);
+    expect(adaAt9(s)).toBe(true);
+  });
+
+  it("a stray 'no' then the model's own plain read-back: the move is ASKED, never done silently (review #1)", async () => {
+    const s = await savedAt9("CA_fix3r_stray_no");
+    await s.callerSays("No thanks. Hmm, what about Friday at 2?");
+    await s.assistantTurn("So that's Friday, September 18 at 2 PM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_14));
+    expect(r.response.success).toBe(false);
+    expect(String(r.response.message)).toMatch(/So that's moving your Friday, September 18 at 9/);
+    expect(s.store.scheduled()).toHaveLength(1);
+    expect(adaAt9(s)).toBe(true);
+  });
+
+  it("the model asks its own move question first: one question, moved (review #5)", async () => {
+    const s = await savedAt9("CA_fix3r_model_asks");
+    await s.callerSays("No, 10 instead.");
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m.?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("a full slot is never moved into: the first booking stays (review #2)", async () => {
+    // 10 was open when it was checked; someone else takes it before the move
+    // (a plain reschedule would double-book it).
+    const s = await savedAt9("CA_fix3r_full");
+    s.store.appointments.push({
+      id: "appt-ben",
+      business_id: s.store.scheduled()[0].business_id,
+      client_name: "Ben Ortiz",
+      client_phone: "+15550001111",
+      scheduled_at: "2026-09-18T15:00:00.000Z",
+      status: "scheduled",
+    });
+    await s.callerSays("No, 10 instead.");
+    await s.assistantTurn("So that's moving your Friday, September 18 at 9 AM to 10 AM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(String(r.response.message)).toMatch(/fully booked/);
+    expect(adaAt9(s)).toBe(true);
+  });
+
+  it("the answer to move-or-keep not transcribed yet: the model's choice stands, nothing lost (review #4)", async () => {
+    const s = await savedAt9("CA_fix3r_lag");
+    await s.callerSays("What about 10?");
+    const [ask] = await s.callTool("book_appointment", book(AT_10));
+    expect(String(ask.response.message)).toMatch(/or keep both\?/);
+    await s.turnEnds();
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9:00 AM to 10:00 AM, or keep both?");
+    await s.feed(900, { voiced: true });
+    await s.feed(400);
+    const [r] = await s.callTool("book_appointment", { ...book(AT_10), in_addition_to_existing: true });
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(2);
+  });
+
+  it("the cascade (no words-since-save) is left to the ordinary path (review #3)", () => {
+    const ctx = {
+      capabilityState: {
+        appointments: { lastBooked: { id: "a1", scheduled_at: "2026-09-18T14:00:00.000Z", client_name: "Ada Moss", callerSaidLen: 0 } },
+      },
+      lastCallerText: "",
+    };
+    expect(correctionAfterSave(book(AT_10), ctx, "2026-09-18T15:00:00.000Z")).toBeNull();
+    expect(correctionAfterSave(book(AT_10), { ...ctx, callerSaidThisCall: "No, 10 instead." }, "2026-09-18T15:00:00.000Z")).toMatchObject({ kind: "confirm_move" });
+  });
+
+  it("answers to move-or-keep: 'no' keeps both, 'no, just move it' moves, 'yes' moves", () => {
+    expect(classifyOrKeepAnswer("No.")).toBe("add");
+    expect(classifyOrKeepAnswer("No, keep both.")).toBe("add");
+    expect(classifyOrKeepAnswer("No, just move it.")).toBe("move");
+    expect(classifyOrKeepAnswer("Yes please.")).toBe("move");
+    expect(classifyOrKeepAnswer("Yes, both.")).toBe("add");
+    expect(classifyOrKeepAnswer("Hmm.")).toBeNull();
   });
 });

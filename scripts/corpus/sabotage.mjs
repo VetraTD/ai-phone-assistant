@@ -2172,7 +2172,7 @@ const SABOTAGES = [
   {
     name: "p5-after-save-move",
     why:
-      "LVX179 Fix 3: a correction cue and no addition cue right after a save classifies as 'move' (the booking just made goes to the new time). Back to asking.",
+      "LVX179 Fix 3: a correction cue and no addition cue right after a save classifies as 'move', so the ONE question handed is the move read-back ('So that's moving your 9 to 10...'), not move-or-keep.",
     file: "capabilities/appointments.js",
     find: "  if (move && !add) return \"move\";",
     replace: "  if (move && !add) return \"ask\"; // SABOTAGE",
@@ -2199,9 +2199,9 @@ const SABOTAGES = [
   {
     name: "p5-after-save-same-person",
     why:
-      "LVX179 Fix 3: only the SAME person's booking is corrected (samePersonBookings); a different person right after the save is an ordinary second booking, nothing moved.",
+      "LVX179 Fix 3 (opus review #1): only the SAME person's booking is corrected (samePersonForMove: the same name, not F-E's loose family match); a daughter with the same surname right after the save is never a move of the first booking.",
     file: "capabilities/appointments.js",
-    find: "  if (samePersonBookings(args?.client_name, [last]).length === 0) return null;",
+    find: "  if (!samePersonForMove(args?.client_name, last.client_name)) return null;",
     replace: "  // SABOTAGE: any name counts as the same person",
     red: [LVX179_REPLAY],
   },
@@ -2230,6 +2230,60 @@ const SABOTAGES = [
     file: "services/tools.js",
     find: "  const after = fc.name === \"book_appointment\" ? afterSaveQuestion(fc.args || {}, ctx) : null;",
     replace: "  const after = null; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-move-only-after-move-question",
+    why:
+      "LVX179 Fix 3 (opus review #1, Critical): correction words alone never move a booking -- after a plain read-back the move is ASKED ('confirm_move'). Sabotaged, a stray 'no' said to 'anything else?' silently moves the first booking.",
+    file: "capabilities/appointments.js",
+    find: '  return { kind: k === "add" ? "add" : k === "move" ? "confirm_move" : "ask", last };',
+    replace: '  return { kind: k === "add" ? "add" : k === "move" ? "move" : "ask", last }; // SABOTAGE',
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-move-question-moves",
+    why:
+      "LVX179 Fix 3 (opus review #5): an answer to a question that NAMED the move ('Shall I move your 9 to 10?', the model's own or the gate's) moves the booking -- one question. Sabotaged, the caller is asked a second time.",
+    file: "capabilities/appointments.js",
+    find: '  if (MOVE_QUESTION_RE.test(asked)) return { kind: "move", last };',
+    replace: "  // SABOTAGE: a move question is not read",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-move-capacity",
+    why:
+      "LVX179 Fix 3 (opus review #2): a move checks the slot first -- reschedule is a plain update with no overlap check, so a correction into a full slot would double-book it.",
+    file: "capabilities/appointments.js",
+    find: "      full = !available;",
+    replace: "      full = false; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-fix3-live-only",
+    why:
+      "LVX179 Fix 3 (opus review #3): Live only. The cascade has no words-since-save, so Fix 3 there asked move-or-keep forever and no second booking was ever written.",
+    file: "capabilities/appointments.js",
+    find: '  if (typeof ctx?.callerSaidThisCall !== "string") return null;',
+    replace: "  // SABOTAGE: the cascade too",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-or-keep-no-keeps",
+    why:
+      "LVX179 Fix 3: 'No.' to 'Shall I move your 9 to 10, or keep both?' means do not move -- keep both. Sabotaged it is unclear and falls to the model's flag.",
+    file: "capabilities/appointments.js",
+    find: '  if (/^\\s*(?:no|nope|nah)\\b/i.test(t)) return "add";',
+    replace: "  // SABOTAGE: a plain no is unclear",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p5-or-keep-answer-read",
+    why:
+      "LVX179 Fix 3: after the move-or-keep question the caller's ANSWER decides ('keep both' adds, 'move it' moves); the model's flag only fills in when the answer is unclear or not transcribed yet.",
+    file: "capabilities/appointments.js",
+    find: '    const kind = classifyOrKeepAnswer(answer) || (args?.in_addition_to_existing === true ? "add" : "move");',
+    replace: '    const kind = args?.in_addition_to_existing === true ? "add" : "move"; // SABOTAGE',
     red: [LVX179_REPLAY],
   },
   {
@@ -2559,8 +2613,8 @@ const SABOTAGES = [
     name: "p4-no-booking-now-while-open",
     why: "A1 part 4 F-A, retargeted (LVX179 dropped 'booking that now'): the book_appointment declaration -- which Live always carries -- says to ask any spelling or extra-or-move question BEFORE the one question.",
     file: "capabilities/appointments.js",
-    find: "    \"Ask any spelling or extra-or-move question BEFORE that one question.\",",
-    replace: "    \"\",",
+    find: "    \"Ask any spelling or extra-or-move question BEFORE that one question. \" +",
+    replace: "    \"\" + // SABOTAGE",
     red: ["tests/a1AskNow.test.js"],
   },
   {

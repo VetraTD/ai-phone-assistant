@@ -69,7 +69,11 @@ const BOOK_APPOINTMENT_DECLARATION = {
     "and wait for the answer. Call this only after they answer with anything but " +
     "a no, never in the same response as that question. " +
     // Round A1 part 4 (owner): questions come BEFORE the read-back.
-    "Ask any spelling or extra-or-move question BEFORE that one question.",
+    "Ask any spelling or extra-or-move question BEFORE that one question. " +
+    // LVX179 Fix 3 (owner, 2026-10-16): a correction right after a save moves it.
+    "If the caller changes a booking you made earlier on this call (\"no, 10 instead\"), that one " +
+    "question names the move — \"Shall I move your 9 a.m. to 10 a.m.?\" — and calling this with the new " +
+    "time moves that booking; it never adds a second one.",
   parameters: {
     type: "object",
     properties: {
@@ -697,19 +701,74 @@ export function inAdditionWouldRefuse(args, ctx, config) {
 // the SAME person (samePersonBookings, F-E's predicate) at a DIFFERENT time,
 // on the call that just booked (scratch lastBooked).
 //
-// The caller's words since that save decide (owner): a correction cue and no
-// addition cue -> move it; an addition cue and no correction cue -> an extra
-// one; neither, both, or nothing transcribed yet -> ask ONCE, naming both
-// times (owner 22:55: "code makes it ask once"). After that question only the
-// answer counts (askedAtLen), and if even the answer is unclear the model's
-// own choice stands (in_addition_to_existing): the caller has been asked.
+// The caller's words since that save choose the ONE question (owner): a
+// correction cue and no addition cue -> "So that's moving your 9 a.m. to 10
+// a.m. ..., is that right?"; an addition cue and no correction cue -> the
+// ordinary read-back, then an extra one; neither or both -> "Shall I move your
+// 9 a.m. to 10 a.m., or keep both?" (owner 22:55: "code makes it ask once").
+//
+// Opus review (2026-10-16, Critical): a row is MOVED only on an answer to a
+// question that NAMED the move -- never on cue words alone. A stray "no" said
+// to "anything else?", or a daughter with the same surname, moved the first
+// booking silently. So: the same person means the same name (a misheard
+// first name of 4+ letters with the same surname, or the surname dropped,
+// still counts); Live only (the cascade has no words-since-save and asked
+// forever); after the move/keep question only the answer counts (askedAtLen,
+// for that slot only), and if the answer is unclear or not transcribed yet the
+// model's own choice stands (in_addition_to_existing) -- it heard the answer.
 // ---------------------------------------------------------------------------
 const AFTER_SAVE_MOVE_RE =
   /\b(?:no|nope|instead|actually|change|move|moving|make\s+it|rather|meant|switch|en\s+vez|mejor|cambi\w*|mueva|mover)\b/i;
 const AFTER_SAVE_ADD_RE =
   /\b(?:another|also|too|as\s+well|second|both|extra|in\s+addition|keep|tambi[eé]n|adem[aá]s|las\s+dos|ambas|mantener|mantenga)(?![\p{L}])/iu;
 
-/** "move" | "add" | "ask" for the caller's words since the save (or since the question). */
+const MOVE_QUESTION_RE = /\b(?:moving\s+your|move\s+your|muevo\s+su|la\s+mueva)\b/i;
+const OR_KEEP_RE = /\bor\s+keep\s+both\b|\bmantenga\s+las\s+dos\b/i;
+const OR_KEEP_ADD_RE =
+  /\b(?:keep|both|another|also|extra|add|second|as\s+well|las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])/iu;
+const OR_KEEP_MOVE_RE = /\b(?:move|moving|change|switch|instead|replace|mueva(?:la)?|c[aá]mbiela|cambie)(?![\p{L}])/iu;
+const OR_KEEP_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|s[ií]|claro)(?![\p{L}])/iu;
+
+/**
+ * The answer to "Shall I move your X to Y, or keep both?". "No" means do not
+ * move (keep both); "No, just move it" names the move. Null = unclear.
+ */
+export function classifyOrKeepAnswer(text) {
+  const t = typeof text === "string" ? text : "";
+  if (!t.trim()) return null;
+  if (OR_KEEP_ADD_RE.test(t)) return "add";
+  if (OR_KEEP_MOVE_RE.test(t)) return "move";
+  if (/^\s*(?:no|nope|nah)\b/i.test(t)) return "add";
+  if (OR_KEEP_YES_RE.test(t)) return "move";
+  return null;
+}
+
+/** Fix 3's "same person": the same name, not F-E's loose family match. */
+function samePersonForMove(name, theirs) {
+  const a = nameWords(name);
+  const b = nameWords(theirs);
+  if (a.length === 0 || b.length === 0) return false;
+  if (a.join(" ") === b.join(" ")) return true;
+  if ((a.length === 1 || b.length === 1) && a[0] === b[0]) return true;
+  return (
+    a.length > 1 &&
+    b.length > 1 &&
+    a[a.length - 1] === b[b.length - 1] &&
+    a[0].length >= 4 &&
+    b[0].length >= 4 &&
+    withinOneEdit(a[0], b[0])
+  );
+}
+
+/** The confirming question the caller just answered about THIS slot, or "". */
+function answeredQuestionFor(args, ctx) {
+  for (const t of [ctx?.lastReplyText, ctx?.a1AnsweredReadBack]) {
+    if (typeof t === "string" && t.trim() && args?.scheduled_at && readBackMentionsSlot(t, args.scheduled_at)) return t;
+  }
+  return "";
+}
+
+/** "move" | "add" | "ask" for the caller's words since the save. */
 export function classifyAfterSave(text) {
   const t = typeof text === "string" ? text : "";
   if (!t.trim()) return "ask";
@@ -724,6 +783,18 @@ function callerSaidLen(ctx) {
   return typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall.length : null;
 }
 
+/** lastBooked + "the move/keep question for THIS slot was put here" (review #6: scoped to the slot). */
+function askedPatch(last, args, ctx) {
+  let askedFor = null;
+  try {
+    const v = validateBookingTime(args?.scheduled_at, ctx?.config || {}, ctx?.deps);
+    askedFor = v?.ok ? Date.parse(v.scheduledAt) : null;
+  } catch {
+    askedFor = null;
+  }
+  return { ...last, askedAtLen: callerSaidLen(ctx), askedFor };
+}
+
 /**
  * Does Fix 3 apply to this book_appointment, and which way?
  *
@@ -733,23 +804,27 @@ function callerSaidLen(ctx) {
  * @returns {null | { kind: "move"|"add"|"ask"|"wait", last: object }}
  */
 export function correctionAfterSave(args, ctx, scheduledAtInstant) {
+  // Live only (review #3): the cascade has no words-since-save.
+  if (typeof ctx?.callerSaidThisCall !== "string") return null;
   const last = scratch(ctx).lastBooked;
   if (!last?.id || !last.scheduled_at) return null;
   const lastMs = Date.parse(last.scheduled_at);
   const newMs = Date.parse(scheduledAtInstant ?? "");
   if (!Number.isFinite(lastMs) || !Number.isFinite(newMs) || lastMs === newMs) return null;
-  if (samePersonBookings(args?.client_name, [last]).length === 0) return null;
-  const said = typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall : null;
-  if (Number.isFinite(last.askedAtLen)) {
-    const answer = said != null ? said.slice(last.askedAtLen) : ctx?.lastCallerText || "";
-    if (!answer.trim()) return { kind: "wait", last };
-    const kind = classifyAfterSave(answer);
-    if (kind !== "ask") return { kind, last };
-    return { kind: args?.in_addition_to_existing === true ? "add" : "move", last };
+  if (!samePersonForMove(args?.client_name, last.client_name)) return null;
+  const said = ctx.callerSaidThisCall;
+  const asked = answeredQuestionFor(args, ctx);
+  const askedHere = Number.isFinite(last.askedAtLen) && last.askedFor === newMs;
+  if (askedHere || OR_KEEP_RE.test(asked)) {
+    const answer = askedHere ? said.slice(last.askedAtLen) : ctx?.lastCallerText || "";
+    const kind = classifyOrKeepAnswer(answer) || (args?.in_addition_to_existing === true ? "add" : "move");
+    return { kind, last };
   }
-  const words =
-    said != null && Number.isFinite(last.callerSaidLen) ? said.slice(last.callerSaidLen) : ctx?.lastCallerText || "";
-  return { kind: classifyAfterSave(words), last };
+  // Moved ONLY on an answer to a question that named the move (review #1).
+  if (MOVE_QUESTION_RE.test(asked)) return { kind: "move", last };
+  const words = Number.isFinite(last.callerSaidLen) ? said.slice(last.callerSaidLen) : "";
+  const k = classifyAfterSave(words);
+  return { kind: k === "add" ? "add" : k === "move" ? "confirm_move" : "ask", last };
 }
 
 /**
@@ -775,7 +850,7 @@ export function afterSaveQuestion(args, ctx) {
   try {
     const config = ctx?.config || {};
     const d = afterSaveDecision(args, ctx);
-    if (!d || d.kind === "add" || d.kind === "wait") return null;
+    if (!d || d.kind === "add") return null;
     const orKeep = d.kind === "ask";
     return {
       sentence: composeMoveQuestion({
@@ -785,7 +860,7 @@ export function afterSaveQuestion(args, ctx) {
         config,
         orKeep,
       }),
-      lastBooked: orKeep ? { ...d.last, askedAtLen: callerSaidLen(ctx) } : null,
+      lastBooked: orKeep ? askedPatch(d.last, args, ctx) : null,
     };
   } catch {
     return null;
@@ -795,6 +870,43 @@ export function afterSaveQuestion(args, ctx) {
 /** Fix 3, "move": the row just booked goes to the new time. Never an insert. */
 async function moveJustBooked(fc, ctx, last, anchoredScheduledAt) {
   const args = fc.args || {};
+  // Review #2: reschedule is a plain update with no overlap check, unlike the
+  // atomic insert a booking uses -- so the slot is checked first, as the book
+  // path's own pre-check does. A full slot leaves the first booking as it is.
+  const avail = availabilitySettings(capabilityConfig(ctx?.config || {}, "appointments"));
+  const adapter = schedulingAdapter(ctx?.config || {}, ctx?.integrations);
+  if (typeof adapter.checkAvailability === "function") {
+    let full = false;
+    try {
+      const { available } = await adapter.checkAvailability(ctx, {
+        startISO: anchoredScheduledAt,
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+      });
+      full = !available;
+    } catch (err) {
+      ctx?.deps?.captureException?.(err);
+    }
+    if (full) {
+      bumpCounter("booking_correction_move_failed");
+      return {
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: {
+            success: false,
+            message:
+              "That time is fully booked. The appointment booked a moment ago is unchanged. Offer the caller a " +
+              "different time — call check_appointment_availability to find open slots.",
+          },
+        },
+        stateEffects: {
+          toolResult: { name: fc.name, success: false, message: "I'm sorry, that time is already taken.", callerSafe: true },
+          toolCallEvent: { name: fc.name, args },
+        },
+      };
+    }
+  }
   const moved = await rescheduleAppointment(
     {
       id: fc.id,
@@ -843,15 +955,28 @@ async function moveJustBooked(fc, ctx, last, anchoredScheduledAt) {
   };
 }
 
-/** Fix 3, "ask" / "wait": held, with the named question (or "you asked; wait"). */
-function moveOrKeepResult(fc, ctx, config, last, wait) {
+/**
+ * Fix 3, held with ONE named question: "ask" = move or keep both;
+ * "confirm_move" = the caller's words said it is a correction, but the
+ * question they answered did not name the move, so the move is asked.
+ */
+function moveOrKeepResult(fc, ctx, config, last, kind) {
   const args = fc.args || {};
-  const question = composeMoveQuestion({ fromAt: last.scheduled_at, toAt: args.scheduled_at, config, orKeep: true });
-  if (!wait) bumpCounter("booking_correction_asked");
-  const message = wait
-    ? "[not caller speech] HELD, not failed. You asked whether to move the appointment booked a moment ago or " +
-      "keep both, and the caller has not answered yet. WAIT for their answer, then call this again with the " +
-      "same details. Do not book anything else and do not ask again."
+  const orKeep = kind === "ask";
+  const question = composeMoveQuestion({
+    fromAt: last.scheduled_at,
+    toAt: args.scheduled_at,
+    clientName: orKeep ? "" : args.client_name,
+    config,
+    orKeep,
+  });
+  bumpCounter("booking_correction_asked");
+  const message = !orKeep
+    ? "[not caller speech] HELD, not failed: this caller booked an appointment a moment ago on this call and " +
+      "is changing it, but your question did not say it MOVES that booking. Ask them ONCE, in exactly these " +
+      `words and with nothing before them: "${question}" Then stop talking and wait. When they answer with ` +
+      "anything but a no, call book_appointment again with the same details -- it will move the one just booked, " +
+      "never add a second. Do not tell them anything went wrong."
     : "[not caller speech] HELD, not failed: this caller booked an appointment a moment ago on this call, and " +
       "it is not clear whether this new time replaces it or is an extra one. Ask them ONCE, in exactly these " +
       `words and with nothing before them: "${question}" Then stop talking and wait. If they want it moved, ` +
@@ -863,7 +988,7 @@ function moveOrKeepResult(fc, ctx, config, last, wait) {
     stateEffects: {
       toolResult: { name: fc.name, success: false, message: question, callerSafe: true },
       toolCallEvent: { name: fc.name, args, silent: true },
-      ...(wait ? {} : { capabilityState: { appointments: { lastBooked: { ...last, askedAtLen: callerSaidLen(ctx) } } } }),
+      ...(orKeep ? { capabilityState: { appointments: { lastBooked: askedPatch(last, args, ctx) } } } : {}),
     },
   };
 }
@@ -2467,8 +2592,8 @@ async function bookAppointment(fc, ctx) {
         // instead" into a second booking (call b).
         const afterSave = correctionAfterSave(args, ctx, anchoredScheduledAt);
         if (afterSave?.kind === "move") return moveJustBooked(fc, ctx, afterSave.last, anchoredScheduledAt);
-        if (afterSave?.kind === "ask" || afterSave?.kind === "wait") {
-          return moveOrKeepResult(fc, ctx, config, afterSave.last, afterSave.kind === "wait");
+        if (afterSave?.kind === "ask" || afterSave?.kind === "confirm_move") {
+          return moveOrKeepResult(fc, ctx, config, afterSave.last, afterSave.kind);
         }
         if (afterSave?.kind === "add") bumpCounter("booking_correction_added");
         // The caller's words said "another": that IS the in-addition answer.
@@ -3533,7 +3658,8 @@ async function rescheduleAppointment(fc, ctx) {
       newScheduledAt: anchoredScheduledAt,
     }));
   } catch (err) {
-    log.error("reschedule_failed", { reason: err?.message, severity: "warn" });
+    // Review: there is no module-level `log` here; a bare log.error threw.
+    ctx?.deps?.log?.error?.("reschedule_failed", { reason: err?.message, severity: "warn" });
     ok = false;
   }
 

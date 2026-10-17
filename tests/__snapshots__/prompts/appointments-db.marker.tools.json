@@ -17,7 +17,7 @@
   },
   {
     "name": "book_appointment",
-    "description": "Book an appointment. First ask ONE question that names the day, the time and the name — e.g. \"So that's Tuesday at 3 p.m. for Jon Doe, is that right?\" — and wait for the answer. Call this only after they answer with anything but a no, never in the same response as that question. Ask any spelling or extra-or-move question BEFORE that one question.",
+    "description": "Book an appointment. First ask ONE question that names the day, the time and the name — e.g. \"So that's Tuesday at 3 p.m. for Jon Doe, is that right?\" — and wait for the answer. Call this only after they answer with anything but a no, never in the same response as that question. Ask any spelling or extra-or-move question BEFORE that one question. If the caller changes a booking you made earlier on this call (\"no, 10 instead\"), that one question names the move — \"Shall I move your 9 a.m. to 10 a.m.?\" — and calling this with the new time moves that booking; it never adds a second one.",
     "parameters": {
       "type": "object",
       "properties": {
