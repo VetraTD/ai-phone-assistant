@@ -875,7 +875,11 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       const { functionResponse } = await executeToolCall(fc, baseCtx);
 
       expect(mockUpdateAppointment).toHaveBeenCalledWith("appt-2", { scheduled_at: FUTURE_SLOT_ANCHORED }, "biz-1");
-      expect(functionResponse.response).toEqual({ success: true, message: "Rescheduled." });
+      // LVX179 (owner, 2026-10-16): after the save only "Done, you're all set".
+      expect(functionResponse.response).toEqual({
+        success: true,
+        message: 'Rescheduled. Say only: "Done, you\'re all set." Do not repeat the day, the time or the name.',
+      });
     });
 
     it("reschedule_appointment_db: denies on identity mismatch — never calls updateAppointment", async () => {

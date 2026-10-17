@@ -83,6 +83,10 @@ const ctxWith = (heard) => ({
   // agreed to, carrying a name they never said.
   lastAgreementReadBackKey: "k_agreed_earlier",
   callerTurnsSinceAgreement: 1,
+  // LVX179 (2026-10-16): for a booking the action-blind token no longer stands
+  // the gate down; the ONE question about this slot, answered earlier on the
+  // call, does. Same honest shape: the caller HAD agreed.
+  a1AnsweredReadBack: "So that's Monday, September 7 at 10 a.m., is that right?",
 });
 
 const book = (client_name) => ({

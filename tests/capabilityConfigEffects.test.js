@@ -156,8 +156,11 @@ describe("appointments — every knob has an effect", () => {
 
     // Default (nothing configured) behaves as "confirm".
     const dflt = apptConfig({});
-    expect(rulesOf(dflt)).toMatch(/do not offer to book, schedule, or arrange/i);
-    expect(rulesOf(dflt)).toMatch(/when YOU are the one raising it/i);
+    // LVX180 (2026-10-16): the opener was reworded so it no longer reads
+    // against "another -> book it, no question"; the rule it carries is the
+    // same -- the receptionist never raises a second booking itself.
+    expect(rulesOf(dflt)).toMatch(/Never be the one to suggest booking another/i);
+    expect(rulesOf(dflt)).not.toMatch(/do not offer to book, schedule, or arrange/i);
     expect(bookTool(dflt).parameters.properties.in_addition_to_existing).toBeDefined();
 
     const block = apptConfig({ existingAppointment: "block" });

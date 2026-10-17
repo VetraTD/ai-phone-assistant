@@ -82,6 +82,28 @@ async function waits(run) {
   return lines.filter((l) => l.includes('"event":"live_readback_wait"')).map((l) => JSON.parse(l));
 }
 
+/** Run a call; return the write_consent_probe log events it wrote. */
+async function probes(run) {
+  const lines = [];
+  const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    if (typeof chunk === "string") lines.push(...chunk.split("\n"));
+    return true;
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  const parse = (ev) => lines.filter((l) => l.includes(`"event":"${ev}"`)).map((l) => JSON.parse(l));
+  return { probes: parse("write_consent_probe"), waits: parse("live_readback_wait") };
+}
+
+// LVX179 (owner, 2026-10-16): a read-back IN the turn of the call is never a
+// save -- the one question waits for the answer. The wait still matters: it
+// lets the gate SEE the question being spoken, so the model is told to wait
+// instead of being handed sentence S a second time (F6).
+const WAITS = /WAIT for them/;
+
 async function upToTheBooking(s) {
   await s.callTool("check_appointment_availability", { requested_at: SLOT });
   await s.callerSays("Friday at two works.");
@@ -89,8 +111,21 @@ async function upToTheBooking(s) {
 
 const said = (r) => String(r?.response?.message || "");
 
+// LVX179: a save on arriving words now happens only when the ONE question was
+// already answered earlier on the call (the carry-over, answered_earlier) and
+// the model says the details again in the turn of the call. That is the only
+// way left to be "saved on the words", so the saved_then_asked counter is
+// exercised through it.
+async function answeredEarlier(s) {
+  await upToTheBooking(s);
+  await s.assistantTurn(READ_BACK);
+  await s.callerSays("Yes.");
+  await s.assistantTurn("Lovely.");
+  await s.callerSays("Okay.");
+}
+
 describe("F-D — the gate waits for the read-back words that follow the call", () => {
-  it("words land 600 ms after the call: saved, and no second sentence handed", async () => {
+  it("words land 600 ms after the call: held for the answer, and no second sentence handed", async () => {
     let s;
     const events = await waits(async () => {
       s = await bootLive({ config: CONFIG, callSid: "CA_wait_arrive" });
@@ -105,10 +140,18 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
     });
     const r = s.responsesFor("book_appointment");
     expect(r).toHaveLength(1);
-    expect(r[0].response.success).toBe(true);
+    expect(r[0].response.success).toBe(false);
     expect(said(r[0])).not.toMatch(/in exactly these words/);
+    expect(said(r[0])).toMatch(WAITS);
+    expect(s.store.scheduled()).toHaveLength(0);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ tool: "book_appointment", outcome: "arrived" });
+    // Answered: saved once, on the next call.
+    await s.turnEnds();
+    await s.callerSays("Yes.");
+    const [ok] = await s.callTool("book_appointment", ARGS);
+    expect(ok.response.success).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
   });
 
   it("no model audio this turn: no wait (the gate decides at once, as before)", async () => {
@@ -124,7 +167,7 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
     expect(events).toHaveLength(0);
   });
 
-  it("a read-back already in the turn: no wait, saved at once", async () => {
+  it("a read-back already in the turn: no wait, held at once for the answer", async () => {
     let s;
     const events = await waits(async () => {
       s = await bootLive({ config: CONFIG, callSid: "CA_wait_already" });
@@ -133,7 +176,9 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
       await s.assistantSays(READ_BACK);
       const r = await s.callTool("book_appointment", ARGS);
       expect(r).toHaveLength(1);
-      expect(r[0].response.success).toBe(true);
+      expect(r[0].response.success).toBe(false);
+      expect(said(r[0])).toMatch(WAITS);
+      expect(said(r[0])).not.toMatch(/in exactly these words/);
     });
     expect(events).toHaveLength(0);
   });
@@ -174,12 +219,13 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
   // Live can deliver the last transcript chunk and turnComplete in ONE
   // message. The wait ends on the words, but the gate's continuation runs a
   // microtask later -- after the turn has rolled. Judged on the rolled state,
-  // the read-back looks like LAST turn's with no sound since, and the save is
-  // held for an answer nobody is going to give. The state is frozen when the
-  // wait ends, so the gate judges the turn the call was made on.
-  it("words and turnComplete in one message: judged on the turn the call was made on, saved", async () => {
+  // the read-back looks like LAST turn's. The state is frozen when the wait
+  // ends, so the gate judges the turn the call was made on: since LVX179 both
+  // readings hold the write, so the probe's a1_readback is what tells them
+  // apart ("in_turn", not "previous").
+  it("words and turnComplete in one message: judged on the turn the call was made on (in_turn), held", async () => {
     let s;
-    const events = await waits(async () => {
+    const { probes: seen, waits: events } = await probes(async () => {
       s = await bootLive({ config: CONFIG, callSid: "CA_wait_same_msg" });
       await upToTheBooking(s);
       speakAudio(s, 3000);
@@ -190,8 +236,11 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
     });
     const r = s.responsesFor("book_appointment");
     expect(r).toHaveLength(1);
-    expect(r[0].response.success).toBe(true);
+    expect(r[0].response.success).toBe(false);
+    expect(said(r[0])).toMatch(WAITS);
     expect(events[0]).toMatchObject({ outcome: "arrived" });
+    const last = seen.filter((p) => p.tool === "book_appointment").at(-1);
+    expect(last?.a1_readback).toBe("in_turn");
   });
 
   it("a second call during the wait runs after it, never beside it: one row", async () => {
@@ -209,7 +258,13 @@ describe("F-D — the gate waits for the read-back words that follow the call", 
     });
     const r = s.responsesFor("book_appointment");
     expect(r).toHaveLength(2);
-    expect(r.filter((x) => x.response.success === true).length).toBeGreaterThanOrEqual(1);
+    expect(r.filter((x) => x.response.success === true)).toHaveLength(0);
+    expect((s.store.appointments || []).length).toBe(0);
+    // Answered: one row, never two.
+    await s.turnEnds();
+    await s.callerSays("Yes, that's right.");
+    await s.callTool("book_appointment", ARGS);
+    await s.settle();
     expect((s.store.appointments || []).length).toBe(1);
   });
 });
@@ -268,7 +323,10 @@ describe("F-D review — the wait reads text that is still arriving", () => {
     });
     const r = s.responsesFor("book_appointment");
     expect(r).toHaveLength(1);
-    expect(r[0].response.success).toBe(true);
+    // A statement in the turn: held, and the ONE question is handed (LVX179).
+    expect(r[0].response.success).toBe(false);
+    expect(said(r[0])).toMatch(/You told the caller you were booking it/);
+    expect(said(r[0])).toMatch(/is that right\?/);
     expect(events[0]).toMatchObject({ outcome: "arrived" });
   });
 });
@@ -277,7 +335,7 @@ describe("F-D review — saved on the words, then the turn asked (I3: counted)",
   it("a confirming question after the saved read-back is counted", async () => {
     const { summary } = await summaryOf(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_asked" });
-      await upToTheBooking(s);
+      await answeredEarlier(s);
       speakAudio(s, 3000);
       await s.callTool("book_appointment", ARGS);
       await s.assistantSays(READ_BACK);
@@ -294,7 +352,7 @@ describe("F-D review — saved on the words, then the turn asked (I3: counted)",
   it("the closing question is not counted", async () => {
     const { summary } = await summaryOf(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_tic" });
-      await upToTheBooking(s);
+      await answeredEarlier(s);
       speakAudio(s, 3000);
       await s.callTool("book_appointment", ARGS);
       await s.assistantSays(READ_BACK);
@@ -349,7 +407,7 @@ describe("F-D re-review — saved_then_asked counts any question but the closing
   it("'Does that work for you?' after the saved read-back is counted", async () => {
     const { summary } = await summaryOf(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_work" });
-      await upToTheBooking(s);
+      await answeredEarlier(s);
       speakAudio(s, 3000);
       await s.callTool("book_appointment", ARGS);
       await s.assistantSays(READ_BACK);
@@ -365,7 +423,7 @@ describe("F-D re-review — saved_then_asked counts any question but the closing
   it("after an interrupt, the next turn's question is not counted against the old read-back", async () => {
     const { summary } = await summaryOf(async () => {
       const s = await bootLive({ config: CONFIG, callSid: "CA_wait_saved_interrupt" });
-      await upToTheBooking(s);
+      await answeredEarlier(s);
       speakAudio(s, 3000);
       await s.callTool("book_appointment", ARGS);
       await s.assistantSays(READ_BACK);

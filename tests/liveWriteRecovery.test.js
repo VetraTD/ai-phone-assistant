@@ -92,7 +92,12 @@ const bookArgs = (slot = SLOT) => ({ client_name: CLIENT, scheduled_at: slot });
 // LVX161
 // ---------------------------------------------------------------------------
 describe("an apology must not buy the gate another refusal", () => {
-  it("keeps the earlier read-back, so the second refusal releases — CAad88df4a", async () => {
+  // LVX179 (owner, 2026-10-16): a BOOKING is saved only on an answer to the
+  // ONE question that is not a no -- the write-order ceiling and the attempt
+  // budget never release one (CA954592 #2-4 changed the same way). A hedge
+  // ("Hmm, maybe.") is not that answer, and two apologies do not make it one.
+  // Before LVX179 this test certified that the ceiling released here.
+  it("a hedge to the one question is never released by the ceiling, apologies or not — CAad88df4a", async () => {
     const s = await bootLive({ config: CONFIG, callSid: "CA_ceiling_history" });
     await s.callTool("check_appointment_availability", { requested_at: SLOT });
     await s.callerSays("Friday afternoon please.");
@@ -122,10 +127,11 @@ describe("an apology must not buy the gate another refusal", () => {
     // Same proposal, already read back once, already refused once. It is AT its
     // ceiling and must be released.
     const second = await s.callTool("book_appointment", bookArgs());
-    expect(ok(second), "the ceiling did not release -- the apology raised it").toBe(true);
-    expect(counters().write_order_gate_ceiling).toBe(1);
-    expect(counters().write_order_ceiling_kept_by_history).toBe(1);
-    expect(s.store.scheduled()).toHaveLength(1);
+    expect(ok(second), "a booking-rule write was released without an answer").toBe(false);
+    expect(counters().write_order_gate_ceiling || 0).toBe(0);
+    expect(s.store.scheduled()).toHaveLength(0);
+    // The ONE question is handed again, so the caller can answer it.
+    expect(String(second[0]?.response?.message || "")).toMatch(/is that right\?/);
   });
 
   it("still gives a proposal nobody was ever asked about the full budget", async () => {

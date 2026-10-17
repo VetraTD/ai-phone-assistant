@@ -44,10 +44,14 @@ vi.mock("../lib/logger.js", () => ({
 }));
 
 import { executeToolCall } from "../services/tools.js";
+import { composeReadBack } from "../lib/voice/savePolicy.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
-const READ_BACK = "Shall we book your discovery call for Monday, October fifth at four thirty PM?";
+// LVX179 (owner, 2026-10-16): the ONE question must name the slot being
+// written; the old fixture asked about a different day and time and rode the
+// action-blind "Shall we book" match.
+const READ_BACK = composeReadBack({ toolName: "book_appointment", args: { scheduled_at: FUTURE_SLOT }, config: {} });
 
 const outboundCtx = ({ firstName = "Nithin", lastName = "Dodla", verified = true, outbound = true } = {}) => ({
   businessId: "biz-1",

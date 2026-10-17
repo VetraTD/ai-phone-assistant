@@ -43,6 +43,7 @@ vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));
 vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
 
 import { executeToolCall } from "../services/tools.js";
+import { composeReadBack } from "../lib/voice/savePolicy.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
@@ -180,9 +181,26 @@ describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => 
     // The benign shape. The token is read ONLY to permit the gate to stand
     // down -- never to authorise anything -- which is why an action-blind token
     // is safe here and would not be as permission.
+    //
+    // LVX179 (owner, 2026-10-16): for a BOOKING the action-blind token no
+    // longer stands the gate down. What does is the ONE question about this
+    // slot, answered earlier on the call (a1AnsweredReadBack, the carry-over).
     mockCreateAppointment.mockResolvedValue("appt-token");
-    const { functionResponse } = await book(liveCtx({ lastAgreementReadBackKey: "k1" }));
+    const asked = composeReadBack({
+      toolName: "book_appointment",
+      args: { client_name: "Nithin Dodla", scheduled_at: FUTURE_SLOT },
+      config: {},
+    });
+    const { functionResponse } = await book(liveCtx({ lastAgreementReadBackKey: "k1", a1AnsweredReadBack: asked }));
     expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("LVX179: the action-blind token alone no longer books", async () => {
+    // b's 10 AM rode a "Just to confirm ... additional one, correct?" that
+    // never named the time; the token it left is action-blind.
+    const { functionResponse } = await book(liveCtx({ lastAgreementReadBackKey: "k1" }));
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
   });
 
   it("leaves the cascade alone — no callerSaidThisCall, no refusal", async () => {

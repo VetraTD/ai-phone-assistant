@@ -485,7 +485,9 @@ describe("gemini.js — the existing-appointment rule is intent-independent", ()
 
   // Specific to the new rule. A looser pattern also matched escalation wording
   // that has always been in the static prefix.
-  const OFFER_RULE = /do not offer to book, schedule, or arrange/i;
+  // LVX180 (2026-10-16) reworded the default ("confirm") opener; same rule,
+  // new words. The "block" policy keeps the old sentence.
+  const OFFER_RULE = /never be the one to suggest booking another|do not offer to book, schedule, or arrange/i;
 
   it("appears on a general-question turn, which is where the bad offer was made", () => {
     const tail = buildDynamicTail("gather_details", "general_question", apptConfig(), withAppt);
