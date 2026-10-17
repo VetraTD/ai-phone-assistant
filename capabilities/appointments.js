@@ -742,7 +742,7 @@ const OR_KEEP_NEG_MOVE_RE =
 const OR_KEEP_MOVE_RE =
   /\b(?:move|moving|change|switch|instead|replace|cancel\w*|only|just\s+(?:the|one|that)|one\s+(?:appointment|is\s+enough)|not\s+both|mueva(?:la)?|mu[eé]vala|c[aá]mbiela|cambie|s[oó]lo)(?![\p{L}])/iu;
 const OR_KEEP_ADD_RE =
-  /\b(?:keep|both|another|also|extra|add|second|as\s+well|las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])/iu;
+  /\b(?:keep|both|another|also|extra|add|additionally|second|as\s+well|too|still|plus|one\s+more|in\s+addition|las\s+dos|ambas|mantenga|mantener|tambi[eé]n)(?![\p{L}])/iu;
 const OR_KEEP_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|go\s+ahead|s[ií]|claro)(?![\p{L}])/iu;
 
 /**
@@ -788,6 +788,12 @@ function samePersonForMove(name, theirs) {
   // the same person here (Mark/Mary, John/Joan): it falls to the old
   // in-addition question, which asks -- never a silent move.
   return (a.length === 1 || b.length === 1) && a[0] === b[0];
+}
+
+/** Does the question name the booking being moved, at its OLD time? */
+function namesOldSlot(question, last, ctx) {
+  const naive = toLocalNaiveDateTime(last?.scheduled_at, ctx?.config?.timezone);
+  return Boolean(naive) && readBackMentionsSlot(question, naive);
 }
 
 /** The confirming question the caller just answered about THIS slot, or "". */
@@ -845,7 +851,13 @@ export function correctionAfterSave(args, ctx, scheduledAtInstant) {
   if (!Number.isFinite(lastMs) || !Number.isFinite(newMs) || lastMs === newMs) return null;
   if (!samePersonForMove(args?.client_name, last.client_name)) return null;
   const handed = last.handedFor === newMs;
-  const qk = fix3QuestionKind(answeredQuestionFor(args, ctx));
+  const askedQ = answeredQuestionFor(args, ctx);
+  let qk = fix3QuestionKind(askedQ);
+  // Opus re-review 3 (High): the move question must name THIS booking's old
+  // time. Two bookings on the call: "Shall I move your 9 to 10?" answered yes
+  // moved the 2 p.m. one (lastBooked is always the latest). About another
+  // booking -> read as a plain read-back.
+  if ((qk === "move" || qk === "or_keep") && !namesOldSlot(askedQ, last, ctx)) qk = "plain";
   if (qk === "move") {
     // "Keep both please" / "Yes, and keep the 9 too" to a move question, or the
     // model's own in_addition flag: never a move (re-review #1).

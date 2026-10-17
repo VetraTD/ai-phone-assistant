@@ -595,6 +595,11 @@ describe("LVX179 Fix 3 review: never a silent move", () => {
     expect(classifyOrKeepAnswer("Move it. Can you also text me?")).toBe("move");
     expect(classifyOrKeepAnswer("Don't move it.")).toBe("add");
     expect(classifyOrKeepAnswer("Keep the nine as well.")).toBe("add");
+    // Re-review 3 #2: more ways of saying "keep it too".
+    expect(classifyOrKeepAnswer("Yes, and the 9 too.")).toBe("add");
+    expect(classifyOrKeepAnswer("I meant in addition.")).toBe("add");
+    expect(classifyOrKeepAnswer("Yes, I still want the 9.")).toBe("add");
+    expect(classifyOrKeepAnswer("Yeah, one more.")).toBe("add");
   });
 });
 
@@ -740,5 +745,33 @@ describe("LVX179 Fix 3 re-review 2: a move needs the move question and a plain y
     expect(r.response.success).toBe(false);
     expect(adaAt9(s)).toBe(true);
     expect(s.store.scheduled()).toHaveLength(1);
+  });
+});
+
+describe("LVX179 Fix 3 re-review 3: the move question must name the booking it moves", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+
+  it("two bookings on the call: 'move your 9 to 10?' never moves the 2 p.m. one", async () => {
+    const s = await boot("CA_fix3r3_two");
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    expect((await s.callTool("book_appointment", book(AT_9)))[0].response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    await s.callerSays("Also one at 2, please.");
+    await s.assistantTurn("So that's Friday, September 18 at 2 PM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    expect((await s.callTool("book_appointment", book(AT_14)))[0].response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    await s.callerSays("The 9 one, make it 10 instead.");
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m.?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(String(r.response.message)).not.toMatch(/Moved the appointment/);
+    const rows = s.store.scheduled().map(at).sort();
+    expect(rows).toEqual([local(AT_9), local(AT_14)]);
   });
 });

@@ -2341,6 +2341,15 @@ const SABOTAGES = [
     red: [LVX179_REPLAY],
   },
   {
+    name: "p5-move-names-old-slot",
+    why:
+      "LVX179 Fix 3 (opus re-review 3, High): a move question must name the OLD time of the booking it moves (lastBooked is always the latest). Sabotaged, 'Shall I move your 9 to 10?' moves the 2 p.m. booking made after it.",
+    file: "capabilities/appointments.js",
+    find: '  if ((qk === "move" || qk === "or_keep") && !namesOldSlot(askedQ, last, ctx)) qk = "plain";',
+    replace: "  // SABOTAGE: the old time is not checked",
+    red: [LVX179_REPLAY],
+  },
+  {
     name: "farewell-not-take-care-of",
     why: "LVX178 counter accuracy: 'I'll take care of that… anything else?' is not a goodbye; counted, it fails a target of 0 on a clean call.",
     file: "lib/voice/strings.js",
