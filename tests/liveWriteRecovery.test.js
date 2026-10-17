@@ -27,7 +27,7 @@
 // ---------------------------------------------------------------------------
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { bootLive, counters } from "./helpers/liveBoot.js";
+import { bootLive, counters, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
 
 const OPEN = { open: "09:00", close: "18:00", closed: false };
@@ -224,6 +224,40 @@ describe("the booking argument the model would not set", () => {
     await s.callerSays("Yes, book both.");
     const again = await s.callTool("book_appointment", bookArgs(SECOND_SLOT));
     expect(ok(again)).toBe(true);
+    await s.turnEnds();
+    await s.settle();
+
+    expect(s.store.scheduled(), "the second booking never landed").toHaveLength(2);
+  });
+
+  // LVX160 for a booking already ON FILE from an earlier call (Fix 3 handles one
+  // made on THIS call). The pack refuses, stores the corrected arguments with the
+  // flag, and the caller's yes releases them -- the model sets nothing.
+  it("a booking already on file: the caller's yes releases the stash with the flag", async () => {
+    const onFile = { id: "appt-onfile", client_name: CLIENT, scheduled_at: "2026-09-18T20:30:00.000Z" };
+    const s = await bootLive({
+      config: CONFIG,
+      callSid: "CA_inaddition_onfile",
+      seedAppointments: [{ ...onFile, business_id: "biz-1", client_phone: "+15551234567", status: "scheduled" }],
+      database: {
+        ...fakeDb(CONFIG, "biz-1"),
+        fetchCallerContext: async () => ({ callCount: 2, upcomingAppointments: [onFile] }),
+      },
+    });
+    await s.callTool("check_appointment_availability", { requested_at: SECOND_SLOT });
+    await s.callerSays("Can I book four thirty?");
+    await s.assistantTurn(SECOND_READ_BACK);
+    await s.callerSays("Yes please.");
+    const held = await s.callTool("book_appointment", bookArgs(SECOND_SLOT));
+    expect(ok(held)).toBe(false);
+    expect(String(held[0]?.response?.message || "")).toMatch(/in_addition_to_existing/);
+    expect(s.store.scheduled()).toHaveLength(1);
+    await s.turnEnds();
+
+    await s.assistantTurn(
+      "You already have an appointment with us — shall I book this additional one for Friday at four thirty as well?"
+    );
+    await s.callerSays("Yes, book both.");
     await s.turnEnds();
     await s.settle();
 

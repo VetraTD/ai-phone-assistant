@@ -896,15 +896,11 @@ const SABOTAGES = [
   // -------------------------------------------------------------------------
   // LVX160 and LVX161 — the write the caller asked for that never landed.
   // -------------------------------------------------------------------------
-  {
-    name: "ceiling-ignores-history",
-    why:
-      "puts the release ceiling back to reading `readBackMade` for THIS turn only, which inverted the gate: when the model answered a refusal with an apology instead of re-reading the proposal back, the read-back aged out, the flag went false, and the ceiling ROSE from one to two. The model apologising bought the gate another refusal against the caller. CAad88df4a needed four before a cancellation went through, with two 'the system isn't working' sentences in between. Distinct from ceiling-ignores-the-read-back, which removes the early ceiling entirely; this one keeps it and makes it unreachable after an apology.",
-    file: "services/tools.js",
-    find: "                readBackMade || (sameProposal && orderScratch.writeOrderEverReadBack === true);",
-    replace: "                readBackMade; // SABOTAGE",
-    red: [RECOVERY],
-  },
+  // RETIRED 2026-10-17 (P5 overnight gate, row went GREEN): ceiling-ignores-history. Its
+  // only red test was CAad88df4a's booking, and since LVX179 the write-order ceiling never
+  // releases a booking-rule write (that test now certifies exactly that). The history
+  // rule still governs cancels and strict tools, which have NO test of their own --
+  // backlog: add a cancel case to tests/liveWriteRecovery.test.js and restore this row.
   {
     name: "in-addition-stash",
     why:
@@ -1940,11 +1936,11 @@ const SABOTAGES = [
   },
   {
     name: "voiced-flag-survives-nudge",
-    why: "T5b: a ladder line is not a real reply. Resetting the flag on it would judge a caller's sound against the ladder line, not the read-back it holds over (LVX120's rule).",
+    why: "T5b + LVX179, retargeted 2026-10-17: the old anchor (not resetting the flag on a ladder line) went GREEN because the LVX179 carry-over judge reads callerVoicedSinceReply at that same turn end. The judge itself must require a sound: without it, a read-back met by silence and a nudge is carried over as answered and books with no sound at all.",
     file: "lib/voice/live/index.js",
-    find: "      if (spokenLinePending) bumpCounter(\"reply_held_over_spoken_line\");",
-    replace: "      if (spokenLinePending) { bumpCounter(\"reply_held_over_spoken_line\"); callerVoicedSinceReply = false; } // SABOTAGE",
-    red: [A1_SILENCEREADBACK],
+    find: "      asksReadBack(lastReplyText, getStrings(state.config)) &&\n      callerVoicedSinceReply\n    ) {",
+    replace: "      asksReadBack(lastReplyText, getStrings(state.config)) &&\n      true // SABOTAGE\n    ) {",
+    red: [A1_SILENCEREADBACK, LVX179_REPLAY],
   },
   {
     name: "echo-is-not-an-answer",
@@ -1987,30 +1983,19 @@ const SABOTAGES = [
     replace: "    if (false) { // SABOTAGE",
     red: [A1_SAVEPOLICY],
   },
-  {
-    name: "a1-objection-before-write-order",
-    why: "round A1 final review I4: 'Yeah, make it four' is an objection; the write-order gate passes it on isAffirmative and books the slot that was read back. Held before that gate.",
-    file: "services/tools.js",
-    find: "                  : a1Save.applies &&\n                      a1Save.objection &&",
-    replace: "                  : false && // SABOTAGE\n                      a1Save.objection &&",
-    red: [A1_SAVEPOLICY],
-  },
-  {
-    name: "a1-objection-branch-only-for-a-yes",
-    why: "round A1 final review I4 follow-up: only a YES that objects is held before the write-order gate; every other objection (a hedge, a garbled no) must still reach that gate's ceiling, or it can be refused forever (CAad88df4a, LVX21's cost).",
-    file: "services/tools.js",
-    find: "                      isAffirmative(lastCallerText) &&\n                      callerObjects(lastCallerText, { restatedSlot: true })",
-    replace: "                      true // SABOTAGE",
-    red: [RECOVERY],
-  },
-  {
-    name: "a1-objection-branch-skips-time-cue",
-    why: "round A1 final review I4 follow-up: a yes that merely NAMES a time ('Yeah, 4:30 works') is not held before the write-order gate -- the restated-slot detector misses real restatements (CA239046 attempt 0 would be held).",
-    file: "services/tools.js",
-    find: "callerObjects(lastCallerText, { restatedSlot: true })",
-    replace: "callerObjects(lastCallerText, { restatedSlot: false })",
-    red: [REPLAY],
-  },
+  // RETIRED 2026-10-17 (P5 overnight gate, row went GREEN): a1-objection-before-write-order. Since LVX179 the
+  // A1 decision is authoritative in the write-order gate (a booking is refused unless
+  // agreed, and the ceiling never releases one), so the early "yes that objects" branch
+  // no longer changes the outcome; booking-objection-refuses and p5-engine-retry-own-slot
+  // certify what it used to. Its message still carries pre-LVX179 wording (backlog).
+  // RETIRED 2026-10-17 (P5 overnight gate, row went GREEN): a1-objection-branch-only-for-a-yes. Since LVX179 the
+  // A1 decision is authoritative in the write-order gate (a booking is refused unless
+  // agreed, and the ceiling never releases one), so the early "yes that objects" branch
+  // no longer changes the outcome; booking-objection-refuses and p5-engine-retry-own-slot
+  // certify what it used to. Its message still carries pre-LVX179 wording (backlog).
+  // RETIRED 2026-10-17 (P5 overnight gate, row went GREEN): a1-objection-branch-skips-time-cue.
+  // Same cause as the two a1-objection rows retired below: since LVX179 the A1 decision is
+  // authoritative in the write-order gate, so the early branch no longer changes the outcome.
   {
     name: "a1-objection-held-not-failed",
     why: "round A1 final review I4 follow-up: the objection hold is marked gated (held, not failed) -- retryPendingWrite and the claim guard branch on it, and an unmarked refusal is announced as a failure (CAa08fc3).",

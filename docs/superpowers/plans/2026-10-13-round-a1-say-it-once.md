@@ -1348,3 +1348,52 @@ RULES
 - Cheaper models for mechanical work; opus for the review.
 - Detail goes in the ledger, not in chat.
 ```
+
+## Part 5 S2 + overnight as built (2026-10-16 22:36 → 2026-10-17 ~05:00 CDT, unattended, $0.34)
+
+Owner overnight decisions (final): probe may run (cap $0.80); LVX181 pick by the pre-registered rule (owner 22:55:
+the >= 3/10 margin applies to EVERY arm, tie -> faster); deploy iff the gate passes; short on time -> gate what's
+ready. Owner 22:55 on Fix 3: unclear words -> CODE asks once (the move/keep question is the confirmation).
+
+**Step 0.** p5-root @1e78dc1: ROOT red, 24 tests in 8 files, all encoding the old same-breath save / the action-blind
+token / old wording; updated deliberately (f04bdef).
+
+**LVX181 — not fixed (rule says change nothing).** A ($0, sonnet): the literal filter is useless (transcript chars are
+misattributed: 84 of 86 hits were real words); debug-text cross-check: filler-only caller turns drew a reply on 6 of
+86 calls (7%, a floor), 8 of 550 turns. Baseline `reply_after_last_voice_ms_p50` 00105 = 1,378 ms (n=3), 00104 =
+1,664 (n=4). B (`scripts/probes/lvx181-umm.mjs`, gemini-3.8-live AI Studio = prod, real prompt builder, synthetic
+SAPI "ummm" 1.30 s + 4 s silence, N = 10 umm + 5 complete per arm, 0 invalid): umm replies default 10/10, silence
+1000 10/10, silence 1200 10/10, prompt line 9/10; complete-answer median 2215 / 2497 / 2744 / 2432 ms. No arm
+qualifies -> nothing changed. $0.3393 (incl. smoke). The silence knobs moved complete replies but not the umm reply
+time, so the synthetic umm may be only partly heard as speech (weaker instrument) -- either way no knob or prompt
+line stops a reply. Next options are code: hold a turn end on a short wordless utterance (manual VAD / the
+s2s-frontend gate + hangover).
+
+**Fix 3 — a correction right after a save moves that booking** (1d098c8 → 72f3483 → 04211cc → 4ebc606 → 12eecce →
+6da2411; four opus review rounds). Final design, `capabilities/appointments.js`:
+- Applies only on Live, to a second `book_appointment` on the call that just booked, same person (the same name, or
+  the surname dropped), different time.
+- The QUESTION the caller answered decides, recognised by EXACT wording only: ours ("So that's moving your <old> to
+  <new> …, is that right?" / "Shall I move your <old> to <new>, or keep both?") or the declaration's "Shall I move
+  your 9 a.m. to 10 a.m.?". It must name the NEW slot and the OLD slot of the booking being moved.
+- Move question + a plain yes -> the row is MOVED (reschedule path, capacity pre-checked, never an insert, "Done,
+  you're all set."). Keep-words about the booking in the answer ("keep both", "the 9 too", "still want") or the
+  model's in_addition flag -> keep both.
+- Either/or -> the caller's LATEST answer ("move it" / "just the ten" / "only one" -> move; "keep both" / "no" ->
+  keep both; unclear -> keep both if already asked, else the move is asked).
+- Anything else -> the caller's words since the save choose the ONE question the gate hands (correction words -> the
+  move read-back; unclear -> move-or-keep; "also / another" -> the ordinary read-back, extra one), handed at most once
+  per slot; after it a plain yes keeps both.
+- Safe direction everywhere: a second row (visible to the business) beats a silent move (loses a booking the
+  caller believes they have).
+- Review findings fixed: silent move on cue words; same-surname daughter; cascade asked forever; "wait" verdict on
+  lag; capacity skipped; either/or read as a move; "keep both" to a move question; ordinary "…or change anything?"
+  read-backs and spelled names ("M-O-S-S") misread; Mark/Mary as one person; the wrong one of two bookings moved;
+  everyday asides ("one more thing") read as keep; rescheduleAppointment's undefined `log`.
+- Accepted / documented: a time-only answer ("Ten, please") to move-or-keep after it was handed keeps both; "one
+  works" read as a time costs one extra question; "No, keep both" is a gate objection (one extra question); the
+  engine-retry veto's note text never reaches the model. A move sends NO owner notification (booking email is
+  link-only, so it stays accurate). LVX176's claim check is unaffected (verified by review).
+
+**Proof.** Census 327 rows clean. 13 drifted rows repointed (none retired), 35 new p5- rows, every one
+hand-verified RED (several read GREEN on first try and got sharper test cases). `tests/lvx179Replay.test.js` 42 cases.

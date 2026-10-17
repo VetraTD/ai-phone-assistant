@@ -17333,8 +17333,27 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
   1 as built". Fix 3 (correction moves), sabotage rows, review, gate, deploy and calls remain (S2/S3).
 - Pre-existing, found in S1: `npm run corpus:build` rewrites derived targets in CA240834/CA299f23/CA6dcec7/CAec2309
   at HEAD, so `corpus:check` fails; the gate does not run it. Left as committed. `[cheap]`
+- **2026-10-17 overnight (Part 5 S2):** Fix 3 built and reworked through four opus review rounds (final `6da2411`;
+  design in the round-A1 plan "Part 5 S2 + overnight as built"). Gate `p5-final5` @ `6da2411`: root 8,038 passed,
+  census clean, db 700; full sabotage run as shards (single run crashed on a Windows file lock, and the corpus replay
+  makes it ~9 h). Five older rows went GREEN because LVX179 made their guards redundant (see below); staged as a
+  NO-TRAFFIC revision, the owner switches traffic. Calls not yet made.
+- Follow-ups found by that gate `[cheap]`:
+  - `services/tools.js` early "yes that objects" refusal (A1 final review I4) is now redundant with the A1 gate AND
+    still hands pre-LVX179 wording ("read the new ones back once in one sentence and call this again") — a yes with
+    a change ("Yeah, make it four") can get a statement read-back then the handed question. Reword to the one-
+    question form or delete the branch; rows a1-objection-* retired meanwhile.
+  - The write-order ceiling's history rule (LVX161) still governs cancels / strict tools but has no test since
+    CAad88df4a moved to the A1 rule; add a cancel case to `tests/liveWriteRecovery.test.js`, restore
+    `ceiling-ignores-history`.
+  - Fix 3 accepted gaps: a time-only answer ("Ten, please") to move-or-keep after it was handed keeps both; "one
+    works" read as a time costs one extra question; "No, keep both" is a gate objection (one extra question); the
+    engine-retry veto's note text never reaches the model; a move sends no owner notification (email link-only).
 
-### LVX180 · Prompt rules the model skipped on the same day · **OPEN · P2** `[cheap]` (watch first; N=1 each)
+### LVX180 · Prompt rules the model skipped on the same day · **BUILT 2026-10-16 (S1 prompt) — ships with LVX179; watch on calls** `[cheap]`
+- S1: "another / also / one more" = an extra one, no question, and the opener no longer reads against it; a caller
+  whose name is on file is never asked for it, "not even their full name". Overnight Fix 3 also enforces "also /
+  another" in CODE for a booking right after a save on the same call (no in-addition question).
 - d1 `CA7c0d50b0672a602767c9e9f8ac0cf38c`: the caller said "book ANOTHER appointment" and was asked "in addition…or
   move?" anyway (rule in `capabilities/appointments.js` `existingAppointmentContextRules`). That block opens with "Do
   NOT offer to book … another one", which may read against the "another → no ask" line.
@@ -17342,7 +17361,18 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
   appointments; the next is …" (d1 used it), and after "That time is available". It also asked an on-file caller for
   their full name (owner rule: a name on file is never asked).
 
-### LVX181 · It answers a thinking "umm" as if the caller had finished · **OPEN · P1** `[medium]` measure first (~0.5 h, $0), then one setting test (~1 h + 2–3 calls)
+### LVX181 · It answers a thinking "umm" as if the caller had finished · **OPEN · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
+- **2026-10-17 overnight (Part 5, $0.34):** (A, logs, $0) filler-only caller turns drew a reply on 6 of 86 calls
+  (7%, a floor; `transcript_chars` is misattributed so the literal filter is useless). Baseline
+  `reply_after_last_voice_ms_p50` 00105 = 1,378 ms (n=3). (B, `scripts/probes/lvx181-umm.mjs`, gemini-3.8-live as
+  prod, synthetic SAPI "ummm" 1.30 s after "Which works best?" + 4 s silence, N=10+5 per arm): umm replies default
+  10/10, silence 1000 10/10, silence 1200 10/10, prompt line 9/10; complete-answer median 2215 / 2497 / 2744 / 2432
+  ms. Pre-registered rule (>= 3/10 cut, <= +150 ms): **no arm qualifies, nothing changed.** The silence knobs did
+  not move the umm reply time, so the synthetic umm may be only partly heard as speech (weaker than a real one).
+  Since LVX179's one-question confirm, an umm cannot BOOK anything; it can still make the receptionist talk.
+- **Next (owner to choose):** a code-level hold on a short wordless utterance after our own question (manual VAD,
+  or the s2s-frontend gate + hangover on `feat/s2s-frontend`); or re-run the probe with a REAL recorded umm first
+  (owner records one, ~$0.35) to confirm the instrument.
 Owner, 2026-10-16: "whenever I was saying 'uhhh' or 'ummmm' it would interject and say something when I was just
 thinking." Seen in the logs:
 - b `CA70682e3219cb227353f4681b25119586`: right after "…openings at 9, 1 and 4:30. Which of those works best?", the

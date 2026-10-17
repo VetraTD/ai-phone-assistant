@@ -782,3 +782,20 @@ describe("LVX179 Fix 3 re-review 3: the move question must name the booking it m
     expect(rows).toEqual([local(AT_9), local(AT_14)]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The carry-over judge needs a SOUND (gate p5-final5, 2026-10-17: the row that
+// removed that condition read GREEN -- no test had a nudge END with the caller
+// silent before the model called).
+// ---------------------------------------------------------------------------
+describe("LVX179 carry-over: silence is never an answer", () => {
+  it("a question met by silence and a nudge, with no sound at all, is never booked", async () => {
+    const s = await boot("CA_carry_silence_nudge");
+    await s.assistantTurn("So that's Friday, September 18 at 2 PM for Ada Moss, is that right?");
+    await s.feed(12_000);
+    await s.assistantTurn("Hello? Are you still there?");
+    const [r] = await s.callTool("book_appointment", book(AT_14));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
+});
