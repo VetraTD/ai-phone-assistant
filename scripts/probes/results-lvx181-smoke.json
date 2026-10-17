@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "model": "gemini-3.8-live",
+    "surface": "aistudio",
+    "voice": "Kore",
+    "language": "en-US",
+    "started_at": "2026-10-17T04:00:22.289Z",
+    "rule": "Instrument check: default must reply to the umm in >= 3/10, else the probe is BLIND and nothing changes. An arm qualifies only if it cuts umm-replies by >= 3 (of 10) vs default AND its complete-answer median delay is <= default median + 150 ms. Among qualifying arms, fewest umm-replies wins; tie -> lower median delay. No qualifying arm -> change nothing.",
+    "smoke": true
+  },
+  "rows": [
+    {
+      "key": "default|umm|1",
+      "arm": "default",
+      "kind": "umm",
+      "take": 1,
+      "at": "2026-10-17T04:00:22.293Z",
+      "valid": true,
+      "speech_end_ms": 1360,
+      "caller_audio_sent_ms": 2374,
+      "fixture_pace_ms": 1412,
+      "reply_start_ms": 2436,
+      "reply_run_ms": 320,
+      "output_transcript": "Just to confirm,",
+      "input_transcript": "아, 응애.",
+      "tool_calls": [
+        "set_call_intent"
+      ],
+      "replied": true,
+      "replied_during_umm": false,
+      "usd": 0.0049,
+      "usd_estimated": true,
+      "wall_s": 4.3
+    },
+    {
+      "key": "default|complete|1",
+      "arm": "default",
+      "kind": "complete",
+      "take": 1,
+      "at": "2026-10-17T04:00:26.597Z",
+      "valid": true,
+      "speech_end_ms": 480,
+      "caller_audio_sent_ms": 5555,
+      "fixture_pace_ms": 526,
+      "reply_start_ms": 3007,
+      "reply_run_ms": 580,
+      "output_transcript": "I'm sorry, that time is already token — would you like to try a different time?",
+      "input_transcript": "ten work",
+      "tool_calls": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "replied": true,
+      "delay_ms": 2527,
+      "usd": 0.00624,
+      "usd_estimated": true,
+      "wall_s": 7.4
+    }
+  ]
+}

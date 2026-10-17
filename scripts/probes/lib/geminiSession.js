@@ -65,6 +65,12 @@ export async function openSession(opts) {
   if (opts.automaticActivityDetection) {
     config.realtimeInputConfig = { automaticActivityDetection: opts.automaticActivityDetection };
   }
+  // Additive overrides (LVX181): a probe that must match PRODUCTION's session
+  // config rather than this file's stand-in prompt/tools. All unset = unchanged.
+  if (opts.systemInstruction) config.systemInstruction = { parts: [{ text: opts.systemInstruction }] };
+  if (opts.tools) config.tools = opts.tools;
+  if (opts.speechConfig) config.speechConfig = opts.speechConfig;
+  if (opts.extraConfig) Object.assign(config, opts.extraConfig);
   // gemini-3.8-live-extended-thinking REFUSES TO START without a thinking
   // level ("Thinking level must be specified for this model"), and plain
   // gemini-3.8-live refuses WITH one ("Thinking level is not supported for
