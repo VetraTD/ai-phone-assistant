@@ -1397,3 +1397,27 @@ s2s-frontend gate + hangover).
 
 **Proof.** Census 327 rows clean. 13 drifted rows repointed (none retired), 35 new p5- rows, every one
 hand-verified RED (several read GREEN on first try and got sharper test cases). `tests/lvx179Replay.test.js` 42 cases.
+
+**Gate (`p5-final5` @ `6da2411`).** ROOT exit 0 (8,038 passed), CENSUS clean, DB exit 0 (700). The full sabotage
+matrix could not run as one job before 07:00 (`liveCorpusReplay` is ~700 s per run) and the single run crashed after
+row 27 on a Windows file lock ("Error: UNKNOWN … open …\lib\voice\live\index.js", tree verified clean). Finished as
+shards at the same sha: the gate run (rows 0–27), `sharda` (28–176) in `../ai-phone-gate`, `shardb` (177–249) in a new
+worktree `../ai-phone-shardb`, then the same per-row check (`verify-tail.mjs`: patch, assert landed, one worker,
+restore + assert) for 250–326. All 327 rows got a verdict, 0 "could not be READ", trees clean. Non-red beyond the 3
+baseline rows, each read in code, test-only follow-up (`f2f4c60`, `1f60bc2`):
+- fixed, RED again: `in-addition-stash` (new on-file case), `voiced-flag-survives-nudge` (retargeted at the carry-
+  over judge's "a sound since the question" condition, which had no test; new silence + nudge case),
+  `p3-real-hold-overwrites` (assertion was stale: the earlier hold's sentence is now "…is that right?").
+- retired with reasons (LVX179 made the A1 decision authoritative; the ceiling never releases a booking):
+  `a1-objection-before-write-order`, `a1-objection-branch-only-for-a-yes`, `a1-objection-branch-skips-time-cue`,
+  `ceiling-ignores-history` (cancel path now untested → backlog). Census 323.
+
+**Deploy (05:09 CDT).** Build `c3f9da3a` from the main checkout (HEAD `f2f4c60`, `6da2411..HEAD` docs/tests only), all
+steps; `voice:6da2411` digest `sha256:58936de0d121db12cf0ad40e74769d3ab2323b86416cfc623eebcfe8d3ae400f`. Migrate job →
+`:6da2411`, `--status`: 53 applied, none pending, no "edited". Revision **`voice-uk-prod-00108-rox`** staged with no
+traffic (tag `lvx179p5`), checked, then 100%. Env diff vs `00105-mw4` = only `GIT_COMMIT_SHA` 5c15583→6da2411 (44 = 44,
+spec identical; no `LIVE_VAD_SILENCE_MS`, LVX181 changed nothing). Boot 0 WARNING+ (`sms_channel_off` expected). The
+voice service has no `/health` route (404 on 00105 too); `GET /` 200. Dashboard untouched. Rollback:
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00105-mw4=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+**Next:** the owner's 3 calls (scripts in the overnight report / ledger), then Round A2 + the backlog follow-ups.

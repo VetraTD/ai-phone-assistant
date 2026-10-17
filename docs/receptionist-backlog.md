@@ -17312,7 +17312,7 @@ the same counters plus the backwards-order count.
 
 ## A1 part 4 live calls, 2026-10-16 (prod `voice-uk-prod-00105-mw4` @ `5c15583`): one serious new defect
 
-### LVX179 · The receptionist booked a time the caller never chose, then turned the correction into a second booking · **OPEN · P0** `[medium]` ~1.5–2.5 h + gate + deploy + 1–2 live calls
+### LVX179 · The receptionist booked a time the caller never chose, then turned the correction into a second booking · **DEPLOYED 2026-10-17 05:09 (00108-rox @6da2411) — owner calls pending · P0**
 Call b `CA70682e3219cb227353f4681b25119586` (2026-10-16 19:55Z, Test Line). The model listed "9 00 AM, 1 00 PM and
 4 30 PM. Which of those works best for Maja?". In its NEXT turn, with the caller saying nothing ("What? No, I didn't
 even say anything"), it booked 9:00 AM itself. The A1 same-breath rule saved it: `write_consent_probe`
@@ -17336,8 +17336,9 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - **2026-10-17 overnight (Part 5 S2):** Fix 3 built and reworked through four opus review rounds (final `6da2411`;
   design in the round-A1 plan "Part 5 S2 + overnight as built"). Gate `p5-final5` @ `6da2411`: root 8,038 passed,
   census clean, db 700; full sabotage run as shards (single run crashed on a Windows file lock, and the corpus replay
-  makes it ~9 h). Five older rows went GREEN because LVX179 made their guards redundant (see below); staged as a
-  NO-TRAFFIC revision, the owner switches traffic. Calls not yet made.
+  makes it ~9 h). Seven older rows went GREEN: three fixed with sharper tests, four retired because LVX179 made
+  their guards redundant (see below). LIVE `voice-uk-prod-00108-rox` @ `6da2411` 05:09 CDT; rollback to
+  `00105-mw4`. Calls not yet made.
 - Follow-ups found by that gate `[cheap]`:
   - `services/tools.js` early "yes that objects" refusal (A1 final review I4) is now redundant with the A1 gate AND
     still hands pre-LVX179 wording ("read the new ones back once in one sentence and call this again") — a yes with
