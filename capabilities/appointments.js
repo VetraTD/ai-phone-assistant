@@ -52,6 +52,7 @@ import { declineGuardrail } from "../lib/capabilities/decline.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { readBackMentionsSlot } from "../lib/voice/slotMention.js";
 import { getStrings } from "../lib/voice/strings.js";
+import { composeMoveQuestion } from "../lib/voice/savePolicy.js";
 
 /**
  * Booking. Registered only when the business opted into the book_appointment
@@ -677,7 +678,194 @@ function inAdditionExisting(args, ctx, config) {
 export function inAdditionWouldRefuse(args, ctx, config) {
   const { policy, existing } = inAdditionExisting(args, ctx, config);
   if (existing.length === 0) return false;
+  // LVX179 Fix 3 decides a same-person booking right after a save on this
+  // call (move / ask / extra), so the in-addition question is not asked -- and
+  // the write-order gate's look-ahead must NOT step aside for it: stepping
+  // aside let the move or the extra one land with no question at all. Only
+  // `block` still refuses an extra one (the business's own rule).
+  const after = afterSaveDecision(args, ctx);
+  if (after && (after.kind !== "add" || policy !== "block")) return false;
   return policy === "block" || args?.in_addition_to_existing !== true;
+}
+
+// ---------------------------------------------------------------------------
+// LVX179 Fix 3 (owner, 2026-10-16): A CORRECTION RIGHT AFTER A SAVE MOVES THAT
+// BOOKING, never adds one. Call b (CA70682e): the model booked 9 AM, the
+// caller said "10 a.m." and it became a SECOND booking through the in-addition
+// question. The model decides first -- a reschedule it calls itself never
+// reaches here. This steps in only when it calls book_appointment again for
+// the SAME person (samePersonBookings, F-E's predicate) at a DIFFERENT time,
+// on the call that just booked (scratch lastBooked).
+//
+// The caller's words since that save decide (owner): a correction cue and no
+// addition cue -> move it; an addition cue and no correction cue -> an extra
+// one; neither, both, or nothing transcribed yet -> ask ONCE, naming both
+// times (owner 22:55: "code makes it ask once"). After that question only the
+// answer counts (askedAtLen), and if even the answer is unclear the model's
+// own choice stands (in_addition_to_existing): the caller has been asked.
+// ---------------------------------------------------------------------------
+const AFTER_SAVE_MOVE_RE =
+  /\b(?:no|nope|instead|actually|change|move|moving|make\s+it|rather|meant|switch|en\s+vez|mejor|cambi\w*|mueva|mover)\b/i;
+const AFTER_SAVE_ADD_RE =
+  /\b(?:another|also|too|as\s+well|second|both|extra|in\s+addition|keep|tambi[eé]n|adem[aá]s|las\s+dos|ambas|mantener|mantenga)(?![\p{L}])/iu;
+
+/** "move" | "add" | "ask" for the caller's words since the save (or since the question). */
+export function classifyAfterSave(text) {
+  const t = typeof text === "string" ? text : "";
+  if (!t.trim()) return "ask";
+  const move = AFTER_SAVE_MOVE_RE.test(t);
+  const add = AFTER_SAVE_ADD_RE.test(t);
+  if (move && !add) return "move";
+  if (add && !move) return "add";
+  return "ask";
+}
+
+function callerSaidLen(ctx) {
+  return typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall.length : null;
+}
+
+/**
+ * Does Fix 3 apply to this book_appointment, and which way?
+ *
+ * @param {object} args - book_appointment arguments
+ * @param {object} ctx
+ * @param {string} scheduledAtInstant - the anchored (offset-bearing) new slot
+ * @returns {null | { kind: "move"|"add"|"ask"|"wait", last: object }}
+ */
+export function correctionAfterSave(args, ctx, scheduledAtInstant) {
+  const last = scratch(ctx).lastBooked;
+  if (!last?.id || !last.scheduled_at) return null;
+  const lastMs = Date.parse(last.scheduled_at);
+  const newMs = Date.parse(scheduledAtInstant ?? "");
+  if (!Number.isFinite(lastMs) || !Number.isFinite(newMs) || lastMs === newMs) return null;
+  if (samePersonBookings(args?.client_name, [last]).length === 0) return null;
+  const said = typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall : null;
+  if (Number.isFinite(last.askedAtLen)) {
+    const answer = said != null ? said.slice(last.askedAtLen) : ctx?.lastCallerText || "";
+    if (!answer.trim()) return { kind: "wait", last };
+    const kind = classifyAfterSave(answer);
+    if (kind !== "ask") return { kind, last };
+    return { kind: args?.in_addition_to_existing === true ? "add" : "move", last };
+  }
+  const words =
+    said != null && Number.isFinite(last.callerSaidLen) ? said.slice(last.callerSaidLen) : ctx?.lastCallerText || "";
+  return { kind: classifyAfterSave(words), last };
+}
+
+/**
+ * The A1 gate's question when Fix 3 applies (services/tools.js), so the caller
+ * hears ONE question: the move/keep question in the unclear case, the move
+ * read-back for a clear correction. Null = the ordinary read-back.
+ * `lastBooked` is the state patch that records the move/keep question was
+ * put (askedAtLen), so only the answer is read afterwards.
+ *
+ * @returns {null | { sentence: string, lastBooked: object|null }}
+ */
+function afterSaveDecision(args, ctx) {
+  try {
+    if (!args?.scheduled_at) return null;
+    const v = validateBookingTime(args.scheduled_at, ctx?.config || {}, ctx?.deps);
+    return v?.ok ? correctionAfterSave(args, ctx, v.scheduledAt) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function afterSaveQuestion(args, ctx) {
+  try {
+    const config = ctx?.config || {};
+    const d = afterSaveDecision(args, ctx);
+    if (!d || d.kind === "add" || d.kind === "wait") return null;
+    const orKeep = d.kind === "ask";
+    return {
+      sentence: composeMoveQuestion({
+        fromAt: d.last.scheduled_at,
+        toAt: args.scheduled_at,
+        clientName: args.client_name,
+        config,
+        orKeep,
+      }),
+      lastBooked: orKeep ? { ...d.last, askedAtLen: callerSaidLen(ctx) } : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Fix 3, "move": the row just booked goes to the new time. Never an insert. */
+async function moveJustBooked(fc, ctx, last, anchoredScheduledAt) {
+  const args = fc.args || {};
+  const moved = await rescheduleAppointment(
+    {
+      id: fc.id,
+      name: "reschedule_appointment_db",
+      args: { appointment_id: last.id, new_scheduled_at: args.scheduled_at, client_name: args.client_name },
+    },
+    ctx
+  );
+  const ok = moved?.functionResponse?.response?.success === true;
+  bumpCounter(ok ? "booking_correction_moved" : "booking_correction_move_failed");
+  ctx?.deps?.log?.info?.("booking_correction_after_save", { callSid: ctx?.callSid, outcome: ok ? "moved" : "move_failed" });
+  const effects = moved?.stateEffects || {};
+  return {
+    ...moved,
+    functionResponse: {
+      ...moved.functionResponse,
+      name: fc.name,
+      response: ok
+        ? {
+            success: true,
+            message:
+              'Moved the appointment booked a moment ago to the new time -- there is still ONE booking, nothing ' +
+              'was added. Say only: "Done, you\'re all set." Do not repeat the day, the time or the name.',
+          }
+        : moved.functionResponse.response,
+    },
+    stateEffects: {
+      ...effects,
+      ...(ok
+        ? {
+            capabilityState: {
+              ...(effects.capabilityState || {}),
+              appointments: {
+                ...(effects.capabilityState?.appointments || {}),
+                lastBooked: {
+                  id: last.id,
+                  scheduled_at: anchoredScheduledAt,
+                  client_name: last.client_name || null,
+                  callerSaidLen: callerSaidLen(ctx),
+                },
+              },
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+/** Fix 3, "ask" / "wait": held, with the named question (or "you asked; wait"). */
+function moveOrKeepResult(fc, ctx, config, last, wait) {
+  const args = fc.args || {};
+  const question = composeMoveQuestion({ fromAt: last.scheduled_at, toAt: args.scheduled_at, config, orKeep: true });
+  if (!wait) bumpCounter("booking_correction_asked");
+  const message = wait
+    ? "[not caller speech] HELD, not failed. You asked whether to move the appointment booked a moment ago or " +
+      "keep both, and the caller has not answered yet. WAIT for their answer, then call this again with the " +
+      "same details. Do not book anything else and do not ask again."
+    : "[not caller speech] HELD, not failed: this caller booked an appointment a moment ago on this call, and " +
+      "it is not clear whether this new time replaces it or is an extra one. Ask them ONCE, in exactly these " +
+      `words and with nothing before them: "${question}" Then stop talking and wait. If they want it moved, ` +
+      "call book_appointment again with the same details -- it will move the one just booked, never add a " +
+      "second. If they want both, call it again with in_addition_to_existing set to true. Do not tell them " +
+      "anything went wrong.";
+  return {
+    functionResponse: { id: fc.id, name: fc.name, response: { success: false, gated: true, message } },
+    stateEffects: {
+      toolResult: { name: fc.name, success: false, message: question, callerSafe: true },
+      toolCallEvent: { name: fc.name, args, silent: true },
+      ...(wait ? {} : { capabilityState: { appointments: { lastBooked: { ...last, askedAtLen: callerSaidLen(ctx) } } } }),
+    },
+  };
 }
 
 /**
@@ -2274,7 +2462,18 @@ async function bookAppointment(fc, ctx) {
         // Round A1 part 4, F-E: the same predicate the write-order gate's
         // look-ahead reads, so the two cannot drift. A booking for a different
         // person than the ones on file is not asked about (owner, call b).
-        const { policy, all: allUpcoming, existing } = inAdditionExisting(args, ctx, config);
+        // LVX179 Fix 3: a correction right after a save MOVES that booking.
+        // Before the in-addition guard, which would otherwise turn "10
+        // instead" into a second booking (call b).
+        const afterSave = correctionAfterSave(args, ctx, anchoredScheduledAt);
+        if (afterSave?.kind === "move") return moveJustBooked(fc, ctx, afterSave.last, anchoredScheduledAt);
+        if (afterSave?.kind === "ask" || afterSave?.kind === "wait") {
+          return moveOrKeepResult(fc, ctx, config, afterSave.last, afterSave.kind === "wait");
+        }
+        if (afterSave?.kind === "add") bumpCounter("booking_correction_added");
+        // The caller's words said "another": that IS the in-addition answer.
+        const guardArgs = afterSave?.kind === "add" ? { ...args, in_addition_to_existing: true } : args;
+        const { policy, all: allUpcoming, existing } = inAdditionExisting(guardArgs, ctx, config);
 
         if (existing.length > 0) {
           // What the model may say. Times only — no id, no phone, no stored
@@ -2291,7 +2490,7 @@ async function bookAppointment(fc, ctx) {
           // `block` ignores the flag entirely — it is never advertised under
           // this policy (see tools()), and honouring it would make an opt-in
           // parameter a bypass for the business's own rule.
-          const blocked = inAdditionWouldRefuse(args, ctx, config);
+          const blocked = inAdditionWouldRefuse(guardArgs, ctx, config);
 
           if (blocked) {
             // Round A1 part 4, F-E: a question that still lands after a
@@ -2611,6 +2810,9 @@ async function bookAppointment(fc, ctx) {
                   id: bookedRowId,
                   scheduled_at: booked.scheduled_at,
                   client_name: booked.client_name || null,
+                  // LVX179 Fix 3: where "the caller's words since this save"
+                  // begin (Live only; the cascade reads its last caller turn).
+                  callerSaidLen: callerSaidLen(ctx),
                 },
                 callerFacts,
               },

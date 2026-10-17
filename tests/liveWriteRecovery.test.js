@@ -186,7 +186,12 @@ describe("the booking argument the model would not set", () => {
     return s;
   }
 
-  it("refuses a second booking with a read-back the caller can answer", async () => {
+  // LVX179 Fix 3 + LVX180 (owner, 2026-10-16): right after a booking on this
+  // call, the caller's words decide. "Also" says it is an extra one, so there
+  // is no in-addition question: the one read-back, the yes, booked. (The
+  // in-addition question for a booking already ON FILE from an earlier call
+  // is tests/a1InAddition.test.js.)
+  it("an 'also' right after a booking is an extra one: no in-addition question, booked on the yes", async () => {
     const s = await alreadyBooked("CA_inaddition_readback");
     await s.callTool("check_appointment_availability", { requested_at: SECOND_SLOT });
     await s.callerSays("Can I also take four thirty?");
@@ -194,34 +199,31 @@ describe("the booking argument the model would not set", () => {
     await s.callerSays("Yes please.");
 
     const res = await s.callTool("book_appointment", bookArgs(SECOND_SLOT));
-    expect(ok(res)).toBe(false);
-    // The MODEL is told to set the flag...
-    expect(res[0].response.message).toMatch(/in_addition_to_existing/);
-    // ...and the CALLER gets a question that names the time, so their answer
-    // means something. The old either/or named no time and could not be
-    // answered yes, so nothing downstream could act on the reply.
-    // The caller-safe line is asserted in tests/appointments.test.js, where the
-    // pack is called directly and stateEffects.toolResult is reachable. Here the
-    // behavioural consequence is what matters, and the next two cases are it.
+    expect(ok(res)).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(2);
   });
 
   it("books it on the caller's yes, without the model setting anything", async () => {
     // THE WHOLE POINT. The model does not have to get the argument right for
     // the booking to land -- it was told twice on CAad88df4a and did not.
+    // Since LVX179 Fix 3, unclear words right after a booking get ONE named
+    // question ("Shall I move ..., or keep both?"). The model only has to call
+    // again with the SAME details; the caller's words ("book both") decide
+    // that it is an extra one -- no flag for the model to set.
     const s = await alreadyBooked("CA_inaddition_retry");
     await s.callTool("check_appointment_availability", { requested_at: SECOND_SLOT });
-    await s.callerSays("Can I also take four thirty?");
-    await s.assistantTurn(SECOND_READ_BACK);
-    await s.callerSays("Yes please.");
-    expect(ok(await s.callTool("book_appointment", bookArgs(SECOND_SLOT)))).toBe(false);
+    await s.callerSays("What about four thirty?");
+    const held = await s.callTool("book_appointment", bookArgs(SECOND_SLOT));
+    expect(ok(held)).toBe(false);
+    const asked = /"(Shall I move [^"]*or keep both\?)"/.exec(String(held[0]?.response?.message || ""));
+    expect(asked, "the move-or-keep question was not handed").toBeTruthy();
     expect(s.store.scheduled()).toHaveLength(1);
+    await s.turnEnds();
 
-    // The model asks, the caller agrees, and the stash is released with the
-    // flag the pack asked for.
-    await s.assistantTurn(
-      "You already have an appointment with us — shall I book this additional one for Friday at four thirty as well?"
-    );
+    await s.assistantTurn(asked[1]);
     await s.callerSays("Yes, book both.");
+    const again = await s.callTool("book_appointment", bookArgs(SECOND_SLOT));
+    expect(ok(again)).toBe(true);
     await s.turnEnds();
     await s.settle();
 

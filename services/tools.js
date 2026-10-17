@@ -17,7 +17,7 @@ import {
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
-import { inAdditionWouldRefuse } from "../capabilities/appointments.js";
+import { inAdditionWouldRefuse, afterSaveQuestion } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
@@ -281,6 +281,35 @@ function a1AwaitingMessage(toolName) {
  * the model TOLD the caller it was booking ("…booking that now") without
  * asking; that is said to the model so it does not repeat the statement.
  */
+/**
+ * LVX179: the ONE question for this booking. Normally composeReadBack's; for a
+ * second booking right after a save on this call, same person, different time
+ * (Fix 3, owner 2026-10-16), the move question instead -- "Shall I move your
+ * 9 a.m. to 10 a.m., or keep both?" when the caller's words do not say which,
+ * so the caller hears one question, not a read-back and then a move/keep ask.
+ * `lastBooked` is the state patch recording that the move/keep question was
+ * put, so the booking path reads only the answer after it.
+ */
+function a1Question(fc, ctx) {
+  const after = fc.name === "book_appointment" ? afterSaveQuestion(fc.args || {}, ctx) : null;
+  return {
+    sentence:
+      after?.sentence ??
+      composeReadBack({
+        toolName: fc.name,
+        args: fc.args || {},
+        config: ctx?.config,
+        callerSpelled: ctx?.callerSpelled === true,
+      }),
+    lastBooked: after?.lastBooked ?? null,
+  };
+}
+
+/** Fix 3's state patch, only when the move/keep question was the one handed. */
+function lastBookedPatch(q) {
+  return q?.lastBooked ? { lastBooked: q.lastBooked } : {};
+}
+
 function a1AskMessage(toolName, sentence, source) {
   const told =
     source === "in_turn_statement" || source === "previous_statement"
@@ -1544,16 +1573,7 @@ export async function executeToolCall(fc, ctx) {
                   message: a1Save.awaitingAnswer === true
                     ? a1AwaitingMessage(fc.name)
                     : a1Save.applies && a1Save.rule === "booking"
-                    ? a1AskMessage(
-                        fc.name,
-                        composeReadBack({
-                          toolName: fc.name,
-                          args: fc.args || {},
-                          config: ctx?.config,
-                          callerSpelled: ctx?.callerSpelled === true,
-                        }),
-                        a1Save.readBackSource
-                      )
+                    ? a1AskMessage(fc.name, a1Question(fc, ctx).sentence, a1Save.readBackSource)
                     : heldWritePreamble(fc.name) +
                     `this is still ` +
                     `going ahead. The caller has not answered you: their last turn carried no speech ` +
@@ -1579,6 +1599,10 @@ export async function executeToolCall(fc, ctx) {
                 toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                 capabilityState: {
                   [pack.id]: {
+                    // LVX179 Fix 3: the move/keep question was put.
+                    ...(a1Save.applies && a1Save.rule === "booking" && a1Save.awaitingAnswer !== true
+                      ? lastBookedPatch(a1Question(fc, ctx))
+                      : {}),
                     // THE WRITE SURVIVES THE REFUSAL, and this is the
                     // load-bearing half of the fix.
                     //
@@ -2366,17 +2390,12 @@ export async function executeToolCall(fc, ctx) {
                 // standing, the only way here is an objection (a no, a question,
                 // a change): answer it, never re-confirm.
                 const a1Booking = a1Save.applies && a1Save.rule === "booking";
-                const a1Sentence = a1Booking
-                  ? composeReadBack({
-                      toolName: fc.name,
-                      args: fc.args || {},
-                      config: ctx?.config,
-                      // Owner, A1 part 4 (call d1, "felt weird"): a name on file
-                      // is SAID, not spelled. Letters only for a surname the
-                      // caller spelled on this call (LVX172).
-                      callerSpelled: ctx?.callerSpelled === true,
-                    })
-                  : null;
+                // Owner, A1 part 4 (call d1, "felt weird"): a name on file is
+                // SAID, not spelled. Letters only for a surname the caller
+                // spelled on this call (LVX172). LVX179 Fix 3: the move
+                // question for a correction right after a save (a1Question).
+                const a1Q = a1Booking ? a1Question(fc, ctx) : null;
+                const a1Sentence = a1Q ? a1Q.sentence : null;
                 // T5b: read back, then not a sound from the caller. Nothing to
                 // answer and nothing to re-read: wait for them.
                 const a1Awaiting = a1Booking && a1Save.awaitingAnswer === true;
@@ -2441,6 +2460,8 @@ export async function executeToolCall(fc, ctx) {
                     toolCallEvent: { name: fc.name, args: fc.args, silent: true },
                     capabilityState: {
                       [pack.id]: {
+                        // LVX179 Fix 3: the move/keep question was put.
+                        ...(a1Q && !a1Awaiting && !readBackMade ? lastBookedPatch(a1Q) : {}),
                         // The key is written on EVERY refusal, even one that
                         // does not spend a turn's budget: it is what tells the
                         // next attempt whether this is the same proposal or a

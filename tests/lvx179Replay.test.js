@@ -298,3 +298,109 @@ describe("LVX179: an answer given earlier in the call still counts", () => {
     expect(s.store.scheduled()).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// LVX179 Fix 3 (owner, 2026-10-16): a correction right after a save MOVES that
+// booking, never adds one. Call b: 9 AM booked, the caller's "10 a.m." became
+// a second row through the in-addition question. The caller's words since the
+// save decide; unclear words get ONE named question, which is also the
+// confirmation (owner 22:55: "code makes it ask once").
+// ---------------------------------------------------------------------------
+describe("LVX179 Fix 3: a correction right after a save moves that booking", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+
+  async function savedAt9(callSid) {
+    const s = await boot(callSid);
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    const [saved] = await s.callTool("book_appointment", book(AT_9));
+    expect(saved.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    return s;
+  }
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+
+  it("'no, 10 instead' right after the save: asked once as a move, then ONE row, moved to 10", async () => {
+    const s = await savedAt9("CA_fix3_instead");
+    await s.callerSays("No, 10 instead.");
+    const [ask] = await s.callTool("book_appointment", book(AT_10));
+    expect(ask.response.success).toBe(false);
+    const asked = String(ask.response.message);
+    expect(asked).toMatch(/So that's moving your Friday, September 18 at 9/);
+    expect(asked).toMatch(/to 10/);
+    expect(asked).not.toMatch(/or keep both/);
+    await s.turnEnds();
+    await s.assistantTurn("So that's moving your Friday, September 18 at 9 AM to 10 AM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [moved] = await s.callTool("book_appointment", book(AT_10));
+    expect(moved.response.success).toBe(true);
+    expect(String(moved.response.message)).toMatch(/Done, you're all set/);
+    expect(String(moved.response.message)).toMatch(/ONE booking/);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("'also one at 2' right after the save: an extra one, two rows, no move question", async () => {
+    const s = await savedAt9("CA_fix3_also");
+    await s.callerSays("Also one at 2, please.");
+    const [ask] = await s.callTool("book_appointment", book(AT_14));
+    expect(ask.response.success).toBe(false);
+    expect(String(ask.response.message)).not.toMatch(/move/i);
+    await s.turnEnds();
+    await s.assistantTurn("So that's Friday, September 18 at 2 PM for Ada Moss, is that right?");
+    await s.callerSays("Yes.");
+    const [added] = await s.callTool("book_appointment", book(AT_14));
+    expect(added.response.success).toBe(true);
+    const rows = s.store.scheduled().map(at).sort();
+    expect(rows).toEqual([local(AT_9), local(AT_14)]);
+  });
+
+  it("unclear words ('what about 10?'): ONE named question, then 'move it' -> moved, one row", async () => {
+    const s = await savedAt9("CA_fix3_unclear_move");
+    await s.callerSays("What about 10?");
+    const [ask] = await s.callTool("book_appointment", book(AT_10));
+    expect(ask.response.success).toBe(false);
+    expect(String(ask.response.message)).toMatch(/Shall I move your Friday, September 18 at 9:00 AM to 10:00 AM, or keep both\?/);
+    expect(s.store.scheduled()).toHaveLength(1);
+    await s.turnEnds();
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m., or keep both?");
+    await s.callerSays("Move it.");
+    const [moved] = await s.callTool("book_appointment", book(AT_10));
+    expect(moved.response.success).toBe(true);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("unclear words, then 'keep both': two rows, and no second question", async () => {
+    const s = await savedAt9("CA_fix3_unclear_keep");
+    await s.callerSays("What about 10?");
+    await s.callTool("book_appointment", book(AT_10));
+    await s.turnEnds();
+    await s.assistantTurn("Shall I move your Friday, September 18 at 9 a.m. to 10 a.m., or keep both?");
+    await s.callerSays("Keep both.");
+    const [added] = await s.callTool("book_appointment", book(AT_10));
+    expect(added.response.success).toBe(true);
+    const rows = s.store.scheduled().map(at).sort();
+    expect(rows).toEqual([local(AT_9), local(AT_10)]);
+  });
+
+  it("a different person right after the save: the normal path, a second row, nothing moved", async () => {
+    const s = await savedAt9("CA_fix3_other_person");
+    await s.callerSays("Can you book my colleague Ben Ortiz at 10?");
+    const [ask] = await s.callTool("book_appointment", book(AT_10, "Ben Ortiz"));
+    expect(ask.response.success).toBe(false);
+    expect(String(ask.response.message)).not.toMatch(/move/i);
+    expect(String(ask.response.message)).toMatch(/for Ben Ortiz, is that right\?/);
+    await s.turnEnds();
+    await s.assistantTurn("So that's Friday, September 18 at 10 AM for Ben Ortiz, is that right?");
+    await s.callerSays("Yes.");
+    const [ben] = await s.callTool("book_appointment", book(AT_10, "Ben Ortiz"));
+    expect(ben.response.success).toBe(true);
+    const rows = s.store.scheduled().map(at).sort();
+    expect(rows).toEqual([local(AT_9), local(AT_10)]);
+  });
+});
