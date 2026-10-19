@@ -508,11 +508,14 @@ function existingAppointmentPolicy(cfg) {
 function applyToCallerSnapshot(effect, engine) {
   if (typeof engine?.setCallerContext !== "function") return;
   const current = engine.call?.callerContext;
-  const base = current || { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  // snapshotMissing (Part 6 review L2): a snapshot built here from nothing
+  // knows only this call's bookings, so bookingsFitting treats the caller's
+  // other bookings as unknown rather than none.
+  const base = current || { callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true };
   const list = Array.isArray(base.upcomingAppointments) ? base.upcomingAppointments : [];
   const data = effect.data || {};
   // Part 6: the rows past the five listed (fetchCallerContext upcomingBeyond)
-  // follow a rename, move or cancel too, so bookingsThatDay counts the day as
+  // follow a rename, move or cancel too, so bookingsFitting counts the day as
   // it now is. A new booking joins the listed array, as before.
   const beyond = Array.isArray(base.upcomingBeyond) ? base.upcomingBeyond : null;
   let nextBeyond = null;
@@ -824,8 +827,34 @@ const MONTH_NAMES = [
   "january", "february", "march", "april", "may", "june",
   "july", "august", "september", "october", "november", "december",
 ];
-const OLD_HALF_CLOCK_RE =
-  /\b\d{1,2}(?::\d{2})?\s*(?:a\.?\s?m\b|p\.?\s?m\b)|\b\d{1,2}:\d{2}\b|\bo['’]?clock\b|\bnoon\b|\bmidnight\b|\bat\s+\d{1,2}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:a\.?\s?m\b|p\.?\s?m\b|o['’]?clock|fifteen|thirty|forty|oh)\b/i;
+// Any clock time, digits or words (review L1: "at eleven", "half past nine",
+// "nine twenty", "in the morning" are times too). A clock in the old half
+// names a booking by its time, which readBackMentionsSlot already judged.
+const HOUR_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve";
+const OLD_HALF_CLOCK_RE = new RegExp(
+  String.raw`\b\d{1,2}(?::\d{2})?\s*(?:a\.?\s?m\b|p\.?\s?m\b)|\b\d{1,2}:\d{2}\b|\bo['’]?clock\b|\bnoon\b|\bmidnight\b|\bat\s+\d{1,2}\b|` +
+    String.raw`\bat\s+(?:${HOUR_WORDS})\b|\b(?:half|quarter)\s+(?:past|to)\b|\bin\s+the\s+(?:morning|afternoon|evening)\b|` +
+    String.raw`\b(?:${HOUR_WORDS})\s+(?:a\.?\s?m\b|p\.?\s?m\b|o['’]?clock|oh|five|ten|fifteen|twenty|thirty|forty|fifty)\b`,
+  "i"
+);
+// Spelled dates ("Monday the twenty-sixth"; review H1): read like digits.
+const ORDINAL_UNITS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"];
+const ORDINAL_TEENS = [
+  "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth",
+  "sixteenth", "seventeenth", "eighteenth", "nineteenth",
+];
+function spelledDates(half) {
+  const out = [];
+  const units = ORDINAL_UNITS.join("|");
+  for (const x of half.matchAll(new RegExp(String.raw`\b(?:(twenty|thirty)\s+)?(${units})\b`, "g"))) {
+    out.push((x[1] === "twenty" ? 20 : x[1] === "thirty" ? 30 : 0) + ORDINAL_UNITS.indexOf(x[2]) + 1);
+  }
+  for (const x of half.matchAll(new RegExp(String.raw`\b(${ORDINAL_TEENS.join("|")})\b`, "g"))) {
+    out.push(10 + ORDINAL_TEENS.indexOf(x[1]));
+  }
+  for (const x of half.matchAll(/\b(twentieth|thirtieth)\b/g)) out.push(x[1] === "twentieth" ? 20 : 30);
+  return out;
+}
 
 /** The text between the last move phrase and its "to", or "". */
 function oldHalfOfMoveQuestion(question) {
@@ -837,19 +866,34 @@ function oldHalfOfMoveQuestion(question) {
   return to ? rest.slice(0, to.index) : "";
 }
 
+const weekdayOf = (y, mo, d) => WEEKDAY_NAMES[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
+
 function namesOldDayOnly(question, last, ctx, naive) {
-  const half = oldHalfOfMoveQuestion(question).toLowerCase();
+  const half = oldHalfOfMoveQuestion(question).toLowerCase().replace(/-/g, " ");
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(naive);
   if (!half.trim() || !m || OLD_HALF_CLOCK_RE.test(half)) return false;
   if (/\b(?:today|tomorrow|tonight|yesterday)\b/.test(half)) return false;
-  const weekday = WEEKDAY_NAMES[new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay()];
-  const days = WEEKDAY_NAMES.filter((d) => new RegExp(`\\b${d}\\b`).test(half));
-  if (days.some((d) => d !== weekday)) return false;
-  if (MONTH_NAMES.some((mo, i) => i !== Number(m[2]) - 1 && new RegExp(`\\b${mo}\\b`).test(half))) return false;
-  const dates = [...half.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((x) => Number(x[1]));
-  if (dates.some((d) => d !== Number(m[3]))) return false;
+  const [mo, d] = [Number(m[2]), Number(m[3])];
+  const weekday = weekdayOf(Number(m[1]), mo, d);
+  const days = WEEKDAY_NAMES.filter((w) => new RegExp(`\\b${w}\\b`).test(half));
+  if (days.some((w) => w !== weekday)) return false;
+  const months = MONTH_NAMES.filter((name) => new RegExp(`\\b${name}\\b`).test(half));
+  if (months.some((name) => name !== MONTH_NAMES[mo - 1])) return false;
+  const dates = [...[...half.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((x) => Number(x[1])), ...spelledDates(half)];
+  if (dates.some((x) => x !== d)) return false;
   if (days.length === 0 && dates.length === 0) return false;
-  return bookingsThatDay(last, ctx, naive.slice(0, 10)) === 1;
+  // Opus review H1: count what the question NAMED, not the old date. "Your
+  // Monday appointment" fits every Monday and "the 26th" every month's 26th,
+  // so a second booking on another Monday makes it unclear -> ours is asked.
+  const fits = (rowNaive) => {
+    const r = /^(\d{4})-(\d{2})-(\d{2})/.exec(rowNaive);
+    if (!r) return true;
+    if (days.length && weekdayOf(Number(r[1]), Number(r[2]), Number(r[3])) !== weekday) return false;
+    if (dates.length && Number(r[3]) !== d) return false;
+    if (months.length && Number(r[2]) !== mo) return false;
+    return true;
+  };
+  return bookingsFitting(last, ctx, fits) === 1;
 }
 
 /**
@@ -861,21 +905,28 @@ function namesOldDayOnly(question, last, ctx, naive) {
  * 48:51.991), so its reply is the moment to say it (services/tools.js).
  *
  * Live + inbound only (the cascade has its own spelling gate; an outbound
- * contact's name has its own rule). Null when no name is on record. Several
- * names on one number (a family, an office): never spell any of them, and if
- * it is unclear which is the caller, one yes/no naming the most-booked name --
- * never a guess written silently onto the row.
+ * contact's name has its own rule), and only for a BOOKING intent (opus review
+ * M2): a booking's one question says the name back, so a wrong on-file name is
+ * heard and corrected; a message has no read-back, and someone else on the
+ * household phone would be filed under the on-file name. Null when no name is
+ * on record. Several names on one number (a family, an office): never spell
+ * any of them, and if it is unclear which is the caller, one yes/no naming the
+ * most-booked name -- never a guess written silently onto the row.
+ *
+ * Names come from the LISTED bookings only, at most three (review M3): the
+ * spelling gate (lib/nameQuality.js nameIsOnFile) reads the same list, so a
+ * name the note calls "on record" is never then held for a spelling, and an
+ * office number does not hand the model every patient's name.
  *
  * @param {object} ctx - tool context
+ * @param {string} [intent] - set_call_intent's intent argument
  * @returns {string|null}
  */
-export function onFileNameNote(ctx) {
+export function onFileNameNote(ctx, intent) {
   if (ctx?.callerSaidThisCall == null || ctx?.outboundCall) return null;
+  if (intent !== "book_appointment") return null;
   const cc = ctx?.callerContext;
-  const rows = [
-    ...(Array.isArray(cc?.upcomingAppointments) ? cc.upcomingAppointments : []),
-    ...(Array.isArray(cc?.upcomingBeyond) ? cc.upcomingBeyond : []),
-  ];
+  const rows = Array.isArray(cc?.upcomingAppointments) ? cc.upcomingAppointments : [];
   const byName = new Map();
   for (const a of rows) {
     const raw = typeof a?.client_name === "string" ? a.client_name.trim().replace(/\s+/g, " ") : "";
@@ -886,17 +937,24 @@ export function onFileNameNote(ctx) {
     byName.set(key, e);
   }
   if (byName.size === 0) return null;
-  const names = [...byName.values()].sort((x, y) => y.n - x.n).map((e) => e.name);
+  const names = [...byName.values()]
+    .sort((x, y) => y.n - x.n)
+    .slice(0, 3)
+    .map((e) => e.name);
   const config = ctx?.config || {};
   const canBook = Array.isArray(config.allowedTasks) && config.allowedTasks.includes("book_appointment");
+  // Review M1: the flag the in-addition guard reads, or it asks its own
+  // "shall I book this additional one?" after the read-back -- a second question.
   const another =
     canBook && existingAppointmentPolicy(capabilityConfig(config, "appointments")) !== "block"
-      ? " If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to move or reschedule one they already have, and do not list the ones they already have."
+      ? " If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to " +
+        "move or reschedule one they already have, do not list the ones they already have, and book it with " +
+        "in_addition_to_existing set to true."
       : "";
   if (names.length === 1) {
     return (
-      `[not caller speech] On this caller's record: ${names[0]}. If they are calling for themselves, that is their name: ` +
-      `use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +
+      `[not caller speech] On this caller's record: ${names[0]}. If they are booking for themselves, that is their ` +
+      `name: use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +
       another
     );
   }
@@ -910,20 +968,23 @@ export function onFileNameNote(ctx) {
 }
 
 /**
- * This person's bookings on one local day: the snapshot (this call's bookings
+ * This person's bookings that fit what the move question named: the snapshot (this call's bookings
  * are added to it), the rows past the five listed, and lastBooked, each once.
  * Fails toward MORE (ours is asked): any name sharing a word, a row with no
  * name, and an overflow the snapshot cannot see (an older snapshot shape).
  */
-function bookingsThatDay(last, ctx, day) {
+function bookingsFitting(last, ctx, fits) {
   const cc = ctx?.callerContext;
-  const beyond = cc?.upcomingBeyond;
-  if (Number(cc?.upcomingOverflow) > 0 && !Array.isArray(beyond)) return Infinity;
+  // Review L2: no call-start snapshot (lookup failed, number withheld) means
+  // the caller's other bookings are unknown, not none.
+  if (!cc || cc.snapshotMissing) return Infinity;
+  const beyond = cc.upcomingBeyond;
+  if (Number(cc.upcomingOverflow) > 0 && !Array.isArray(beyond)) return Infinity;
   const tz = ctx?.config?.timezone;
   const now = Date.now();
   const rows = [...upcomingForCaller(ctx), ...(Array.isArray(beyond) ? beyond : []), last].filter((a) => {
     const t = Date.parse(a?.scheduled_at);
-    return Number.isFinite(t) && t > now && toLocalNaiveDateTime(a.scheduled_at, tz).slice(0, 10) === day;
+    return Number.isFinite(t) && t > now && fits(toLocalNaiveDateTime(a.scheduled_at, tz));
   });
   const ids = new Set();
   const times = new Set();

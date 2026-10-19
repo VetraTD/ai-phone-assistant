@@ -53,6 +53,11 @@ const RESULTS_FILE = path.resolve("scripts/probes/results-p6-onfile.json");
 const argv = process.argv.slice(2);
 const DRY = argv.includes("--dry");
 const SMOKE = argv.includes("--smoke");
+// --note-only (after the opus review changed the note: listed names only, the
+// in_addition flag): re-run the note arm alone against the first run's plain
+// arm (5/10). PRE-REGISTERED: it passes if note SPELL <= 2/10.
+const NOTE_ONLY = argv.includes("--note-only");
+const BASELINE_PLAIN_SPELL = 5;
 
 // The Test Line's snapshot shape on 2026-10-19 (pseudonyms kept as on the line).
 const at = (d, h) => new Date(`2026-10-${d}T${String(h).padStart(2, "0")}:00:00-05:00`).toISOString();
@@ -84,7 +89,7 @@ const extras = {
   greetingSpoken: false,
   intentMarker: false,
 };
-const NOTE = onFileNameNote({ callerSaidThisCall: "", callerContext: CALLER_CONTEXT, config });
+const NOTE = onFileNameNote({ callerSaidThisCall: "", callerContext: CALLER_CONTEXT, config }, "book_appointment");
 const ARMS = {
   plain: { success: true },
   note: { success: true, message: NOTE },
@@ -202,7 +207,7 @@ if (SMOKE) {
   plan.push(["plain", LINES[0], 0], ["note", LINES[0], 0]);
 } else {
   // Interleaved so drift over the run hits both arms alike.
-  for (let i = 0; i < N_PER_LINE; i++) for (const line of LINES) for (const arm of ["plain", "note"]) plan.push([arm, line, i]);
+  for (let i = 0; i < N_PER_LINE; i++) for (const line of LINES) for (const arm of NOTE_ONLY ? ["note"] : ["plain", "note"]) plan.push([arm, line, i]);
 }
 const results = [];
 for (const [arm, line, i] of plan) {
@@ -227,8 +232,9 @@ const summary = {
   invalid: results.length - valid.length,
   usd: results.reduce((s, r) => s + r.usd, 0),
 };
-summary.verdict =
-  summary.spell.plain < 3 ? "INCONCLUSIVE (plain arm did not reproduce)" :
+summary.verdict = NOTE_ONLY
+  ? (summary.spell.note <= BASELINE_PLAIN_SPELL - 3 ? "NOTE HOLDS" : "NOTE REGRESSED")
+  : summary.spell.plain < 3 ? "INCONCLUSIVE (plain arm did not reproduce)" :
   summary.spell.note <= summary.spell.plain - 3 ? "NOTE WINS" : "NO WIN";
 console.log(JSON.stringify(summary, null, 2));
-if (!SMOKE) fs.writeFileSync(RESULTS_FILE, JSON.stringify({ summary, note: NOTE, results }, null, 2));
+if (!SMOKE) fs.writeFileSync(NOTE_ONLY ? RESULTS_FILE.replace(".json", "-v2.json") : RESULTS_FILE, JSON.stringify({ summary, note: NOTE, results }, null, 2));

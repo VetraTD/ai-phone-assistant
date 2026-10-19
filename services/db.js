@@ -1776,7 +1776,7 @@ export async function fetchCallerContext(businessId, callerNumber) {
   const upcomingOverflow = Math.max(0, (apptRows || []).length - upcomingAppointments.length);
   // Round A1 Part 6: the rows past the five, never rendered. A move question
   // naming only a DAY counts when that person has one booking that day
-  // (capabilities/appointments.js bookingsThatDay), and a sixth booking on
+  // (capabilities/appointments.js bookingsFitting), and a sixth booking on
   // that day must be seen. No notes: nothing here reads them.
   const upcomingBeyond = (apptRows || []).slice(5).map((a) => ({
     id: a.id,

@@ -119,6 +119,8 @@ async function boot(env = {}) {
     say: (text) => live.push({ serverContent: { outputTranscription: { text } } }),
     hear: (text) => live.push({ serverContent: { inputTranscription: { text } } }),
     endTurn: () => live.push({ serverContent: { turnComplete: true } }),
+    // Model audio with no transcription of it (the transcript can go missing).
+    audio: () => live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { mimeType: "audio/pcm;rate=24000", data: Buffer.alloc(960).toString("base64") } }] } } }),
   };
 }
 
@@ -154,6 +156,17 @@ describe("LVX50 — a caller turn that did not transcribe as speech", () => {
     // unusable script stands in for it.
     s.hear("에레는");
     s.say("All right, what else can I assist you with today?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stats().live_unusable_transcript).toBe(1);
+    expect(notes(s.live)).toHaveLength(0);
+  });
+
+  it("sends NO note when the model spoke but its transcription never arrived", async () => {
+    const s = await boot();
+    s.hear("에레는");
+    s.audio();
     s.endTurn();
     await s.settle();
 

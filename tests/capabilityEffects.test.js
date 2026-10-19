@@ -284,7 +284,7 @@ describe("appointments.onEffect — the caller snapshot follows what the call di
   });
 
   // Part 6: the rows past the five listed follow the call too, so a day's
-  // booking count (bookingsThatDay) sees a moved or cancelled sixth booking.
+  // booking count (bookingsFitting) sees a moved or cancelled sixth booking.
   it("a cancel or move of a row past the five listed updates upcomingBeyond", async () => {
     const appointments = (await import("../capabilities/appointments.js")).default;
     const ctx = () => ({

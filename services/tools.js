@@ -534,7 +534,7 @@ export async function executeToolCall(fc, ctx) {
       const intentArgs = fc.args ?? null;
       // Round A1 Part 6: the on-file name (and "another" = extra) in the reply
       // the model acts on before its words this turn. Live + inbound only.
-      const onFile = onFileNameNote(ctx);
+      const onFile = onFileNameNote(ctx, intentArgs?.intent);
       return {
         functionResponse: {
           id: fc.id,

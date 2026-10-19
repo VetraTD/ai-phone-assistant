@@ -814,7 +814,11 @@ describe("Part 6 Fix 1: a move question naming only the DAY", () => {
   const local = (naive) => Date.parse(`${naive}-05:00`);
   const row = (id, naive, client_name = "Ada Moss") => ({ id, client_name, scheduled_at: `${naive}-05:00` });
 
-  async function savedAt9(callSid, callerContext = null) {
+  // A known snapshot with nothing on file (review L2: no snapshot at all is
+  // "unknown", not "none").
+  const KNOWN = { callCount: 1, lastCallSummary: null, upcomingAppointments: [], upcomingOverflow: 0, upcomingBeyond: [] };
+
+  async function savedAt9(callSid, callerContext = KNOWN) {
     const s = await bootLive({
       config: CONFIG,
       callSid,
@@ -920,5 +924,63 @@ describe("Part 6 Fix 1: a move question naming only the DAY", () => {
       expect(String(r.response.message), sid).not.toMatch(/Moved the appointment/);
       expect(s.store.scheduled().map(at), sid).toContain(local(AT_9));
     }
+  });
+
+  // Opus review H1: the count is of what the question NAMED. "Your Friday
+  // appointment" fits every Friday, so another Friday on file makes it unclear.
+  it("a weekday only, with another Friday on file: ours is asked, nothing moved", async () => {
+    const s = await savedAt9("CA_p6_day_weekday_two", {
+      ...KNOWN,
+      upcomingAppointments: [row("appt-next-fri", "2026-09-25T11:00:00")],
+    });
+    await s.assistantTurn("Shall I move your Friday appointment to 10:00 AM?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+
+  it("weekday AND date with another Friday on file: the date makes it this one, moved", async () => {
+    const s = await savedAt9("CA_p6_day_weekday_date", {
+      ...KNOWN,
+      upcomingAppointments: [row("appt-next-fri", "2026-09-25T11:00:00")],
+    });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_10)]);
+  });
+
+  it("a spelled date is read like digits: 'the eighteenth' moves, 'the twenty-fifth' does not", async () => {
+    const yes = await savedAt9("CA_p6_day_spelled_yes");
+    await yes.assistantTurn("Shall I move your appointment on Friday the eighteenth to 10:00 AM?");
+    await yes.callerSays("Yes.");
+    expect((await yes.callTool("book_appointment", book(AT_10)))[0].response.success).toBe(true);
+    expect(yes.store.scheduled().map(at)).toEqual([local(AT_10)]);
+
+    const no = await savedAt9("CA_p6_day_spelled_no");
+    await no.assistantTurn("Shall I move your appointment on Friday the twenty-fifth to 10:00 AM?");
+    await no.callerSays("Yes.");
+    await no.callTool("book_appointment", book(AT_10));
+    expect(no.store.scheduled().map(at)).toContain(local(AT_9));
+  });
+
+  it("a time in words in the old half ('half past two') names a time, not the day: never a day-only move", async () => {
+    const s = await savedAt9("CA_p6_day_word_clock");
+    await s.assistantTurn("Shall I move your Friday half past two appointment to 10:00 AM?");
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(String(r.response.message)).not.toMatch(/Moved the appointment/);
+    expect(s.store.scheduled().map(at)).toContain(local(AT_9));
+  });
+
+  it("no call-start snapshot (lookup failed, number withheld): other bookings unknown, ours is asked", async () => {
+    const s = await savedAt9("CA_p6_day_no_snapshot", null);
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
   });
 });
