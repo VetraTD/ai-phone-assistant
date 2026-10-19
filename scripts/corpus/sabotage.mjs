@@ -896,11 +896,15 @@ const SABOTAGES = [
   // -------------------------------------------------------------------------
   // LVX160 and LVX161 — the write the caller asked for that never landed.
   // -------------------------------------------------------------------------
-  // RETIRED 2026-10-17 (P5 overnight gate, row went GREEN): ceiling-ignores-history. Its
-  // only red test was CAad88df4a's booking, and since LVX179 the write-order ceiling never
-  // releases a booking-rule write (that test now certifies exactly that). The history
-  // rule still governs cancels and strict tools, which have NO test of their own --
-  // backlog: add a cancel case to tests/liveWriteRecovery.test.js and restore this row.
+  {
+    name: "ceiling-ignores-history",
+    why:
+      "puts the release ceiling back to reading `readBackMade` for THIS turn only, which inverted the gate: when the model answered a refusal with an apology instead of re-reading the proposal back, the read-back aged out, the flag went false, and the ceiling ROSE from one to two. The model apologising bought the gate another refusal against the caller. CAad88df4a needed four before a cancellation went through. Since LVX179 bookings never release, so the red case is a CANCEL (restored Round A1 Part 6).",
+    file: "services/tools.js",
+    find: "                readBackMade || (sameProposal && orderScratch.writeOrderEverReadBack === true);",
+    replace: "                readBackMade; // SABOTAGE",
+    red: [RECOVERY],
+  },
   {
     name: "in-addition-stash",
     why:

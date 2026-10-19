@@ -375,6 +375,41 @@ describe("a booking made on the call can be changed on the call", () => {
     expect(ok(res), "the cancellation could not name the row the call just booked").toBe(true);
     expect(s.store.scheduled()).toHaveLength(0);
   });
+
+  // Round A1 Part 6: the history rule on a CANCEL (CAad88df4a's own tool) -- restores ceiling-ignores-history.
+  // Since LVX179 a booking is never released by the ceiling, so a CANCEL is the
+  // only write that still shows whether an apology buys the gate a refusal.
+  it("an apology after a refused cancellation does not raise the ceiling — CAad88df4a", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_cancel_ceiling_history" });
+    await s.callTool("check_appointment_availability", { requested_at: SLOT });
+    await s.callerSays("Friday at three thirty please.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("Yes, that works.");
+    expect(ok(await s.callTool("book_appointment", bookArgs()))).toBe(true);
+    expect(s.store.scheduled()).toHaveLength(1);
+
+    await s.callerSays("Actually, cancel that please.");
+    await s.assistantTurn(
+      "To confirm, you would like to cancel your strategy call on Friday, September eighteenth at three thirty PM?"
+    );
+    await s.callerSays("Hmm, maybe.");
+    const first = await s.callTool("cancel_appointment_db", {});
+    expect(ok(first), "a hedge was taken as a yes").toBe(false);
+    expect(s.store.scheduled()).toHaveLength(1);
+
+    // Two apologies, none re-reading the proposal: the read-back ages out.
+    await s.assistantTurn(APOLOGY_ONE);
+    await s.callerSays("What? I just said yes.");
+    await s.assistantTurn(APOLOGY_TWO);
+    await s.callerSays("I do not want to leave a message.");
+
+    // Same proposal, already read back once and refused once: AT its ceiling.
+    const second = await s.callTool("cancel_appointment_db", {});
+    expect(ok(second), String(second[0]?.response?.message || "")).toBe(true);
+    expect(counters().write_order_gate_ceiling || 0).toBe(1);
+    expect(counters().write_order_ceiling_kept_by_history || 0).toBe(1);
+    expect(s.store.scheduled()).toHaveLength(0);
+  });
 });
 
 describe("a write and a hang-up in the SAME tool batch", () => {
