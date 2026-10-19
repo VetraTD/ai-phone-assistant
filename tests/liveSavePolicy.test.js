@@ -361,6 +361,11 @@ describe("bookings: ONE question, then saved on anything but a no (LVX179)", () 
       // HELD, not failed: retryPendingWrite and the claim guard branch on it.
       expect(functionResponse.response.gated).toBe(true);
       expect(mockCreateAppointment).not.toHaveBeenCalled();
+      // Round A1 Part 6 (backlog from the P5 gate): the one-question form, not
+      // the pre-LVX179 "read the new ones back once in one sentence" -- a
+      // statement read-back plus the question is the caller hearing it twice.
+      expect(functionResponse.response.message).toMatch(/ask ONE question that names the new day, time and name/);
+      expect(functionResponse.response.message).not.toMatch(/in one sentence/);
     }
   );
 

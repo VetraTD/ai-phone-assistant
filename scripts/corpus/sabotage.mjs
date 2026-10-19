@@ -3223,6 +3223,14 @@ const SABOTAGES = [
     replace: "    true // SABOTAGE",
     red: ["tests/a1OnFileNote.test.js"],
   },
+  {
+    name: "p6-objection-one-question",
+    why: "Round A1 Part 6 (P5 gate backlog): a yes that carries a change is held with the one-question instruction (LVX179). Sabotaged, it hands the pre-LVX179 'read the new ones back once in one sentence', and the caller hears a statement read-back plus the question.",
+    file: "services/tools.js",
+    find: "                          `ask ONE question that names the new day, time and name -- \"So that's ..., is that ` +",
+    replace: "                          `read the new ones back once in one sentence and call this again -- \"So that's ..., is that ` +",
+    red: ["tests/liveSavePolicy.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

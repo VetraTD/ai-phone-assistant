@@ -1709,9 +1709,14 @@ export async function executeToolCall(fc, ctx) {
                           heldWritePreamble(fc.name) +
                           `the caller did not agree to what you read back: they said no, asked a question ` +
                           `or changed something. Answer them or make the change. If the details change, ` +
-                          `read the new ones back once in one sentence and call this again; otherwise call ` +
-                          `this again once they are happy. Do not ask them to confirm a second time, do not ` +
-                          `tell them anything went wrong, and do not offer a callback.`,
+                          // Round A1 Part 6: the one-question form (LVX179), not
+                          // "read the new ones back once in one sentence" -- a
+                          // statement read-back plus the question is heard twice.
+                          `ask ONE question that names the new day, time and name -- "So that's ..., is that ` +
+                          `right?" -- and call this again only after they answer it; otherwise call this again ` +
+                          `once they are happy. Do not also read the details back as a statement, do not ask ` +
+                          `them to confirm a second time, do not tell them anything went wrong, and do not ` +
+                          `offer a callback.`,
                         callerLine: "No problem — what would you like to change?",
                       }
                     : null;
