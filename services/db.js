@@ -1725,7 +1725,10 @@ export async function latestSmsConsent(businessId, phoneNumber) {
  * @returns {Promise<{ callCount: number, lastCallSummary: string|null, upcomingAppointments: Array }>}
  */
 export async function fetchCallerContext(businessId, callerNumber) {
-  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  // snapshotMissing (Round A1 Part 6 re-review): nothing was looked up -- a
+  // withheld number or no database -- so the caller's bookings are unknown,
+  // not none (capabilities/appointments.js bookingsFitting).
+  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true };
   if (!pool || !businessId || !callerNumber) return empty;
 
   // Run both queries in parallel

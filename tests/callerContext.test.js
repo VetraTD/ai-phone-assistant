@@ -137,7 +137,7 @@ describe("fetchCallerContext", () => {
 
     const ctx = await fetchCallerContext("biz-1", null);
 
-    expect(ctx).toEqual({ callCount: 0, lastCallSummary: null, upcomingAppointments: [] });
+    expect(ctx).toEqual({ callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true });
     expect(fromCalls).toEqual([]);
   });
 });

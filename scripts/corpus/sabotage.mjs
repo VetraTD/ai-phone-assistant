@@ -3255,8 +3255,8 @@ const SABOTAGES = [
     name: "p6-day-spelled-ordinal",
     why: "Round A1 Part 6 (opus review H1): a spelled date ('the twenty-fifth') is read like digits. Sabotaged, it is invisible, the question reads as weekday-only, and a move happens for a date that is not the booking's.",
     file: "capabilities/appointments.js",
-    find: "  const dates = [...[...half.matchAll(/\\b(\\d{1,2})(?:st|nd|rd|th)?\\b/g)].map((x) => Number(x[1])), ...spelledDates(half)];",
-    replace: "  const dates = [...[...half.matchAll(/\\b(\\d{1,2})(?:st|nd|rd|th)?\\b/g)].map((x) => Number(x[1]))] /* SABOTAGE */;",
+    find: "  String.raw`\\d{1,2}(?:st|nd|rd|th)?|(?:(?:twenty|thirty)\\s+)?(?:${ORDINAL_UNITS.join(\"|\")})|` +",
+    replace: "  String.raw`\\d{1,2}(?:st|nd|rd|th)?|` + // SABOTAGE: no spelled units",
     red: ["tests/lvx179Replay.test.js"],
   },
   {
@@ -3298,6 +3298,22 @@ const SABOTAGES = [
     find: "        \"move or reschedule one they already have, do not list the ones they already have, and book it with \" +",
     replace: "        \"move or reschedule one they already have, and do not list the ones they already have; \" + // SABOTAGE",
     red: ["tests/a1OnFileNote.test.js"],
+  },
+  {
+    name: "p6-day-ordinal-anchored",
+    why: "Round A1 Part 6 (opus re-review, High): a number or ordinal is a DATE only beside a weekday or month. Sabotaged, a stray one ('your eighteenth one', 'your first appointment') is read as a date and picks the row to move.",
+    file: "capabilities/appointments.js",
+    find: "  return new RegExp(String.raw`\\b(?:${DATE_TOKEN})\\b`).test(rest) ? null : dates;",
+    replace: "  return [...dates, ...[...rest.matchAll(new RegExp(String.raw`\\b(${DATE_TOKEN})\\b`, \"g\"))].map((x) => dateValue(x[1]))]; // SABOTAGE",
+    red: ["tests/lvx179Replay.test.js"],
+  },
+  {
+    name: "p6-empty-snapshot-missing",
+    why: "Round A1 Part 6 (opus re-review): fetchCallerContext's empty shape (withheld number, no database) is UNKNOWN, not none. Sabotaged, a withheld caller's day-only move question is accepted as if they had no other bookings.",
+    file: "services/db.js",
+    find: "  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true };",
+    replace: "  const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [] }; // SABOTAGE",
+    red: ["tests/callerContext.test.js"],
   },
 ];
 

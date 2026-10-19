@@ -975,6 +975,31 @@ describe("Part 6 Fix 1: a move question naming only the DAY", () => {
     expect(s.store.scheduled().map(at)).toContain(local(AT_9));
   });
 
+  // Opus re-review (High): an ordinal on its own is an ORDER ("your first
+  // appointment"), not a date; read as the 18th it picked this row to move.
+  it("an ordinal not beside a weekday or month is not a date: ours is asked, nothing moved", async () => {
+    for (const [sid, q] of [
+      ["CA_p6_ord_spelled", "Shall I move your eighteenth one to 10:00 AM?"],
+      ["CA_p6_ord_digit", "Shall I move your 18th appointment to 10:00 AM?"],
+    ]) {
+      const s = await savedAt9(sid);
+      await s.assistantTurn(q);
+      await s.callerSays("Yes.");
+      const [r] = await s.callTool("book_appointment", book(AT_10));
+      expect(String(r.response.message), sid).not.toMatch(/Moved the appointment/);
+      expect(s.store.scheduled().map(at), sid).toContain(local(AT_9));
+    }
+  });
+
+  it("a withheld number (fetchCallerContext's empty shape): other bookings unknown, ours is asked", async () => {
+    const s = await savedAt9("CA_p6_day_withheld", { callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+
   it("no call-start snapshot (lookup failed, number withheld): other bookings unknown, ours is asked", async () => {
     const s = await savedAt9("CA_p6_day_no_snapshot", null);
     await s.assistantTurn(DAY_Q);

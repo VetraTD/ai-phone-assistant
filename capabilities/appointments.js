@@ -837,23 +837,45 @@ const OLD_HALF_CLOCK_RE = new RegExp(
     String.raw`\b(?:${HOUR_WORDS})\s+(?:a\.?\s?m\b|p\.?\s?m\b|o['’]?clock|oh|five|ten|fifteen|twenty|thirty|forty|fifty)\b`,
   "i"
 );
-// Spelled dates ("Monday the twenty-sixth"; review H1): read like digits.
+// Dates in the old half, digits or spelled ("Monday the twenty-sixth"; review
+// H1). Opus re-review (High): a number or ordinal counts as a DATE only beside
+// a weekday or month ("Monday the 26th", "October 26th", "the 26th of
+// October"). On its own -- "your first appointment", "your second one" -- it
+// is an order, not a date, and read as one it chose the row to move. Any such
+// stray number or ordinal makes the question unclear: null, ours is asked.
 const ORDINAL_UNITS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"];
 const ORDINAL_TEENS = [
   "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth",
   "sixteenth", "seventeenth", "eighteenth", "nineteenth",
 ];
-function spelledDates(half) {
-  const out = [];
-  const units = ORDINAL_UNITS.join("|");
-  for (const x of half.matchAll(new RegExp(String.raw`\b(?:(twenty|thirty)\s+)?(${units})\b`, "g"))) {
-    out.push((x[1] === "twenty" ? 20 : x[1] === "thirty" ? 30 : 0) + ORDINAL_UNITS.indexOf(x[2]) + 1);
+const DATE_TOKEN =
+  String.raw`\d{1,2}(?:st|nd|rd|th)?|(?:(?:twenty|thirty)\s+)?(?:${ORDINAL_UNITS.join("|")})|` +
+  String.raw`${ORDINAL_TEENS.join("|")}|twentieth|thirtieth`;
+
+function dateValue(token) {
+  if (/^\d/.test(token)) return parseInt(token, 10);
+  const words = token.split(/\s+/);
+  const last = words[words.length - 1];
+  const tens = words[0] === "twenty" ? 20 : words[0] === "thirty" ? 30 : 0;
+  if (ORDINAL_UNITS.includes(last)) return tens + ORDINAL_UNITS.indexOf(last) + 1;
+  if (ORDINAL_TEENS.includes(last)) return 10 + ORDINAL_TEENS.indexOf(last);
+  return last === "twentieth" ? 20 : 30;
+}
+
+/** @returns {number[]|null} the anchored dates, or null when a stray number or ordinal remains */
+function anchoredDates(half) {
+  const names = [...WEEKDAY_NAMES, ...MONTH_NAMES].join("|");
+  const after = new RegExp(String.raw`\b(?:${names}),?\s+(?:the\s+)?(${DATE_TOKEN})\b`, "g");
+  const before = new RegExp(String.raw`\b(?:the\s+)?(${DATE_TOKEN})\s+of\s+(?:${MONTH_NAMES.join("|")})\b`, "g");
+  const dates = [];
+  let rest = half;
+  for (const re of [after, before]) {
+    rest = rest.replace(re, (_m, token) => {
+      dates.push(dateValue(token));
+      return " ";
+    });
   }
-  for (const x of half.matchAll(new RegExp(String.raw`\b(${ORDINAL_TEENS.join("|")})\b`, "g"))) {
-    out.push(10 + ORDINAL_TEENS.indexOf(x[1]));
-  }
-  for (const x of half.matchAll(/\b(twentieth|thirtieth)\b/g)) out.push(x[1] === "twentieth" ? 20 : 30);
-  return out;
+  return new RegExp(String.raw`\b(?:${DATE_TOKEN})\b`).test(rest) ? null : dates;
 }
 
 /** The text between the last move phrase and its "to", or "". */
@@ -879,7 +901,8 @@ function namesOldDayOnly(question, last, ctx, naive) {
   if (days.some((w) => w !== weekday)) return false;
   const months = MONTH_NAMES.filter((name) => new RegExp(`\\b${name}\\b`).test(half));
   if (months.some((name) => name !== MONTH_NAMES[mo - 1])) return false;
-  const dates = [...[...half.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((x) => Number(x[1])), ...spelledDates(half)];
+  const dates = anchoredDates(half);
+  if (!dates) return false;
   if (dates.some((x) => x !== d)) return false;
   if (days.length === 0 && dates.length === 0) return false;
   // Opus review H1: count what the question NAMED, not the old date. "Your
@@ -949,7 +972,7 @@ export function onFileNameNote(ctx, intent) {
     canBook && existingAppointmentPolicy(capabilityConfig(config, "appointments")) !== "block"
       ? " If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to " +
         "move or reschedule one they already have, do not list the ones they already have, and book it with " +
-        "in_addition_to_existing set to true."
+        "in_addition_to_existing set to true -- that extra booking only, never a change to one already booked."
       : "";
   if (names.length === 1) {
     return (
