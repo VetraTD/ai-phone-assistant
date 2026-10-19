@@ -283,6 +283,40 @@ describe("appointments.onEffect — the caller snapshot follows what the call di
     ]);
   });
 
+  // Part 6: the rows past the five listed follow the call too, so a day's
+  // booking count (bookingsThatDay) sees a moved or cancelled sixth booking.
+  it("a cancel or move of a row past the five listed updates upcomingBeyond", async () => {
+    const appointments = (await import("../capabilities/appointments.js")).default;
+    const ctx = () => ({
+      ...CTX([{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }]),
+      upcomingOverflow: 2,
+      upcomingBeyond: [
+        { id: "b1", client_name: "Jane", scheduled_at: "2026-09-20T15:00:00.000Z" },
+        { id: "b2", client_name: "Jane", scheduled_at: "2026-09-21T15:00:00.000Z" },
+      ],
+    });
+
+    const cancel = engineWith(ctx());
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "b1" } },
+      cancel.engine
+    );
+    const afterCancel = cancel.setCallerContext.mock.calls[0][0];
+    expect(afterCancel.upcomingBeyond.map((a) => a.id)).toEqual(["b2"]);
+    expect(afterCancel.upcomingOverflow).toBe(1);
+
+    const move = engineWith(ctx());
+    appointments.onEffect(
+      {
+        capability: "appointments",
+        type: "changed",
+        data: { tool: "reschedule_appointment_db", appointmentId: "b2", newScheduledAt: "2026-09-25T15:00:00.000Z" },
+      },
+      move.engine
+    );
+    expect(move.setCallerContext.mock.calls[0][0].upcomingBeyond[1].scheduled_at).toBe("2026-09-25T15:00:00.000Z");
+  });
+
   it("does nothing on an engine that has no setCallerContext (the v1 pipeline)", async () => {
     // lib/mediaStream.js is a rollback escape hatch and deliberately not at
     // parity. It must keep working, not throw.

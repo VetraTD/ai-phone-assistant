@@ -1774,7 +1774,16 @@ export async function fetchCallerContext(businessId, callerNumber) {
   // OVERFLOW is stored, not the total: consumers add it to the live list, which
   // a booking or cancellation this call changes (review M6).
   const upcomingOverflow = Math.max(0, (apptRows || []).length - upcomingAppointments.length);
-  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow };
+  // Round A1 Part 6: the rows past the five, never rendered. A move question
+  // naming only a DAY counts when that person has one booking that day
+  // (capabilities/appointments.js bookingsThatDay), and a sixth booking on
+  // that day must be seen. No notes: nothing here reads them.
+  const upcomingBeyond = (apptRows || []).slice(5).map((a) => ({
+    id: a.id,
+    client_name: a.client_name,
+    scheduled_at: a.scheduled_at,
+  }));
+  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow, upcomingBeyond };
 }
 
 /**

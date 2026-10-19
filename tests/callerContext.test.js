@@ -126,6 +126,10 @@ describe("fetchCallerContext", () => {
     // Round A1 part 4, G2: the count is every upcoming booking, so "You have
     // 9 upcoming appointments" is right although only five are listed.
     expect(ctx.upcomingOverflow).toBe(4);
+    // Part 6: the rows past the five, never rendered, for the "one booking
+    // that day" count (capabilities/appointments.js) -- no notes, no phone.
+    expect(ctx.upcomingBeyond.map((a) => a.id)).toEqual(["a5", "a6", "a7", "a8"]);
+    expect(Object.keys(ctx.upcomingBeyond[0]).sort()).toEqual(["client_name", "id", "scheduled_at"]);
   });
 
   it("returns the empty shape without querying when the caller number is missing", async () => {

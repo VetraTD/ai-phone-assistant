@@ -18,7 +18,7 @@
 // harness's business week.
 // ---------------------------------------------------------------------------
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { bootLive } from "./helpers/liveBoot.js";
+import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
 import { correctionAfterSave, classifyOrKeepAnswer } from "../capabilities/appointments.js";
 
@@ -797,5 +797,128 @@ describe("LVX179 carry-over: silence is never an answer", () => {
     const [r] = await s.callTool("book_appointment", book(AT_14));
     expect(r.response.success).toBe(false);
     expect(s.store.scheduled()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Part 6 (owner, 2026-10-19), call c CA1cfcbc4e: after "No, actually do 10
+// instead." the model asked its OWN "Shall I move your appointment on Monday,
+// October 26th to 10:00 AM?" -- the old booking by its DAY, not its 9 a.m. --
+// so the gate handed ours and the caller heard two move questions. A day-only
+// move question counts when that person has ONE booking that day.
+// ---------------------------------------------------------------------------
+describe("Part 6 Fix 1: a move question naming only the DAY", () => {
+  const Q9 = "So that's Friday, September 18 at 9 a.m. for Ada Moss, is that right?";
+  const DAY_Q = "Shall I move your appointment on Friday, September 18th to 10:00 AM?";
+  const at = (row) => Date.parse(row.scheduled_at);
+  const local = (naive) => Date.parse(`${naive}-05:00`);
+  const row = (id, naive, client_name = "Ada Moss") => ({ id, client_name, scheduled_at: `${naive}-05:00` });
+
+  async function savedAt9(callSid, callerContext = null) {
+    const s = await bootLive({
+      config: CONFIG,
+      callSid,
+      database: { ...fakeDb(CONFIG, "biz-1"), fetchCallerContext: async () => callerContext },
+    });
+    for (const t of [AT_9, AT_10, AT_14]) await s.callTool("check_appointment_availability", { requested_at: t });
+    await s.turnEnds();
+    await s.assistantTurn(Q9);
+    await s.callerSays("Yes.");
+    const [saved] = await s.callTool("book_appointment", { ...book(AT_9), in_addition_to_existing: true });
+    expect(saved.response.success).toBe(true);
+    await s.turnEnds();
+    await s.assistantTurn("Done, you're all set.");
+    await s.callerSays("No, actually do 10 instead.");
+    return s;
+  }
+
+  it("call c: the model's day-only question answered yes MOVES the booking, no second question", async () => {
+    const s = await savedAt9("CA_p6_day_only");
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    expect(String(r.response.message)).toMatch(/Done, you're all set/);
+    const rows = s.store.scheduled();
+    expect(rows).toHaveLength(1);
+    expect(at(rows[0])).toBe(local(AT_10));
+  });
+
+  it("the same person has a second booking that day: the day-only question is not enough, ours is asked", async () => {
+    const s = await savedAt9("CA_p6_day_two", {
+      callCount: 1,
+      lastCallSummary: null,
+      upcomingAppointments: [row("appt-2pm", "2026-09-18T14:00:00")],
+      upcomingOverflow: 0,
+      upcomingBeyond: [],
+    });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(String(r.response.message)).toMatch(/So that's moving your Friday, September 18 at 9/);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+
+  it("that second booking is past the five listed (beyond): still counted, ours is asked", async () => {
+    const listed = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"].map((d, i) =>
+      row(`appt-l${i}`, `${d}T11:00:00`)
+    );
+    const s = await savedAt9("CA_p6_day_beyond", {
+      callCount: 1,
+      lastCallSummary: null,
+      upcomingAppointments: listed,
+      upcomingOverflow: 1,
+      upcomingBeyond: [row("appt-b", "2026-09-18T14:00:00")],
+    });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+
+  it("overflow with no beyond list (an older snapshot): unknown, so ours is asked", async () => {
+    const s = await savedAt9("CA_p6_day_unknown", {
+      callCount: 1,
+      lastCallSummary: null,
+      upcomingAppointments: [],
+      upcomingOverflow: 3,
+    });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(false);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+
+  it("another person's booking that day does not count: Priya's 2 p.m. leaves Ada's day unique", async () => {
+    const s = await savedAt9("CA_p6_day_other_person", {
+      callCount: 1,
+      lastCallSummary: null,
+      upcomingAppointments: [row("appt-priya", "2026-09-18T14:00:00", "Priya Raman")],
+      upcomingOverflow: 0,
+      upcomingBeyond: [],
+    });
+    await s.assistantTurn(DAY_Q);
+    await s.callerSays("Yes.");
+    const [r] = await s.callTool("book_appointment", book(AT_10));
+    expect(r.response.success).toBe(true);
+    expect(s.store.scheduled().map(at)).toEqual([local(AT_10)]);
+  });
+
+  it("the old half names ANOTHER day or a clock time: not this booking, never a move", async () => {
+    for (const [sid, q] of [
+      ["CA_p6_day_wrong_weekday", "Shall I move your appointment on Thursday to 10:00 AM on Friday?"],
+      ["CA_p6_day_wrong_date", "Shall I move your appointment on September 21st to 10:00 AM?"],
+      ["CA_p6_day_clock", "Shall I move your Friday 2 PM appointment to 10:00 AM?"],
+    ]) {
+      const s = await savedAt9(sid);
+      await s.assistantTurn(q);
+      await s.callerSays("Yes.");
+      const [r] = await s.callTool("book_appointment", book(AT_10));
+      expect(String(r.response.message), sid).not.toMatch(/Moved the appointment/);
+      expect(s.store.scheduled().map(at), sid).toContain(local(AT_9));
+    }
   });
 });

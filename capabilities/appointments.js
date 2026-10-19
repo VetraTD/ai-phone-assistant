@@ -511,6 +511,11 @@ function applyToCallerSnapshot(effect, engine) {
   const base = current || { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
   const list = Array.isArray(base.upcomingAppointments) ? base.upcomingAppointments : [];
   const data = effect.data || {};
+  // Part 6: the rows past the five listed (fetchCallerContext upcomingBeyond)
+  // follow a rename, move or cancel too, so bookingsThatDay counts the day as
+  // it now is. A new booking joins the listed array, as before.
+  const beyond = Array.isArray(base.upcomingBeyond) ? base.upcomingBeyond : null;
+  let nextBeyond = null;
 
   let next;
   if (effect.type === "booked") {
@@ -558,15 +563,16 @@ function applyToCallerSnapshot(effect, engine) {
     // had. Left to fall through, correcting a name would have silently deleted
     // the appointment from the caller snapshot, and the caller would then have
     // been told they had none. Same family as LVX33 and not worth repeating.
-    next = list.map((a) =>
-      a?.id && a.id === data.appointmentId ? { ...a, client_name: data.newClientName } : a
-    );
+    const rename = (a) => (a?.id && a.id === data.appointmentId ? { ...a, client_name: data.newClientName } : a);
+    next = list.map(rename);
+    nextBeyond = beyond && beyond.map(rename);
   } else if (data.newScheduledAt) {
-    next = list.map((a) =>
-      a?.id && a.id === data.appointmentId ? { ...a, scheduled_at: data.newScheduledAt } : a
-    );
+    const move = (a) => (a?.id && a.id === data.appointmentId ? { ...a, scheduled_at: data.newScheduledAt } : a);
+    next = list.map(move);
+    nextBeyond = beyond && beyond.map(move);
   } else if (data.appointmentId) {
     next = list.filter((a) => a?.id !== data.appointmentId);
+    nextBeyond = beyond && beyond.filter((a) => a?.id !== data.appointmentId);
     // Re-review M6: a cancelled row beyond the five listed (the model can list
     // and cancel any of them) leaves the list as it was; the overflow is what
     // shrinks, or the count stays one high.
@@ -575,6 +581,7 @@ function applyToCallerSnapshot(effect, engine) {
         ...base,
         upcomingAppointments: next,
         upcomingOverflow: Number(base.upcomingOverflow) - 1,
+        ...(nextBeyond ? { upcomingBeyond: nextBeyond } : {}),
       });
       return;
     }
@@ -583,7 +590,7 @@ function applyToCallerSnapshot(effect, engine) {
   }
 
   next.sort((a, b) => Date.parse(a?.scheduled_at || 0) - Date.parse(b?.scheduled_at || 0));
-  engine.setCallerContext({ ...base, upcomingAppointments: next });
+  engine.setCallerContext({ ...base, upcomingAppointments: next, ...(nextBeyond ? { upcomingBeyond: nextBeyond } : {}) });
 }
 
 function upcomingForCaller(ctx) {
@@ -798,10 +805,80 @@ function samePersonForMove(name, theirs) {
   return (a.length === 1 || b.length === 1) && a[0] === b[0];
 }
 
-/** Does the question name the booking being moved, at its OLD time? */
+/** Does the question name the booking being moved, at its OLD time (or day, Part 6)? */
 function namesOldSlot(question, last, ctx) {
   const naive = toLocalNaiveDateTime(last?.scheduled_at, ctx?.config?.timezone);
-  return Boolean(naive) && readBackMentionsSlot(question, naive);
+  return Boolean(naive) && (readBackMentionsSlot(question, naive) || namesOldDayOnly(question, last, ctx, naive));
+}
+
+// Part 6 (owner, 2026-10-19), call c: "Shall I move your appointment on
+// Monday, October 26th to 10:00 AM?" names the old booking by its DAY only.
+// That counts when this person has ONE booking that day -- this call's and the
+// call-start snapshot's, the rows past the five listed included. The OLD half
+// (between "move your" and "to") must name that weekday or date and nothing
+// else: another weekday, month or date, a relative day, or any clock time
+// there is about some other booking, so ours is handed (one more question,
+// never a move of the wrong row).
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const MONTH_NAMES = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+const OLD_HALF_CLOCK_RE =
+  /\b\d{1,2}(?::\d{2})?\s*(?:a\.?\s?m\b|p\.?\s?m\b)|\b\d{1,2}:\d{2}\b|\bo['’]?clock\b|\bnoon\b|\bmidnight\b|\bat\s+\d{1,2}\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:a\.?\s?m\b|p\.?\s?m\b|o['’]?clock|fifteen|thirty|forty|oh)\b/i;
+
+/** The text between the last move phrase and its "to", or "". */
+function oldHalfOfMoveQuestion(question) {
+  let end = -1;
+  for (const m of String(question || "").matchAll(FIX3_MOVE_Q_RE)) end = m.index + m[0].length;
+  if (end < 0) return "";
+  const rest = question.slice(end);
+  const to = /\bto\b/i.exec(rest);
+  return to ? rest.slice(0, to.index) : "";
+}
+
+function namesOldDayOnly(question, last, ctx, naive) {
+  const half = oldHalfOfMoveQuestion(question).toLowerCase();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(naive);
+  if (!half.trim() || !m || OLD_HALF_CLOCK_RE.test(half)) return false;
+  if (/\b(?:today|tomorrow|tonight|yesterday)\b/.test(half)) return false;
+  const weekday = WEEKDAY_NAMES[new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay()];
+  const days = WEEKDAY_NAMES.filter((d) => new RegExp(`\\b${d}\\b`).test(half));
+  if (days.some((d) => d !== weekday)) return false;
+  if (MONTH_NAMES.some((mo, i) => i !== Number(m[2]) - 1 && new RegExp(`\\b${mo}\\b`).test(half))) return false;
+  const dates = [...half.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((x) => Number(x[1]));
+  if (dates.some((d) => d !== Number(m[3]))) return false;
+  if (days.length === 0 && dates.length === 0) return false;
+  return bookingsThatDay(last, ctx, naive.slice(0, 10)) === 1;
+}
+
+/**
+ * This person's bookings on one local day: the snapshot (this call's bookings
+ * are added to it), the rows past the five listed, and lastBooked, each once.
+ * Fails toward MORE (ours is asked): any name sharing a word, a row with no
+ * name, and an overflow the snapshot cannot see (an older snapshot shape).
+ */
+function bookingsThatDay(last, ctx, day) {
+  const cc = ctx?.callerContext;
+  const beyond = cc?.upcomingBeyond;
+  if (Number(cc?.upcomingOverflow) > 0 && !Array.isArray(beyond)) return Infinity;
+  const tz = ctx?.config?.timezone;
+  const now = Date.now();
+  const rows = [...upcomingForCaller(ctx), ...(Array.isArray(beyond) ? beyond : []), last].filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > now && toLocalNaiveDateTime(a.scheduled_at, tz).slice(0, 10) === day;
+  });
+  const ids = new Set();
+  const times = new Set();
+  let n = 0;
+  for (const a of samePersonBookings(last?.client_name, rows)) {
+    const t = Date.parse(a.scheduled_at);
+    if (a.id ? ids.has(a.id) : times.has(t)) continue;
+    if (a.id) ids.add(a.id);
+    times.add(t);
+    n += 1;
+  }
+  return n;
 }
 
 /** The confirming question the caller just answered about THIS slot, or "". */

@@ -3159,6 +3159,38 @@ const SABOTAGES = [
     replace: "    if (false) {",
     red: ["tests/a1InAddition.test.js"],
   },
+  {
+    name: "p6-day-only-unique",
+    why: "Round A1 Part 6 Fix 1 (owner, 2026-10-19): a move question naming only the old booking's DAY counts when that person has ONE booking that day. Sabotaged, any booking that day will do, so with two that day the day-only question moves one of them.",
+    file: "capabilities/appointments.js",
+    find: "  return bookingsThatDay(last, ctx, naive.slice(0, 10)) === 1;",
+    replace: "  return bookingsThatDay(last, ctx, naive.slice(0, 10)) >= 1; // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p6-day-counts-beyond",
+    why: "Round A1 Part 6 Fix 1: the day's count includes the rows past the five listed (upcomingBeyond). Sabotaged, a sixth booking on that day is invisible and the day-only question moves a row while the caller has two that day.",
+    file: "capabilities/appointments.js",
+    find: "  const rows = [...upcomingForCaller(ctx), ...(Array.isArray(beyond) ? beyond : []), last].filter((a) => {",
+    replace: "  const rows = [...upcomingForCaller(ctx), last].filter((a) => { // SABOTAGE",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p6-day-other-weekday",
+    why: "Round A1 Part 6 Fix 1: the old half of the move question must name THIS booking's weekday and no other. Sabotaged, 'move your appointment on Thursday' moves the Friday booking.",
+    file: "capabilities/appointments.js",
+    find: "  if (days.some((d) => d !== weekday)) return false;",
+    replace: "  // SABOTAGE: any weekday",
+    red: [LVX179_REPLAY],
+  },
+  {
+    name: "p6-beyond-follows-call",
+    why: "Round A1 Part 6 Fix 1: a cancel of a row past the five listed removes it from upcomingBeyond too. Sabotaged, the cancelled booking still counts for its day.",
+    file: "capabilities/appointments.js",
+    find: "    nextBeyond = beyond && beyond.filter((a) => a?.id !== data.appointmentId);",
+    replace: "    // SABOTAGE",
+    red: ["tests/capabilityEffects.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
