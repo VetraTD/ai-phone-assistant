@@ -6,6 +6,7 @@ import { log } from "../lib/logger.js";
 import { allCapabilityToolNames, getPack } from "../capabilities/index.js";
 import { validateCapabilityConfig } from "../lib/capabilities/configSchema.js";
 import { normalizePhoneNumber } from "../lib/phone.js";
+import { isRealCallerNumber } from "../lib/inboundGuards.js";
 import { PHI_ACCESS, NON_PHI_EXPORTS, mergeAccess, validateAccessRecord } from "../lib/phiAudit.js";
 import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
 import { cloudSqlConfig, cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
@@ -1308,7 +1309,9 @@ export async function listAppointmentsByCaller(businessId, opts = {}) {
   );
   if (res.error) {
     log.error("db_error", { operation: "listAppointmentsByCaller", error: res.error.message });
-    return [];
+    // opts.nullOnError (Round A1 Part 6): fetchCallerContext must tell a
+    // failed lookup ("unknown") from an empty one ("none").
+    return opts.nullOnError ? null : [];
   }
   let list = res.rows || [];
   if (opts.upcomingOnly) {
@@ -1729,7 +1732,10 @@ export async function fetchCallerContext(businessId, callerNumber) {
   // withheld number or no database -- so the caller's bookings are unknown,
   // not none (capabilities/appointments.js bookingsFitting).
   const empty = { callCount: 0, lastCallSummary: null, upcomingAppointments: [], snapshotMissing: true };
-  if (!pool || !businessId || !callerNumber) return empty;
+  // A withheld number arrives as a shared placeholder (lib/inboundGuards.js),
+  // not empty: looked up, every withheld caller would read as one returning
+  // caller, with another caller's last-call summary (opus re-review, Part 6).
+  if (!pool || !businessId || !callerNumber || !isRealCallerNumber(callerNumber)) return empty;
 
   // Run both queries in parallel
   const [callsResult, apptRows] = await Promise.all([
@@ -1749,8 +1755,11 @@ export async function fetchCallerContext(businessId, callerNumber) {
     // tool, and migration 026 cannot close that gap on its own: it normalizes
     // punctuation and whitespace but deliberately will not guess a country
     // code, so a national number stays national.
-    listAppointmentsByCaller(businessId, { clientPhone: callerNumber, upcomingOnly: true }),
+    listAppointmentsByCaller(businessId, { clientPhone: callerNumber, upcomingOnly: true, nullOnError: true }),
   ]);
+  // A failed lookup is unknown, not "no bookings" (Round A1 Part 6 re-review):
+  // q() never throws, it returns {error}, and the list used to come back [].
+  const lookupFailed = Boolean(callsResult.error) || apptRows === null;
 
   const calls = callsResult.rows || [];
   const lastCallSummary = calls[0]?.summary || null;
@@ -1786,7 +1795,14 @@ export async function fetchCallerContext(businessId, callerNumber) {
     client_name: a.client_name,
     scheduled_at: a.scheduled_at,
   }));
-  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow, upcomingBeyond };
+  return {
+    callCount: calls.length,
+    lastCallSummary,
+    upcomingAppointments,
+    upcomingOverflow,
+    upcomingBeyond,
+    ...(lookupFailed ? { snapshotMissing: true } : {}),
+  };
 }
 
 /**

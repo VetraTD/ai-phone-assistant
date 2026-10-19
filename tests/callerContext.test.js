@@ -132,6 +132,33 @@ describe("fetchCallerContext", () => {
     expect(Object.keys(ctx.upcomingBeyond[0]).sort()).toEqual(["client_name", "id", "scheduled_at"]);
   });
 
+  // Round A1 Part 6 (opus re-review): a withheld number is a shared
+  // placeholder, and a failed lookup is not "no bookings" -- both unknown.
+  it("a withheld placeholder number is never looked up: the empty shape, unknown", async () => {
+    const { fetchCallerContext } = await load();
+    const ctx = await fetchCallerContext("biz-1", "+266696687");
+    expect(ctx.snapshotMissing).toBe(true);
+    expect(fromCalls).toEqual([]);
+  });
+
+  it("a failed appointment lookup marks the snapshot unknown", async () => {
+    const { fetchCallerContext } = await load();
+    pg.respond = (text) => {
+      const table = /FROM\s+(\w+)/i.exec(text)?.[1] ?? "";
+      if (table === "appointments") throw new Error("connection reset");
+      return { rows: tables[table] || [] };
+    };
+    const ctx = await fetchCallerContext("biz-1", "+15551112222");
+    expect(ctx.upcomingAppointments).toEqual([]);
+    expect(ctx.snapshotMissing).toBe(true);
+  });
+
+  it("a clean lookup with nothing on file is NOT marked unknown", async () => {
+    const { fetchCallerContext } = await load();
+    const ctx = await fetchCallerContext("biz-1", "+15551112222");
+    expect(ctx.snapshotMissing).toBeUndefined();
+  });
+
   it("returns the empty shape without querying when the caller number is missing", async () => {
     const { fetchCallerContext } = await load();
 

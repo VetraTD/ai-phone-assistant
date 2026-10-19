@@ -862,14 +862,28 @@ function dateValue(token) {
   return last === "twentieth" ? 20 : 30;
 }
 
-/** @returns {number[]|null} the anchored dates, or null when a stray number or ordinal remains */
-function anchoredDates(half) {
-  const names = [...WEEKDAY_NAMES, ...MONTH_NAMES].join("|");
-  const after = new RegExp(String.raw`\b(?:${names}),?\s+(?:the\s+)?(${DATE_TOKEN})\b`, "g");
-  const before = new RegExp(String.raw`\b(?:the\s+)?(${DATE_TOKEN})\s+of\s+(?:${MONTH_NAMES.join("|")})\b`, "g");
+// Re-review #2 (Low): beside a WEEKDAY only an ordinal is a date ("Monday the
+// 26th"); a bare number there is as likely a time ("your Monday 9
+// appointment"), so it needs a month ("Monday 26 October"). And never one
+// followed by "one" ("your Monday, the second one" is an order).
+const ORDINAL_TOKEN = DATE_TOKEN.replace(String.raw`\d{1,2}(?:st|nd|rd|th)?`, String.raw`\d{1,2}(?:st|nd|rd|th)`);
+
+/**
+ * @param {string} half - the old half of a move question, lowercased, hyphens as spaces
+ * @returns {number[]|null} the anchored dates, or null when a stray number or ordinal remains
+ */
+export function anchoredDates(half) {
+  const months = MONTH_NAMES.join("|");
+  const notOne = String.raw`\b(?!\s+ones?\b)`;
+  const afterMonth = new RegExp(String.raw`\b(?:${months}),?\s+(?:the\s+)?(${DATE_TOKEN})${notOne}`, "g");
+  const afterWeekday = new RegExp(
+    String.raw`\b(?:${WEEKDAY_NAMES.join("|")}),?\s+(?:the\s+)?(${ORDINAL_TOKEN})${notOne}`,
+    "g"
+  );
+  const beforeMonth = new RegExp(String.raw`\b(?:the\s+)?(${DATE_TOKEN})\s+(?:of\s+)?(?:${months})\b`, "g");
   const dates = [];
   let rest = half;
-  for (const re of [after, before]) {
+  for (const re of [afterMonth, beforeMonth, afterWeekday]) {
     rest = rest.replace(re, (_m, token) => {
       dates.push(dateValue(token));
       return " ";

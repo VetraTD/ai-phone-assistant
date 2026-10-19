@@ -20,7 +20,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
-import { correctionAfterSave, classifyOrKeepAnswer } from "../capabilities/appointments.js";
+import { correctionAfterSave, classifyOrKeepAnswer, anchoredDates } from "../capabilities/appointments.js";
 
 const OPEN = { open: "09:00", close: "18:00", closed: false };
 const CONFIG = {
@@ -1007,5 +1007,28 @@ describe("Part 6 Fix 1: a move question naming only the DAY", () => {
     const [r] = await s.callTool("book_appointment", book(AT_10));
     expect(r.response.success).toBe(false);
     expect(s.store.scheduled().map(at)).toEqual([local(AT_9)]);
+  });
+});
+
+// Part 6, opus re-reviews #1-#2: in the old half of a move question a number
+// or ordinal is a DATE only when anchored -- beside a month, or an ORDINAL
+// beside a weekday -- and never one followed by "one". Anything else stray is
+// an order or a time: null, ours is asked.
+describe("Part 6: anchoredDates", () => {
+  it.each([
+    ["appointment on monday, october 26th", [26]],
+    ["monday the twenty sixth", [26]],
+    ["monday, the 26th", [26]],
+    ["the 26th of october", [26]],
+    ["october the 26th", [26]],
+    ["monday 26 october", [26]],
+    ["friday the twenty fifth", [25]],
+    ["your monday, the second one", null],
+    ["your monday 9 appointment", null],
+    ["your first appointment", null],
+    ["your 18th one", null],
+    ["mon 26th", null],
+  ])("%j -> %j", (half, want) => {
+    expect(anchoredDates(half)).toEqual(want);
   });
 });
