@@ -2774,8 +2774,8 @@ const SABOTAGES = [
     name: "p4-upcoming-total-from-db",
     why: "A1 part 4 G2: fetchCallerContext counts every upcoming booking, not only the five it lists -- 'You have 7 upcoming appointments' must be the real number.",
     file: "services/db.js",
-    find: "  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow };",
-    replace: "  return { callCount: calls.length, lastCallSummary, upcomingAppointments }; // SABOTAGE",
+    find: "  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingOverflow, upcomingBeyond };",
+    replace: "  return { callCount: calls.length, lastCallSummary, upcomingAppointments, upcomingBeyond }; // SABOTAGE",
     red: ["tests/callerContext.test.js"],
   },
   {
