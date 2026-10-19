@@ -1432,3 +1432,49 @@ it. (c) "another appointment for myself, Monday the 26th at 9 a.m." -> yes -> "D
 instead." -> ONE move question -> plain "Yes" -> one row Mon 26 10:00, none at 9:00. After: readcall.sh by time
 window, db-inspect --appointments --names via the migrate job, write_consent_probe a1_readback,
 booking_correction_* counters, reply_after_last_voice_ms_p50 vs 1,378 ms.
+
+## Part 5 calls (2026-10-19, owner handset → Test Line, on `00108-rox`) — verdict
+
+| Call | CallSid | Core (LVX179) | Other |
+|---|---|---|---|
+| (a) on-file, "uhh" | `CAc31b31c86e0f266042665253c423cb11` | **PASS**: one question naming Nithin Dodla, "Ya" → saved once → only "Done, you're all set" | FAIL (prompt-only, LVX180): asked an on-file caller to spell; asked extra-or-move after "another". "uhh" (heard "A") drew "Could you specify…" (LVX181). After "Done", an unusable caller turn got TWO replies (model's own + the unusable-transcript note) |
+| (b) new name, "ummm" | `CAd918e0c910be304966f7c8eda5ba5fcf` | **PASS**: one full-name spelling ask; day only → list; the umm (1.06 s + 0.28 s, no words) drew NO reply; one question → "Yes" → saved once | The model asked its OWN question without letters ("…for Leila Hartmann, is that right?"); the gate only requires a slot question |
+| (c) correction | `CA1cfcbc4e47655e76c8d9802bb09203f3` | **PASS on outcome**: one row moved 9 → 10 (`booking_correction_after_save` moved) | Caller heard TWO move questions: the model's "Shall I move your appointment on Monday, October 26th to 10:00 AM?" named the day, not 9 AM, so namesOldSlot refused it and the gate handed ours. On-file caller asked to spell again |
+
+DB after: Tue 20 11:00 Nithin Dodla, Wed 21 11:00 Leila Hartmann, Mon 26 10:00 Nithin Dodla (no 9:00).
+`reply_after_last_voice_ms_p50` 1,863 / 2,100 / 1,986 vs 1,378 (00105, n=3) — watch, not a finding.
+
+**Owner decisions (2026-10-19):** letters missing from the model's own question → ACCEPT the save (no extra
+question). A move question that names only the DAY counts when that person has ONE booking that day. Polish round
+NOW. LVX181 → leave it for now (parked; it can no longer book on an umm).
+
+## Part 6 starting message — polish round (paste into a fresh session)
+
+```text
+Round A1 polish (Part 6). LIVE voice-uk-prod-00108-rox @ 6da2411 (rollback
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00105-mw4=100 --project=vetra-uk-edc8ca --region=europe-west2`).
+Branch feat/outbound-stage4. Read: docs/superpowers/plans/2026-10-13-round-a1-say-it-once.md "Part 5 S2 + overnight
+as built" and "Part 5 calls … verdict"; ledger .superpowers/sdd/2026-10-13-round-a1-say-it-once/progress.md (P5 lines).
+FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion).
+
+Owner decisions (2026-10-19, final): a yes to the model's own question without letters SAVES (no extra question);
+a move question naming only the DAY counts when that person has one booking that day; LVX181 parked.
+Fix, red-first, each with a hand-verified RED sabotage row:
+1. Fix 3 day-if-unique: capabilities/appointments.js namesOldSlot -- accept a question naming the old booking's DAY
+   when the caller has exactly one booking that day (this call's lastBooked + callerContext upcoming). Replay call c.
+2. On-file caller asked to spell (3 of 3 calls) and extra-or-move asked after "another" (call a): prompt-only rules
+   the model skips. Find a code lever at the right moment -- e.g. the set_call_intent tool reply (a tool reply is
+   executed at once, memory live-instruction-timing) carrying "this caller is <name> on file: never ask for or spell
+   their name; 'another' = extra, no question". Prototype on the call a/c turns first.
+3. Double reply after an unusable caller turn (call a): lib/voice/live/index.js auditCallerTurn sends
+   UNUSABLE_TRANSCRIPT_NOTE at turn end after the model already answered -> it speaks twice. Send it only when the
+   model's reply to that turn was empty (or not at all on Live) -- decide from the code + counters.
+4. Optional cheap backlog items from the overnight gate: reword the early "yes that objects" branch in
+   services/tools.js to the one-question form (or delete it); add a cancel case for the write-order ceiling history
+   and restore the retired row ceiling-ignores-history.
+Then: opus review (named risks: double question, a held write lost, cascade drift, on-file name on the wrong caller,
+transcript lag); gate in mintty -- run the sabotage matrix SHARDED from the start (two worktrees at the same sha,
+`sabotage.mjs --from`, see memory round-a1-say-it-once overnight block; the single run is ~9 h); ask before the ONE
+deploy; 2 calls (cap $1.50): on-file booking ("another") and a correction where the model names only the day.
+Conserve usage; cheaper models for mechanical work; detail in the ledger; never git checkout over uncommitted work.
+```

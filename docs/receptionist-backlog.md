@@ -17351,7 +17351,10 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
     works" read as a time costs one extra question; "No, keep both" is a gate objection (one extra question); the
     engine-retry veto's note text never reaches the model; a move sends no owner notification (email link-only).
 
-### LVX180 · Prompt rules the model skipped on the same day · **BUILT 2026-10-16 (S1 prompt) — ships with LVX179; watch on calls** `[cheap]`
+### LVX180 · Prompt rules the model skipped on the same day · **LIVE 00108-rox, STILL SKIPPED on 2026-10-19 calls — needs a code lever (Part 6)** `[cheap]`
+- 2026-10-19 calls: an on-file caller was asked to spell their full name on BOTH booking-for-myself calls
+  (`CAc31b31c8…`, `CA1cfcbc4e…`), and "another appointment for myself" still got the extra-or-move question
+  (`CAc31b31c8…`). Prompt lines alone do not hold; Part 6 tries the set_call_intent tool reply as the lever.
 - S1: "another / also / one more" = an extra one, no question, and the opener no longer reads against it; a caller
   whose name is on file is never asked for it, "not even their full name". Overnight Fix 3 also enforces "also /
   another" in CODE for a booking right after a save on the same call (no in-addition question).
@@ -17362,7 +17365,7 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
   appointments; the next is …" (d1 used it), and after "That time is available". It also asked an on-file caller for
   their full name (owner rule: a name on file is never asked).
 
-### LVX181 · It answers a thinking "umm" as if the caller had finished · **OPEN · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
+### LVX181 · It answers a thinking "umm" as if the caller had finished · **PARKED by owner 2026-10-19 · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
 - **2026-10-17 overnight (Part 5, $0.34):** (A, logs, $0) filler-only caller turns drew a reply on 6 of 86 calls
   (7%, a floor; `transcript_chars` is misattributed so the literal filter is useless). Baseline
   `reply_after_last_voice_ms_p50` 00105 = 1,378 ms (n=3). (B, `scripts/probes/lvx181-umm.mjs`, gemini-3.8-live as
