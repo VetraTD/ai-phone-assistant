@@ -129,10 +129,9 @@ const notes = (live) => live.sent.clientContent.slice(1);
 describe("LVX50 — a caller turn that did not transcribe as speech", () => {
   beforeEach(() => clearStats());
 
-  it("counts the exact turn from the call, and tells the model to ask again", async () => {
+  it("counts the exact turn from the call, and tells the model to ask again when it said nothing", async () => {
     const s = await boot();
     s.hear("에레는");
-    s.say("Great, 8 AM on Tuesday, September 8th, is available.");
     s.endTurn();
     await s.settle();
 
@@ -141,6 +140,25 @@ describe("LVX50 — a caller turn that did not transcribe as speech", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].turns[0].parts[0].text).toContain("did not come through as usable speech");
     expect(sent[0].turns[0].parts[0].text).toContain("ask them to say it again");
+  });
+
+  // Round A1 Part 6 (call a CAc31b31c, 2026-10-19): the model had already
+  // answered the unusable turn ("All right, what else can I assist you
+  // with?"), the note arrived after it, and the caller heard a second reply
+  // ("I'm sorry, I didn't catch that..."). Fleet 10-05..10-19: 2 notes, both
+  // after a non-empty reply, both doubled. The note now goes only to a turn
+  // the model left unanswered; a write is still refused by services/tools.js.
+  it("counts, but sends NO note, when the model already answered the turn", async () => {
+    const s = await boot();
+    // The call's transcript is logged as "????" (non-Latin script); any
+    // unusable script stands in for it.
+    s.hear("에레는");
+    s.say("All right, what else can I assist you with today?");
+    s.endTurn();
+    await s.settle();
+
+    expect(stats().live_unusable_transcript).toBe(1);
+    expect(notes(s.live)).toHaveLength(0);
   });
 
   it("counts the POSITIVE case, so a clean call is not indistinguishable from no call", async () => {
@@ -215,7 +233,6 @@ describe("LVX50 — a caller turn that did not transcribe as speech", () => {
     const s = await boot();
     for (const t of ["에레는", "안녕하세요", "こんにちは"]) {
       s.hear(t);
-      s.say("Sure.");
       s.endTurn();
       await s.settle();
     }

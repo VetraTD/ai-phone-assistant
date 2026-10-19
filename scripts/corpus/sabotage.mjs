@@ -3191,6 +3191,14 @@ const SABOTAGES = [
     replace: "    // SABOTAGE",
     red: ["tests/capabilityEffects.test.js"],
   },
+  {
+    name: "p6-unusable-note-only-unanswered",
+    why: "Round A1 Part 6 (call a): the unusable-transcript note goes only to a turn the model left unanswered. Sabotaged, it follows a reply the model already gave and the caller hears two replies.",
+    file: "lib/voice/live/index.js",
+    find: "    auditCallerTurn({ notes: !replyText });",
+    replace: "    auditCallerTurn({ notes: true }); // SABOTAGE",
+    red: ["tests/liveUnusableTranscript.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
