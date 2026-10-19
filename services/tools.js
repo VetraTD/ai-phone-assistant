@@ -17,7 +17,7 @@ import {
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
-import { inAdditionWouldRefuse, afterSaveQuestion } from "../capabilities/appointments.js";
+import { inAdditionWouldRefuse, afterSaveQuestion, onFileNameNote } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
@@ -532,8 +532,15 @@ export async function executeToolCall(fc, ctx) {
   switch (fc.name) {
     case "set_call_intent": {
       const intentArgs = fc.args ?? null;
+      // Round A1 Part 6: the on-file name (and "another" = extra) in the reply
+      // the model acts on before its words this turn. Live + inbound only.
+      const onFile = onFileNameNote(ctx);
       return {
-        functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: onFile ? { success: true, message: onFile } : { success: true },
+        },
         stateEffects: {
           intentArgs,
           toolResult: { name: fc.name, success: true, message: "How can I help you with that?", callerSafe: true },

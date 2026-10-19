@@ -3199,6 +3199,30 @@ const SABOTAGES = [
     replace: "    auditCallerTurn({ notes: true }); // SABOTAGE",
     red: ["tests/liveUnusableTranscript.test.js"],
   },
+  {
+    name: "p6-onfile-note-in-reply",
+    why: "Round A1 Part 6 Fix 2 (calls a/c; probe P6ONFILE spell 5/10 -> 0/10): set_call_intent's reply carries the on-file name, the moment the model acts on before its words. Sabotaged, the reply is bare and the on-file caller is asked to spell again.",
+    file: "services/tools.js",
+    find: "          response: onFile ? { success: true, message: onFile } : { success: true },",
+    replace: "          response: { success: true }, // SABOTAGE",
+    red: ["tests/a1OnFileNote.test.js"],
+  },
+  {
+    name: "p6-onfile-live-inbound-only",
+    why: "Round A1 Part 6 Fix 2: the on-file note is Live + inbound only (the cascade has its own spelling gate; an outbound contact's name has its own rule). Sabotaged, the cascade's set_call_intent reply changes.",
+    file: "capabilities/appointments.js",
+    find: "  if (ctx?.callerSaidThisCall == null || ctx?.outboundCall) return null;",
+    replace: "  if (ctx?.outboundCall) return null; // SABOTAGE",
+    red: ["tests/a1OnFileNote.test.js"],
+  },
+  {
+    name: "p6-onfile-another-not-on-block",
+    why: "Round A1 Part 6 Fix 2: 'another = an extra booking' is said only where a second booking is allowed. Sabotaged, a business that blocks a second booking hears the model told to book it.",
+    file: "capabilities/appointments.js",
+    find: '    canBook && existingAppointmentPolicy(capabilityConfig(config, "appointments")) !== "block"',
+    replace: "    true // SABOTAGE",
+    red: ["tests/a1OnFileNote.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

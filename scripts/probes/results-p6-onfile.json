@@ -1,0 +1,497 @@
+{
+  "summary": {
+    "model": "gemini-3.8-live",
+    "n": {
+      "plain": 10,
+      "note": 10
+    },
+    "spell": {
+      "plain": 5,
+      "note": 0
+    },
+    "name": {
+      "plain": 6,
+      "note": 0
+    },
+    "move": {
+      "plain": 1,
+      "note": 0
+    },
+    "invalid": 0,
+    "usd": 0.18278650000000002,
+    "verdict": "NOTE WINS"
+  },
+  "note": "[not caller speech] Names on this caller's record: Nithin Dodla, Maja Okafor, Priya Raman and Leila Hartmann. Never ask any of them to spell their name, and do not spell it back: use it exactly as written. If it is for the caller themselves and they have not said which name is theirs, ask only \"Is that under Nithin Dodla?\" and use the name they confirm. If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to move or reschedule one they already have, and do not list the ones they already have.",
+  "results": [
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 0,
+      "reply": "Of course, what day were you thinking of coming in?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.008957,
+      "ms": 5734,
+      "usage": {
+        "text_in": 14194,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 71,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 0,
+      "reply": "I can certainly help with that. Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.009169,
+      "ms": 6439,
+      "usage": {
+        "text_in": 14186,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 89,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 0,
+      "reply": "So that's Tuesday, October 27th at 9 a.m. for Nithin Dodla, is that right?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.009871,
+      "ms": 9142,
+      "usage": {
+        "text_in": 14222,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 146,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 0,
+      "reply": "That time is available. Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.0092,
+      "ms": 6252,
+      "usage": {
+        "text_in": 14200,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 91,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 1,
+      "reply": "Could you spell your first and last name for me?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.008767,
+      "ms": 5297,
+      "usage": {
+        "text_in": 14126,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 58,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": true,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 1,
+      "reply": "Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.008817,
+      "ms": 5294,
+      "usage": {
+        "text_in": 14226,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 58,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 1,
+      "reply": "That time is available. Could you spell the first and last name for me?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.009297999999999999,
+      "ms": 7036,
+      "usage": {
+        "text_in": 14108,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 103,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": true,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 1,
+      "reply": "Is that booking for Nithin Dodla?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.008789499999999999,
+      "ms": 4924,
+      "usage": {
+        "text_in": 14243,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 55,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 2,
+      "reply": "Sure thing. To get started, could you spell your first and last name for me?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.009377,
+      "ms": 7258,
+      "usage": {
+        "text_in": 14050,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 112,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": true,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 2,
+      "reply": "Of course. Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.00916,
+      "ms": 6805,
+      "usage": {
+        "text_in": 14408,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 79,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 2,
+      "reply": "That time is available. Since you already have an upcoming appointment, should this new booking be in addition to your existing one?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.010201499999999999,
+      "ms": 11095,
+      "usage": {
+        "text_in": 14139,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 177,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": true
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 2,
+      "reply": "Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.00878,
+      "ms": 4772,
+      "usage": {
+        "text_in": 14272,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 53,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 3,
+      "reply": "Sure thing, what is your first and last name?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.0090515,
+      "ms": 6240,
+      "usage": {
+        "text_in": 14143,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 81,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 3,
+      "reply": "Of course. Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.009131,
+      "ms": 6032,
+      "usage": {
+        "text_in": 14230,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 84,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 3,
+      "reply": "Could you spell your first and last name for me?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.0090565,
+      "ms": 6092,
+      "usage": {
+        "text_in": 14393,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 71,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": true,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 3,
+      "reply": "Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.0087935,
+      "ms": 4850,
+      "usage": {
+        "text_in": 14251,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 55,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 4,
+      "reply": "Sure thing. What day and time were you thinking of for this new appointment?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.0092755,
+      "ms": 6716,
+      "usage": {
+        "text_in": 14255,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 95,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself.",
+      "idx": 4,
+      "reply": "Of course. Is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent"
+      ],
+      "error": null,
+      "usd": 0.0089285,
+      "ms": 5557,
+      "usage": {
+        "text_in": 14209,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 68,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    },
+    {
+      "arm": "plain",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 4,
+      "reply": "Could you spell your first and last name for me?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.008893,
+      "ms": 5491,
+      "usage": {
+        "text_in": 14114,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 69,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": true,
+      "name": true,
+      "move": false
+    },
+    {
+      "arm": "note",
+      "line": "Hi, I'd like to book another appointment for myself, Tuesday the 27th at 9 a.m.",
+      "idx": 4,
+      "reply": "That time is available — is that under Nithin Dodla?",
+      "tools": [
+        "set_call_intent",
+        "check_appointment_availability"
+      ],
+      "error": null,
+      "usd": 0.00927,
+      "ms": 6600,
+      "usage": {
+        "text_in": 14268,
+        "audio_in": 336,
+        "text_out": 0,
+        "audio_out": 94,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "spell": false,
+      "name": false,
+      "move": false
+    }
+  ]
+}

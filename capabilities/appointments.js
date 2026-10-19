@@ -853,6 +853,63 @@ function namesOldDayOnly(question, last, ctx, naive) {
 }
 
 /**
+ * Round A1 Part 6 (calls a/c, 2026-10-19): an on-file caller was asked to
+ * spell their name on 3 of 3 calls, and "another appointment" drew the
+ * extra-or-move question -- prompt-only rules, and Live builds its prompt once
+ * at the greeting. set_call_intent is the first tool of those calls and runs
+ * BLOCKING before the model's words that turn (call a 48:47.697, ask logged
+ * 48:51.991), so its reply is the moment to say it (services/tools.js).
+ *
+ * Live + inbound only (the cascade has its own spelling gate; an outbound
+ * contact's name has its own rule). Null when no name is on record. Several
+ * names on one number (a family, an office): never spell any of them, and if
+ * it is unclear which is the caller, one yes/no naming the most-booked name --
+ * never a guess written silently onto the row.
+ *
+ * @param {object} ctx - tool context
+ * @returns {string|null}
+ */
+export function onFileNameNote(ctx) {
+  if (ctx?.callerSaidThisCall == null || ctx?.outboundCall) return null;
+  const cc = ctx?.callerContext;
+  const rows = [
+    ...(Array.isArray(cc?.upcomingAppointments) ? cc.upcomingAppointments : []),
+    ...(Array.isArray(cc?.upcomingBeyond) ? cc.upcomingBeyond : []),
+  ];
+  const byName = new Map();
+  for (const a of rows) {
+    const raw = typeof a?.client_name === "string" ? a.client_name.trim().replace(/\s+/g, " ") : "";
+    const key = nameWords(raw).join(" ");
+    if (!key) continue;
+    const e = byName.get(key) || { name: raw, n: 0 };
+    e.n += 1;
+    byName.set(key, e);
+  }
+  if (byName.size === 0) return null;
+  const names = [...byName.values()].sort((x, y) => y.n - x.n).map((e) => e.name);
+  const config = ctx?.config || {};
+  const canBook = Array.isArray(config.allowedTasks) && config.allowedTasks.includes("book_appointment");
+  const another =
+    canBook && existingAppointmentPolicy(capabilityConfig(config, "appointments")) !== "block"
+      ? " If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to move or reschedule one they already have, and do not list the ones they already have."
+      : "";
+  if (names.length === 1) {
+    return (
+      `[not caller speech] On this caller's record: ${names[0]}. If they are calling for themselves, that is their name: ` +
+      `use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +
+      another
+    );
+  }
+  const list = `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return (
+    `[not caller speech] Names on this caller's record: ${list}. Never ask any of them to spell their name, and do ` +
+    `not spell it back: use it exactly as written. If it is for the caller themselves and they have not said which ` +
+    `name is theirs, ask only "Is that under ${names[0]}?" and use the name they confirm.` +
+    another
+  );
+}
+
+/**
  * This person's bookings on one local day: the snapshot (this call's bookings
  * are added to it), the rows past the five listed, and lastBooked, each once.
  * Fails toward MORE (ours is asked): any name sharing a word, a row with no

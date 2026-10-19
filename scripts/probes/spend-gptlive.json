@@ -1,6 +1,6 @@
 {
   "cap_usd": 25.5,
-  "spent_usd": 25.415573,
+  "spent_usd": 25.616616,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -6901,11 +6901,209 @@
       "model": "gemini-3.8-live",
       "usd": 0.004904525,
       "estimated": true
+    },
+    {
+      "at": "2026-10-19T21:44:28.399Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.009047,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:44:35.600Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.00921,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:44:48.488Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.008957,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:44:55.422Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.009169,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:05.049Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.009871,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:11.775Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-0",
+      "model": "gemini-3.8-live",
+      "usd": 0.0092,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:17.561Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.008767,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:23.337Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.008817,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:30.835Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.009297999999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:36.218Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.008789499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:43.989Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.009377,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:45:51.274Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.00916,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:02.844Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.010201499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:08.082Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.00878,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:14.803Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0090515,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:21.301Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.009131,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:27.885Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0090565,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:33.234Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0087935,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:40.414Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0092755,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:46.467Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0089285,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:52.447Z",
+      "probe": "P6ONFILE-plain",
+      "arm": "plain",
+      "label": "plain-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.008893,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-19T21:46:59.544Z",
+      "probe": "P6ONFILE-note",
+      "arm": "note",
+      "label": "note-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.00927,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-10-17T04:07:12.320Z",
+  "updated_at": "2026-10-19T21:46:59.544Z",
   "cap_history": [
     {
       "cap": 5,
