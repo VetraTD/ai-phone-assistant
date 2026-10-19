@@ -24,7 +24,7 @@
 //      at risk. A restore that does not verify is not a restore, so the bytes
 //      are compared afterwards and a mismatch is a hard failure.
 //
-// Usage:  node scripts/corpus/sabotage.mjs [--only <name>]
+// Usage:  node scripts/corpus/sabotage.mjs [--only <name>] [--from <name>] [--to <name>]
 // ---------------------------------------------------------------------------
 
 import fs from "node:fs";
@@ -3251,6 +3251,17 @@ if (from && !SABOTAGES.some((s) => s.name === from)) {
   console.error(`--from ${from}: no row by that name.`);
   process.exit(1);
 }
+// --to <name>: stop after that row (inclusive). With --from on a second tree
+// at the same sha, the matrix runs as two shards (round A1 Part 6: the single
+// run is ~9 h).
+const to = process.argv.includes("--to")
+  ? process.argv[process.argv.indexOf("--to") + 1]
+  : null;
+if (to && !SABOTAGES.some((s) => s.name === to)) {
+  console.error(`--to ${to}: no row by that name.`);
+  process.exit(1);
+}
+let pastTo = false;
 if (only && !SABOTAGES.some((s) => s.name === only)) {
   console.error(`--only ${only}: no row by that name.`);
   process.exit(1);
@@ -3420,6 +3431,8 @@ for (const s of SABOTAGES) {
     if (s.name === from) reached = true;
     if (!reached) continue;
   }
+  if (pastTo) break;
+  if (to && s.name === to) pastTo = true;
 
   const original = fs.readFileSync(s.file, "utf8");
   const hits = original.split(s.find).length - 1;
