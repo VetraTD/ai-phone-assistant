@@ -1557,5 +1557,5 @@ Fix `4708fc9` + review `4ae6f1d`: `silenceOwnsExit`; a caller transcript with wo
 silence-owned latch AND restarts the ladder; the call clock's goodbye still ends the call (a skipped clock goodbye takes
 ownership). Rows lvx183-silence-latch-cleared, lvx183-ladder-restarts, lvx183-words-only (census 350). Gate `lvx183`
 @ `4ae6f1d` PASS (ROOT 8,085, DB 700, A 108 + B 242, only the 3 baseline x). **LIVE `voice-uk-prod-00112-boh`**
-(rollback `00110-vah`). Verification call: on 1171, stay quiet until the goodbye, talk over it, ask a question — the
+(rollback `00110-vah`). **Verified** `CA2b224386…` (16:07, 328 s): goodbye talked over → latch cleared, call ran 4 more min, caller hung up. Verification call: on 1171, stay quiet until the goodbye, talk over it, ask a question — the
 line must stay open and the silence nudges must work again later.
