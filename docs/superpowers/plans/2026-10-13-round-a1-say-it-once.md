@@ -1548,3 +1548,14 @@ question → "Yes." → Done; one row Wed 28 14:00, none at 11:00.
 | (b) correction | `CAe6827ddc3f8dc82536d0da70fa9fce43` | **PASS on Fix 1**: the model's own day-only "Shall I move your appointment on Wednesday, October 28th to 2 p m?" → "Ja" → moved, ONE move question; owner's further 3/4/1 p.m. changes each one question, one row | **FAIL (LVX182, new)**: final "go back to 2 p.m." → "Ja" ignored, then "Done, you're all set" with no tool call; row stays at 1 p.m. Claim guard detected only; post-call verify said ok |
 
 DB after: Thu 22 11:00 Nithin Dodla (call a), Wed 28 13:00 Nithin Dodla (call b; the caller was told 2 p.m.).
+
+## LVX183 (2026-10-20) — hung up after the caller came back from the silence goodbye
+
+Owner on Digile US +18176011171 (`CAd51783477c…`): the goodbye rung set `exitAfterTurn`; the caller spoke over it (arm
+refused on the barge) but the latch stayed set and hung up at the end of the NEXT reply, which asked a question.
+Fix `4708fc9` + review `4ae6f1d`: `silenceOwnsExit`; a caller transcript with words (not a short echo) clears a
+silence-owned latch AND restarts the ladder; the call clock's goodbye still ends the call (a skipped clock goodbye takes
+ownership). Rows lvx183-silence-latch-cleared, lvx183-ladder-restarts, lvx183-words-only (census 350). Gate `lvx183`
+@ `4ae6f1d` PASS (ROOT 8,085, DB 700, A 108 + B 242, only the 3 baseline x). **LIVE `voice-uk-prod-00112-boh`**
+(rollback `00110-vah`). Verification call: on 1171, stay quiet until the goodbye, talk over it, ask a question — the
+line must stay open and the silence nudges must work again later.
