@@ -1478,3 +1478,64 @@ transcript lag); gate in mintty -- run the sabotage matrix SHARDED from the star
 deploy; 2 calls (cap $1.50): on-file booking ("another") and a correction where the model names only the day.
 Conserve usage; cheaper models for mechanical work; detail in the ledger; never git checkout over uncommitted work.
 ```
+
+## Part 6 as built (2026-10-19, ~16:35 → , polish round)
+
+Owner answers at start: paid probe for Fix 2 first (cap $0.50); item 4 both parts; one session through the calls.
+Later (AskUserQuestion): deploy iff the gate passes; on a number with several names on file KEEP the separate
+"Is that under <most-booked>?" yes/no (not folded into the read-back). Code `b8e60b6..bcec775`, docs/ledger P6 lines.
+
+**Fix 1 — a day-only move question counts when that person has one booking that fits it.** `namesOldSlot` also
+accepts `namesOldDayOnly`: the OLD half of the move question (between "move your" and "to") names a weekday and/or
+an anchored date and no clock, no relative day, no other weekday/month/date, and exactly ONE of that person's
+upcoming bookings fits what it named (`bookingsFitting`: the snapshot incl. this call's bookings, the new
+`fetchCallerContext.upcomingBeyond` = rows past the five listed, and lastBooked; loose same-person predicate).
+"Your Monday appointment" fits every Monday; "the 26th" every month's 26th (opus review H1). A number/ordinal is a
+date only beside a month, or an ORDINAL beside a weekday, never followed by "one" ("your first appointment", "the
+second one", "your Monday 9 appointment" ask). Unknown = ours is asked: no snapshot, a withheld number (now never
+looked up — this also closed a pre-existing leak: all withheld callers shared one caller context and last-call
+summary), a failed lookup, an overflow without the beyond list. Spanish and "on the 26th" alone still get ours.
+
+**Fix 2 — the on-file name rides `set_call_intent`'s reply** (Live, inbound, intent `book_appointment` only). Logs:
+set_call_intent is the first tool and runs BLOCKING before the words that asked to spell (calls a and c). One name
+→ "that is their name, never ask or spell"; several → the listed names (max 3), never spelled, "Is that under
+<most-booked>?" only when unclear; "another" → an extra booking with `in_addition_to_existing` (not on a block
+policy). Probe `scripts/probes/p6-onfile.mjs` (gemini-3.8-live, real prompt + tools, text caller turns, Test-Line-
+shaped snapshot, pre-registered rule): asked to spell plain 5/10 → note 0/10, any name ask 6 → 0, move question
+1 → 0; re-run of the reviewed note 0/10. $0.29 total.
+
+**Fix 3 — the unusable-transcript note only to a turn the model left unanswered** (no reply text and no model audio
+this turn). Fleet 10-05..10-19: 2 notes, both after a reply, both doubled.
+
+**Item 4.** The early "yes that objects" branch hands the one-question form; a cancel case for the write-order
+ceiling history restores `ceiling-ignores-history`.
+
+**Review.** Opus review + 2 re-reviews (H1 regression, then stray ordinals as dates, then withheld/failed lookups):
+all fixed with red-first tests and hand-verified sabotage rows. Accepted: the note repeats on a second booking
+intent; Spanish never gets the day-only form; a reply that guessed at garble no longer gets the "do not guess" note
+(writes still refused); a stale audio marker on a turn with no turnComplete.
+
+**Tooling.** `sabotage.mjs --to <row>`; `.superpowers/sdd/2026-10-13-round-a1-say-it-once/run-shard-p6.sh <sha>
+<label> A|B <args>` (A: root+census+db inline, then `--to`; B: `--from` in `../ai-phone-shardb`). Census 347.
+A verify run in a Claude shell was killed by the memory reaper mid-row and LEFT A FILE SABOTAGED — restored from
+the row's find; run verifiers in the foreground or in mintty.
+
+**Gate `p6-final` @ `bcec775`.** ROOT exit 0 (8,080 passed), CENSUS 347 clean, DB exit 0 (700); sabotage shards A
+(0–107) and B (108–346) — verdict below. Build `d583596e` SUCCESS (all 5 steps), `voice:bcec775` digest
+`sha256:af306b221579af7bcc27e6460055f7e21717aebe4da115562d81c2e224c006c6`.
+
+**Gate verdict: PASS.** Shard A 108 rows (only the 3 baseline x: ask-branch-latch, ask-branch-in-turn,
+ask-latch-per-action), shard B 239 rows all red; 347/347 verdicts, 0 "could not be READ", both trees clean.
+
+**Deploy (20:42 CDT).** Migrate job → `:bcec775`, `scripts/migrate.js --status` (the job's command is `node`; a bare
+`--status` arg exits 9): 53 applied, none pending. **LIVE `voice-uk-prod-00110-vah`** @ `bcec775` (staged with no
+traffic, tag `p6polish`: env diff vs 00108 only GIT_COMMIT_SHA, spec identical, Ready, GET / 200, 0 WARNING+; then
+100%). Rollback:
+`gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00108-rox=100 --project=vetra-uk-edc8ca --region=europe-west2`.
+
+**Calls (owner handset → +18175803291), cap $1.50.** (a) on-file "another": "Hi, I'd like to book another
+appointment for myself." → expect "Is that under Nithin Dodla?" → "Yes." → "Thursday the 22nd at 11 a.m." → ONE
+question naming Nithin Dodla, not spelled, no extra-or-move question → "Yes." → only "Done, you're all set." (b)
+correction, day only: "I'd like to book another appointment for myself, Wednesday the 28th at 11 a.m." → (Is that
+under Nithin Dodla? → Yes) → one question → "Yes." → Done → "No, actually make it 2 p.m. instead." → ONE move
+question → "Yes." → Done; one row Wed 28 14:00, none at 11:00.
