@@ -16,7 +16,7 @@ professional is required. Nothing here substitutes for that.
 
 ## Launch checklist — first paying clients (2026-10-09, current)
 
-> **2026-10-20 (owner): next = four sessions in `docs/superpowers/plans/2026-10-20-mvp-pilot-readiness.md`** —
+> **2026-10-20 (owner): next = sessions in `docs/superpowers/plans/2026-10-20-mvp-pilot-readiness.md` (order updated: pronunciation NEXT, security LAST)** —
 > security clean-up (Railway/Supabase off, merge to `main`) → pronunciation box ("Digile") → dashboard check,
 > left-sidebar redesign, one deploy → receptionist trust (LVX182 + warmth), then a client-day test. Session 1 has a
 > starting message there.

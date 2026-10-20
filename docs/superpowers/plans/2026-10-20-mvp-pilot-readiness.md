@@ -76,3 +76,37 @@ points at Railway production. Then: merge to main (never force), repoint that SM
 Railway services and Supabase -- ask before EACH delete. Verify every old host and the Twilio number list after.
 Conserve usage; cheaper models for mechanical work; detail in a ledger; never git checkout over uncommitted work.
 ```
+
+## Owner update (2026-10-20, later): new order + pronunciation design
+
+**Order now:** pronunciation (next) → dashboard → trust → client-day test → **security clean-up LAST** (owner). The
+Railway hosts stay up meanwhile; nothing calls them except +18175803291's SMS URL.
+
+**Pronunciation = all three layers + LVX174 (~6–9 h + ~$0.50), owner-approved after a plain explanation:**
+1. **Recorded greeting** — per business (and language), a clip of the greeting made once and approved by ear; played
+   at pickup while the model is told the greeting was already said (reuse the outbound seeded-first-line mechanism:
+   Live's own audio for that line is dropped; prompt `greetingSpoken`); regenerated when the greeting changes; falls
+   back to the model's spoken greeting if the clip is missing. Voice source: try BOTH Google TTS "Kore" and the best of
+   several takes from gemini-3.8-live itself; the owner picks on a phone.
+2. **Pronunciation box** — per business written → spoken map (business name; staff/service names it enters); the model
+   only ever sees the spoken form; written form kept in tools, dashboard, emails, transcripts; a prompt line to say
+   "we / our team" rather than repeat the business name. Check the claim detector's tenant-noun matching.
+3. **Listening test** — ~10 samples per candidate spelling + the greeting in both voices, saved as audio for the owner
+   (STT normalises spellings and calls are not recorded, so no automatic check). Pre-register the pick rule.
+4. **LVX174** — the fixed lines (noAnswer, cantTransfer, technical, technicalOutbound, timeUp) as clips in the
+   receptionist's voice, Polly as fallback; Twilio fallback Function clips as Assets per account.
+
+## Pronunciation session starting message (paste into a fresh session)
+
+```text
+MVP pilot readiness: pronunciation session. Read docs/superpowers/plans/2026-10-20-mvp-pilot-readiness.md
+("Owner update ... pronunciation design") and docs/receptionist-backlog.md LVX174; memory digile-lead-gen-tenant
+(the earlier "pronounce Digile as DIJ-ILE" instruction failed). Live voice voice-uk-prod-00112-boh @ 4ae6f1d; branch
+feat/outbound-stage4. Owner decisions (final): all three layers + LVX174 -- recorded greeting per business (voice:
+try Google TTS "Kore" AND the best gemini-3.8-live take, owner picks by ear), pronunciation box (model sees only the
+spoken form, says "we/our team" mid-call), listening test (~$0.50, ask before spending), fixed lines in the
+receptionist's voice. Digile tenants: UK 55c7c8c4 (+441372656055), US 2083c6a4 (+18176011171).
+FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion). Then a
+plan for owner review before building; red-first tests with sabotage rows; sharded gate in mintty; ask before deploy.
+Conserve usage; cheaper models for mechanical work; detail in a ledger; never git checkout over uncommitted work.
+```
