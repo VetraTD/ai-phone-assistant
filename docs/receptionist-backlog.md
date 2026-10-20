@@ -17378,6 +17378,18 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - Options to weigh: a code retry of the agreed move when a claim is unbacked and the last move question was answered
   with anything but a no (like the engine retry for bookings); post-call compare the last agreed slot with the row.
 
+### LVX183 · Hangs up after the caller came back from a silence goodbye · **NEW 2026-10-20, not fixed (pre-existing, owner hit it on 1171)** `[cheap]`
+- `CAd51783477c05662f2b645075b7f53e43` (Digile US +18176011171, 00110-vah, 142 s): after "Ahm" the caller paused; ladder nudge (05:11:07),
+  "Take your time" (05:11:18), goodbye rung at 05:11:31.9 (`live_silence_hangup`, `exitAfterTurn = true`). The caller spoke
+  over it: `armExit` refused (`live_exit_refused_recent_barge` 41 ms) but `exitAfterTurn` stayed set. They asked about their
+  appointments; the model checked and asked "Would you like to go ahead and book a free strategy call?" -- and at that
+  turn end the stale silence latch armed the exit (`live_exit_armed end_call`, no end_call tool) and hung up 1.6 s later.
+- Cause: LVX96 route B clears `endCallArmed` when the caller speaks after a refused arm, but not the silence ladder's
+  `exitAfterTurn`, and the question-outranks-hang-up hold is deliberately NOT applied to exitAfterTurn. The ladder resets
+  silenceStage on voice but stays off while exitAfterTurn is set (`if (silenceStage >= 3 || exitAfterTurn) return`).
+- Fix shape: a silence-only marker beside exitAfterTurn (the call clock's forced goodbye, lines ~8348/8368, must still
+  end the call); caller speech before the exit is armed clears it and the ladder starts again. Red-first + sabotage row.
+
 ### LVX181 · It answers a thinking "umm" as if the caller had finished · **PARKED by owner 2026-10-19 · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
 - **2026-10-17 overnight (Part 5, $0.34):** (A, logs, $0) filler-only caller turns drew a reply on 6 of 86 calls
   (7%, a floor; `transcript_chars` is misattributed so the literal filter is useless). Baseline
