@@ -410,3 +410,38 @@ describe("LVX183: a caller back from the silence goodbye is not hung up later", 
     expect(getLatencyStats().turnTaking.live_exit_refused_recent_barge ?? 0).toBe(0);
   });
 });
+
+// LVX183 opus review: the ladder restarts on the caller's WORDS (not only on
+// frames the VAD counted), and a "?"-only transcript is not a caller.
+describe("LVX183 review: the ladder after a cancelled silence goodbye", () => {
+  beforeEach(() => clearStats());
+
+  it("words with no voiced frames still restart the ladder: a later silence is nudged again", async () => {
+    const s = await boot();
+    s.greet();
+    s.quiet(21_000);
+    s.speakAudio(3_000);
+    s.endTurn();
+    await s.settle();
+    // Quiet speech below the VAD floor: a transcript, no voiced frames.
+    s.live.push({ serverContent: { inputTranscription: { text: "Sorry, I'm still here." } } });
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_silence_exit_cancelled_caller_back).toBe(1);
+    // 3 s of the goodbye still playing, then past the first rung.
+    s.quiet(12_000);
+    expect(getLatencyStats().turnTaking.nudges_fired).toBe(3);
+  });
+
+  it("a transcript of only punctuation does not cancel the silence goodbye", async () => {
+    const s = await boot();
+    s.greet();
+    s.quiet(21_000);
+    s.speakAudio(3_000);
+    s.talk(600);
+    s.endTurn();
+    await s.settle();
+    s.live.push({ serverContent: { inputTranscription: { text: "?" } } });
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_silence_exit_cancelled_caller_back ?? 0).toBe(0);
+  });
+});
