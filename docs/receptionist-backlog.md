@@ -17160,7 +17160,7 @@ by the clock).
 
 ## E1 live check, 2026-10-13: one new defect, found because owner emails now work
 
-### LVX176 · A message-only call emails the owner a false "Unconfirmed booking" · **BUILT `0fcd6f5`, NOT deployed (ships with round A) · P1** `[cheap]`
+### LVX176 · A message-only call emails the owner a false "Unconfirmed booking" · **LIVE (`0fcd6f5` is in every deploy since round A; current 00112-boh) · P1** `[cheap]`
 
 On the E1 check call `CA6514cf8ba98d599919f2b956d2640782` (test line, 2026-10-13 18:37 UTC) the caller left a
 message, and `record_customer_request` succeeded at 18:39:14. Two emails went out:
@@ -17312,7 +17312,7 @@ the same counters plus the backwards-order count.
 
 ## A1 part 4 live calls, 2026-10-16 (prod `voice-uk-prod-00105-mw4` @ `5c15583`): one serious new defect
 
-### LVX179 · The receptionist booked a time the caller never chose, then turned the correction into a second booking · **DEPLOYED 2026-10-17 05:09 (00108-rox @6da2411) — owner calls pending · P0**
+### LVX179 · The receptionist booked a time the caller never chose, then turned the correction into a second booking · **LIVE + VERIFIED on owner calls 2026-10-19 (00108-rox, polished in 00110-vah) · P0**
 Call b `CA70682e3219cb227353f4681b25119586` (2026-10-16 19:55Z, Test Line). The model listed "9 00 AM, 1 00 PM and
 4 30 PM. Which of those works best for Maja?". In its NEXT turn, with the caller saying nothing ("What? No, I didn't
 even say anything"), it booked 9:00 AM itself. The A1 same-breath rule saved it: `write_consent_probe`
@@ -17378,7 +17378,7 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - Options to weigh: a code retry of the agreed move when a claim is unbacked and the last move question was answered
   with anything but a no (like the engine retry for bookings); post-call compare the last agreed slot with the row.
 
-### LVX183 · Hangs up after the caller came back from a silence goodbye · **NEW 2026-10-20, not fixed (pre-existing, owner hit it on 1171)** `[cheap]`
+### LVX183 · Hangs up after the caller came back from a silence goodbye · **FIXED + VERIFIED 2026-10-20 (00112-boh @4ae6f1d, call CA2b224386)** `[cheap]`
 - `CAd51783477c05662f2b645075b7f53e43` (Digile US +18176011171, 00110-vah, 142 s): after "Ahm" the caller paused; ladder nudge (05:11:07),
   "Take your time" (05:11:18), goodbye rung at 05:11:31.9 (`live_silence_hangup`, `exitAfterTurn = true`). The caller spoke
   over it: `armExit` refused (`live_exit_refused_recent_barge` 41 ms) but `exitAfterTurn` stayed set. They asked about their

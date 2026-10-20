@@ -167,7 +167,7 @@ voicemail.
   only the D1 Calls-list date fix went live, as a backend hotfix on that base:
   `dashboard-api-uk-prod-00003-hc7` @ `f130aee`, branch `hotfix/d1-dashboard-bounds`.
   Its frontend half ships with this deploy.)
-- [ ] **LVX179 (P0): the receptionist booked a time the caller never chose**
+- [x] **DONE, live + verified on owner calls 2026-10-19/20 (now `voice-uk-prod-00112-boh`).** **LVX179 (P0): the receptionist booked a time the caller never chose**
   (2026-10-16 call b), then turned the correction into a second booking.
   Fix before first paying clients. See `docs/receptionist-backlog.md`.
 - [ ] **Merge `feat/outbound-stage4` into `main`, then shut down Railway and
