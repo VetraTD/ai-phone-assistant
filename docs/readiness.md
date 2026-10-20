@@ -16,6 +16,11 @@ professional is required. Nothing here substitutes for that.
 
 ## Launch checklist — first paying clients (2026-10-09, current)
 
+> **2026-10-20 (owner): next = four sessions in `docs/superpowers/plans/2026-10-20-mvp-pilot-readiness.md`** —
+> security clean-up (Railway/Supabase off, merge to `main`) → pronunciation box ("Digile") → dashboard check,
+> left-sidebar redesign, one deploy → receptionist trust (LVX182 + warmth), then a client-day test. Session 1 has a
+> starting message there.
+
 > **Start here.** The sections below this one were written 2026-09-03 for the
 > demo stage; where they disagree with this list, this list wins. Hours marked
 > *rough* are new estimates; the rest come from the finance guide (OneDrive
