@@ -17390,6 +17390,17 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - Fix shape: a silence-only marker beside exitAfterTurn (the call clock's forced goodbye, lines ~8348/8368, must still
   end the call); caller speech before the exit is armed clears it and the ladder starts again. Red-first + sabotage row.
 
+### LVX184 · A distressed caller gets a promise it may not keep, then a script · **NEW 2026-10-20, logged by owner, not fixed** `[medium]`
+- `CA2b224386868ca873168ea6842637e9db` (Digile US +18176011171, 00112-boh, owner role-play): "I'm kind of feeling down lately and I just
+  need somebody to talk to" -> "I can connect you with someone who can help, or if you prefer, I can take a message." Check
+  whether Digile US has a transfer number/policy at all (db-inspect cannot read transfer_policy for this tenant yet; the Test
+  Line shows transfer_policy "never"). If not, that is an offer of a phantom action (NNR 1 family).
+- Then "I'm only able to assist with business inquiries for Digile Media" three times in a row (16:09:27, 16:09:45,
+  16:10:01) -- cold against [[receptionist-must-sound-human]] (warmth, pause the task, ask once).
+- Good: at "I just don't know anymore" it gave the 988 Suicide and Crisis Lifeline (16:11:42). Keep that.
+- Shape to consider: one warm acknowledgement, offer what really exists (a message, or 988 when it sounds serious), and stop
+  repeating the business-only line. Measure on a scripted distressed caller before changing the prompt.
+
 ### LVX181 · It answers a thinking "umm" as if the caller had finished · **PARKED by owner 2026-10-19 · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
 - **2026-10-17 overnight (Part 5, $0.34):** (A, logs, $0) filler-only caller turns drew a reply on 6 of 86 calls
   (7%, a floor; `transcript_chars` is misattributed so the literal filter is useless). Baseline
