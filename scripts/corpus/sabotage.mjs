@@ -3347,6 +3347,14 @@ const SABOTAGES = [
     replace: "    // SABOTAGE",
     red: ["tests/callerContext.test.js"],
   },
+  {
+    name: "lvx183-silence-latch-cleared",
+    why: "LVX183 (CAd51783477c, 2026-10-20): a caller who speaks after the silence goodbye clears its exit latch. Sabotaged, the refused goodbye exit stays set and hangs up at the end of the NEXT reply -- one that asked the caller a question.",
+    file: "lib/voice/live/index.js",
+    find: "        if (silenceOwnsExit && exitAfterTurn && String(sc.inputTranscription.text).trim()) {",
+    replace: "        if (false) { // SABOTAGE",
+    red: ["tests/liveSilence.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

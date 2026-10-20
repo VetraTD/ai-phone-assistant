@@ -337,3 +337,76 @@ describe("LVX120 — a silence nudge does not displace the read-back", () => {
   // three-turn window, where a yes authorised something read several turns
   // earlier. A vacuous `expect(true)` here would assert none of that.
 });
+
+// ---------------------------------------------------------------------------
+// LVX183 (CAd51783477c, Digile US, 2026-10-20). The goodbye rung set
+// exitAfterTurn; the caller spoke over the goodbye, so armExit refused
+// (live_exit_refused_recent_barge) -- but the latch stayed set. The caller
+// asked about their appointments, the model answered with a question, and at
+// THAT turn end the stale silence latch armed the exit and hung up on them.
+// ---------------------------------------------------------------------------
+describe("LVX183: a caller back from the silence goodbye is not hung up later", () => {
+  beforeEach(() => clearStats());
+
+  it("speaking over the goodbye cancels the silence hang-up; the next reply's turn end does not hang up", async () => {
+    const s = await boot();
+    s.greet();
+    s.quiet(21_000);
+    expect(getLatencyStats().turnTaking.silence_hangups).toBe(1);
+
+    // The goodbye plays; the caller talks over it. The call's order: the
+    // goodbye's turn ends first (the arm is refused on the barge), and only
+    // then does their transcript land.
+    s.speakAudio(3_000);
+    s.talk(600);
+    s.endTurn();
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_exit_refused_recent_barge).toBe(1);
+    s.live.push({ serverContent: { inputTranscription: { text: "Wait, could I check if I have any appointments?" } } });
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_silence_exit_cancelled_caller_back).toBe(1);
+
+    // Well past the barge grace window, the model answers with a question.
+    s.quiet(4_000);
+    s.live.push({ serverContent: { outputTranscription: { text: "I couldn't find any. Would you like to book a call?" } } });
+    s.speakAudio(2_000);
+    s.endTurn();
+    await s.settle();
+
+    // Only the refused attempt: the stale latch never tries again. (The exit
+    // mark itself goes out only after the audio drains, so it is not the
+    // observable here; every arm attempt bumps live_exit_arm_checked.)
+    expect(getLatencyStats().turnTaking.live_exit_arm_checked).toBe(1);
+    expect(s.ws.readyState).toBe(1);
+  });
+
+  it("their words landing BEFORE the goodbye's turn ends: no hang-up is even attempted", async () => {
+    const s = await boot();
+    s.greet();
+    s.quiet(21_000);
+    s.speakAudio(3_000);
+    s.talk(600);
+    s.live.push({ serverContent: { inputTranscription: { text: "Hang on, I'm here." } } });
+    s.endTurn();
+    await s.settle();
+    s.quiet(4_000);
+    s.live.push({ serverContent: { outputTranscription: { text: "No problem, what can I help with?" } } });
+    s.speakAudio(2_000);
+    s.endTurn();
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_exit_arm_checked ?? 0).toBe(0);
+    expect(getLatencyStats().turnTaking.live_silence_exit_cancelled_caller_back).toBe(1);
+  });
+
+  it("a goodbye nobody answers still hangs up (the backstop holds)", async () => {
+    const s = await boot();
+    s.greet();
+    s.quiet(21_000);
+    s.speakAudio(3_000);
+    s.quiet(2_000);
+    s.endTurn();
+    await s.settle();
+    expect(getLatencyStats().turnTaking.live_exit_arm_checked).toBe(1);
+    expect(getLatencyStats().turnTaking.live_exit_refused_recent_barge ?? 0).toBe(0);
+  });
+});
