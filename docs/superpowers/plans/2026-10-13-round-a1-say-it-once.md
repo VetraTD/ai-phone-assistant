@@ -1539,3 +1539,12 @@ question naming Nithin Dodla, not spelled, no extra-or-move question → "Yes." 
 correction, day only: "I'd like to book another appointment for myself, Wednesday the 28th at 11 a.m." → (Is that
 under Nithin Dodla? → Yes) → one question → "Yes." → Done → "No, actually make it 2 p.m. instead." → ONE move
 question → "Yes." → Done; one row Wed 28 14:00, none at 11:00.
+
+## Part 6 calls (2026-10-19, owner handset → Test Line, on `00110-vah`) — verdict
+
+| Call | CallSid | Part 6 | Other |
+|---|---|---|---|
+| (a) on-file "another" | `CAa3e6c3f99cbcad238ed09e2e7a14c8a0` | **PASS**: "Is that booking under Nithin Dodla?" → no spelling, no extra-or-move question → ONE question naming him → "Ja" → saved once (in_addition) → only "Done, you're all set" | goodbye on a garbled "n?o aceita", no double reply |
+| (b) correction | `CAe6827ddc3f8dc82536d0da70fa9fce43` | **PASS on Fix 1**: the model's own day-only "Shall I move your appointment on Wednesday, October 28th to 2 p m?" → "Ja" → moved, ONE move question; owner's further 3/4/1 p.m. changes each one question, one row | **FAIL (LVX182, new)**: final "go back to 2 p.m." → "Ja" ignored, then "Done, you're all set" with no tool call; row stays at 1 p.m. Claim guard detected only; post-call verify said ok |
+
+DB after: Thu 22 11:00 Nithin Dodla (call a), Wed 28 13:00 Nithin Dodla (call b; the caller was told 2 p.m.).

@@ -17351,7 +17351,8 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
     works" read as a time costs one extra question; "No, keep both" is a gate objection (one extra question); the
     engine-retry veto's note text never reaches the model; a move sends no owner notification (email link-only).
 
-### LVX180 · Prompt rules the model skipped on the same day · **LIVE 00108-rox, STILL SKIPPED on 2026-10-19 calls — needs a code lever (Part 6)** `[cheap]`
+### LVX180 · Prompt rules the model skipped on the same day · **FIXED in code, LIVE 00110-vah @bcec775 (2026-10-19, Part 6); call a verified** `[cheap]`
+- Part 6: the on-file name (and "another" = an extra booking with in_addition_to_existing) rides set_call_intent's reply, the first tool, which runs before the words that asked to spell. Probe spell 5/10 -> 0/10. Call a `CAa3e6c3f9…` (00110-vah): "Is that booking under Nithin Dodla?", no spelling, no extra-or-move question, one question, saved once.
 - 2026-10-19 calls: an on-file caller was asked to spell their full name on BOTH booking-for-myself calls
   (`CAc31b31c8…`, `CA1cfcbc4e…`), and "another appointment for myself" still got the extra-or-move question
   (`CAc31b31c8…`). Prompt lines alone do not hold; Part 6 tries the set_call_intent tool reply as the lever.
@@ -17364,6 +17365,18 @@ already booked, correct?" (no slot named), the caller said yes, and 10 AM was bo
 - d1b `CAb3e55b61be728cc99f4e8994f5d160e3`: the in-addition question came in generic wording, not "You have N upcoming
   appointments; the next is …" (d1 used it), and after "That time is available". It also asked an on-file caller for
   their full name (owner rule: a name on file is never asked).
+
+### LVX182 · Says "Done, you're all set" for a change it never made (long correction chain) · **NEW 2026-10-19, not fixed** `[medium]`
+- Call b `CAe6827ddc3f8dc82536d0da70fa9fce43` (00110-vah, 199 s): the caller moved one booking 11 -> 2 -> 3 -> 4 -> 1 p.m. (every move
+  written once on ONE row, one move question each -- Part 6 Fix 1 worked), then asked "go back to 2:00 p.m.?". The model
+  asked "Shall I move your appointment on Wednesday, October 28th to 2 p m?"; the caller's "Ja." drew no action (the
+  silence nudge fired 10 s later); on "Ja, ja, movet." it said "Done, you're all set" with NO book_appointment call.
+  `live_claim_unbacked_by_action` fired and a claim note was sent (spoken:false), then the model called end_call. DB: the row
+  is at 1 p.m. (13:00 CDT); the caller heard "Done" for 2 p.m.
+- Post-call verify said `ok` (skipped already_confirmed): it checks that an owed booking has a row, not that the row's
+  TIME is the one last agreed. Same class as [[why-it-still-fabricates]]: on Live the claim guard only detects.
+- Options to weigh: a code retry of the agreed move when a claim is unbacked and the last move question was answered
+  with anything but a no (like the engine retry for bookings); post-call compare the last agreed slot with the row.
 
 ### LVX181 · It answers a thinking "umm" as if the caller had finished · **PARKED by owner 2026-10-19 · P1 — measured 2026-10-17, no setting fixes it; next = code** `[medium]`
 - **2026-10-17 overnight (Part 5, $0.34):** (A, logs, $0) filler-only caller turns drew a reply on 6 of 86 calls
