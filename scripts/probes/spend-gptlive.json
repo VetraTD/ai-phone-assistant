@@ -1,6 +1,6 @@
 {
   "cap_usd": 25.5,
-  "spent_usd": 25.707717,
+  "spent_usd": 26.287275,
   "entries": [
     {
       "at": "2026-09-15T05:17:06.776Z",
@@ -7189,11 +7189,639 @@
       "model": "gemini-3.8-live",
       "usd": 0.008925500000000001,
       "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:49:30.743Z",
+      "probe": "PRONLISTEN-A",
+      "label": "smoke-49b09e",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:49:33.919Z",
+      "probe": "PRONLISTEN-B",
+      "label": "smoke-a47ca4",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:49:36.894Z",
+      "probe": "PRONLISTEN-C",
+      "label": "smoke-09925b",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:49:39.853Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "smoke-d4f377",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:50:15.775Z",
+      "probe": "PRONLISTEN-SMOKE-CORRECTION",
+      "label": "4 smoke sessions closed before usageMetadata; p6 max $0.0102 each",
+      "usd": 0.0408,
+      "estimated": true
+    },
+    {
+      "at": "2026-10-21T00:50:26.354Z",
+      "probe": "PRONLISTEN-A",
+      "label": "smoke-469c31",
+      "model": "gemini-3.8-live",
+      "usd": 0.005942,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:50:51.599Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-8b227b",
+      "model": "gemini-3.8-live",
+      "usd": 0.00503,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:50:55.805Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-c2d179",
+      "model": "gemini-3.8-live",
+      "usd": 0.004994,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:02.010Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-8730b6",
+      "model": "gemini-3.8-live",
+      "usd": 0.00561,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:05.907Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-36579c",
+      "model": "gemini-3.8-live",
+      "usd": 0.004902,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:13.175Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-7a7145",
+      "model": "gemini-3.8-live",
+      "usd": 0.005834000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:19.842Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-989017",
+      "model": "gemini-3.8-live",
+      "usd": 0.005678000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:26.050Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-edf26f",
+      "model": "gemini-3.8-live",
+      "usd": 0.00561,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:30.755Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-ceb287",
+      "model": "gemini-3.8-live",
+      "usd": 0.00513,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:35.688Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-342dc3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005222,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:42.439Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-c24ac3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005726,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:46.808Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-b8843a",
+      "model": "gemini-3.8-live",
+      "usd": 0.004986,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:52.537Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-b6710c",
+      "model": "gemini-3.8-live",
+      "usd": 0.0054540000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:51:57.172Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-d73871",
+      "model": "gemini-3.8-live",
+      "usd": 0.005102,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:02.410Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-550235",
+      "model": "gemini-3.8-live",
+      "usd": 0.00527,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:08.466Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-373663",
+      "model": "gemini-3.8-live",
+      "usd": 0.0055379999999999995,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:12.790Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-f5ae9f",
+      "model": "gemini-3.8-live",
+      "usd": 0.004938,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:18.158Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-72e793",
+      "model": "gemini-3.8-live",
+      "usd": 0.005329,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:26.720Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-a22c11",
+      "model": "gemini-3.8-live",
+      "usd": 0.006193,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:33.999Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-54d331",
+      "model": "gemini-3.8-live",
+      "usd": 0.005873,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:39.448Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-03a9ee",
+      "model": "gemini-3.8-live",
+      "usd": 0.005273,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:44.881Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-cb9261",
+      "model": "gemini-3.8-live",
+      "usd": 0.005341,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:50.697Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-333de7",
+      "model": "gemini-3.8-live",
+      "usd": 0.005389,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:52:59.796Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-2cd4d7",
+      "model": "gemini-3.8-live",
+      "usd": 0.006365,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:08.511Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-ed4acb",
+      "model": "gemini-3.8-live",
+      "usd": 0.006293,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:21.017Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-06aa8f",
+      "model": "gemini-3.8-live",
+      "usd": 0.005317,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:30.166Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-ffc1b4",
+      "model": "gemini-3.8-live",
+      "usd": 0.006409,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:36.061Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-c30f2f",
+      "model": "gemini-3.8-live",
+      "usd": 0.0053809999999999995,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:41.674Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-a1d760",
+      "model": "gemini-3.8-live",
+      "usd": 0.005333,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:53:53.370Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-eea9ea",
+      "model": "gemini-3.8-live",
+      "usd": 0.011102,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:54:02.375Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-c682bd",
+      "model": "gemini-3.8-live",
+      "usd": 0.010290500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:54:14.583Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-dc9cac",
+      "model": "gemini-3.8-live",
+      "usd": 0.011307999999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:54:27.525Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-8e2d63",
+      "model": "gemini-3.8-live",
+      "usd": 0.011498,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:54:40.987Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-33b743",
+      "model": "gemini-3.8-live",
+      "usd": 0.012629,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:54:52.092Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-203103",
+      "model": "gemini-3.8-live",
+      "usd": 0.010929,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:55:05.842Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-49ba2e",
+      "model": "gemini-3.8-live",
+      "usd": 0.011706500000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:55:16.208Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-3e6d28",
+      "model": "gemini-3.8-live",
+      "usd": 0.010713,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:55:29.510Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-522c77",
+      "model": "gemini-3.8-live",
+      "usd": 0.011588999999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:55:40.744Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-60c74a",
+      "model": "gemini-3.8-live",
+      "usd": 0.010975000000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:55:53.149Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-d98697",
+      "model": "gemini-3.8-live",
+      "usd": 0.011318499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:56:03.799Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-8ef802",
+      "model": "gemini-3.8-live",
+      "usd": 0.0107855,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:56:17.279Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-97ac29",
+      "model": "gemini-3.8-live",
+      "usd": 0.0116735,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:56:33.330Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-e0e28f",
+      "model": "gemini-3.8-live",
+      "usd": 0.012421,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:56:45.157Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-1e7d28",
+      "model": "gemini-3.8-live",
+      "usd": 0.011178500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:00.344Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-6b5bb5",
+      "model": "gemini-3.8-live",
+      "usd": 0.012136000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:11.007Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-94f4cc",
+      "model": "gemini-3.8-live",
+      "usd": 0.0108075,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:20.994Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-977ed6",
+      "model": "gemini-3.8-live",
+      "usd": 0.0106205,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:32.977Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-36d05a",
+      "model": "gemini-3.8-live",
+      "usd": 0.011192,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:45.727Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-f25a63",
+      "model": "gemini-3.8-live",
+      "usd": 0.011421,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:57:58.570Z",
+      "probe": "PRONLISTEN-A",
+      "label": "full-defec4",
+      "model": "gemini-3.8-live",
+      "usd": 0.011512,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:58:11.409Z",
+      "probe": "PRONLISTEN-B",
+      "label": "full-31a9d9",
+      "model": "gemini-3.8-live",
+      "usd": 0.011460000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:58:20.417Z",
+      "probe": "PRONLISTEN-C",
+      "label": "full-ace369",
+      "model": "gemini-3.8-live",
+      "usd": 0.010293,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:58:33.614Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "full-43e2bf",
+      "model": "gemini-3.8-live",
+      "usd": 0.011593,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:22.619Z",
+      "probe": "PRONLISTEN-A",
+      "label": "topup-800676",
+      "model": "gemini-3.8-live",
+      "usd": 0.005186,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:27.321Z",
+      "probe": "PRONLISTEN-B",
+      "label": "topup-c2bcdd",
+      "model": "gemini-3.8-live",
+      "usd": 0.005138,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:32.053Z",
+      "probe": "PRONLISTEN-C",
+      "label": "topup-ab29ae",
+      "model": "gemini-3.8-live",
+      "usd": 0.005142,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:37.909Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "topup-57f523",
+      "model": "gemini-3.8-live",
+      "usd": 0.005466,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:44.855Z",
+      "probe": "PRONLISTEN-A",
+      "label": "topup-d62c23",
+      "model": "gemini-3.8-live",
+      "usd": 0.005762,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:49.802Z",
+      "probe": "PRONLISTEN-B",
+      "label": "topup-6f97cf",
+      "model": "gemini-3.8-live",
+      "usd": 0.005222,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:54.299Z",
+      "probe": "PRONLISTEN-C",
+      "label": "topup-f961d7",
+      "model": "gemini-3.8-live",
+      "usd": 0.009374500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T00:59:58.872Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "topup-6230aa",
+      "model": "gemini-3.8-live",
+      "usd": 0.00507,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:00:05.017Z",
+      "probe": "PRONLISTEN-A",
+      "label": "topup-a12e86",
+      "model": "gemini-3.8-live",
+      "usd": 0.005545,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:00:10.745Z",
+      "probe": "PRONLISTEN-B",
+      "label": "topup-2a38ad",
+      "model": "gemini-3.8-live",
+      "usd": 0.0054245000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:00:20.470Z",
+      "probe": "PRONLISTEN-C",
+      "label": "topup-7d45bf",
+      "model": "gemini-3.8-live",
+      "usd": 0.0066165,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:00:26.015Z",
+      "probe": "PRONLISTEN-CONTROL",
+      "label": "topup-55705c",
+      "model": "gemini-3.8-live",
+      "usd": 0.0053805,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:35:55.808Z",
+      "probe": "PRONCLIP-TTS",
+      "label": "greeting-spell",
+      "usd": 0.00456,
+      "estimated": true
+    },
+    {
+      "at": "2026-10-21T01:35:58.674Z",
+      "probe": "PRONCLIP-TTS",
+      "label": "greeting-ipa",
+      "usd": 0.00636,
+      "estimated": true
+    },
+    {
+      "at": "2026-10-21T01:36:09.390Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "greeting-live-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0039435,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:36:21.071Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "greeting-live-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0041475,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:36:32.323Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "greeting-live-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0041115,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:36:43.696Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "greeting-live-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0040395000000000006,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:36:53.626Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "greeting-live-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0037275,
+      "estimated": false
+    },
+    {
+      "at": "2026-10-21T01:36:54.880Z",
+      "probe": "PRONCLIP-TTS",
+      "label": "fixed-technical",
+      "usd": 0.00438,
+      "estimated": true
+    },
+    {
+      "at": "2026-10-21T01:37:04.397Z",
+      "probe": "PRONCLIP-LIVE",
+      "label": "fixed-live",
+      "model": "gemini-3.8-live",
+      "usd": 0.0035475000000000003,
+      "estimated": false
     }
   ],
   "started_at": "2026-09-15T05:17:06.776Z",
   "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
-  "updated_at": "2026-10-19T22:19:40.227Z",
+  "updated_at": "2026-10-21T01:37:04.397Z",
   "cap_history": [
     {
       "cap": 5,
