@@ -9,6 +9,8 @@ import { fileDegradedVoicemail } from "./lib/degradedVoicemail.js";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/db.js";
+import { buildGreetingClipRouteAuth, registerGreetingClipRoute } from "./lib/voice/greetingClipRoute.js";
+import { synthesizeSsmlMulaw } from "./services/googleTts.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
@@ -1729,6 +1731,14 @@ if (outboundDeps) {
   registerOutboundInternalRoutes(app, outboundDeps);
 } else {
   log.info("outbound_internal_routes_disabled", {});
+}
+
+// The dashboard's "Hear greeting" and its remake-after-save (pronunciation
+// build, Step 3). Mounted only when GREETING_CLIP_CALLER_SA and BASE_URL are
+// both set: the route is OIDC-only and fails closed without them.
+const greetingClipAuth = buildGreetingClipRouteAuth(process.env, log);
+if (greetingClipAuth) {
+  registerGreetingClipRoute(app, { db, verifier: greetingClipAuth.verifier, synthesize: synthesizeSsmlMulaw, env: process.env, log });
 }
 // Fix round 1, item 7: `outboundPostCall` was built at module load, before
 // `buildOutboundDeps` (above) resolved the real, Cloud-Tasks-backed enqueue
