@@ -2225,3 +2225,36 @@ CREATE POLICY tenant_isolation ON greeting_clips
   USING (business_id = app_current_business_id())
   WITH CHECK (business_id = app_current_business_id());
 GRANT SELECT, INSERT, UPDATE, DELETE ON greeting_clips TO vetra_app;
+
+-- ---------------------------------------------------------------------------
+-- Migration 057: LVX174 fixed-line clips (lib/voice/fixedLines.js). Platform
+-- table, definer functions only.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fixed_line_clips (
+  hash        text        PRIMARY KEY CHECK (hash ~ '^[0-9a-f]{32}$'),
+  line_key    text        NOT NULL CHECK (line_key IN ('noAnswer', 'cantTransfer', 'technical', 'technicalOutbound', 'timeUp')),
+  voice_name  text        NOT NULL,
+  audio       bytea       NOT NULL CHECK (octet_length(audio) BETWEEN 1 AND 1048576),
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION app_fixed_line_clips(p_hashes text[])
+RETURNS TABLE (hash text, audio bytea)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp STABLE
+AS $$
+  SELECT c.hash, c.audio FROM fixed_line_clips c WHERE c.hash = ANY (p_hashes[1:10]);
+$$;
+CREATE OR REPLACE FUNCTION app_upsert_fixed_line_clip(p_hash text, p_line_key text, p_voice_name text, p_audio bytea)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+AS $$
+  INSERT INTO fixed_line_clips (hash, line_key, voice_name, audio)
+  VALUES (p_hash, p_line_key, p_voice_name, p_audio)
+  ON CONFLICT (hash) DO UPDATE
+    SET line_key = EXCLUDED.line_key, voice_name = EXCLUDED.voice_name, audio = EXCLUDED.audio, created_at = now();
+$$;
+REVOKE ALL ON fixed_line_clips FROM PUBLIC;
+REVOKE ALL ON fixed_line_clips FROM vetra_app;
+REVOKE ALL ON FUNCTION app_fixed_line_clips(text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_upsert_fixed_line_clip(text, text, text, bytea) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_fixed_line_clips(text[]) TO vetra_app;
+GRANT EXECUTE ON FUNCTION app_upsert_fixed_line_clip(text, text, text, bytea) TO vetra_app;

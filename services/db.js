@@ -3757,6 +3757,24 @@ export async function upsertGreetingClip({ businessId, variant, languageCode, in
 }
 
 /**
+ * LVX174 fixed-line clips (migration 057, lib/voice/fixedLines.js). A platform
+ * table reached only through definer functions -- no tenant scope involved.
+ * @param {string[]} hashes - at most 10 are read
+ * @returns {Promise<{hash: string, audio: Buffer}[]>}
+ */
+export async function fetchFixedLineClips(hashes) {
+  const res = await q(`SELECT hash, audio FROM app_fixed_line_clips($1::text[])`, [hashes]);
+  if (res.error) throw res.error;
+  return res.rows || [];
+}
+
+/** Insert or replace one fixed-line clip. Throws on any failure. */
+export async function upsertFixedLineClip({ hash, lineKey, voiceName, audio }) {
+  const res = await q(`SELECT app_upsert_fixed_line_clip($1, $2, $3, $4)`, [hash, lineKey, voiceName, audio]);
+  if (res.error) throw res.error;
+}
+
+/**
  * Stamp one async AMD verdict onto a call_attempts row (spec §9.4, Task 13).
  * Runs inside `withTenant`/`withTenantSafe` -- the caller resolves
  * businessId first via `outboundAttemptByCallSid`, the same as

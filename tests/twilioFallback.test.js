@@ -318,3 +318,30 @@ describe("handler", () => {
     expect(String(calls[0][1])).toContain("<Hangup/>");
   });
 });
+
+// LVX174: with a=<asset prefix> the fixed lines play the receptionist-voice
+// clips uploaded as PUBLIC Twilio Assets in this Service (served from our own
+// domain, so nothing depends on our server); without it, Polly as before.
+describe("LVX174 asset clips", () => {
+  it("first request with no valid To: the technical clip plays instead of Polly", () => {
+    const xml = build({ To: "", a: "kore-en-gb" });
+    expect(xml).toContain("<Play>https://vetra-fallback-1234.twil.io/kore-en-gb-technical.wav</Play>");
+    expect(xml).not.toContain("<Say");
+    expect(tags(xml, "Record")).toHaveLength(1);
+  });
+
+  it("a=... rides the dial's after-URL, and the no-answer clip plays there", () => {
+    const first = build({ a: "kore-en-gb" });
+    const action = unesc(attr(tags(first, "Dial")[0], "action"));
+    expect(new URL(action).searchParams.get("a")).toBe("kore-en-gb");
+    const xml = build({ step: "after", DialCallStatus: "no-answer", a: "kore-en-gb" });
+    expect(xml).toContain("<Play>https://vetra-fallback-1234.twil.io/kore-en-gb-noanswer.wav</Play>");
+  });
+
+  it("an unsafe or missing prefix, or no domain, falls back to Polly", () => {
+    for (const a of ["../x", "KORE", "a b", ""]) {
+      expect(build({ To: "", a })).toContain('<Say voice="Polly.Amy">');
+    }
+    expect(build({ To: "", a: "kore-en-gb" }, { ...CTX, DOMAIN_NAME: "" })).toContain("<Say");
+  });
+});

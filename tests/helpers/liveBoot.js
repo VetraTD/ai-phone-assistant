@@ -215,6 +215,8 @@ export async function bootLive({
   setTimer,
   clearTimer,
   accountSid,
+  // LVX174: the shared fixed-line clip store (lib/voice/fixedLines.js).
+  fixedLines,
 } = {}) {
   const ws = new FakeSocket();
   if (authorizedCallSid !== undefined) ws.authorizedCallSid = authorizedCallSid;
@@ -248,6 +250,7 @@ export async function bootLive({
     ...(twilioClientFor !== undefined ? { twilioClientFor } : {}),
     ...(setTimer !== undefined ? { setTimer } : {}),
     ...(clearTimer !== undefined ? { clearTimer } : {}),
+    ...(fixedLines !== undefined ? { fixedLines } : {}),
   });
 
   ws.deliver({
