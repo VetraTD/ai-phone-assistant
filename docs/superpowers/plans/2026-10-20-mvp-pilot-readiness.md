@@ -107,7 +107,8 @@ try Google TTS "Kore" AND the best gemini-3.8-live take, owner picks by ear), pr
 spoken form, says "we/our team" mid-call), listening test (~$0.50, ask before spending), fixed lines in the
 receptionist's voice; dashboard greeting preview (▶, exact clip, no phone toggle); goodbye without the name; no
 mid-call name-check button. Digile tenants: UK 55c7c8c4 (+441372656055), US 2083c6a4 (+18176011171).
-FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion). Then a
+FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion). Then the
+listening test FIRST as a go/no-go for the box (owner rule >= 9/10 by ear; see "listening test FIRST"). Then a
 plan for owner review before building; red-first tests with sabotage rows; sharded gate in mintty; ask before deploy.
 Conserve usage; cheaper models for mechanical work; detail in a ledger; never git checkout over uncommitted work.
 ```
@@ -126,3 +127,15 @@ Conserve usage; cheaper models for mechanical work; detail in a ledger; never gi
 - Mid-call slips are reduced, not impossible; the listening test measures the leftover rate with mid-call sentences
   in the live voice. Splicing a recorded name into live speech is ruled out for now (seams, timing).
 - Built in the pronunciation session inside today's Settings panels (greeting + voice); they carry into the redesign.
+
+## Owner decision: listening test FIRST, as a go/no-go (2026-10-20)
+
+Owner asked "will the box work for sure?" -- honest answer: for the greeting yes (an approved clip is fixed audio);
+for live mid-call speech nobody knows until measured. So the pronunciation session STARTS with a paid listening test
+(~$0.30, ~1 h, ask before running): gemini-3.8-live with the real prompt says mid-call sentences with the business name
+("Digile Media helps businesses grow", "This is Digile Media", an answer to "what's the company called?") ~10 times
+for each of 3-4 sound-spellings; audio saved for the owner to judge on a phone. **Pre-registered rule: a spelling
+passes if the owner judges it right in >= 9 of 10 samples.** One passes -> build the box as planned. None passes -> no
+mid-call box; rely on the recorded greeting, "we / our team", the goodbye without the name, and spelling the real
+letters when asked; the owner then decides whether a bigger fix (splicing the recorded name) is worth it. The recorded
+greeting + dashboard preview + LVX174 are built either way.
