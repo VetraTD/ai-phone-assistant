@@ -516,6 +516,7 @@ export function loadConfig(business, capabilityRows = null) {
       liveVoice: null,
       smsFollowupEnabled: false,
       smsTemplates: {},
+      pronunciations: {},
     };
   }
 
@@ -578,6 +579,12 @@ export function loadConfig(business, capabilityRows = null) {
     liveVoice: business.live_voice || null,
     smsFollowupEnabled: !!business.sms_followup_enabled,
     smsTemplates: (business.sms_templates && typeof business.sms_templates === "object") ? business.sms_templates : {},
+    // Written -> spoken names for the model (migration 055,
+    // lib/voice/pronunciation.js). Validated again where it is read.
+    pronunciations:
+      business.pronunciations && typeof business.pronunciations === "object" && !Array.isArray(business.pronunciations)
+        ? business.pronunciations
+        : {},
   };
 }
 

@@ -3120,6 +3120,25 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     await call.hangUp();
   });
 
+  // Pronunciation box on outbound (owner, 2026-10-20): the model's prompt and
+  // its memory of the opener carry the SPOKEN name; the tenant's transcript row
+  // keeps the written one.
+  it("a business with a pronunciation map: spoken name to the model, written name in the transcript", async () => {
+    const base = outboundDb({ firstName: null });
+    const database = { ...base, loadConfig: vi.fn(() => ({ ...CONFIG, pronunciations: { Digile: "Dij-aisle" } })) };
+    const call = await bootOutbound({ database });
+    await call.feed(1400);
+    expect(call.live.sent.clientContent).toEqual([
+      { turns: [{ role: "model", parts: [{ text: "It's Ava, an AI assistant from Dij-aisle Media." }] }], turnComplete: false },
+    ]);
+    const prompt = call.live.connect.mock.calls[0][0].config.systemInstruction.parts[0].text;
+    expect(prompt).toContain("Dij-aisle Media");
+    expect(prompt).not.toMatch(/\bDigile\b/);
+    const aiRows = database.addTranscriptEntry.mock.calls.filter((c) => c[1] === "ai").map((c) => c[2]);
+    expect(aiRows).toContain("It's Ava, an AI assistant from Digile Media.");
+    await call.hangUp();
+  });
+
   it("O-9: no first name and nothing usable left -- no clip; Live is asked to introduce itself with the disclosure", async () => {
     allowErrors("outbound_backstop_render_refused", "outbound_backstop_missing");
     const campaignConfig = { ...CAMPAIGN_CONFIG, opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}." };

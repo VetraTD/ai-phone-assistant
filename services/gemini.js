@@ -11,6 +11,7 @@ import {
 } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { greetingTextFor } from "../lib/voice/greeting.js";
+import { pronunciationNote, toSpoken } from "../lib/voice/pronunciation.js";
 import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
@@ -689,8 +690,8 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
           "is ready to hang up: you have asked whether there is anything else " +
           "and they said no, or they said goodbye. Never say goodbye before " +
           "that question has been answered. You MUST write your warm sign-off in the SAME " +
-          "response as this call — thank them for calling, use the business name, " +
-          "and wish them well. Nothing you say after this is heard.",
+          "response as this call — thank them for calling and wish them well. " +
+          "Nothing you say after this is heard.",
       parameters: {
         type: "object",
         properties: {
@@ -1574,7 +1575,7 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   // the same response (mechanical -- nothing after end_call is heard).
   toolContract += outbound
     ? `- Do not call end_call before the call has reached its end: the last step of the CALL PLAN, a SITUATIONS row that ends the call, or the person making clear they do not want to go on -- never keep them on the line after that. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for their time and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`
-    : `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. When a task is done, or the caller starts to wrap up, ask whether there is anything else before any goodbye; say goodbye only after they say no or say goodbye themselves — never a goodbye and then the question. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling ${config.businessName} and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
+    : `- Do not call end_call until the caller has made clear they are finished. If you genuinely need to check whether they are, ask in your own words, and only once the conversation has actually reached its end — never as a way of rounding off an ordinary answer, and never on a turn where the caller has just asked you something. When a task is done, or the caller starts to wrap up, ask whether there is anything else before any goodbye; say goodbye only after they say no or say goodbye themselves — never a goodbye and then the question. Say your goodbye IN THE SAME RESPONSE as end_call — thank them for calling and wish them well. The call ends the moment that tool runs, so a goodbye you were going to say afterwards is never heard.\n`;
   if (appointmentsEnabled) {
     // This bullet used to MANDATE saying "One moment while I check that for
     // you" in the same response as a lookup call. That is a two-part
@@ -1780,6 +1781,9 @@ export function buildStaticSystemPrefix(config, extras = {}) {
   identity += `\n\nIf the caller asks whether you are a real person, an AI, or a robot, answer honestly and briefly — e.g. "I'm ${config.businessName}'s AI assistant — ${selfDescription}. How can I help?" — then continue helping. Never claim to be human. Do not transfer the call just because they asked what you are; offer a transfer only if they then ask to speak with a person.`;
   identity += voiceAndLanguageRules(config, "inbound");
   sections.push(identity);
+  // Pronunciation box: only for a business with a map (lib/voice/pronunciation.js).
+  const sayingNames = pronunciationNote(config);
+  if (sayingNames) sections.push(sayingNames);
 
   sections.push(nonNegotiableRulesSection(config, extras, "inbound"));
 
@@ -2328,9 +2332,17 @@ export function buildOutboundSystemInstruction(config, extras = {}) {
   const sections = [];
   sections.push(promptSafetySection());
   sections.push(`=== IDENTITY ===\n` + outboundIdentityLine(config, outbound) + voiceAndLanguageRules(config, "outbound"));
+  const sayingNames = pronunciationNote(config);
+  if (sayingNames) sections.push(sayingNames);
   sections.push(nonNegotiableRulesSection(config, extras, "outbound"));
   sections.push(...businessInfoSections(config, extras));
-  const campaignNotes = typeof outbound?.config?.notes === "string" ? outbound.config.notes.trim() : "";
+  // The campaign's notes are business prose the model reads: spoken names too.
+  const campaignNotes =
+    typeof outbound?.config?.notes === "string"
+      ? config._spokenNames
+        ? toSpoken(outbound.config.notes.trim(), config.pronunciations)
+        : outbound.config.notes.trim()
+      : "";
   if (campaignNotes) {
     sections.push(
       `=== CAMPAIGN NOTES ===\n` +

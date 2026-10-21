@@ -382,6 +382,18 @@ describe("createLiveRenderAudio (dispatch's renderAudio)", () => {
     expect(config.speechConfig.languageCode).toBe("en-US");
   });
 
+  // Pronunciation box on outbound (owner, 2026-10-20): the clip is rendered
+  // from the SPOKEN name, so the recorded opener says it the approved way.
+  it("renders the opener from the business's spoken name", async () => {
+    const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB", pronunciations: { Digile: "Dij-aisle" } });
+    const { connect, sessions } = fakeConnect();
+    const renderAudio = createLiveRenderAudio({ db, env: {}, connect, log: quietLog() });
+    const row = { id: "out-1", business_id: BIZ, phone_e164: "+15551230000", config: { caller_id: "+441372656055" } };
+    const audio = await renderAudio({ row, attemptNo: 1, lines: { opener: OPENER } });
+    expect(sessions[0].sent[0].turns[0].parts[0].text).toContain("an AI assistant from Dij-aisle Media");
+    expect(audio.opener).not.toBeNull();
+  });
+
   it("no campaign language set: falls through to the tenant's own locale exactly as before this task", async () => {
     const db = fakeDb({ id: BIZ, name: "Digile Media", live_voice: null, locale: "en-GB" });
     const { connect } = fakeConnect();

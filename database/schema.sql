@@ -81,6 +81,9 @@ CREATE TABLE businesses (
   -- services/notifications.js sendCallerSms(). Opt-in per business.
   sms_followup_enabled         boolean DEFAULT false,
   sms_templates                jsonb DEFAULT '{}'::jsonb,
+  -- Written -> spoken names for the AI (migration 055,
+  -- lib/voice/pronunciation.js). {} = none.
+  pronunciations               jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at                   timestamptz DEFAULT now(),
   -- Outbound calling (migration 043, spec §6.2). Off by default; capacity
   -- default of 2 matches the spec's §0.1 defaults table.
