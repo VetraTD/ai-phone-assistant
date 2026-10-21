@@ -180,3 +180,22 @@ describe("Live: the email is never lost to the way the call ends", () => {
     expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(2);
   });
 });
+
+// Pronunciation box (Opus review, 2026-10-20): the model only knows the SPOKEN
+// name, so a message it writes says "Brite-werk". The owner's row and email
+// must carry the written name.
+describe("Live: a message the model writes keeps the business's written name", () => {
+  it("maps the spoken name in a tool's text back to the written one before it is stored", async () => {
+    const { db, rows } = storeDb();
+    const pron = { Brightwork: "Brite-werk" };
+    const database = { ...db, loadConfig: () => ({ ...CONFIG, pronunciations: pron }) };
+    const s = await bootLive({ config: { ...CONFIG, pronunciations: pron }, database, callSid: "CA_pron_live" });
+    await s.callerSays("It's Jon, 214 555 0123, it's about the Brite-werk invoice.");
+    await s.assistantSays("So that's Jon on 2 1 4, 5 5 5, 0 1 2 3 about the Brite-werk invoice — passing that on now.");
+    const [res] = await s.callTool("record_customer_request", { ...MESSAGE, message: "about the Brite-werk invoice" });
+    expect(res?.response?.success).toBe(true);
+    await s.turnEnds();
+    await writesLand();
+    expect(rows[0].message).toBe("about the Brightwork invoice");
+  });
+});

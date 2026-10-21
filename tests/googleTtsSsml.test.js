@@ -22,7 +22,7 @@ describe("synthesizeSsmlMulaw", () => {
       input: { ssml },
       voice: { languageCode: "en-GB", name: "en-GB-Chirp3-HD-Kore" },
       audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
-    });
+    }, { timeout: 10000 });
     expect(audio.length).toBe(800);
   });
 });

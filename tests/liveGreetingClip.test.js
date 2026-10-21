@@ -9,6 +9,7 @@ vi.mock("../lib/logger.js", () => ({
 
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { greetingClipSpec } from "../lib/voice/greetingClip.js";
+import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 
 // ---------------------------------------------------------------------------
 // The recorded greeting through the real Live front-end (pronunciation build,
@@ -138,6 +139,17 @@ describe("recorded greeting at pickup", () => {
     expect(s.prompt()).toContain("Your FIRST words on this call");
     await vi.waitFor(() => expect(s.database.upsertGreetingClip).toHaveBeenCalled());
     expect(s.synthesizeGreeting).toHaveBeenCalledWith(SPEC.ssml, "en-GB-Chirp3-HD-Kore");
+  });
+
+  // Opus review: after the clip, a silent caller gets a nudge, and the model's
+  // first words are its reply to THAT -- with no caller turn and no earlier
+  // reply, the greeting-echo cut was not armed, so a re-greet went through.
+  it("after the clip, the model saying the greeting again is cut, even before the caller speaks", async () => {
+    clearStats();
+    const s = await boot();
+    s.live.push({ serverContent: { outputTranscription: { text: SPEC.spokenText } } });
+    await new Promise((r) => setImmediate(r));
+    expect(getLatencyStats().turnTaking.live_greeting_respoken).toBe(1);
   });
 
   it("off unless GREETING_CLIP=on: no lookup, the model greets", async () => {

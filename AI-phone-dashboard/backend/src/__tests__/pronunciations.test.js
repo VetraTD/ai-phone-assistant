@@ -46,11 +46,47 @@ describe("validatePronunciations", () => {
     ["a long ipa", { Digile: { say: "Dij-aisle", ipa: "a".repeat(61) } }],
     ["a non-string value", { Digile: 5 }],
     ["a newline", { Digile: "Dij\naisle" }],
+    ["a lowercase-first written form", { digile: "Dij-aisle" }],
+    ["a dot in say", { Digile: "Dij.aisle" }],
+    ["a digit in say", { Digile: "Dij2aisle" }],
+    ["an ampersand in say", { Digile: "Dij & aisle" }],
+    ["a 5-word say", { Digile: "one two three four five" }],
+    ["a 41-char say", { Digile: "a".repeat(41) }],
+    ["say equal to written (any case)", { Digile: "DIGILE" }],
+    ["say containing written", { Digile: "the Digile team" }],
+    ["the word AI in say", { Digile: "Dij AI" }],
+    ["the word assistant in say", { Digile: "Dij assistant" }],
+    ["a disclosure word in written", { "Robot Works": "Row-bot Works" }],
+    ["a human in written", { "Human Care": "Hyoo-man Care" }],
+    ["a common word as written", { Will: "Wil" }],
+    ["a common word as written, other case", { WIN: "Wen" }],
+    ["a common word as say", { Digile: "My" }],
+    ["a common word as say, padded", { Digile: " win " }],
   ];
   it.each(rejected)("rejects %s", (_n, input) => {
     const r = validate(input);
     expect(r.error).toBeTruthy();
     expect(r.value).toBeUndefined();
+  });
+
+  it("allows a disclosure word as a SUBSTRING, only whole words are refused", () => {
+    expect(validate({ Maillard: "Mie-lar" }).error).toBeUndefined();
+    expect(validate({ Digile: "Chai-tea" }).error).toBeUndefined();
+  });
+
+  it("allows exactly 4 words in say and 40 characters", () => {
+    expect(validate({ Digile: "one two three four" }).error).toBeUndefined();
+    expect(validate({ Digile: "a".repeat(40) }).error).toBeUndefined();
+  });
+
+  it("allows a digit-first written form", () => {
+    expect(validate({ "3M": "Three Em" }).error).toBeUndefined();
+  });
+
+  it("exports its word lists", () => {
+    const { PRON_COMMON_WORDS, PRON_DISCLOSURE_WORDS } = require("../settingsValidation.js");
+    expect(PRON_DISCLOSURE_WORDS).toContain("assistant");
+    expect(PRON_COMMON_WORDS.length).toBeGreaterThan(0);
   });
 
   it("accepts exactly 10 entries", () => {
@@ -139,6 +175,24 @@ describe("settings route: pronunciations and the greeting clip", () => {
 
     it("is 403 for another business and never calls the voice server", async () => {
       const res = await get(OTHER_ID);
+      expect(res.status).toBe(403);
+      expect(voiceClient.postGreetingClip).not.toHaveBeenCalled();
+    });
+
+    it("does not hold a database transaction while it waits for the voice server", async () => {
+      const withTenant = vi.fn(async (_id, fn) => fn());
+      const built = createTestApp({ voiceClient, withTenant });
+      built.poolQueryMock.mockImplementation((sql) =>
+        Promise.resolve({ rows: sql.includes("app_lookup_user_by_auth_uid") ? [{ business_id: BUSINESS_ID }] : [] })
+      );
+      const res = await request(built.app).get(`/api/business/${BUSINESS_ID}/greeting-clip`).set("Authorization", "Bearer t");
+      expect(res.status).toBe(200);
+      expect(withTenant).not.toHaveBeenCalled();
+    });
+
+    it("is 403 when the user has no business, without calling the voice server", async () => {
+      poolQueryMock.mockImplementation(() => Promise.resolve({ rows: [] }));
+      const res = await get();
       expect(res.status).toBe(403);
       expect(voiceClient.postGreetingClip).not.toHaveBeenCalled();
     });
@@ -278,7 +332,8 @@ describe("voiceClient.postGreetingClip", () => {
     const [metaUrl, metaInit] = f.mock.calls[0];
     expect(metaUrl).toBe(
       "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=" +
-        encodeURIComponent("https://voice.example.com")
+        encodeURIComponent("https://voice.example.com") +
+        "&format=full"
     );
     expect(metaInit.headers["Metadata-Flavor"]).toBe("Google");
     const [url, init] = f.mock.calls[1];

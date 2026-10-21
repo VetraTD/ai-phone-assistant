@@ -3,7 +3,7 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { buildUpdateFromWhitelist } = require("../utils");
+const { buildUpdateFromWhitelist, getBusinessIdForUser } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { SETTINGS_FIELD_VALIDATORS } = require("../settingsValidation");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
@@ -163,9 +163,24 @@ router.put("/api/business/:id/settings", authenticate, withTenantHandler(async (
 // The recorded greeting exactly as callers hear it, for the "Hear greeting"
 // button. Rendered by the voice server (re-rendered first if anything it
 // depends on changed); this route only authenticates and proxies the bytes.
-router.get("/api/business/:id/greeting-clip", authenticate, withTenantHandler(async (req, res) => {
+//
+// DELIBERATELY NOT withTenantHandler: that holds a database transaction (and a
+// pooled connection, pool size 10) for the whole handler, and this one waits up
+// to 2 x 15 s on the voice server. The tenant is resolved with one plain lookup
+// and nothing here touches a tenant table, so no transaction is needed.
+router.get("/api/business/:id/greeting-clip", authenticate, async (req, res) => {
   const { id } = req.params;
-  if (!req.businessId || req.businessId !== id) {
+  let businessId;
+  try {
+    businessId = await getBusinessIdForUser(req.authUser);
+  } catch (err) {
+    console.error("greeting clip tenant lookup failed:", err?.message || err);
+    return res.status(500).json({ error: "Failed to look up your business" });
+  }
+  if (!businessId) {
+    return res.status(403).json({ error: "No business linked to this user" });
+  }
+  if (businessId !== id) {
     return res.status(403).json({ error: "Forbidden" });
   }
   let result;
@@ -184,7 +199,7 @@ router.get("/api/business/:id/greeting-clip", authenticate, withTenantHandler(as
     return res.status(503).json({ error: "Greeting preview isn't available yet." });
   }
   return res.status(502).json({ error: "Couldn't make the greeting recording. Try again in a minute." });
-}));
+});
 
 // ---------------------------------------------------------------------------
 // Voice catalog (dashboard voice picker) — mirrors root repo config/voices.js

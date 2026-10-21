@@ -3124,7 +3124,8 @@ describe("outbound fix round 2: the owner decisions through the real session", (
   // its memory of the opener carry the SPOKEN name; the tenant's transcript row
   // keeps the written one.
   it("a business with a pronunciation map: spoken name to the model, written name in the transcript", async () => {
-    const base = outboundDb({ firstName: null });
+    const campaignConfig = { ...CAMPAIGN_CONFIG, objective: "Qualify the lead for Digile Media.", topic: "your Digile enquiry" };
+    const base = outboundDb({ firstName: null, campaignConfig });
     const database = { ...base, loadConfig: vi.fn(() => ({ ...CONFIG, pronunciations: { Digile: "Dij-aisle" } })) };
     const call = await bootOutbound({ database });
     await call.feed(1400);

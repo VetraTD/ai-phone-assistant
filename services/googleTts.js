@@ -131,14 +131,19 @@ export async function synthesizeMulaw(text, voiceName, callSid = null, opts = {}
  *
  * @param {string} ssml - a full <speak> document
  * @param {string} voiceName - e.g. "en-GB-Chirp3-HD-Kore"
+ * @param {{timeoutMs?: number}} [opts] - a deadline, so a hung TTS call cannot
+ *   hold a background render (or the dashboard preview) open indefinitely
  * @returns {Promise<Buffer>} raw mu-law bytes
  */
-export async function synthesizeSsmlMulaw(ssml, voiceName) {
+export async function synthesizeSsmlMulaw(ssml, voiceName, { timeoutMs = 10_000 } = {}) {
   const languageCode = voiceName.split("-").slice(0, 2).join("-");
-  const [response] = await getClient().synthesizeSpeech({
-    input: { ssml },
-    voice: { languageCode, name: voiceName },
-    audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
-  });
+  const [response] = await getClient().synthesizeSpeech(
+    {
+      input: { ssml },
+      voice: { languageCode, name: voiceName },
+      audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
+    },
+    { timeout: timeoutMs }
+  );
   return stripWavHeader(Buffer.from(response.audioContent, "binary"));
 }

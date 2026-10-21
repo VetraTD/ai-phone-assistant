@@ -165,3 +165,43 @@ describe("ensureGreetingClips", () => {
     expect(synthesize).not.toHaveBeenCalled();
   });
 });
+
+// Opus review (2026-10-20): a render for an OLD greeting must not be joined by
+// a request for the new one, and a TTS that keeps failing must not be retried
+// on every single call.
+describe("ensureGreetingClips under change and failure", () => {
+  it("a render for new settings is not answered by a render still running for the old ones", async () => {
+    const db = fakeDb(null);
+    const store = new Map();
+    db.fetchGreetingClip = vi.fn(async (_b, variant, lang) => store.get(`${variant}|${lang}`) || null);
+    db.upsertGreetingClip = vi.fn(async (c) => store.set(`${c.variant}|${c.languageCode}`, { input_hash: c.inputHash, audio: c.audio }));
+    let release;
+    const gate = new Promise((r) => (release = r));
+    const synthesize = vi.fn(async () => {
+      await gate;
+      return Buffer.alloc(800, 0xff);
+    });
+    const s1 = { ...DIGILE, greeting: "Old greeting from Digile Media." };
+    const s2 = { ...DIGILE, greeting: "New greeting from Digile Media." };
+    const common = { database: db, businessId: "biz-9", languageCode: "en-GB", liveVoice: "Kore", synthesize, log: quiet };
+    const first = ensureGreetingClips({ ...common, config: s1 });
+    const second = ensureGreetingClips({ ...common, config: s2 });
+    release();
+    await Promise.all([first, second]);
+    const want = greetingClipSpec(s2, { languageCode: "en-GB", liveVoice: "Kore", variant: "custom" });
+    // Both ran; whichever stored last, the S2 render ran and S2's hash is reachable.
+    expect(synthesize).toHaveBeenCalledWith(want.ssml, "en-GB-Chirp3-HD-Kore");
+  });
+
+  it("after a failed render, the same clip is not re-rendered on every call for a while", async () => {
+    const db = fakeDb(null);
+    const synthesize = vi.fn(async () => {
+      throw new Error("TTS down");
+    });
+    const cfg = { ...DIGILE, greeting: "Cooldown greeting from Digile Media." };
+    const common = { database: db, businessId: "biz-10", config: cfg, languageCode: "en-GB", liveVoice: "Kore", synthesize, log: quiet };
+    await expect(ensureGreetingClips(common)).rejects.toThrow();
+    await expect(ensureGreetingClips(common)).rejects.toThrow();
+    expect(synthesize).toHaveBeenCalledTimes(1);
+  });
+});

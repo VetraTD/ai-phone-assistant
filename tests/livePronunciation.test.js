@@ -64,17 +64,21 @@ const CONFIG = {
   businessHours: {},
 };
 
-async function boot({ pronunciations } = {}) {
+async function boot({ pronunciations, knowledge = [], notes = null } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const database = {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Digile Media" })),
-    loadConfig: () => ({ ...CONFIG, ...(pronunciations ? { pronunciations } : {}) }),
+    loadConfig: () => ({
+      ...CONFIG,
+      ...(pronunciations ? { pronunciations } : {}),
+      ...(notes ? { capabilities: { ...CONFIG.capabilities, messages: { enabled: true, notes } } } : {}),
+    }),
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
-    fetchBusinessKnowledge: async () => [],
+    fetchBusinessKnowledge: async () => knowledge,
     fetchCallerContext: async () => null,
     addTranscriptEntry: vi.fn(async () => {}),
   };
@@ -108,6 +112,19 @@ describe("pronunciation box on a Live call", () => {
     expect(s.prompt()).not.toMatch(/\bDigile\b/);
     expect(s.prompt()).toContain("=== SAYING NAMES ===");
     expect(s.prompt()).toContain("D-I-G-I-L-E");
+  });
+
+  // Opus review: the knowledge base and the capability notes reach the frozen
+  // prompt too, and carried the written name.
+  it("gives the model the spoken name in the knowledge base and capability notes too", async () => {
+    const s = await boot({
+      pronunciations: MAP,
+      knowledge: [{ question: "Who owns Digile Media?", answer: "Digile Media is run by Ilija.", category: "About Digile" }],
+      notes: "Tell callers Digile Media replies within a day.",
+    });
+    expect(s.prompt()).toContain("Who owns Dij-aisle Media?");
+    expect(s.prompt()).toContain("Dij-aisle Media replies within a day.");
+    expect(s.prompt()).not.toMatch(/Digile/);
   });
 
   it("leaves a business without a map exactly as before", async () => {

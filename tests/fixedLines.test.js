@@ -112,3 +112,15 @@ describe("TwiML with a clip", () => {
     expect(buildHangupLineTwiml({ line: CALL_LINES.timeUp, sayVoice: "Polly.Amy" })).toContain('<Say voice="Polly.Amy">');
   });
 });
+
+describe("fixed-line render failures (Opus review)", () => {
+  it("a line whose render failed is not re-rendered on every call for a while", async () => {
+    const db = fakeDb();
+    const synthesize = vi.fn(async () => Buffer.alloc(0));
+    const lines = createFixedLineClips({ database: db, synthesize, baseUrl: BASE, log: quiet });
+    const v = { languageCode: "en-US", liveVoice: "Leda" };
+    await lines.prepare(v);
+    await lines.prepare(v);
+    expect(synthesize).toHaveBeenCalledTimes(FIXED_LINE_KEYS.length);
+  });
+});

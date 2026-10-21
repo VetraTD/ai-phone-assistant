@@ -11,7 +11,7 @@ import {
 } from "../lib/businessHours.js";
 import { getStrings } from "../lib/voice/strings.js";
 import { greetingTextFor } from "../lib/voice/greeting.js";
-import { pronunciationNote, toSpoken } from "../lib/voice/pronunciation.js";
+import { pronunciationNote } from "../lib/voice/pronunciation.js";
 import { engineFillerEnabled } from "../lib/voice/promiseGate.js";
 import { trimHistory } from "../lib/voice/historyTrim.js";
 import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js";
@@ -2336,13 +2336,8 @@ export function buildOutboundSystemInstruction(config, extras = {}) {
   if (sayingNames) sections.push(sayingNames);
   sections.push(nonNegotiableRulesSection(config, extras, "outbound"));
   sections.push(...businessInfoSections(config, extras));
-  // The campaign's notes are business prose the model reads: spoken names too.
-  const campaignNotes =
-    typeof outbound?.config?.notes === "string"
-      ? config._spokenNames
-        ? toSpoken(outbound.config.notes.trim(), config.pronunciations)
-        : outbound.config.notes.trim()
-      : "";
+  // Spoken names in the campaign's prose come from spokenExtras (lib/voice/pronunciation.js).
+  const campaignNotes = typeof outbound?.config?.notes === "string" ? outbound.config.notes.trim() : "";
   if (campaignNotes) {
     sections.push(
       `=== CAMPAIGN NOTES ===\n` +

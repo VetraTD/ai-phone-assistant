@@ -77,7 +77,6 @@ const NON_PHI_ROUTES = Object.freeze([
   // The business's own configuration and content.
   "GET /api/businesses/:id",
   "PUT /api/business/:id/settings",
-  "GET /api/business/:id/greeting-clip",
   "GET /api/business/:id/capabilities",
   "PUT /api/business/:id/capabilities/:capabilityId",
   "GET /api/knowledge",

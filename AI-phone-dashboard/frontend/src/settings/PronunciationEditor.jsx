@@ -60,7 +60,7 @@ export default function PronunciationEditor({ value, onChange }) {
             type="text"
             aria-label="Say it as"
             value={r.say}
-            maxLength={60}
+            maxLength={40}
             placeholder="Dij-aisle"
             // Changing the sound invalidates the phonetic spelling.
             onChange={(e) => edit(r.id, { say: e.target.value, ipa: "" })}

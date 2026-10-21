@@ -2,8 +2,10 @@
 //
 // The voice server only accepts a Google-signed OIDC ID token whose audience
 // is its own base URL, so each call first asks the GCP metadata server for
-// one (this runs on Cloud Run; there is no metadata server on a laptop, which
-// surfaces as a 502 here -- the preview simply isn't available locally).
+// one. There is no metadata server on a laptop, so locally this surfaces as a
+// 502 and the preview is simply unavailable. format=full is required: the voice
+// server checks the token's email claim, which the default "standard" format
+// leaves out.
 
 const METADATA_IDENTITY_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
@@ -23,7 +25,7 @@ async function postGreetingClip(businessId, { timeoutMs = 15000 } = {}) {
   if (!base) return { status: 503, audio: null };
 
   try {
-    const tokenRes = await fetch(`${METADATA_IDENTITY_URL}?audience=${encodeURIComponent(base)}`, {
+    const tokenRes = await fetch(`${METADATA_IDENTITY_URL}?audience=${encodeURIComponent(base)}&format=full`, {
       headers: { "Metadata-Flavor": "Google" },
       signal: AbortSignal.timeout(timeoutMs),
     });
