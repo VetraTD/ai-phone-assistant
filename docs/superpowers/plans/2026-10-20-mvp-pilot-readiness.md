@@ -105,8 +105,24 @@ MVP pilot readiness: pronunciation session. Read docs/superpowers/plans/2026-10-
 feat/outbound-stage4. Owner decisions (final): all three layers + LVX174 -- recorded greeting per business (voice:
 try Google TTS "Kore" AND the best gemini-3.8-live take, owner picks by ear), pronunciation box (model sees only the
 spoken form, says "we/our team" mid-call), listening test (~$0.50, ask before spending), fixed lines in the
-receptionist's voice. Digile tenants: UK 55c7c8c4 (+441372656055), US 2083c6a4 (+18176011171).
+receptionist's voice; dashboard greeting preview (▶, exact clip, no phone toggle); goodbye without the name; no
+mid-call name-check button. Digile tenants: UK 55c7c8c4 (+441372656055), US 2083c6a4 (+18176011171).
 FIRST: reiterate in one short plain paragraph (steps, hours, $) and ask anything needed (AskUserQuestion). Then a
 plan for owner review before building; red-first tests with sabotage rows; sharded gate in mintty; ask before deploy.
 Conserve usage; cheaper models for mechanical work; detail in a ledger; never git checkout over uncommitted work.
 ```
+
+## Owner decisions on the pronunciation design (2026-10-20, after "do we even need the box?")
+
+- **Greeting preview in the dashboard: YES, preview only** — a ▶ next to the greeting plays the exact clip callers
+  hear in the business's chosen voice (Settings already has a 5-voice Live picker, `VoicePickerSection.jsx`, with no
+  preview — this also gives it one). The clip is remade automatically when the greeting, voice or pronunciation
+  changes. No "as on a phone" toggle.
+- **Pronunciation box: KEPT.** It is the fix lever for the clip (the clip's voice engine can misread "Digile" too:
+  preview sounds wrong → fix the box → clip remade) and for everything the AI says live mid-call.
+- **No "hear it say our name mid-call" button** — mid-call pronunciation is checked with a test call.
+- **The goodbye drops the business name** ("Thanks for calling, have a great day") to cut mid-call mentions. Asked
+  the company name, the AI says it (spoken form); asked how it is spelled, it spells the real written letters.
+- Mid-call slips are reduced, not impossible; the listening test measures the leftover rate with mid-call sentences
+  in the live voice. Splicing a recorded name into live speech is ruled out for now (seams, timing).
+- Built in the pronunciation session inside today's Settings panels (greeting + voice); they carry into the redesign.
