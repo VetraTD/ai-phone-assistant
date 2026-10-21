@@ -2202,3 +2202,26 @@ REVOKE ALL ON FUNCTION app_ai_seconds_today(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_ai_seconds_today(uuid, text, text) TO vetra_app;
 COMMENT ON FUNCTION app_ai_seconds_today(uuid, text, text) IS
   'Repeat-caller alert: AI seconds this caller used at this business today (UTC); time after a transfer is not counted.';
+
+-- ---------------------------------------------------------------------------
+-- Migration 056: the recorded greeting (lib/voice/greetingClip.js). One clip
+-- per business, variant and language; played only when input_hash matches.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS greeting_clips (
+  business_id    uuid        NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  variant        text        NOT NULL CHECK (variant IN ('custom', 'morning', 'afternoon', 'evening')),
+  language_code  text        NOT NULL,
+  input_hash     text        NOT NULL,
+  spoken_text    text        NOT NULL,
+  voice_name     text        NOT NULL,
+  audio          bytea       NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (business_id, variant, language_code)
+);
+ALTER TABLE greeting_clips ENABLE ROW LEVEL SECURITY;
+ALTER TABLE greeting_clips FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON greeting_clips;
+CREATE POLICY tenant_isolation ON greeting_clips
+  USING (business_id = app_current_business_id())
+  WITH CHECK (business_id = app_current_business_id());
+GRANT SELECT, INSERT, UPDATE, DELETE ON greeting_clips TO vetra_app;

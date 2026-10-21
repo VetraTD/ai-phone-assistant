@@ -3452,6 +3452,63 @@ const SABOTAGES = [
     replace: "  pronunciations: (v) => {\n    return null; // SABOTAGE\n    let obj;",
     red: ["tests/setBusinessConfig.test.js"],
   },
+  // ---- Recorded greeting (pronunciation build Step 2, 2026-10-20) ----
+  {
+    name: "clip-stale-refused",
+    why: "Recorded greeting: a clip plays only when it was made from exactly this greeting/voice/language. Sabotaged, a greeting the business has since changed keeps playing.",
+    file: "lib/voice/greetingClip.js",
+    find: "  if (row && row.input_hash === spec.hash && row.audio?.length) {",
+    replace: "  if (row && row.audio?.length) { // SABOTAGE: stale clip plays",
+    red: ["tests/greetingClip.test.js", "tests/liveGreetingClip.test.js"],
+  },
+  {
+    name: "clip-hash-covers-voice",
+    why: "Recorded greeting: the clip's identity includes the TTS voice. Sabotaged, changing the voice in Settings keeps playing the old voice's clip.",
+    file: "lib/voice/greetingClip.js",
+    find: "    .update(JSON.stringify({ v: GREETING_CLIP_VERSION, ttsVoice, ssml }))",
+    replace: "    .update(JSON.stringify({ v: GREETING_CLIP_VERSION, ssml })) // SABOTAGE",
+    red: ["tests/greetingClip.test.js"],
+  },
+  {
+    name: "clip-ensure-skips-current",
+    why: "Recorded greeting: a current clip is not re-rendered. Sabotaged, every miss re-bills TTS for clips that are already right.",
+    file: "lib/voice/greetingClip.js",
+    find: "      if (row?.input_hash === spec.hash && row?.audio?.length) continue;",
+    replace: "      // SABOTAGE: always re-render",
+    red: ["tests/greetingClip.test.js"],
+  },
+  {
+    name: "clip-ssml-phoneme",
+    why: "Recorded greeting: a name with a phonetic spelling is said from it (the owner's pick by ear). Sabotaged, the clip reads the spelling instead.",
+    file: "lib/voice/pronunciation.js",
+    find: "    out += h.e.ipa\n",
+    replace: "    out += false // SABOTAGE\n",
+    red: ["tests/greetingClip.test.js"],
+  },
+  {
+    name: "clip-inbound-only",
+    why: "Recorded greeting is inbound only. Sabotaged, an outbound call loads (and could play) the business's inbound greeting.",
+    file: "lib/voice/live/index.js",
+    find: "      !outboundDial && greetingClipEnabled(env)",
+    replace: "      greetingClipEnabled(env) /* SABOTAGE */",
+    red: ["tests/liveOutboundStart.test.js"],
+  },
+  {
+    name: "clip-prompt-greeted",
+    why: "Recorded greeting: the frozen prompt says 'already greeted' exactly when a clip plays. Sabotaged, the prompt still orders the model to say the greeting -- the caller hears it twice.",
+    file: "lib/voice/live/index.js",
+    find: "    if (greetingClip) extras.greetingSpoken = true;",
+    replace: "    // SABOTAGE: prompt not told the greeting played",
+    red: ["tests/liveGreetingClip.test.js"],
+  },
+  {
+    name: "clip-no-kick",
+    why: "Recorded greeting: with a clip, the model is not kicked to open the call. Sabotaged, the kick follows the clip and the model greets a second time.",
+    file: "lib/voice/live/index.js",
+    find: "      bumpCounter(\"live_greeting_clip_played\");\n      return;",
+    replace: "      bumpCounter(\"live_greeting_clip_played\"); // SABOTAGE: falls through to the kick",
+    red: ["tests/liveGreetingClip.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

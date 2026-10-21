@@ -3139,6 +3139,17 @@ describe("outbound fix round 2: the owner decisions through the real session", (
     await call.hangUp();
   });
 
+  // The recorded greeting is INBOUND only: an outbound call opens with its own
+  // opener, never the business's inbound greeting.
+  it("GREETING_CLIP=on never loads or plays the inbound greeting on an outbound call", async () => {
+    const database = { ...outboundDb({ firstName: null }), fetchGreetingClip: vi.fn(async () => null), upsertGreetingClip: vi.fn() };
+    const call = await bootOutbound({ database, env: { GREETING_CLIP: "on" } });
+    await call.feed(1400);
+    expect(database.fetchGreetingClip).not.toHaveBeenCalled();
+    expect(database.upsertGreetingClip).not.toHaveBeenCalled();
+    await call.hangUp();
+  });
+
   it("O-9: no first name and nothing usable left -- no clip; Live is asked to introduce itself with the disclosure", async () => {
     allowErrors("outbound_backstop_render_refused", "outbound_backstop_missing");
     const campaignConfig = { ...CAMPAIGN_CONFIG, opener: "Hi {first_name}, it's {persona_name}, an AI assistant from {business_name}." };

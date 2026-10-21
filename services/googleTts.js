@@ -120,3 +120,25 @@ export async function synthesizeMulaw(text, voiceName, callSid = null, opts = {}
     throw err;
   }
 }
+
+/**
+ * Synthesize a COMPLETE SSML document, untouched, to raw 8 kHz mu-law.
+ *
+ * For the recorded greeting (lib/voice/greetingClip.js), whose SSML carries a
+ * <phoneme> for the business name: synthesizeMulaw wraps plain text through
+ * buildSayContent, which would escape those tags. Not cached -- clips are made
+ * once and stored.
+ *
+ * @param {string} ssml - a full <speak> document
+ * @param {string} voiceName - e.g. "en-GB-Chirp3-HD-Kore"
+ * @returns {Promise<Buffer>} raw mu-law bytes
+ */
+export async function synthesizeSsmlMulaw(ssml, voiceName) {
+  const languageCode = voiceName.split("-").slice(0, 2).join("-");
+  const [response] = await getClient().synthesizeSpeech({
+    input: { ssml },
+    voice: { languageCode, name: voiceName },
+    audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
+  });
+  return stripWavHeader(Buffer.from(response.audioContent, "binary"));
+}
