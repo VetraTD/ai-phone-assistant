@@ -18,6 +18,19 @@ import { GROUPS, GROUP_IDS, DEFAULT_GROUP } from "./groups";
 import { DAY_KEYS, MODULE_TASKS, AFTER_HOURS_POLICIES, TRANSFER_POLICIES } from "./constants";
 import "./Settings.css";
 
+// Keys the recorded greeting is made from. While any is unsaved, "Hear
+// greeting" would play a recording that doesn't match the screen.
+const PREVIEW_KEYS = [
+  "greeting",
+  "live_voice",
+  "locale",
+  "pronunciations",
+  "name",
+  "recording_disclosure_enabled",
+  "recording_disclosure_text",
+  "timezone",
+];
+
 const MODULE_TASK_KEYS = MODULE_TASKS.map((t) => t.key);
 const AFTER_HOURS_KEYS = AFTER_HOURS_POLICIES.map((p) => p.key);
 const TRANSFER_POLICY_KEYS = TRANSFER_POLICIES.map((p) => p.key);
@@ -68,6 +81,12 @@ function snapshotFromBusiness(b) {
     // the diff sees a value change rather than a type change.
     locale: b?.locale || "",
     live_voice: b?.live_voice || "",
+    // Written -> spoken names (businesses.pronunciations). Plain object so the
+    // diff sees a value change, never null.
+    pronunciations:
+      b?.pronunciations && typeof b.pronunciations === "object" && !Array.isArray(b.pronunciations)
+        ? b.pronunciations
+        : {},
     notification_email: b?.notification_email || "",
     notification_phone: b?.notification_phone || "",
     notifications_enabled: b?.notifications_enabled !== false,
@@ -195,6 +214,7 @@ export default function SettingsPage({
   const changed = useMemo(() => diffSnapshots(draft, baseline), [draft, baseline]);
   const changedKeys = useMemo(() => Object.keys(changed), [changed]);
   const dirty = changedKeys.length > 0;
+  const previewDirty = changedKeys.some((k) => PREVIEW_KEYS.includes(k));
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -327,8 +347,8 @@ export default function SettingsPage({
 
           {activeGroup === "voice" ? (
             <>
-              <VoicePickerSection value={draft} onChange={patch} />
-              <AIBehaviorSection value={draft} onChange={patch} />
+              <VoicePickerSection value={draft} onChange={patch} businessId={businessId} previewDirty={previewDirty} />
+              <AIBehaviorSection value={draft} onChange={patch} businessId={businessId} previewDirty={previewDirty} />
               <LanguagesSection value={draft} onChange={patch} />
             </>
           ) : null}

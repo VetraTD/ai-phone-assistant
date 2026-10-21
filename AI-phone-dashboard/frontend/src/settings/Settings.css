@@ -914,3 +914,15 @@
   }
   .set-btn-primary:hover:not(:disabled) { transform: none; }
 }
+
+/* Greeting preview + pronunciation editor */
+.set-preview { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -4px 0 8px; }
+.set-preview-status { margin: 0; }
+.set-pron-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.set-pron-row input { flex: 1; min-width: 0; }
+.set-pron-arrow { color: var(--vetra-muted); }
+.set-pron-remove { flex: none; padding: 0 10px; }
+@media (max-width: 560px) {
+  .set-pron-row { flex-wrap: wrap; }
+  .set-pron-arrow { display: none; }
+}

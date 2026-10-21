@@ -40,7 +40,7 @@ function injectFakeModule(specifier, exportsValue) {
  *
  * @returns {{ app: import('express').Express, poolQueryMock: import('vitest').Mock, authState: { user: object|null } }}
  */
-export function createTestApp({ mailer } = {}) {
+export function createTestApp({ mailer, voiceClient, withTenant } = {}) {
   clearSrcRequireCache();
 
   const poolQueryMock = vi.fn();
@@ -52,6 +52,10 @@ export function createTestApp({ mailer } = {}) {
   // clear and before server.js is required, the same way db and authMiddleware
   // do.
   if (mailer) injectFakeModule("../services/mailer.js", mailer);
+  // Same reasoning for the voice-server client: a fake postGreetingClip lets
+  // tests assert the settings route's fire-and-forget re-render and the
+  // greeting-clip proxy without any network.
+  if (voiceClient) injectFakeModule("../services/voiceClient.js", voiceClient);
 
   // The db module now exports { query, withTenant, ... } rather than the Pool
   // itself, so the fake has to carry both.
@@ -64,7 +68,8 @@ export function createTestApp({ mailer } = {}) {
   // other question: does each route build the right SQL and the right response.
   injectFakeModule("../db/index.js", {
     query: (...args) => poolQueryMock(...args),
-    withTenant: async (_businessId, fn) => fn(),
+    // Overridable so a test can observe ordering relative to COMMIT.
+    withTenant: withTenant || (async (_businessId, fn) => fn()),
     currentTenant: () => null,
   });
 

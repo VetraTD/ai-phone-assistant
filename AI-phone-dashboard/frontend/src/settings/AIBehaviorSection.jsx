@@ -1,5 +1,7 @@
 import Panel from "./Panel";
 import Field from "./Field";
+import GreetingPreviewButton from "./GreetingPreviewButton";
+import PronunciationEditor from "./PronunciationEditor";
 import { PERSONALITY_PRESETS } from "./constants";
 
 // Matches a `[Tone] <instruction>` first line against the known presets so
@@ -26,7 +28,7 @@ function autoGreetingPreview(name) {
   return `${tod}, thanks for calling ${name || "our office"}. How can I help you today?`;
 }
 
-export default function AIBehaviorSection({ value, onChange }) {
+export default function AIBehaviorSection({ value, onChange, businessId, previewDirty = false }) {
   const { greeting, custom_instructions: customInstructions } = value;
   const presetKey = detectPreset(customInstructions);
 
@@ -67,6 +69,10 @@ export default function AIBehaviorSection({ value, onChange }) {
           />
         )}
       </Field>
+
+      <GreetingPreviewButton businessId={businessId} previewDirty={previewDirty} />
+
+      <PronunciationEditor value={value.pronunciations} onChange={(pronunciations) => onChange({ pronunciations })} />
 
       <Field
         label="Tone of voice"

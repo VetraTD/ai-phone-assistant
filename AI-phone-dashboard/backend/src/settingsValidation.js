@@ -263,6 +263,53 @@ function validateSmsTemplates(value) {
 
 // Key set = businesses table column names = the write whitelist for
 // PUT /api/business/:id/settings. Keep 1:1 with the columns.
+// Pronunciation box: written -> spoken map (businesses.pronunciations jsonb).
+//
+// These rules MIRROR lib/voice/pronunciation.js pronunciationEntries in the
+// voice server (this package cannot import across the app boundary), with one
+// difference: the voice server silently DROPS an invalid entry, while this
+// REJECTS it so the owner is told. tests/pronunciationParity.test.js (root
+// suite) pins the two together -- change one, change the other.
+const PRON_MAX_ENTRIES = 10;
+const PRON_MAX_WRITTEN = 40;
+const PRON_MAX_SAY = 60;
+const PRON_MAX_IPA = 60;
+// No quotes, braces, colons or newlines: the spoken form goes into the
+// model's prompt and must not be able to carry an instruction.
+const PRON_SAFE_TEXT = /^[\p{L}\p{M}\p{N}'’ .&-]+$/u;
+const PRON_SAFE_IPA = /^[\p{L}\p{M}ˈˌːˑ. -]+$/u;
+
+function validatePronunciations(value) {
+  if (value === null) return { value: {} };
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "must be an object mapping each written name to how it is said" };
+  }
+  const entries = Object.entries(value);
+  if (entries.length > PRON_MAX_ENTRIES) return { error: `must have ${PRON_MAX_ENTRIES} names or fewer` };
+  const out = {};
+  for (const [writtenRaw, v] of entries) {
+    const written = writtenRaw.trim();
+    if (!written || written.length > PRON_MAX_WRITTEN || !PRON_SAFE_TEXT.test(written)) {
+      return { error: `"${writtenRaw.slice(0, 40)}" must be 1-${PRON_MAX_WRITTEN} letters, numbers, spaces, apostrophes, dots, & or hyphens` };
+    }
+    const sayRaw = typeof v === "string" ? v : v && typeof v === "object" && !Array.isArray(v) ? v.say : null;
+    const say = typeof sayRaw === "string" ? sayRaw.trim() : "";
+    if (!say || say.length > PRON_MAX_SAY || !PRON_SAFE_TEXT.test(say)) {
+      return { error: `how to say "${written}" must be 1-${PRON_MAX_SAY} letters, numbers, spaces, apostrophes, dots, & or hyphens` };
+    }
+    let ipa = "";
+    if (v && typeof v === "object" && !Array.isArray(v) && v.ipa != null) {
+      if (typeof v.ipa !== "string") return { error: `phonetic spelling for "${written}" must be text` };
+      ipa = v.ipa.trim();
+      if (ipa && (ipa.length > PRON_MAX_IPA || !PRON_SAFE_IPA.test(ipa))) {
+        return { error: `phonetic spelling for "${written}" has characters that aren't allowed` };
+      }
+    }
+    out[written] = ipa ? { say, ipa } : say;
+  }
+  return { value: out };
+}
+
 const SETTINGS_FIELD_VALIDATORS = {
   name: validateName,
   timezone: validateTimezone,
@@ -299,6 +346,7 @@ const SETTINGS_FIELD_VALIDATORS = {
   // control wired to nothing.
   locale: validateLocale,
   live_voice: validateLiveVoice,
+  pronunciations: validatePronunciations,
   notification_email: validateEmail,
   notification_phone: validateE164Phone,
   notifications_enabled: validateBoolean,
