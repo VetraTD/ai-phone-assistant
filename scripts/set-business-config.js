@@ -44,7 +44,6 @@
 import pg from "pg";
 import { cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
 import { checkDial, REFUSAL_MESSAGES } from "../lib/dialCost.js";
-import { pronunciationEntries } from "../lib/voice/pronunciation.js";
 
 const cfg = {
   instance: process.env.CLOUD_SQL_INSTANCE,
@@ -103,31 +102,7 @@ const FIELDS = [
   // WE set it; there is no dashboard screen. Off by default: only numbers at or
   // under 10 cents/min are dialled automatically. Exactly "true" or "false".
   "allow_pricier_numbers",
-  // Written -> spoken names for the AI (migration 055, lib/voice/pronunciation.js),
-  // as a JSON object: {"Digile": "Dij-aisle"} or {"Digile": {"say": "Dij-aisle",
-  // "ipa": "..."}}. jsonb, so it is dumped and compared as canonical JSON (see
-  // cellText) -- String() of a jsonb value is "[object Object]".
-  "pronunciations",
 ];
-
-/** jsonb columns: written as JSON text, dumped and compared as canonical JSON. */
-const JSON_FIELDS = new Set(["pronunciations"]);
-const canonical = (v) =>
-  v && typeof v === "object"
-    ? Array.isArray(v)
-      ? `[${v.map(canonical).join(",")}]`
-      : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`
-    : JSON.stringify(v);
-/** One cell as text: canonical JSON for a jsonb field (object or JSON string), else String(). */
-function cellText(field, v) {
-  if (v === null || v === undefined) return "";
-  if (!JSON_FIELDS.has(field)) return String(v);
-  try {
-    return canonical(typeof v === "string" ? JSON.parse(v) : v);
-  } catch {
-    return String(v);
-  }
-}
 
 /**
  * Per-field value checks, run BEFORE any write. field -> (value) => error | null.
@@ -144,22 +119,6 @@ const VALIDATORS = {
   transfer_phone_number: (v) =>
     E164.test(v) ? null : `must be E.164, + then 7-15 digits, no spaces or formatting (got a value ending ${last4(v)})`,
   allow_pricier_numbers: (v) => (v === "true" || v === "false" ? null : "must be exactly true or false"),
-  // Every entry must survive pronunciationEntries(): a silently dropped entry
-  // would look stored and never reach a call.
-  pronunciations: (v) => {
-    let obj;
-    try {
-      obj = JSON.parse(v);
-    } catch {
-      return "must be a JSON object";
-    }
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "must be a JSON object";
-    const kept = pronunciationEntries(obj).length;
-    const given = Object.keys(obj).length;
-    return kept === given
-      ? null
-      : `has ${given - kept} unusable entr${given - kept === 1 ? "y" : "ies"} (letters, digits, spaces, ' - . & only; say <= 60 chars; at most 10)`;
-  },
 };
 function refusal(field, value, flag) {
   const err = VALIDATORS[field]?.(value);
@@ -283,7 +242,8 @@ function dump(label, row) {
   // "our office"; an exact-match lookup failing is the same smell.
   say(`${label} phone_number b64`, Buffer.from(String(row.phone_number || ""), "utf8").toString("base64"));
   for (const f of FIELDS) {
-    const s = cellText(f, row[f]);
+    const v = row[f];
+    const s = v === null || v === undefined ? "" : String(v);
     say(`${label} ${f} chars`, s.length);
     say(`${label} ${f} b64`, Buffer.from(s, "utf8").toString("base64"));
   }
@@ -317,7 +277,7 @@ try {
       if (f in changes) continue;
       // Copying NULL clears the target's field, and that is allowed on purpose
       // (transfer_no_answer cannot be NULL -- it is a NOT NULL column).
-      changes[f] = source[f] === null || source[f] === undefined ? null : JSON_FIELDS.has(f) ? cellText(f, source[f]) : String(source[f]);
+      changes[f] = source[f] === null || source[f] === undefined ? null : String(source[f]);
       const bad = changes[f] === null ? null : refusal(f, changes[f], "--copy");
       if (bad) {
         console.error(bad);
@@ -343,8 +303,8 @@ try {
   }
 
   for (const f of fields) {
-    const before = cellText(f, target[f]);
-    const after = changes[f] === null ? "" : cellText(f, changes[f]);
+    const before = target[f] === null || target[f] === undefined ? "" : String(target[f]);
+    const after = changes[f] === null ? "" : String(changes[f]);
     say(`PLAN ${f}`, `${before.length} chars -> ${after.length} chars`, before === after ? "(no change)" : "(CHANGES)");
   }
 
@@ -395,8 +355,8 @@ try {
   dump("AFTER", after);
   let bad = 0;
   for (const f of fields) {
-    const want = changes[f] === null ? "" : cellText(f, changes[f]);
-    const got = cellText(f, after[f]);
+    const want = changes[f] === null ? "" : String(changes[f]);
+    const got = after[f] === null || after[f] === undefined ? "" : String(after[f]);
     if (want !== got) {
       bad += 1;
       console.error(`MISMATCH ${f}: wanted ${want.length} chars, read back ${got.length}.`);

@@ -1,3 +1,14 @@
+# REVERTED 2026-10-22 (owner): pronunciation round undone in full
+
+Owner: "I don't like the pronunciation fix and I want it to go back to how it was right before." Production traffic
+went back to voice-uk-prod-00112-boh (@4ae6f1d) the same day; the code on feat/outbound-stage4 was restored to the
+pre-round state (diff vs 4ae6f1d empty outside docs, scripts/probes, scripts/corpus and the migration files); the
+database additions are removed by migration 058 (owner chose removal over leaving them unused). Kept: the listening-
+test scripts and results, this plan, the sabotage harness improvements (--rows, write retry, baseline failure lines).
+The ledger is .superpowers/sdd/2026-10-20-pronunciation/ledger.md. Do not rebuild any of this without asking.
+
+---
+
 # Pronunciation build plan (2026-10-20) — FOR OWNER REVIEW, nothing built yet
 
 Branch feat/outbound-stage4. LIVE voice-uk-prod-00112-boh @ 4ae6f1d. Ledger: `.superpowers/sdd/2026-10-20-pronunciation/ledger.md`.

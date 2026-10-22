@@ -9,10 +9,6 @@ import { fileDegradedVoicemail } from "./lib/degradedVoicemail.js";
 
 import * as geminiService from "./services/gemini.js";
 import * as db from "./services/db.js";
-import { buildGreetingClipRouteAuth, registerGreetingClipRoute } from "./lib/voice/greetingClipRoute.js";
-import { synthesizeSsmlMulaw } from "./services/googleTts.js";
-import { createFixedLineClips, fixedLineClipsEnabled, FIXED_LINE_PATH_RE } from "./lib/voice/fixedLines.js";
-import { mulawToWav } from "./lib/audio/wav.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
@@ -961,54 +957,6 @@ app.post("/twilio/message-done", twilioValidationAnyAccount, (req, res) => {
   res.type("text/xml").send("<Response><Hangup/></Response>");
 });
 
-// ---------------------------------------------------------------------------
-// LVX174: the fixed lines in the receptionist's voice (lib/voice/fixedLines.js).
-// One store per process, shared by every Live call (deps.fixedLines) and the
-// media route Twilio's <Play> fetches. FIXED_LINE_CLIPS=on to enable; off, every
-// line is said in Polly exactly as before.
-// ---------------------------------------------------------------------------
-const fixedLineClips = createFixedLineClips({
-  database: db,
-  synthesize: synthesizeSsmlMulaw,
-  baseUrl: BASE_URL,
-  log,
-  enabled: fixedLineClipsEnabled(process.env),
-});
-
-// Generic audio (no business, no caller), addressed by its content hash, so no
-// signature: knowing the URL is knowing the line. Never renders on request.
-app.get(FIXED_LINE_PATH_RE, async (req, res) => {
-  try {
-    const audio = await fixedLineClips.audioFor(req.params[0]);
-    if (!audio) return res.status(404).end();
-    res.type("audio/wav").set("Cache-Control", "public, max-age=86400").send(mulawToWav(audio));
-  } catch (err) {
-    log.error("fixed_line_clip_serve_failed", { message: err?.message, severity: "warn" });
-    res.status(404).end();
-  }
-});
-
-/**
- * The no-answer clip for this business's voice and language, or undefined
- * (Polly). Waits at most 300 ms for the clips to load; a render still running
- * finishes in the background for the next call.
- */
-async function noAnswerClipUrl(config, businessNumber) {
-  if (!fixedLineClips.enabled) return undefined;
-  const { resolveLiveLanguage, resolveLiveVoice } = await import("./lib/voice/live/index.js");
-  const language = resolveLiveLanguage(config, businessNumber, process.env);
-  const v = { languageCode: language.code, liveVoice: resolveLiveVoice(config, language.code, process.env).name };
-  let timer;
-  await Promise.race([
-    fixedLineClips.prepare(v),
-    new Promise((r) => {
-      timer = setTimeout(r, 300);
-    }),
-  ]);
-  clearTimeout(timer);
-  return fixedLineClips.urlFor("noAnswer", v) || undefined;
-}
-
 // The transfer <Dial>'s action. Twilio calls it when the dialled leg ends and
 // plays our answer to the CALLER. DialCallStatus=completed means the staff
 // member picked up and the bridged call then ended: hang up, because "leave a
@@ -1027,11 +975,10 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
 
   const guessVoice = () =>
     getProfile(countryFromE164(to) === "GB" || countryFromE164(from) === "GB" ? "en-GB" : "en-US").twimlSayVoice;
-  const messageTwiml = (sayVoice, playUrl) =>
+  const messageTwiml = (sayVoice) =>
     buildMessageTwiml({
       line: CALL_LINES.noAnswer,
       sayVoice,
-      playUrl,
       callbackUrl: voicemailCallbackUrl(BASE_URL, to),
       actionUrl: messageDoneUrl(BASE_URL),
     });
@@ -1048,20 +995,15 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
     if (outcome === "hangup") return res.send("<Response><Hangup/></Response>");
 
     let sayVoice = null;
-    let playUrl;
     if (to && db.isEnabled()) {
       try {
         const business = await db.lookupBusinessByPhone(to);
-        if (business) {
-          const config = db.loadConfig(business);
-          sayVoice = resolveProfile(config).twimlSayVoice;
-          playUrl = await noAnswerClipUrl(config, to);
-        }
+        if (business) sayVoice = resolveProfile(db.loadConfig(business)).twimlSayVoice;
       } catch (err) {
         log.error("transfer_result_lookup_failed", { callSid, message: err?.message, severity: "warn" });
       }
     }
-    return res.send(messageTwiml(sayVoice || guessVoice(), playUrl));
+    return res.send(messageTwiml(sayVoice || guessVoice()));
   } catch (err) {
     log.error("transfer_result_failed", { callSid, message: err?.message, severity: "warn" });
     // Last resort, unconditional: if even building the guess message throws,
@@ -1788,14 +1730,6 @@ if (outboundDeps) {
 } else {
   log.info("outbound_internal_routes_disabled", {});
 }
-
-// The dashboard's "Hear greeting" and its remake-after-save (pronunciation
-// build, Step 3). Mounted only when GREETING_CLIP_CALLER_SA and BASE_URL are
-// both set: the route is OIDC-only and fails closed without them.
-const greetingClipAuth = buildGreetingClipRouteAuth(process.env, log);
-if (greetingClipAuth) {
-  registerGreetingClipRoute(app, { db, verifier: greetingClipAuth.verifier, synthesize: synthesizeSsmlMulaw, env: process.env, log });
-}
 // Fix round 1, item 7: `outboundPostCall` was built at module load, before
 // `buildOutboundDeps` (above) resolved the real, Cloud-Tasks-backed enqueue
 // function -- wire it in now so a non-terminal post-call reschedule can
@@ -2003,7 +1937,7 @@ function attachWebSocket(httpServer) {
         // rather than a second instance. The outbound transfer redial uses only
         // the per-caller-ID router; twilioClientForAccountSid serves inbound
         // redirects.
-        handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor, twilioClientForAccountSid: outboundTwilioAccounts.twilioClientForAccountSid, postCall: outboundPostCall, fixedLines: fixedLineClips }).catch((err) => {
+        handleLiveSessionConnection(ws, req, { twilioClientFor: outboundTwilioClientFor, twilioClientForAccountSid: outboundTwilioAccounts.twilioClientForAccountSid, postCall: outboundPostCall }).catch((err) => {
           log.error("live_connection_failed", { reason: err?.message });
           try {
             ws.close();

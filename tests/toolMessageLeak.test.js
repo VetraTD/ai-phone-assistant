@@ -141,9 +141,7 @@ describe("zero-text turns never speak an unmarked tool message", () => {
 describe("the end_call sign-off", () => {
   const cfg = { businessName: "Brightwork Dental" };
 
-  // Owner, 2026-10-20 (pronunciation build): the goodbye drops the business
-  // name -- one fewer place for the live voice to mispronounce it.
-  it("thanks the caller without naming the business", async () => {
+  it("thanks the caller and names the business", async () => {
     const { executeToolCall } = await import("../services/tools.js");
     const res = await executeToolCall(
       { id: "e1", name: "end_call", args: { reason: "caller is done" } },
@@ -152,7 +150,7 @@ describe("the end_call sign-off", () => {
     const msg = res.stateEffects.toolResult.message;
     expect(res.stateEffects.toolResult.success).toBe(true);
     expect(res.stateEffects.toolResult.callerSafe).toBe(true);
-    expect(msg).not.toContain("Brightwork Dental");
+    expect(msg).toContain("Brightwork Dental");
     expect(msg).toMatch(/thank you for calling/i);
     expect(msg).not.toBe("Goodbye!");
   });
@@ -180,7 +178,7 @@ describe("the end_call sign-off", () => {
       toolParamNames: ["reason", "client_name"],
       fallback: "Sorry, let me get someone to help with that.",
     });
-    expect(spoken).toMatch(/^Thank you for calling\. Have a great day/);
+    expect(spoken).toContain("Brightwork Dental");
     expect(spoken).not.toMatch(/[{}]|reason\s*:|end_call/i);
   });
 });

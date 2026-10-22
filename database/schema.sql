@@ -81,9 +81,6 @@ CREATE TABLE businesses (
   -- services/notifications.js sendCallerSms(). Opt-in per business.
   sms_followup_enabled         boolean DEFAULT false,
   sms_templates                jsonb DEFAULT '{}'::jsonb,
-  -- Written -> spoken names for the AI (migration 055,
-  -- lib/voice/pronunciation.js). {} = none.
-  pronunciations               jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at                   timestamptz DEFAULT now(),
   -- Outbound calling (migration 043, spec §6.2). Off by default; capacity
   -- default of 2 matches the spec's §0.1 defaults table.
@@ -2202,59 +2199,3 @@ REVOKE ALL ON FUNCTION app_ai_seconds_today(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_ai_seconds_today(uuid, text, text) TO vetra_app;
 COMMENT ON FUNCTION app_ai_seconds_today(uuid, text, text) IS
   'Repeat-caller alert: AI seconds this caller used at this business today (UTC); time after a transfer is not counted.';
-
--- ---------------------------------------------------------------------------
--- Migration 056: the recorded greeting (lib/voice/greetingClip.js). One clip
--- per business, variant and language; played only when input_hash matches.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS greeting_clips (
-  business_id    uuid        NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-  variant        text        NOT NULL CHECK (variant IN ('custom', 'morning', 'afternoon', 'evening')),
-  language_code  text        NOT NULL,
-  input_hash     text        NOT NULL,
-  spoken_text    text        NOT NULL,
-  voice_name     text        NOT NULL,
-  audio          bytea       NOT NULL,
-  created_at     timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (business_id, variant, language_code)
-);
-ALTER TABLE greeting_clips ENABLE ROW LEVEL SECURITY;
-ALTER TABLE greeting_clips FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS tenant_isolation ON greeting_clips;
-CREATE POLICY tenant_isolation ON greeting_clips
-  USING (business_id = app_current_business_id())
-  WITH CHECK (business_id = app_current_business_id());
-GRANT SELECT, INSERT, UPDATE, DELETE ON greeting_clips TO vetra_app;
-
--- ---------------------------------------------------------------------------
--- Migration 057: LVX174 fixed-line clips (lib/voice/fixedLines.js). Platform
--- table, definer functions only.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS fixed_line_clips (
-  hash        text        PRIMARY KEY CHECK (hash ~ '^[0-9a-f]{32}$'),
-  line_key    text        NOT NULL CHECK (line_key IN ('noAnswer', 'cantTransfer', 'technical', 'technicalOutbound', 'timeUp')),
-  voice_name  text        NOT NULL,
-  audio       bytea       NOT NULL CHECK (octet_length(audio) BETWEEN 1 AND 1048576),
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-CREATE OR REPLACE FUNCTION app_fixed_line_clips(p_hashes text[])
-RETURNS TABLE (hash text, audio bytea)
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp STABLE
-AS $$
-  SELECT c.hash, c.audio FROM fixed_line_clips c WHERE c.hash = ANY (p_hashes[1:10]);
-$$;
-CREATE OR REPLACE FUNCTION app_upsert_fixed_line_clip(p_hash text, p_line_key text, p_voice_name text, p_audio bytea)
-RETURNS void
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
-AS $$
-  INSERT INTO fixed_line_clips (hash, line_key, voice_name, audio)
-  VALUES (p_hash, p_line_key, p_voice_name, p_audio)
-  ON CONFLICT (hash) DO UPDATE
-    SET line_key = EXCLUDED.line_key, voice_name = EXCLUDED.voice_name, audio = EXCLUDED.audio, created_at = now();
-$$;
-REVOKE ALL ON fixed_line_clips FROM PUBLIC;
-REVOKE ALL ON fixed_line_clips FROM vetra_app;
-REVOKE ALL ON FUNCTION app_fixed_line_clips(text[]) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_upsert_fixed_line_clip(text, text, text, bytea) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app_fixed_line_clips(text[]) TO vetra_app;
-GRANT EXECUTE ON FUNCTION app_upsert_fixed_line_clip(text, text, text, bytea) TO vetra_app;

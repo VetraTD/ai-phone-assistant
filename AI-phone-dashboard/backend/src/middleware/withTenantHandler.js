@@ -86,11 +86,6 @@ function withTenantHandler(handler) {
       };
     }
 
-    // Work that must not start until the transaction has COMMITTED -- e.g.
-    // telling another service to read what this handler just wrote. A handler
-    // pushes a function here; it runs, in order, only if withTenant resolved.
-    req.afterCommit = [];
-
     try {
       await db.withTenant(businessId, () => handler(req, res), {
         rowCount: () => disclosed,
@@ -116,15 +111,6 @@ function withTenantHandler(handler) {
       // unit of work that rolled back.
       if (!res.headersSent) return next(err);
       next(err);
-      return;
-    }
-
-    for (const hook of req.afterCommit) {
-      try {
-        await hook();
-      } catch (err) {
-        console.warn("after-commit hook failed:", err?.message || err);
-      }
     }
   };
 }

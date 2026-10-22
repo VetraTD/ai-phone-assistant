@@ -28,23 +28,6 @@ describe("set-business-config validation (before any connect)", () => {
       expect(r.stderr).not.toContain(bad);
     });
   }
-  for (const [label, bad] of [
-    ["not JSON", "Dij-aisle"],
-    ["a JSON array", '["Digile"]'],
-    ["an entry with a quote", '{"Digile": "say \\"this\\""}'],
-    ["an empty spoken form", '{"Digile": ""}'],
-  ]) {
-    it(`refuses pronunciations that is ${label}`, () => {
-      const r = run("pronunciations", bad);
-      expect(r.status).toBe(1);
-      expect(r.stderr).toContain("Refusing: --set pronunciations");
-    });
-  }
-  it("lets a valid pronunciations map past validation", () => {
-    const r = run("pronunciations", JSON.stringify({ Digile: { say: "Dij-aisle", ipa: "ˈdɪdʒaɪl" } }));
-    expect(r.stderr).not.toContain("Refusing");
-    expect(r.stderr).toContain("Missing instance connection name");
-  });
   it("lets valid values past validation", () => {
     for (const [f, v] of [["transfer_no_answer", "own_voicemail"], ["transfer_no_answer", "take_message"], ["transfer_phone_number", "+441372656055"]]) {
       const r = run(f, v);

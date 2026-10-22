@@ -3,11 +3,10 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { buildUpdateFromWhitelist, getBusinessIdForUser } = require("../utils");
+const { buildUpdateFromWhitelist } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { SETTINGS_FIELD_VALIDATORS } = require("../settingsValidation");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
-const voiceClient = require("../services/voiceClient");
 
 // dialCost.mjs is ESM (a byte-identical copy of the root repo's lib/dialCost.js);
 // this package is CommonJS, so it is loaded once with a cached dynamic import.
@@ -47,20 +46,6 @@ router.get("/api/businesses/:id", authenticate, withTenantHandler(async (req, re
     res.status(500).json({ error: err.message });
   }
 }));
-
-// Columns that change the recorded greeting (mirrors what the voice server
-// re-renders on: greeting, voice, language, pronunciations, name, the
-// recording disclosure and the timezone the time-of-day opener uses).
-const GREETING_CLIP_COLUMNS = [
-  "greeting",
-  "live_voice",
-  "locale",
-  "pronunciations",
-  "name",
-  "recording_disclosure_enabled",
-  "recording_disclosure_text",
-  "timezone",
-];
 
 // Update business settings — dynamic UPDATE built only from whitelisted,
 // validated keys (see settingsValidation.js SETTINGS_FIELD_VALIDATORS).
@@ -132,74 +117,12 @@ router.put("/api/business/:id/settings", authenticate, withTenantHandler(async (
     const sql = `UPDATE businesses SET ${built.setClauses.join(", ")} WHERE id = $${params.length} RETURNING *`;
     const result = await pool.query(sql, params);
 
-    // Anything that changes the recorded greeting callers hear: ask the voice
-    // server to re-render it now, so the first call after a save doesn't pay
-    // for it. Fire-and-forget -- the clip is also re-rendered on demand, so a
-    // failure here must never change what the owner sees from their save.
-    const updatedColumns = built.setClauses.map((c) => c.split(" = ")[0]);
-    if (updatedColumns.some((c) => GREETING_CLIP_COLUMNS.includes(c))) {
-      // Deferred to AFTER COMMIT (withTenantHandler runs this handler inside the
-      // transaction): fired inline, the voice server could read the business
-      // before the commit and render the OLD greeting. Not awaited by the
-      // request either -- the hook only starts the call, it never blocks it.
-      req.afterCommit?.push(() => {
-        try {
-          Promise.resolve(voiceClient.postGreetingClip(id)).catch((e) =>
-            console.warn(`greeting clip re-render failed for business ${id}:`, e?.message || e)
-          );
-        } catch (e) {
-          console.warn(`greeting clip re-render failed for business ${id}:`, e?.message || e);
-        }
-      });
-    }
-
     res.json(result.rows[0]);
   } catch (err) {
     console.error("settings update failed:", err);
     res.status(500).json({ error: "Failed to update settings" });
   }
 }));
-
-// The recorded greeting exactly as callers hear it, for the "Hear greeting"
-// button. Rendered by the voice server (re-rendered first if anything it
-// depends on changed); this route only authenticates and proxies the bytes.
-//
-// DELIBERATELY NOT withTenantHandler: that holds a database transaction (and a
-// pooled connection, pool size 10) for the whole handler, and this one waits up
-// to 2 x 15 s on the voice server. The tenant is resolved with one plain lookup
-// and nothing here touches a tenant table, so no transaction is needed.
-router.get("/api/business/:id/greeting-clip", authenticate, async (req, res) => {
-  const { id } = req.params;
-  let businessId;
-  try {
-    businessId = await getBusinessIdForUser(req.authUser);
-  } catch (err) {
-    console.error("greeting clip tenant lookup failed:", err?.message || err);
-    return res.status(500).json({ error: "Failed to look up your business" });
-  }
-  if (!businessId) {
-    return res.status(403).json({ error: "No business linked to this user" });
-  }
-  if (businessId !== id) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-  let result;
-  try {
-    result = await voiceClient.postGreetingClip(id);
-  } catch (err) {
-    console.warn("greeting clip fetch failed:", err?.message || err);
-    result = { status: 502, audio: null };
-  }
-  if (result.status === 200 && result.audio) {
-    res.type("audio/wav");
-    res.set("Cache-Control", "no-store");
-    return res.send(result.audio);
-  }
-  if (result.status === 503) {
-    return res.status(503).json({ error: "Greeting preview isn't available yet." });
-  }
-  return res.status(502).json({ error: "Couldn't make the greeting recording. Try again in a minute." });
-});
 
 // ---------------------------------------------------------------------------
 // Voice catalog (dashboard voice picker) — mirrors root repo config/voices.js

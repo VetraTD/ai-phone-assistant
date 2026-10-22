@@ -3,7 +3,6 @@ import { TriangleAlert } from "lucide-react";
 import { api } from "../api";
 import Panel from "./Panel";
 import ChoiceCards from "./ChoiceCards";
-import GreetingPreviewButton from "./GreetingPreviewButton";
 
 // ---------------------------------------------------------------------------
 // The voice callers hear — from whichever front-end is actually answering.
@@ -19,15 +18,13 @@ import GreetingPreviewButton from "./GreetingPreviewButton";
 // decided by the Twilio number's voiceUrl, which lives at Twilio. The backend
 // declares it on /api/live-voices and this renders whichever set is real.
 //
-// The "Hear greeting" button plays the real recorded greeting in the SAVED
-// voice (rendered by the voice server). It is a recording, not a phone call, so
-// the note beside the voice list still applies: a phone line strips out much of
-// what makes a voice sound good.
+// Still no audio preview on either path. On the Live side that gap is sharper
+// than it looks — see the note rendered beside the voice list.
 // ---------------------------------------------------------------------------
 const GOOGLE_VALUE = "google";
 const DEFAULT_VOICE = "";
 
-export default function VoicePickerSection({ value, onChange, businessId, previewDirty = false }) {
+export default function VoicePickerSection({ value, onChange }) {
   const [catalog, setCatalog] = useState([]);
   const [live, setLive] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -68,14 +65,14 @@ export default function VoicePickerSection({ value, onChange, businessId, previe
   return live?.frontend === "cascade" ? (
     <CascadeVoice value={value} onChange={onChange} catalog={catalog} />
   ) : (
-    <LiveVoice value={value} onChange={onChange} live={live} businessId={businessId} previewDirty={previewDirty} />
+    <LiveVoice value={value} onChange={onChange} live={live} />
   );
 }
 
 // ---------------------------------------------------------------------------
 // The Live front-end: a Gemini prebuilt voice, and the accent it holds.
 // ---------------------------------------------------------------------------
-function LiveVoice({ value, onChange, live, businessId, previewDirty }) {
+function LiveVoice({ value, onChange, live }) {
   const voices = live?.voices || [];
   const locales = live?.locales || [];
 
@@ -150,15 +147,10 @@ function LiveVoice({ value, onChange, live, businessId, previewDirty }) {
           third time.
         */}
         <p className="set-hint">
-          The button plays your greeting in your saved voice. Treat it as a guide: a phone line strips
-          out much of what makes a voice sound good. The notes below say what each one has actually
-          done on a real call.
+          There's no preview here, and a preview would only half help: these were compared as
+          audio files, and a phone line strips out much of what makes a voice sound good. The notes
+          below say what each one has actually done on a real call.
         </p>
-        <GreetingPreviewButton
-          businessId={businessId}
-          previewDirty={previewDirty}
-          hint="Plays your greeting in your saved voice."
-        />
         <ChoiceCards
           legend="Choose a voice"
           name="live_voice"
@@ -206,7 +198,7 @@ function CascadeVoice({ value, onChange, catalog }) {
   return (
     <Panel
       title="Voice"
-      description="The voice callers hear. The descriptions say how each one has done on a real call."
+      description="The voice callers hear. There's no audio preview yet, so the descriptions are your guide."
       badge={selectedLabel ? <span className="set-pill">{selectedLabel}</span> : null}
     >
       <ChoiceCards

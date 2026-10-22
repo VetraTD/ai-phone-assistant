@@ -263,104 +263,6 @@ function validateSmsTemplates(value) {
 
 // Key set = businesses table column names = the write whitelist for
 // PUT /api/business/:id/settings. Keep 1:1 with the columns.
-// Pronunciation box: written -> spoken map (businesses.pronunciations jsonb).
-//
-// These rules MIRROR lib/voice/pronunciation.js pronunciationEntries in the
-// voice server (this package cannot import across the app boundary), with one
-// difference: the voice server silently DROPS an invalid entry, while this
-// REJECTS it so the owner is told. tests/pronunciationParity.test.js (root
-// suite) pins the two together, word lists included -- change one, change the
-// other.
-const PRON_MAX_ENTRIES = 10;
-const PRON_MAX_WRITTEN = 40;
-const PRON_MAX_SAY = 40;
-const PRON_MAX_SAY_WORDS = 4;
-const PRON_MAX_IPA = 60;
-// Written: a NAME -- starts with a capital or a digit. No quotes, braces,
-// colons or newlines.
-const PRON_SAFE_WRITTEN = /^[\p{L}\p{M}\p{N}'’ .&-]+$/u;
-const PRON_NAME_START = /^[\p{Lu}\p{N}]/u;
-// Spoken: letters, marks, spaces, apostrophes, hyphens only. It is written into
-// the model's prompt; a dot or a digit could carry a sentence of its own.
-const PRON_SAFE_SAY = /^[\p{L}\p{M}'’ -]+$/u;
-const PRON_SAFE_IPA = /^[\p{L}\p{M}ˈˌːˑ. -]+$/u;
-
-// The AI disclosure must survive any map. Whole words, either form.
-const PRON_DISCLOSURE_WORDS = Object.freeze([
-  "ai", "artificial", "automated", "assistant", "virtual", "receptionist", "robot", "bot", "human",
-  "recorded", "recording", "transcribed", "transcription"
-]);
-// Ordinary words that are never an entry on their own, either form.
-const PRON_COMMON_WORDS = Object.freeze([
-  "a", "about", "after", "again", "all", "also", "am", "an", "and", "any", "appointment", "are", "as",
-  "at", "back", "be", "been", "being", "book", "booked", "business", "but", "by", "bye", "call",
-  "called", "calls", "can", "company", "could", "day", "did", "do", "does", "down", "eight", "five",
-  "for", "four", "from", "get", "go", "good", "goodbye", "great", "had", "has", "have", "he", "hello",
-  "help", "her", "here", "hers", "hi", "him", "his", "how", "i", "if", "in", "into", "is", "it", "its",
-  "just", "know", "like", "make", "may", "me", "message", "might", "mine", "more", "most", "much",
-  "must", "my", "name", "new", "nine", "no", "not", "now", "number", "of", "office", "on", "one",
-  "only", "or", "other", "our", "ours", "out", "over", "phone", "please", "see", "seven", "shall",
-  "she", "should", "six", "so", "some", "take", "team", "ten", "than", "thank", "thanks", "that",
-  "the", "their", "them", "then", "there", "these", "they", "this", "those", "three", "time", "to",
-  "today", "tomorrow", "two", "under", "up", "us", "very", "was", "way", "we", "well", "were", "what",
-  "when", "where", "which", "who", "why", "will", "win", "with", "would", "yes", "you", "your",
-  "yours"
-]);
-
-const pronWordsOf = (s) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-const pronTouchesDisclosure = (s) => pronWordsOf(s).some((w) => PRON_DISCLOSURE_WORDS.includes(w));
-const pronIsCommon = (s) => PRON_COMMON_WORDS.includes(s.trim().toLowerCase());
-
-function validatePronunciations(value) {
-  if (value === null) return { value: {} };
-  if (typeof value !== "object" || Array.isArray(value)) {
-    return { error: "must be an object mapping each written name to how it is said" };
-  }
-  const entries = Object.entries(value);
-  if (entries.length > PRON_MAX_ENTRIES) return { error: `must have ${PRON_MAX_ENTRIES} names or fewer` };
-  const out = {};
-  for (const [writtenRaw, v] of entries) {
-    const written = writtenRaw.trim();
-    if (!written || written.length > PRON_MAX_WRITTEN || !PRON_SAFE_WRITTEN.test(written)) {
-      return {
-        error: `"${writtenRaw.slice(0, 40)}" must be 1-${PRON_MAX_WRITTEN} letters, numbers, spaces, apostrophes, dots, & or hyphens`,
-      };
-    }
-    if (!PRON_NAME_START.test(written)) {
-      return { error: `"${written}" must start with a capital letter or a number -- it should be a name` };
-    }
-    const sayRaw = typeof v === "string" ? v : v && typeof v === "object" && !Array.isArray(v) ? v.say : null;
-    const say = typeof sayRaw === "string" ? sayRaw.trim() : "";
-    if (!say || say.length > PRON_MAX_SAY || !PRON_SAFE_SAY.test(say)) {
-      return {
-        error: `how to say "${written}" must be 1-${PRON_MAX_SAY} letters, spaces, apostrophes or hyphens (no digits, dots or &)`,
-      };
-    }
-    if (say.split(/\s+/).length > PRON_MAX_SAY_WORDS) {
-      return { error: `how to say "${written}" must be ${PRON_MAX_SAY_WORDS} words or fewer` };
-    }
-    if (say.toLowerCase() === written.toLowerCase() || say.toLowerCase().includes(written.toLowerCase())) {
-      return { error: `how to say "${written}" must sound different from the name itself, and not contain it` };
-    }
-    if (pronTouchesDisclosure(written) || pronTouchesDisclosure(say)) {
-      return { error: `"${written}" can't involve words like AI, assistant, robot, human or recording` };
-    }
-    if (pronIsCommon(written) || pronIsCommon(say)) {
-      return { error: `"${written}" -> "${say}" uses an everyday word that would change ordinary sentences` };
-    }
-    let ipa = "";
-    if (v && typeof v === "object" && !Array.isArray(v) && v.ipa != null) {
-      if (typeof v.ipa !== "string") return { error: `phonetic spelling for "${written}" must be text` };
-      ipa = v.ipa.trim();
-      if (ipa && (ipa.length > PRON_MAX_IPA || !PRON_SAFE_IPA.test(ipa))) {
-        return { error: `phonetic spelling for "${written}" has characters that aren't allowed` };
-      }
-    }
-    out[written] = ipa ? { say, ipa } : say;
-  }
-  return { value: out };
-}
-
 const SETTINGS_FIELD_VALIDATORS = {
   name: validateName,
   timezone: validateTimezone,
@@ -397,7 +299,6 @@ const SETTINGS_FIELD_VALIDATORS = {
   // control wired to nothing.
   locale: validateLocale,
   live_voice: validateLiveVoice,
-  pronunciations: validatePronunciations,
   notification_email: validateEmail,
   notification_phone: validateE164Phone,
   notifications_enabled: validateBoolean,
@@ -405,4 +306,4 @@ const SETTINGS_FIELD_VALIDATORS = {
   sms_templates: validateSmsTemplates,
 };
 
-module.exports = { SETTINGS_FIELD_VALIDATORS, PRON_COMMON_WORDS, PRON_DISCLOSURE_WORDS };
+module.exports = { SETTINGS_FIELD_VALIDATORS };

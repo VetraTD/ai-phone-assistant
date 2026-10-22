@@ -516,7 +516,6 @@ export function loadConfig(business, capabilityRows = null) {
       liveVoice: null,
       smsFollowupEnabled: false,
       smsTemplates: {},
-      pronunciations: {},
     };
   }
 
@@ -579,12 +578,6 @@ export function loadConfig(business, capabilityRows = null) {
     liveVoice: business.live_voice || null,
     smsFollowupEnabled: !!business.sms_followup_enabled,
     smsTemplates: (business.sms_templates && typeof business.sms_templates === "object") ? business.sms_templates : {},
-    // Written -> spoken names for the model (migration 055,
-    // lib/voice/pronunciation.js). Validated again where it is read.
-    pronunciations:
-      business.pronunciations && typeof business.pronunciations === "object" && !Array.isArray(business.pronunciations)
-        ? business.pronunciations
-        : {},
   };
 }
 
@@ -3718,60 +3711,6 @@ export async function fetchAttemptTransferMissAudio(attemptId) {
   const row = one(res);
   noteAccess("fetchAttemptTransferMissAudio", { resourceIds: [attemptId], rowCount: res.rowCount || 0 });
   return row?.transfer_miss_audio ?? null;
-}
-
-/**
- * The recorded greeting (migration 056, lib/voice/greetingClip.js). One clip per
- * business, variant and language. Runs inside `withTenant`: greeting_clips is
- * FORCE RLS, so an unscoped read sees nothing and an unscoped write is refused.
- * @returns {Promise<{input_hash: string, spoken_text: string, voice_name: string, audio: Buffer}|null>}
- */
-export async function fetchGreetingClip(businessId, variant, languageCode) {
-  requireTenantScope("fetchGreetingClip");
-  const res = await q(
-    `SELECT input_hash, spoken_text, voice_name, audio FROM greeting_clips
-      WHERE business_id = $1 AND variant = $2 AND language_code = $3`,
-    [businessId, variant, languageCode]
-  );
-  if (res.error) throw res.error;
-  return one(res);
-}
-
-/**
- * Insert or replace one greeting clip. Throws unless exactly one row was
- * written: a write that matched nothing (wrong tenant scope) must not read as
- * a stored clip.
- */
-export async function upsertGreetingClip({ businessId, variant, languageCode, inputHash, spokenText, voiceName, audio }) {
-  requireTenantScope("upsertGreetingClip");
-  const res = await q(
-    `INSERT INTO greeting_clips (business_id, variant, language_code, input_hash, spoken_text, voice_name, audio)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (business_id, variant, language_code) DO UPDATE
-       SET input_hash = EXCLUDED.input_hash, spoken_text = EXCLUDED.spoken_text,
-           voice_name = EXCLUDED.voice_name, audio = EXCLUDED.audio, created_at = now()`,
-    [businessId, variant, languageCode, inputHash, spokenText, voiceName, audio]
-  );
-  if (res.error) throw res.error;
-  if ((res.rowCount || 0) !== 1) throw new Error(`upsertGreetingClip: wrote ${res.rowCount || 0} rows, expected 1`);
-}
-
-/**
- * LVX174 fixed-line clips (migration 057, lib/voice/fixedLines.js). A platform
- * table reached only through definer functions -- no tenant scope involved.
- * @param {string[]} hashes - at most 10 are read
- * @returns {Promise<{hash: string, audio: Buffer}[]>}
- */
-export async function fetchFixedLineClips(hashes) {
-  const res = await q(`SELECT hash, audio FROM app_fixed_line_clips($1::text[])`, [hashes]);
-  if (res.error) throw res.error;
-  return res.rows || [];
-}
-
-/** Insert or replace one fixed-line clip. Throws on any failure. */
-export async function upsertFixedLineClip({ hash, lineKey, voiceName, audio }) {
-  const res = await q(`SELECT app_upsert_fixed_line_clip($1, $2, $3, $4)`, [hash, lineKey, voiceName, audio]);
-  if (res.error) throw res.error;
 }
 
 /**

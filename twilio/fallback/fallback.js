@@ -3,13 +3,8 @@
 // Paste this file into the Twilio console as a Function with "Protected"
 // visibility. It must stay self-contained: no repo imports, no npm packages.
 // The number's "Primary handler fails" (voice fallback) URL points at it, with
-// query params n (number to ring, E.164), t (ring seconds, 20 or 45),
-// v (Polly voice) and, optionally, a (asset prefix, LVX174): with a=kore-en-gb
-// the lines play the receptionist-voice clips uploaded to this Service as PUBLIC
-// Assets kore-en-gb-noanswer.wav and kore-en-gb-technical.wav (served from this
-// Service's own domain, so nothing depends on our server); without it, or with
-// no DOMAIN_NAME, Polly says them as before.
-// Env var VOICEMAIL_URL = https://<prod base>/twilio/voicemail.
+// query params n (number to ring, E.164), t (ring seconds, 20 or 45) and
+// v (Polly voice). Env var VOICEMAIL_URL = https://<prod base>/twilio/voicemail.
 //
 // It rings the business's transfer number showing OUR number as caller ID. A
 // call that comes back to us from ourselves (From === To) or from the dialled
@@ -35,11 +30,6 @@ function normaliseNumber(raw) {
   return /^\+[1-9]\d{7,14}$/.test(n) ? n : null;
 }
 
-// LVX174: lowercase letters, digits and hyphens only -- it becomes part of a URL.
-function normaliseAsset(raw) {
-  return typeof raw === "string" && /^[a-z0-9-]{1,40}$/.test(raw) ? raw : null;
-}
-
 function normaliseVoice(raw) {
   return typeof raw === "string" && /^Polly\.[A-Za-z]+(-Neural)?$/.test(raw) ? raw : null;
 }
@@ -61,7 +51,6 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
   const n = normaliseNumber(event.n);
   const ringSec = event.t === "45" ? 45 : 20;
   const voice = normaliseVoice(event.v);
-  const asset = normaliseAsset(event.a);
   const step = str(event.step);
   const domain = str(context.DOMAIN_NAME);
   const to = normaliseTo(event.To);
@@ -73,9 +62,8 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
   const base = domain ? "https://" + domain + path : path.split("/").pop() || "fallback";
   const voicemailUrl = str(context.VOICEMAIL_URL);
 
-  const message = (line, key) => {
-    if (asset && domain) response.play("https://" + domain + "/" + asset + "-" + key.toLowerCase() + ".wav");
-    else if (voice) response.say({ voice }, line);
+  const message = (line) => {
+    if (voice) response.say({ voice }, line);
     else response.say(line);
     const attrs = {
       maxLength: 120,
@@ -105,12 +93,12 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
       response.hangup();
       return response;
     }
-    return message(LINES.noAnswer, "noAnswer");
+    return message(LINES.noAnswer);
   }
 
   // First request. Without a valid To we cannot set our number as caller ID, and
   // Twilio would show the caller's: take a message instead of dialling.
-  if (!to) return message(LINES.technical, "technical");
+  if (!to) return message(LINES.technical);
 
   // A call from a number to itself, or from the number we were about to ring, is
   // a loop.
@@ -118,11 +106,10 @@ function buildFallbackTwiml(event, context, VoiceResponse) {
     response.reject({ reason: "busy" });
     return response;
   }
-  if (!n) return message(LINES.technical, "technical");
+  if (!n) return message(LINES.technical);
 
   const after = new URLSearchParams({ step: "after", n, t: String(ringSec) });
   if (voice) after.set("v", voice);
-  if (asset) after.set("a", asset);
   const dial = response.dial({
     timeout: ringSec,
     timeLimit: 3600,
