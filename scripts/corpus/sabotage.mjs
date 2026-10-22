@@ -56,6 +56,27 @@ const JOURNAL = "scripts/corpus/.sabotage-in-progress";
 function claimJournal(file) {
   fs.writeFileSync(JOURNAL, `${file}\n`, "utf8");
 }
+// ---------------------------------------------------------------------------
+// A FOURTH RULE, added 2026-10-21 (gate pron2, shard A): Windows refused the
+// RESTORE write with `UNKNOWN: unknown error, open '...index.js'` (a transient
+// lock -- antivirus or an indexer holding the file), the process died in the
+// finally block, and only luck left the tree clean. A write that fails for a
+// transient reason is retried for up to ~6 s before anything gives up.
+// ---------------------------------------------------------------------------
+const TRANSIENT_WRITE = new Set(["UNKNOWN", "EBUSY", "EPERM", "EACCES", "EAGAIN"]);
+function writeFileRetrying(file, data) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.writeFileSync(file, data);
+      return;
+    } catch (err) {
+      if (!TRANSIENT_WRITE.has(err?.code) || attempt >= 20) throw err;
+      console.error(`  (write to ${file} refused: ${err.code}; retry ${attempt}/20)`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    }
+  }
+}
+
 function releaseJournal() {
   try {
     fs.unlinkSync(JOURNAL);
@@ -3761,6 +3782,9 @@ function runSuites(files, cwd) {
   return {
     ok: !unreadable && res.status === 0,
     failed: failedMatch ? Number(failedMatch[1]) : unreadable ? null : 0,
+    // What failed, so a red BASELINE names its suite (gate pron2's shard B said
+    // only "Baseline is RED" and had to be re-run to find out).
+    failures: out.split("\n").filter((l) => /^\s*(FAIL|×)\s/.test(l)).slice(0, 25),
     unreadable,
     reason: res.error?.message || (res.status == null ? "no exit status" : "no test tally in the output"),
   };
@@ -3851,6 +3875,7 @@ for (const [cwd, suites] of targetsByCwd) {
   }
   if (!baseline.ok) {
     console.error(`Baseline is RED${cwd ? ` in ${cwd}` : ""}. Fix the suite before asking whether it can fail.`);
+    for (const l of baseline.failures || []) console.error(`  ${l.trim()}`);
     process.exit(1);
   }
 }
@@ -3881,14 +3906,14 @@ for (const s of SABOTAGES) {
   claimJournal(s.file);
   try {
     const patched = original.replace(s.find, s.replace);
-    fs.writeFileSync(s.file, patched);
+    writeFileRetrying(s.file, patched);
     // THE ASSERTION THE RULE IS ABOUT: the bytes on disk actually changed.
     if (fs.readFileSync(s.file, "utf8") === original) {
       throw new Error("the patch did not change the file");
     }
     result = runSuites(s.red, s.cwd);
   } finally {
-    fs.writeFileSync(s.file, original);
+    writeFileRetrying(s.file, original);
     if (fs.readFileSync(s.file, "utf8") !== original) {
       console.error(`FATAL: ${s.file} was not restored. Check it before doing anything else.`);
       process.exit(2);
