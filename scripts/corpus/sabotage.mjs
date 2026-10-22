@@ -24,7 +24,7 @@
 //      at risk. A restore that does not verify is not a restore, so the bytes
 //      are compared afterwards and a mismatch is a hard failure.
 //
-// Usage:  node scripts/corpus/sabotage.mjs [--only <name>] [--from <name>] [--to <name>]
+// Usage:  node scripts/corpus/sabotage.mjs [--only <name>] [--from <name>] [--to <name>] [--rows <file>]
 // ---------------------------------------------------------------------------
 
 import fs from "node:fs";
@@ -3714,6 +3714,21 @@ if (to && !SABOTAGES.some((s) => s.name === to)) {
   console.error(`--to ${to}: no row by that name.`);
   process.exit(1);
 }
+// --rows <file>: run exactly the rows named in the file (one per line), with a
+// baseline of only THEIR suites -- a targeted pre-deploy check (2026-10-21:
+// the rows a change added, and the older rows its edits sit next to) without
+// the ~9 h full matrix. Every name must exist.
+const rowsFile = process.argv.includes("--rows") ? process.argv[process.argv.indexOf("--rows") + 1] : null;
+const rowSet = rowsFile
+  ? new Set(fs.readFileSync(rowsFile, "utf8").split(/\r?\n/).map((l) => l.trim()).filter(Boolean))
+  : null;
+if (rowSet) {
+  const unknown = [...rowSet].filter((n) => !SABOTAGES.some((s) => s.name === n));
+  if (unknown.length) {
+    console.error(`--rows: no row by these names: ${unknown.join(", ")}`);
+    process.exit(1);
+  }
+}
 let pastTo = false;
 if (only && !SABOTAGES.some((s) => s.name === only)) {
   console.error(`--only ${only}: no row by that name.`);
@@ -3859,6 +3874,7 @@ console.log("Baseline: the suites must be green BEFORE anything is broken.\n");
 const targetsByCwd = new Map();
 for (const s of SABOTAGES) {
   if (only && s.name !== only) continue;
+  if (rowSet && !rowSet.has(s.name)) continue;
   if (!targetsByCwd.has(s.cwd)) targetsByCwd.set(s.cwd, new Set());
   for (const suite of s.red) targetsByCwd.get(s.cwd).add(suite);
 }
@@ -3884,6 +3900,7 @@ console.log(`  green: ${targets.join(" ")}\n`);
 let bad = 0;
 for (const s of SABOTAGES) {
   if (only && s.name !== only) continue;
+  if (rowSet && !rowSet.has(s.name)) continue;
   if (from) {
     if (s.name === from) reached = true;
     if (!reached) continue;
