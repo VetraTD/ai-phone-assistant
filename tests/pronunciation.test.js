@@ -81,6 +81,14 @@ describe("toSpoken", () => {
     expect(toSpoken("mark the date with Mark. MARK.", map)).toBe("mark the date with Marc. Marc.");
   });
 
+  // Since matching became case-sensitive, a lowercase address is safe for that
+  // reason alone; a capitalised one depends on the address guard itself
+  // (targeted gate pron4: row pron-address-kept stayed green without this).
+  it("never touches a capitalised email, website or handle either", () => {
+    const text = "Email Info@Digile-Media.com, visit Digile-Media.com or www.Digile.co.uk, or @DigileMedia.";
+    expect(toSpoken(text, MAP)).toBe(text);
+  });
+
   it("leaves a word that only contains the name alone", () => {
     expect(toSpoken("Digilent and Digileo", MAP)).toBe("Digilent and Digileo");
   });
