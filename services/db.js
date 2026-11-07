@@ -1498,6 +1498,24 @@ export async function updateAppointment(appointmentId, updates, businessId) {
 }
 
 /**
+ * The JSON text for customer_requests.details, or null when there is nothing to store.
+ *
+ * An empty value must never overwrite stored details: COALESCE($n::jsonb, details)
+ * keeps the old value only for NULL, so a `{ answers: [] }` or a bare `{}` passed
+ * by a correction that had no answers would otherwise blank them. Only a value
+ * with at least one answer or a callerType is written.
+ *
+ * @param {{ callerType?: string, answers?: Array<{label: string, answer: string}> }|null|undefined} details
+ * @returns {string|null}
+ */
+function detailsJson(details) {
+  if (!details || typeof details !== "object") return null;
+  const answers = Array.isArray(details.answers) ? details.answers : [];
+  if (answers.length === 0 && !details.callerType) return null;
+  return JSON.stringify(details);
+}
+
+/**
  * Create a customer request (message or callback) from the record_customer_request tool.
  * @param {object} params
  * @param {string} params.businessId
@@ -1508,6 +1526,8 @@ export async function updateAppointment(appointmentId, updates, businessId) {
  * @param {string} [params.message]
  * @param {string} [params.preferredTime]
  * @param {string} [params.notes]
+ * @param {{ callerType?: string, answers: Array<{label: string, answer: string}> }|null} [params.details] - the caller's answers to the business's questions; null or empty stores NULL
+ * @param {boolean} [params.ownerNoticePending] - true when the owner has not yet been told (migration 059)
  * @returns {Promise<string|null>} The new customer_requests row id or null
  */
 export async function createCustomerRequest({
@@ -1519,12 +1539,14 @@ export async function createCustomerRequest({
   message,
   preferredTime,
   notes,
+  details = null,
+  ownerNoticePending = false,
 }) {
   if (!pool) return null;
   const res = await q(
     `INSERT INTO customer_requests
-       (business_id, call_id, request_type, caller_name, callback_number, message, preferred_time, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+       (business_id, call_id, request_type, caller_name, callback_number, message, preferred_time, notes, details, owner_notice_pending)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10) RETURNING id`,
     [
       businessId,
       callId || null,
@@ -1534,6 +1556,8 @@ export async function createCustomerRequest({
       message || null,
       preferredTime || null,
       notes || null,
+      detailsJson(details),
+      ownerNoticePending === true,
     ]
   );
   if (res.error) {
@@ -1557,7 +1581,7 @@ export async function createCustomerRequest({
  * @param {string} callId - calls.id
  * @param {string} businessId - REQUIRED
  * @param {string} requestType
- * @returns {Promise<Array<{id: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null}>|null>}
+ * @returns {Promise<Array<{id: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null, details: object|null}>|null>}
  */
 export async function listCallCustomerRequests(callId, businessId, requestType) {
   if (!pool || !callId) return null;
@@ -1566,7 +1590,7 @@ export async function listCallCustomerRequests(callId, businessId, requestType) 
     return null;
   }
   const res = await q(
-    `SELECT id, caller_name, callback_number, message, preferred_time
+    `SELECT id, caller_name, callback_number, message, preferred_time, details
        FROM customer_requests
       WHERE call_id = $1 AND business_id = $2 AND request_type = $3
       ORDER BY created_at DESC, id DESC`,
@@ -1589,10 +1613,13 @@ export async function listCallCustomerRequests(callId, businessId, requestType) 
  * changed -- under FORCE RLS an unscoped UPDATE matches nothing and reports no
  * error, so the row count is the only evidence it landed.
  *
- * @param {{ id: string, businessId: string, callerName?: string|null, callbackNumber?: string|null, message?: string|null, preferredTime?: string|null }} params
+ * `details` follows the same rule: a correction that carries no answers (null,
+ * or an empty answers list) leaves the stored details as they were.
+ *
+ * @param {{ id: string, businessId: string, callerName?: string|null, callbackNumber?: string|null, message?: string|null, preferredTime?: string|null, details?: object|null }} params
  * @returns {Promise<string|null>} the row id, or null
  */
-export async function updateCustomerRequest({ id, businessId, callerName, callbackNumber, message, preferredTime }) {
+export async function updateCustomerRequest({ id, businessId, callerName, callbackNumber, message, preferredTime, details }) {
   if (!pool || !id) return null;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "updateCustomerRequest" });
@@ -1603,10 +1630,11 @@ export async function updateCustomerRequest({ id, businessId, callerName, callba
         SET caller_name = COALESCE($3, caller_name),
             callback_number = COALESCE($4, callback_number),
             message = COALESCE($5, message),
-            preferred_time = COALESCE($6, preferred_time)
+            preferred_time = COALESCE($6, preferred_time),
+            details = COALESCE($7::jsonb, details)
       WHERE id = $1 AND business_id = $2
       RETURNING id`,
-    [id, businessId, callerName || null, callbackNumber || null, message || null, preferredTime || null]
+    [id, businessId, callerName || null, callbackNumber || null, message || null, preferredTime || null, detailsJson(details)]
   );
   if (res.error) {
     log.error("db_error", { operation: "updateCustomerRequest", error: res.error.message });
@@ -1617,6 +1645,84 @@ export async function updateCustomerRequest({ id, businessId, callerName, callba
   if (!row) return null;
   noteAccess("updateCustomerRequest", { resourceIds: [row.id], rowCount: 1 });
   return row.id;
+}
+
+/**
+ * Claim the owner notices this call-end hook is responsible for, atomically.
+ *
+ * A request is claimable when it is still pending (owner_notice_pending) and
+ * either belongs to this call (calls.twilio_call_sid = callSid) or is older than
+ * 15 minutes. The 15 minutes covers a call whose end hook never fired: a Live
+ * call is hard-ended by 9:30, so a row that old cannot still be waiting on its
+ * own call. A null callSid therefore claims only the old rows.
+ *
+ * The claim is one UPDATE, so two hooks racing for the same row cannot both
+ * get it. Rows come back oldest first. A caller that fails to send the notice
+ * must hand the ids back with releaseOwnerNotices.
+ *
+ * Refuses an unscoped call (no businessId) and returns []: under FORCE RLS an
+ * unscoped UPDATE matches no row, so the empty result would look like "nothing
+ * pending" when it means "not scoped".
+ *
+ * @param {{ businessId: string, callSid?: string|null }} params - businessId REQUIRED
+ * @returns {Promise<Array<{id: string, call_id: string, request_type: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null, details: object|null, created_at: Date, caller_number: string|null, twilio_call_sid: string|null}>>}
+ */
+export async function claimOwnerNotices({ businessId, callSid = null }) {
+  if (!pool) return [];
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "claimOwnerNotices" });
+    return [];
+  }
+  const res = await q(
+    `UPDATE customer_requests cr SET owner_notice_pending = false
+       FROM calls c
+      WHERE cr.call_id = c.id AND cr.business_id = $1 AND cr.owner_notice_pending
+        AND (c.twilio_call_sid = $2 OR cr.created_at < now() - interval '15 minutes')
+     RETURNING cr.id, cr.call_id, cr.request_type, cr.caller_name, cr.callback_number, cr.message,
+               cr.preferred_time, cr.details, cr.created_at, c.caller_number, c.twilio_call_sid`,
+    [businessId, callSid || null]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "claimOwnerNotices", error: res.error.message });
+    return [];
+  }
+  const rows = (res.rows || []).sort(
+    (a, b) => new Date(a.created_at) - new Date(b.created_at) || String(a.id).localeCompare(String(b.id))
+  );
+  noteAccess("claimOwnerNotices", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
+  return rows;
+}
+
+/**
+ * Hand claimed owner notices back, so the next call-end hook can claim them.
+ *
+ * Used when the notice could not be sent. Scoped by business_id as well as RLS,
+ * the same as every customer_requests write. Returns the number of rows changed;
+ * 0 for an empty id list (no query runs) or a refused or failed call.
+ *
+ * @param {{ businessId: string, ids: string[] }} params - businessId REQUIRED
+ * @returns {Promise<number>}
+ */
+export async function releaseOwnerNotices({ businessId, ids }) {
+  const list = (ids || []).filter(Boolean);
+  if (!pool || list.length === 0) return 0;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "releaseOwnerNotices" });
+    return 0;
+  }
+  const res = await q(
+    `UPDATE customer_requests SET owner_notice_pending = true
+      WHERE business_id = $1 AND id = ANY($2::uuid[])
+      RETURNING id`,
+    [businessId, list]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "releaseOwnerNotices", error: res.error.message });
+    return 0;
+  }
+  const rows = res.rows || [];
+  noteAccess("releaseOwnerNotices", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
+  return rows.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -2119,7 +2225,7 @@ export async function exportCallerData(businessId, phone) {
   }
 
   const requests = await q(
-    `SELECT id, request_type, caller_name, callback_number, message, preferred_time, notes, created_at
+    `SELECT id, request_type, caller_name, callback_number, message, preferred_time, notes, details, created_at
        FROM customer_requests
       WHERE business_id = $1 AND ${phoneMatch("callback_number", 2)}
       ORDER BY created_at ASC`,
@@ -2310,7 +2416,8 @@ export async function exportCallerData(businessId, phone) {
  *   appointments      KEPT, with client_name, client_phone and notes nulled.
  *                     Same reasoning: the slot was occupied, and that fact
  *                     belongs to the clinic.
- *   customer_requests KEPT, with every free-text and identifying field nulled.
+ *   customer_requests KEPT, with every free-text and identifying field nulled
+ *                     (the caller's answers in `details` included, migration 059).
  *   sms_consents      DELETED outright (migration 037). The row is a phone
  *                     number and a decision about that phone number; null out
  *                     the number and nothing meaningful is left, so there is no
@@ -2458,7 +2565,7 @@ export async function eraseCallerData(businessId, phone) {
     const r = await client.query(
       `UPDATE customer_requests
           SET caller_name = NULL, callback_number = NULL, message = NULL,
-              preferred_time = NULL, notes = NULL
+              preferred_time = NULL, notes = NULL, details = NULL
         WHERE business_id = $1 AND ${phoneMatch("callback_number", 2)}`,
       [businessId, phone]
     );

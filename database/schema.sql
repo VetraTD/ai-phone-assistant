@@ -193,7 +193,9 @@ CREATE TABLE customer_requests (
   message         text,
   preferred_time  text,
   notes           text,
-  created_at      timestamptz DEFAULT now()
+  created_at      timestamptz DEFAULT now(),
+  details         jsonb,                              -- 059: { callerType?, answers: [{label, answer}] }
+  owner_notice_pending boolean NOT NULL DEFAULT false -- 059: claimed by the call-end hook, released on failure
 );
 
 -- 7. Business knowledge (Q&A pairs injected into AI prompt)
@@ -290,6 +292,7 @@ CREATE INDEX idx_appointments_business_scheduled ON appointments (business_id, s
 -- Migration 008: speeds up listAppointmentsByCaller (business + status filter).
 CREATE INDEX idx_appointments_business_status ON appointments (business_id, status);
 CREATE INDEX idx_customer_requests_business_created ON customer_requests (business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_requests_notice_pending ON customer_requests (business_id, created_at) WHERE owner_notice_pending;
 CREATE INDEX idx_business_knowledge_business_enabled ON business_knowledge (business_id, enabled, priority DESC);
 CREATE INDEX idx_integrations_business ON integrations (business_id);
 CREATE INDEX idx_integrations_business_enabled ON integrations (business_id, enabled) WHERE enabled = true;
