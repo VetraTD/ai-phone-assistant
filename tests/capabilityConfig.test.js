@@ -346,6 +346,22 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     expect(callback).toContain(`(5) promise the callback: "${CALLBACK}".`);
   });
 
+  it("LVX189: the step guidance offers the caller's number once, as protocol step 2 does", () => {
+    // The guidance tail reaches the cascade path, so it must not keep the old
+    // "ask for the best callback number" beside a step 2 that offers the
+    // caller-ID number first. Both intents, with and without a callbackLine.
+    const STEP =
+      "(2) if you know the number they are calling from, ask once whether it is the best one; otherwise ask for the best number once;";
+    for (const config of [{}, { callbackLine: CALLBACK }]) {
+      const { protocol, take, callback } = rendered(config);
+      expect(protocol).toContain("2. Number: if you know the number they are calling from, ask once:");
+      for (const guidance of [take, callback]) {
+        expect(guidance).toContain(STEP);
+        expect(guidance).not.toContain("ask for the best callback number");
+      }
+    }
+  });
+
   it("a non-string is dropped; a long one clamps to 160", () => {
     expect(validateMessages({ callbackLine: 42 }).callbackLine).toBeUndefined();
     expect(validateMessages({ callbackLine: "x".repeat(200) }).callbackLine).toHaveLength(160);

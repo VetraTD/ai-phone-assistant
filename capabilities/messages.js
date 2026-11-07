@@ -168,7 +168,7 @@ function messageGuidance(intent, cfg) {
   const callbackLine = callbackLineOf(cfg);
   const steps = [
     `ask for their name`,
-    `ask for the best callback number`,
+    `if you know the number they are calling from, ask once whether it is the best one; otherwise ask for the best number once`,
     `ask briefly what the call is regarding` +
       (intent === "callback_request" ? ` and their preferred callback time` : ``),
   ];
