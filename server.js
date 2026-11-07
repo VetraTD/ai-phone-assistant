@@ -21,6 +21,7 @@ import { inboundGuardTwiml, isRealCallerNumber, isOwnNumber, AI_MINUTES_ALERT_SE
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
+import { flushOwnerNotices } from "./lib/ownerNotices.js";
 import { tableAgeDays } from "./lib/dialCost.js"; // importing validates the price table: a bad one fails boot
 import { assertBootConfig } from "./lib/bootChecks.js";
 import {
@@ -1260,6 +1261,30 @@ app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
         }
       } catch (err) {
         log.error("latency_rollup_failed", { callSid, message: err?.message });
+      }
+    }
+
+    // The owner's email for this call's saved messages (Ilija inbound). AWAITED,
+    // for the cpu_idle reason above: Live's own finish path is fire-and-forget,
+    // so a claim there followed by a throttled send would lose the email. It sits
+    // last on purpose. The summary and latency work above is already running, so
+    // the settle wait and the send (bounded at 10 s) cost the response time and
+    // nothing else; Twilio's callback timeout is 15 s. Nothing above this point
+    // sends an owner notification for a completed call (notifyCallMissed is
+    // failed/busy/no-answer only), so the two cannot double up.
+    //
+    // The business comes from the shared store, else from the dialed number:
+    // Live calls leave the shared store empty. A throw anywhere in here is a
+    // 200 still, never a retry.
+    if (status === "completed") {
+      try {
+        let noticeBusinessId = businessId;
+        if (!noticeBusinessId) noticeBusinessId = (await db.lookupBusinessByPhone(req.body.To))?.id ?? null;
+        if (noticeBusinessId) {
+          await flushOwnerNotices({ db, notifications, log, captureException, businessId: noticeBusinessId, callSid });
+        }
+      } catch (err) {
+        log.error("owner_notice_flush_failed", { callSid, message: err?.name });
       }
     }
 

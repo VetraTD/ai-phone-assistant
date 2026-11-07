@@ -74,6 +74,13 @@ vi.mock("../services/gemini.js", () => ({
   generateSummaryAndSentiment: (...args) => mockGenerateSummaryAndSentiment(...args),
 }));
 
+// The end-of-call owner email waits 2 s for in-flight writes before it claims.
+// It is proven in tests/ownerNotices.test.js and tests/statusCallbackNotices.test.js;
+// here it would only add 2 s to every completed post that resolves a business.
+vi.mock("../lib/ownerNotices.js", () => ({
+  flushOwnerNotices: vi.fn(async () => ({ sent: 0, failed: 0, off: 0 })),
+}));
+
 const mockGetCallStats = vi.fn(() => null);
 
 vi.mock("../lib/voice/metrics.js", () => ({

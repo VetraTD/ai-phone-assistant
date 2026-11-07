@@ -3400,6 +3400,22 @@ const SABOTAGES = [
     replace: "    detailsAllowed: true, // SABOTAGE: tier ignored",
     red: ["tests/notifications.phi.test.js"],
   },
+  {
+    name: "notice-unwired",
+    why: "Ilija inbound: the owner's email is sent from the status callback. Sabotaged, the handler never calls the flush and no call's saved messages are ever emailed.",
+    file: "server.js",
+    find: "          await flushOwnerNotices({ db, notifications, log, captureException, businessId: noticeBusinessId, callSid });",
+    replace: "          // SABOTAGE: flush not called",
+    red: ["tests/statusCallbackNotices.test.js"],
+  },
+  {
+    name: "notice-no-settle",
+    why: "Ilija inbound: the flush waits settleMs for an in-flight write before claiming. Sabotaged, the wait is ignored and a late write misses the email.",
+    file: "lib/ownerNotices.js",
+    find: "    await sleep(settleMs);",
+    replace: "    await sleep(0); // SABOTAGE: settleMs ignored",
+    red: ["tests/ownerNotices.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
