@@ -170,7 +170,9 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
   it("part 4: a name on file is never asked for and is said, not spelled, in the one read-back (booking + message)", () => {
     const p = prefix(avail);
     const both = p.match(/If a name is on their record from an earlier call[^\n]*/g) || [];
-    expect(both.length).toBeGreaterThanOrEqual(1);
+    // LVX188 (R39): one copy in the messages protocol, one in the booking guardrail.
+    expect(both.length).toBe(2);
+    expect(p).not.toMatch(/you have it right already/);
     for (const line of both) {
       // LVX180 (d1b CAb3e55): an on-file caller was asked their full name.
       // LVX188: an on-file name is asked once, never assumed.
