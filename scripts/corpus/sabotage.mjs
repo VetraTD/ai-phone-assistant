@@ -2591,8 +2591,8 @@ const SABOTAGES = [
     name: "p3-message-summary-spells",
     why: "A1 part 3 F3: the message summary spells a surname the caller spelled -- call (a)'s row held 'Dodole' for D-O-D-L-A.",
     file: "capabilities/messages.js",
-    find: "5. Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time),",
-    replace: "5. Summarise it ONCE, in one breath — name,",
+    find: "Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time),",
+    replace: "Summarise it ONCE, in one breath — name,",
     red: ["tests/a1PromptTrims.test.js"],
   },
   {
@@ -3447,6 +3447,14 @@ const SABOTAGES = [
     find: '      ? { contentType: "Text", content: text }',
     replace: '      ? { contentType: "HTML", content: text } // SABOTAGE: plainOnly sends HTML',
     red: ["tests/notifications.graph.test.js"],
+  },
+  {
+    name: "callback-line-ignored",
+    why: "Ilija inbound Task 7: a business's callbackLine must replace the urgency question and the standing promise in the message protocol and step guidance. Sabotaged, the prompt ignores the line and renders the default protocol, so the caller hears the standing promise instead of the business's own.",
+    file: "capabilities/messages.js",
+    find: '  return typeof cfg?.callbackLine === "string" && cfg.callbackLine.trim() ? cfg.callbackLine : null;',
+    replace: "  return null; // SABOTAGE: callbackLine ignored",
+    red: ["tests/capabilityConfig.test.js"],
   },
 ];
 

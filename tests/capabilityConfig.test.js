@@ -18,6 +18,7 @@ import { describe, it, expect } from "vitest";
 const { loadConfig, normalizeAllowedTasks, CORE_TASKS } = await import("../services/db.js");
 const { validateCapabilityConfig } = await import("../lib/capabilities/configSchema.js");
 const appointments = (await import("../capabilities/appointments.js")).default;
+const messages = (await import("../capabilities/messages.js")).default;
 
 const BUSINESS = {
   id: "biz-1",
@@ -307,5 +308,61 @@ describe("loadConfig — transferNoAnswer (migration 052)", () => {
   });
   it("null business defaults to take_message", () => {
     expect(loadConfig(null).transferNoAnswer).toBe("take_message");
+  });
+});
+
+describe("messages — callbackLine (who calls back and how soon)", () => {
+  const CALLBACK = "Sam will call you back as soon as he can.";
+  const validateMessages = (raw) => validateCapabilityConfig(raw, messages, "biz-1");
+  const rendered = (config) => {
+    const out = messages.prompt({ capabilities: { messages: config } });
+    return {
+      protocol: out.static.protocols[0],
+      take: out.dynamic.stepGuidance.take_message,
+      callback: out.dynamic.stepGuidance.callback_request,
+    };
+  };
+
+  it("with no callbackLine the protocol keeps the urgency step and the standing promise", () => {
+    const { protocol, take } = rendered({});
+    expect(protocol).toContain("4. Urgency: ask");
+    expect(protocol).toContain('6. Promise the callback: "Someone will get back to you');
+    expect(protocol).toContain("7. Extra questions:");
+    expect(take).toContain("(4) ask if it's urgent");
+    expect(take).toContain("(6) promise the callback.");
+  });
+
+  it("callbackLine replaces the promise and removes the urgency step", () => {
+    const { protocol, take, callback } = rendered({ callbackLine: CALLBACK });
+    expect(protocol).toContain(`Promise the callback: "${CALLBACK}"`);
+    expect(protocol).not.toContain("Is this urgent");
+    expect(protocol).not.toContain("Someone will get back to you");
+    expect(protocol).toContain("4. Summarise it ONCE");
+    expect(protocol).toContain("5. Promise the callback:");
+    expect(protocol).toContain("6. Extra questions:");
+    expect(take).toContain(`(5) promise the callback: "${CALLBACK}".`);
+    expect(take).not.toContain("urgent");
+    expect(take).not.toContain("Someone will get back to you");
+    expect(callback).toContain(`(5) promise the callback: "${CALLBACK}".`);
+  });
+
+  it("a non-string is dropped; a long one clamps to 160", () => {
+    expect(validateMessages({ callbackLine: 42 }).callbackLine).toBeUndefined();
+    expect(validateMessages({ callbackLine: "x".repeat(200) }).callbackLine).toHaveLength(160);
+  });
+
+  it("strips double quotes and collapses newlines before the prompt sees it", () => {
+    const out = validateMessages({ callbackLine: 'Sam says "hi"\n\nthanks' });
+    expect(out.callbackLine).toBe("Sam says hi thanks");
+  });
+
+  it("a blank callbackLine is absence, not an empty promise", () => {
+    expect(validateMessages({ callbackLine: "   " }).callbackLine).toBeUndefined();
+    const { protocol } = rendered({ callbackLine: "   " });
+    expect(protocol).toContain("4. Urgency: ask");
+  });
+
+  it("a pack that does not declare callbackLine ignores it", () => {
+    expect(validateCapabilityConfig({ callbackLine: CALLBACK }, appointments, "biz-1").callbackLine).toBeUndefined();
   });
 });

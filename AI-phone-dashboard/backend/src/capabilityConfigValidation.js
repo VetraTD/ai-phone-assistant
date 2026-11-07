@@ -14,6 +14,8 @@
  */
 
 const MAX_NOTES = 2000;
+/** Matches the engine loader's bound on callbackLine. */
+const MAX_CALLBACK_LINE = 160;
 /** A key becomes part of a tool parameter name, so it has to survive being one. */
 const KEY_RE = /^[a-z][a-z0-9_]*$/i;
 
@@ -44,6 +46,23 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
       errors.push(`Notes must be ${MAX_NOTES} characters or fewer`);
     } else {
       config.notes = raw.notes;
+    }
+  }
+
+  // Who calls back and how soon. Cleaned exactly as the engine loader cleans it
+  // (lib/capabilities/configSchema.js cleanCallbackLine): no double quotes, no
+  // line breaks, whitespace collapsed. So the saved value is the value that is
+  // spoken. Over the limit is refused, not cut, so the operator sees it.
+  if (raw.callbackLine !== undefined && schema.callbackLine) {
+    if (typeof raw.callbackLine !== "string") {
+      errors.push("What the assistant promises must be text");
+    } else {
+      const line = raw.callbackLine.replace(/"/g, "").replace(/\s+/g, " ").trim();
+      if (line.length > MAX_CALLBACK_LINE) {
+        errors.push(`What the assistant promises must be ${MAX_CALLBACK_LINE} characters or fewer`);
+      } else if (line) {
+        config.callbackLine = line;
+      }
     }
   }
 

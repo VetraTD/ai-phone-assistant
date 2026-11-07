@@ -92,39 +92,88 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
  * misheard callback number, which is the single most damaging failure mode for
  * this capability: the caller believes they will hear back, and never does.
  */
-const MESSAGE_PROTOCOL_SECTION =
+const MESSAGE_PROTOCOL_HEADER =
   `=== MESSAGE PROTOCOL ===\n` +
-  `TAKING A MESSAGE — follow this exactly:\n` +
-  // See the note on BOOKING_CONFIRMATION_GUARDRAIL in capabilities/appointments.js
-  // for why the full-name read-back was removed. This pack is `core: true`, so
-  // it renders on BOOKING calls too — leaving the old sentence here would have
-  // reinstated the instruction on exactly the calls the other edit is for.
-  `1. Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard, so "Thanks — and what's the best number to reach you on?" is all you need. Once they have spelled it you may use their first name — "Thanks, Nithin — ". If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them for it at all — not even their full name — or ask them to spell it. In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call. Do not ask them to spell anything unless you are told to.\n` +
-  // Round A1 (owner, 2026-10-13): the number used to be read back on its own
-  // ("Read it back digit by digit to confirm") and the message saved "only
-  // AFTER the read-back is confirmed" — two waits for a yes. Now one summary,
-  // saved in the same breath; a correction files it again.
-  `2. Number: ask for the best callback number. You will read it back digit by digit in your one summary — not now. If they say "the number I'm calling from", use it.\n` +
-  `3. Reason: ask briefly what the call is regarding.\n` +
-  `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
-  `5. Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time), the number digit by digit, the reason — and record it with record_customer_request in that same response: "So that's Jon, D-O-E, on 2 1 4, 5 5 5, 0 1 2 3 about the invoice — passing that on now." Do not wait for a yes. If they correct anything, record it again with the fix.\n` +
-  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."\n` +
-  `7. Extra questions: if this business's notes list more questions, save as soon as you have name, number and reason, keep going one question at a time, then call record_customer_request once more with the same message and the answers in details. Skip anything they would rather not answer and never ask it again. Set caller_type whenever you can tell.`;
+  `TAKING A MESSAGE — follow this exactly:\n`;
+
+// Each step below is a body with no number. The number is its position in the
+// list the protocol is built from, so a business that sets callbackLine drops
+// the urgency step and every later step renumbers without its text changing.
+
+// See the note on BOOKING_CONFIRMATION_GUARDRAIL in capabilities/appointments.js
+// for why the full-name read-back was removed. This pack is `core: true`, so
+// it renders on BOOKING calls too — leaving the old sentence here would have
+// reinstated the instruction on exactly the calls the other edit is for.
+const STEP_NAME =
+  `Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard, so "Thanks — and what's the best number to reach you on?" is all you need. Once they have spelled it you may use their first name — "Thanks, Nithin — ". If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them for it at all — not even their full name — or ask them to spell it. In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call. Do not ask them to spell anything unless you are told to.`;
+
+// Round A1 (owner, 2026-10-13): the number used to be read back on its own
+// ("Read it back digit by digit to confirm") and the message saved "only
+// AFTER the read-back is confirmed" — two waits for a yes. Now one summary,
+// saved in the same breath; a correction files it again.
+const STEP_NUMBER =
+  `Number: ask for the best callback number. You will read it back digit by digit in your one summary — not now. If they say "the number I'm calling from", use it.`;
+
+const STEP_REASON = `Reason: ask briefly what the call is regarding.`;
+
+const STEP_URGENCY = `Urgency: ask "Is this urgent, or is sometime in the next business day okay?"`;
+
+const STEP_SUMMARISE =
+  `Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time), the number digit by digit, the reason — and record it with record_customer_request in that same response: "So that's Jon, D-O-E, on 2 1 4, 5 5 5, 0 1 2 3 about the invoice — passing that on now." Do not wait for a yes. If they correct anything, record it again with the fix.`;
+
+const STEP_PROMISE_STANDING =
+  `Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."`;
+
+const STEP_EXTRA_QUESTIONS =
+  `Extra questions: if this business's notes list more questions, save as soon as you have name, number and reason, keep going one question at a time, then call record_customer_request once more with the same message and the answers in details. Skip anything they would rather not answer and never ask it again. Set caller_type whenever you can tell.`;
+
+/**
+ * The line the business chose for who calls back and how soon, or null when it
+ * has not set one. The loader has already cleaned it (no double quotes, no
+ * newlines, at most 160 characters).
+ */
+function callbackLineOf(cfg) {
+  return typeof cfg?.callbackLine === "string" && cfg.callbackLine.trim() ? cfg.callbackLine : null;
+}
+
+/**
+ * The message-taking protocol for one business. With no callbackLine this is
+ * the protocol the golden snapshots hold, byte for byte. With one, the urgency
+ * question goes and the promise becomes the business's own line.
+ * @param {object} cfg - the messages capability config
+ */
+function messageProtocol(cfg) {
+  const callbackLine = callbackLineOf(cfg);
+  const steps = callbackLine
+    ? [STEP_NAME, STEP_NUMBER, STEP_REASON, STEP_SUMMARISE, `Promise the callback: "${callbackLine}"`, STEP_EXTRA_QUESTIONS]
+    : [STEP_NAME, STEP_NUMBER, STEP_REASON, STEP_URGENCY, STEP_SUMMARISE, STEP_PROMISE_STANDING, STEP_EXTRA_QUESTIONS];
+  return MESSAGE_PROTOCOL_HEADER + steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
+}
 
 /**
  * Step guidance for the two message intents. Callbacks additionally collect a
- * preferred time; everything else is shared.
+ * preferred time; everything else is shared. Follows the same numbering rule
+ * as messageProtocol.
  * @param {"take_message"|"callback_request"} intent
+ * @param {object} cfg - the messages capability config
  */
-function messageGuidance(intent) {
+function messageGuidance(intent, cfg) {
+  const callbackLine = callbackLineOf(cfg);
+  const steps = [
+    `ask for their name`,
+    `ask for the best callback number`,
+    `ask briefly what the call is regarding` +
+      (intent === "callback_request" ? ` and their preferred callback time` : ``),
+  ];
+  if (!callbackLine) steps.push(`ask if it's urgent or if the next business day is fine`);
+  steps.push(
+    `summarise it once — name (a surname they spelled, one letter at a time), the number digit by digit, reason — and call record_customer_request in that same response, without waiting for a yes; if they correct anything, record it again with the fix`
+  );
+  steps.push(callbackLine ? `promise the callback: "${callbackLine}"` : `promise the callback`);
   return (
     `Your task: Follow the message protocol, one question at a time: ` +
-    `(1) ask for their name; (2) ask for the best callback number; ` +
-    `(3) ask briefly what the call is regarding` +
-    (intent === "callback_request" ? ` and their preferred callback time` : ``) +
-    `; (4) ask if it's urgent or if the next business day is fine; ` +
-    `(5) summarise it once — name (a surname they spelled, one letter at a time), the number digit by digit, reason — and call record_customer_request in that same response, without waiting for a yes; if they correct anything, record it again with the fix; ` +
-    `(6) promise the callback.`
+    steps.map((step, i) => `(${i + 1}) ${step}`).join("; ") +
+    `.`
   );
 }
 
@@ -152,6 +201,11 @@ export default {
       label: "Anything specific about how you take messages?",
       placeholder: "e.g. Always ask which department the message is for",
     },
+    callbackLine: {
+      type: "text",
+      label: "What should the assistant promise about getting back to the caller?",
+      placeholder: "e.g. Sam will call you back as soon as he can.",
+    },
   },
 
 
@@ -163,18 +217,19 @@ export default {
   },
 
   prompt(config) {
+    const cfg = capabilityConfig(config, "messages");
     return {
       static: {
         capabilities: ["take messages and schedule callbacks for follow-up"],
-        protocols: [MESSAGE_PROTOCOL_SECTION],
-        guardrails: requirementPromptLines(capabilityConfig(config, "messages")).map((l) => `${l}
+        protocols: [messageProtocol(cfg)],
+        guardrails: requirementPromptLines(cfg).map((l) => `${l}
 `),
-        capabilityNotes: notesPromptLines(capabilityConfig(config, "messages")),
+        capabilityNotes: notesPromptLines(cfg),
       },
       dynamic: {
         stepGuidance: {
-          take_message: messageGuidance("take_message"),
-          callback_request: messageGuidance("callback_request"),
+          take_message: messageGuidance("take_message", cfg),
+          callback_request: messageGuidance("callback_request", cfg),
         },
       },
     };

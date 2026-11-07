@@ -101,6 +101,11 @@
           "type": "longtext",
           "label": "Anything specific about how you take messages?",
           "placeholder": "e.g. Always ask which department the message is for"
+        },
+        "callbackLine": {
+          "type": "text",
+          "label": "What should the assistant promise about getting back to the caller?",
+          "placeholder": "e.g. Sam will call you back as soon as he can."
         }
       }
     },
