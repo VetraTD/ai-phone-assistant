@@ -9,6 +9,7 @@ import * as db from "./db.js";
 import { checkText } from "../lib/dialCost.js";
 import { effectiveTier } from "../lib/compliance.js";
 import { isRealCallerNumber, isOwnNumber } from "../lib/inboundGuards.js";
+import { createGraphMailer, graphMailConfig } from "./graphMail.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
@@ -20,7 +21,20 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
 
-const HAS_EMAIL_CREDS = !!(SMTP_USER && SMTP_PASS);
+// Which way owner email goes. "smtp" (the default, unset or blank) is the
+// nodemailer path below, unchanged. "graph" is Microsoft 365 through the Graph
+// sendMail API (services/graphMail.js), which needs all four MS_GRAPH_*
+// variables and ignores SMTP_* entirely: a half-configured graph mode is email
+// not configured, never a quiet fallback to a different relay. Anything else is
+// announced once, here at boot, and treated as "smtp". The value is not logged.
+const MAIL_TRANSPORT_SETTING = (process.env.MAIL_TRANSPORT || "").trim().toLowerCase();
+const MAIL_TRANSPORT = MAIL_TRANSPORT_SETTING === "graph" ? "graph" : "smtp";
+if (MAIL_TRANSPORT_SETTING && MAIL_TRANSPORT_SETTING !== "smtp" && MAIL_TRANSPORT_SETTING !== "graph") {
+  log.error("mail_transport_invalid", { severity: "warn" });
+}
+const GRAPH_MAIL_CONFIG = MAIL_TRANSPORT === "graph" ? graphMailConfig(process.env) : null;
+
+const HAS_EMAIL_CREDS = MAIL_TRANSPORT === "graph" ? !!GRAPH_MAIL_CONFIG : !!(SMTP_USER && SMTP_PASS);
 // Exported (read-only) so callers can cheaply short-circuit before doing
 // any DB work for an SMS-only feature when Twilio SMS isn't configured at
 // all (e.g. server.js's missed-call text-back — no point looking up the
@@ -45,8 +59,12 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 let mailTransport = null;
 /** @type {ReturnType<typeof twilio> | null} */
 let twilioClient = null;
+/** @type {ReturnType<typeof createGraphMailer> | null} */
+let graphMailer = null;
 
-if (HAS_EMAIL_CREDS) {
+if (GRAPH_MAIL_CONFIG) {
+  graphMailer = createGraphMailer(GRAPH_MAIL_CONFIG);
+} else if (HAS_EMAIL_CREDS) {
   mailTransport = nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
@@ -138,7 +156,8 @@ async function resolveNotificationConfig(businessId) {
 }
 
 /**
- * Send an email via SMTP (e.g. Gmail). Logs errors; never throws.
+ * Send an email via SMTP (e.g. Gmail), or via Microsoft Graph when
+ * MAIL_TRANSPORT=graph (sendEmailGraph below). Logs errors; never throws.
  * `plainOnly` sends NO html part. The default builds html from the text with the
  * text unescaped, which is fine for our own sentences and not for a caller's
  * words; it also logs the relay's error message, which can quote the recipient,
@@ -147,6 +166,7 @@ async function resolveNotificationConfig(businessId) {
  * @returns {Promise<boolean>} true when the relay accepted it
  */
 async function sendEmail({ to, subject, text, html, plainOnly = false }) {
+  if (MAIL_TRANSPORT === "graph") return sendEmailGraph({ to, subject, text, html, plainOnly });
   if (!mailTransport) {
     // A caller reaching here has a business row asking for email. The boot
     // check cannot see that — it only knows the env — so the drop is reported
@@ -173,6 +193,38 @@ async function sendEmail({ to, subject, text, html, plainOnly = false }) {
     captureException(err, { context: "notifications.sendEmail" });
     return false;
   }
+}
+
+/**
+ * sendEmail's Graph half (MAIL_TRANSPORT=graph). Same contract: true when
+ * Microsoft accepted it (HTTP 202), false otherwise, never throws, no retry
+ * (the flush's release-and-retry covers a refusal). `plainOnly` sends a Text
+ * body and no html at all (R9); otherwise the html the SMTP path builds.
+ *
+ * Logs and Sentry carry a closed reason and the HTTP status only, for every
+ * email and not just plainOnly: never the recipient, the subject, the body, the
+ * secret, the token, or Microsoft's error text.
+ */
+async function sendEmailGraph({ to, subject, text, html, plainOnly }) {
+  if (!graphMailer) {
+    log.error("notification_dropped", { channel: "email", reason: "graph_not_configured" });
+    return false;
+  }
+  let result;
+  try {
+    const body = plainOnly
+      ? { contentType: "Text", content: text }
+      : { contentType: "HTML", content: html || text.replace(/\n/g, "<br>\n") };
+    result = await graphMailer.send({ to, subject, ...body });
+  } catch {
+    result = { ok: false, reason: "graph_refused", status: null };
+  }
+  if (result.ok) return true;
+  log.error("notification_email", { reason: result.reason, ...(result.status ? { status: result.status } : {}) });
+  captureException(new Error(result.status ? `${result.reason} ${result.status}` : result.reason), {
+    context: "notifications.sendEmail",
+  });
+  return false;
 }
 
 /**

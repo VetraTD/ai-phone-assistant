@@ -3432,6 +3432,22 @@ const SABOTAGES = [
     replace: "        if (outcome === \"off\") { // SABOTAGE: sent skips complete",
     red: ["tests/ownerNotices.test.js"],
   },
+  {
+    name: "graph-token-not-cached",
+    why: "Ilija inbound Task M: the Graph token is cached until 60 s before expires_in. Sabotaged, the cache is never read and every owner email fetches a token of its own.",
+    file: "services/graphMail.js",
+    find: "    if (cached && Date.now() < cached.expiresAt) return Promise.resolve(cached.token);",
+    replace: "    // SABOTAGE: token cache never read",
+    red: ["tests/notifications.graph.test.js"],
+  },
+  {
+    name: "graph-plain-sends-html",
+    why: "Ilija inbound Task M, R9 on the Graph path: a plainOnly email (the one carrying caller details) goes as Text with no html. Sabotaged, it goes as HTML.",
+    file: "services/notifications.js",
+    find: '      ? { contentType: "Text", content: text }',
+    replace: '      ? { contentType: "HTML", content: text } // SABOTAGE: plainOnly sends HTML',
+    red: ["tests/notifications.graph.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

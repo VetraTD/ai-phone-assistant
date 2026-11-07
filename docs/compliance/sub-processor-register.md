@@ -53,7 +53,7 @@ Everything here is inside the **Google Cloud BAA**, which is what the whole
 | **Google Cloud** | Artifact Registry | container images — no personal data | `us-central1` | Google Cloud BAA |
 | **Google Cloud** | Firebase Hosting | the SPA's static files — no personal data | Google CDN | Google Cloud BAA |
 | **Twilio** | programmable voice + SMS | **the call itself**: caller number, audio in transit, SMS bodies | US | **BAA NOT YET IN PLACE — ledger O5, `wip`** |
-| **Microsoft 365** | outbound email | owner notifications -- caller details (name, number, reason, answers), except healthcare-tier businesses, which stay link-only | US | see "Email carries caller details, except for healthcare businesses" |
+| **The mail relay**: today a **personal Gmail account** (`SMTP_HOST`, smtp.gmail.com); **Microsoft 365** once `MAIL_TRANSPORT=graph` | outbound email | owner notifications -- caller details (name, number, reason, answers), except healthcare-tier businesses, which stay link-only | Gmail: not controlled; Microsoft 365: the tenant's data location | **no BAA or DPA while it is a personal Gmail account** -- see "Email carries caller details, except for healthcare businesses" and its OPEN note |
 
 ### Two rows that need reading rather than scanning
 
@@ -100,7 +100,7 @@ promise somebody has to remember.
 
 ## Email carries caller details, except for healthcare businesses
 
-The mail relay is a sub-processor for caller data. The owner notification carries the caller's name, number, reason for calling and answers to the business's own questions, and all of that passes through the mail relay that `SMTP_HOST` points at (Microsoft 365 in the table above; see the OPEN note below on the credentials).
+The mail relay is a sub-processor for caller data. The owner notification carries the caller's name, number, reason for calling and answers to the business's own questions, and all of that passes through the mail relay. `MAIL_TRANSPORT` decides which relay that is. With `smtp`, the default, it is the relay `SMTP_HOST` names, which today is a personal Gmail account (`smtp.gmail.com`). With `graph` it is Microsoft 365: the Microsoft Graph `sendMail` API, an app-only token, one shared mailbox (`services/graphMail.js`).
 
 Which emails carry those details is decided by `effectiveTier` in `lib/compliance.js`. A business whose effective tier is `hipaa` (its own `compliance_tier`, or a `hipaa` deployment) gets a link-only email with no caller details. Every other business gets the details. No subject line carries a caller's name or number, for any business.
 
@@ -108,11 +108,16 @@ Which emails carry those details is decided by `effectiveTier` in `lib/complianc
 
 Health details would need a signed agreement with the mail provider, and handling as health data, before a clinic could receive them. Until then a healthcare business gets the link only.
 
-> **OPEN:** the SMTP credentials are currently a **personal Gmail account**, so
-> notifications are sent *from* an individual rather than from the business.
-> Ledger item D1-mail. The messages now carry caller details for non-healthcare
-> businesses, so this is a data-handling problem as well as a workforce-offboarding
-> problem now that there are two founders.
+> **OPEN:** owner notifications still go out through a **personal Gmail account**
+> (`smtp`, the default), so they are sent *from* an individual rather than from the
+> business. Ledger item D1-mail. The messages now carry caller details for
+> non-healthcare businesses, so this is a data-handling problem as well as a
+> workforce-offboarding problem now that there are two founders. The Microsoft 365
+> route is built (`MAIL_TRANSPORT=graph`); this note closes when production switches
+> to it at Task 16, after the shared mailbox and the app registration exist and one
+> test email (`scripts/graph-mail-smoke.js`) has arrived. The dashboard's own mailer
+> (`AI-phone-dashboard/backend/src/services/mailer.js`: the contact form and the
+> appointments digest) is not moved by this change and still sends through `SMTP_*`.
 
 ---
 
