@@ -216,12 +216,14 @@ describe("LVX149 — what an English-only tenant is told", () => {
   it("leaves a multilingual tenant on the mirroring rule", () => {
     const p = prefixFor(["en", "es"]);
     expect(p).toMatch(/ALWAYS reply in the language of the caller's most recent message/);
-    expect(p).not.toMatch(/ALWAYS replies in English/);
+    expect(p).not.toMatch(/Reply in English only/);
+    expect(p).not.toMatch(/you misheard an English speaker/);
   });
 
   it("leaves a single non-English tenant alone", () => {
     const p = prefixFor(["es"]);
     expect(p).toMatch(/Speak es by default/);
-    expect(p).not.toMatch(/ALWAYS replies in English/);
+    expect(p).not.toMatch(/Reply in English only/);
+    expect(p).not.toMatch(/you misheard an English speaker/);
   });
 });
