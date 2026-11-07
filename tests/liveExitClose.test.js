@@ -92,7 +92,13 @@ async function bookedCall() {
   // this file, not left as an implication of these setups.
   // -------------------------------------------------------------------------
   await s.assistantTurn("You're all set. Is there anything else I can help you with today?");
-  await s.callerSays("Actually, could you just confirm the time again?");
+  // LVX185 (2026-11-07). This answer was "Actually, could you just confirm the
+  // time again?" -- a question back, and since LVX185 a question back holds
+  // the hang-up for one more turn. Left as a question, every case below would
+  // stop being about the exit and quietly become a test of LVX185, which has
+  // its own block at the bottom of this file. So the caller answers with
+  // something that is neither a question nor a close.
+  await s.callerSays("Great, thanks for sorting that.");
   return s;
 }
 
@@ -480,5 +486,54 @@ describe("asked on the previous turn, and never answered", () => {
 
     expect(counters().live_exit_arm_checked).toBe(1);
     expect(counters().live_exit_held_unanswered_ask).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX185 AT THE SIGN-OFF DOOR. A farewell spoken with no end_call arms the exit
+// straight from auditTurn (LVX146's door), so the end_call gate cannot see it.
+// A caller whose last words were a question back has not said "no, nothing
+// else", and the farewell must not close the line on them. Caller lines are the
+// brief's examples or invented.
+// ---------------------------------------------------------------------------
+const SIGN_OFF = "Sorry about that. Thanks for calling Digile Media, and have a wonderful day.";
+
+describe("LVX185: a caller's question back at the sign-off door", () => {
+  it("a sign-off after a caller question does not arm the exit", async () => {
+    const s = await bookedCall();
+    await s.assistantTurn("Of course. Is there anything else I can help you with today?");
+    await s.callerSays("Did you just say goodbye?");
+    await s.assistantTurn(SIGN_OFF);
+
+    expect(counters().live_goodbye_exit_held_caller_question).toBe(1);
+    expect(counters().live_goodbye_armed_exit || 0).toBe(0);
+    expect(counters().live_exit_arm_checked || 0).toBe(0);
+    expect(s.ws.readyState).not.toBe(3);
+  });
+
+  it("after two holds the sign-off arms the exit", async () => {
+    const s = await bookedCall();
+    await s.assistantTurn("Of course. Is there anything else I can help you with today?");
+    await s.callerSays("Did you just say goodbye?");
+    await s.assistantTurn(SIGN_OFF);
+    await s.callerSays("Hold on a second.");
+    await s.assistantTurn(SIGN_OFF);
+    expect(counters().live_goodbye_exit_held_caller_question).toBe(2);
+    expect(counters().live_goodbye_armed_exit || 0).toBe(0);
+
+    await s.callerSays("Wait, are you hanging up?");
+    await s.assistantTurn(SIGN_OFF);
+    expect(counters().live_goodbye_exit_held_caller_question).toBe(2);
+    expect(counters().live_goodbye_armed_exit).toBe(1);
+  });
+
+  it("a clear no still arms it", async () => {
+    const s = await bookedCall();
+    await s.assistantTurn("Of course. Is there anything else I can help you with today?");
+    await s.callerSays("No, that's all, thanks.");
+    await s.assistantTurn(SIGN_OFF);
+
+    expect(counters().live_goodbye_exit_held_caller_question || 0).toBe(0);
+    expect(counters().live_goodbye_armed_exit).toBe(1);
   });
 });

@@ -36,6 +36,8 @@ import {
   withdrawsAgreement,
   agreesAfterReadBack,
   callerClosesCall,
+  callerLeftQuestionOpen,
+  MAX_CALLER_QUESTION_HOLDS,
   textFingerprint,
   asksMoreThanOneThing,
   callerObjects,
@@ -439,7 +441,7 @@ const CAPABILITY_DEPS = {
  *   stateEffects: {
  *     intentArgs?: object|null,
  *     endCallArgs?: object|null,
- *     endCallRefusal?: "hesitation"|"generic"|"no_ask"|null,
+ *     endCallRefusal?: "hesitation"|"generic"|"no_ask"|"caller_question"|null,
  *     endCallNoAskRefusal?: boolean,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
@@ -792,6 +794,75 @@ export async function executeToolCall(fc, ctx) {
         // The two diverging is how a second hang-up attempt on a call that was
         // never asked becomes visible at all.
         if (!askedAnythingElse) bumpCounter("end_call_would_refuse_no_ask");
+      }
+      // -----------------------------------------------------------------
+      // LVX185. A QUESTION BACK IS NOT "NO, NOTHING ELSE".
+      //
+      // CA86103cd, 2026-10-22: the no_ask refusal above was spent, the model
+      // asked "Before you go -- is there anything else I can help you with?",
+      // and the caller answered with a question of their own. The model
+      // answered it and called end_call in the same turn. Every gate let it
+      // through: the caller had been asked, and had said something since. The
+      // line dropped 1.6 s later with the caller still speaking.
+      //
+      // ADDITIVE, like LVX132: it only converts an otherwise-ALLOWED hang-up
+      // into a refusal. Where the no_ask refusal below will fire anyway (never
+      // asked, refusal not yet spent) this steps aside, so that branch keeps
+      // its counter's meaning. Its own block rather than a conjunct, so the
+      // "hangup-without-asking" anchor below stays byte-identical.
+      //
+      // INERT WITHOUT ITS WIRE (shared-gate-needs-the-latch-wire). The count
+      // of holds lives on the Live front-end, which spends it from both doors
+      // (this refusal and the sign-off exit held for a question). The cascade
+      // passes no count, so nothing here runs and end_call_question_check_ran
+      // stays 0 there -- a driver that kept no count would hold every hang-up.
+      //
+      // Excluded, as callerClosedCall is: the caller's answer to a READ-BACK
+      // ("That's the one?" confirms it), and a turn where an action completed
+      // (the question was the request the action just answered).
+      // -----------------------------------------------------------------
+      if (
+        typeof ctx?.callerQuestionHolds === "number" &&
+        allowedByExistingGates &&
+        (askedAnythingElse || noAskRefusalSpent) &&
+        !skipOnOutbound("askBeforeHangup", Boolean(ctx?.outboundCall))
+      ) {
+        // The positive twin: bumped on every hang-up this check judged.
+        bumpCounter("end_call_question_check_ran");
+        if (
+          ctx.callerQuestionHolds < MAX_CALLER_QUESTION_HOLDS &&
+          callerLeftQuestionOpen(lastCallerText) &&
+          ctx?.completedActionThisTurn !== true &&
+          !closeAnswersReadBack
+        ) {
+          bumpCounter("end_call_refused_caller_question");
+          return {
+            functionResponse: {
+              id: fc.id,
+              name: fc.name,
+              response: {
+                success: false,
+                message:
+                  "[not caller speech] NOT A FAILURE, the call is still open. The caller just asked you " +
+                  'something. Answer it in one short sentence if you have not, then ask: "Is there ' +
+                  'anything else I can help you with?" Then stop and wait. Do not say goodbye.',
+              },
+            },
+            stateEffects: {
+              // Reaches Live as endCallRefusedThisTurn (the farewell this
+              // refusal causes does not arm the exit) and as the per-call
+              // summary's end_call_refusals.caller_question. Spends a hold
+              // there, not LVX132's no_ask one-shot.
+              endCallRefusal: "caller_question",
+              toolResult: {
+                name: fc.name,
+                success: false,
+                message: "Is there anything else I can help you with?",
+                callerSafe: true,
+              },
+            },
+          };
+        }
       }
       if (allowedByExistingGates && !askedAnythingElse && !noAskRefusalSpent) {
         // S3-1 (spec §19, S3-D1, D7). Ava placed this call, so there is no

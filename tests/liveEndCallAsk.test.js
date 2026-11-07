@@ -25,6 +25,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive, counters } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { executeToolCall } from "../services/tools.js";
 
 const OPEN = { open: "09:00", close: "18:00", closed: false };
 const CONFIG = {
@@ -294,6 +295,231 @@ describe("a close that is really the answer to a read-back (review I4)", () => {
     await s.assistantTurn("You're all booked. Thank you for calling Brightwork, and have a great day.");
     expect(counters().live_goodbye_exit_held_no_ask).toBe(1);
     expect(counters().live_goodbye_exit_caller_closed || 0).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX185. A QUESTION BACK IS NOT "NO, NOTHING ELSE".
+//
+// CA86103cd, 2026-10-22: end_call refused once (no_ask), the model asked
+// "Before you go -- is there anything else I can help you with?", and the
+// caller answered with a question. The model answered it and called end_call
+// in the same turn; the no_ask refusal was spent and the caller HAD said
+// something since the ask, so every gate let it through, and the line dropped
+// while the caller was still mid-confusion.
+//
+// The caller lines here are the brief's examples or invented -- never corpus
+// words.
+// ---------------------------------------------------------------------------
+const QUESTION_BACK = "Wait, what? Wait, hold on. Wait, so this isn't the car insurance company number?";
+const CALLER_QUESTION_REFUSAL =
+  '[not caller speech] NOT A FAILURE, the call is still open. The caller just asked you something. Answer it in one short sentence if you have not, then ask: "Is there anything else I can help you with?" Then stop and wait. Do not say goodbye.';
+const ASK_AGAIN = "Is there anything else I can help you with?";
+
+/** CA86103cd's shape: refused once for no_ask, asked, and the caller asked something back. */
+async function questionedAfterAsk(callSid, said = QUESTION_BACK) {
+  const s = await bookedCall(callSid);
+  const [first] = await s.callTool("end_call", {});
+  expect(first.response.success).toBe(false);
+  expect(counters().end_call_refused_no_ask).toBe(1);
+  await s.assistantTurn("Before you go — is there anything else I can help you with?");
+  await s.callerSays(said);
+  return s;
+}
+
+describe("LVX185: a caller's question back keeps the call open", () => {
+  it("end_call after a caller question is refused with caller_question, even when the no_ask refusal is spent", async () => {
+    const s = await questionedAfterAsk("CA_q_refused");
+    const [res] = await s.callTool("end_call", {});
+
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_caller_question).toBe(1);
+    expect(counters().end_call_question_check_ran).toBe(1);
+    // The no_ask one-shot was the FIRST refusal and is still the only one.
+    expect(counters().end_call_refused_no_ask).toBe(1);
+    await s.settle();
+    expect(s.ws.readyState).toBe(1);
+  });
+
+  it("holds a request to hold on the same way", async () => {
+    const s = await questionedAfterAsk("CA_q_hold", "Hold on a second.");
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_caller_question).toBe(1);
+  });
+
+  it('the refusal asks for "Is there anything else I can help you with?" and no goodbye', async () => {
+    const s = await questionedAfterAsk("CA_q_words");
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.message).toBe(CALLER_QUESTION_REFUSAL);
+
+    // The model signs off anyway, in the turn the refusal belongs to. That
+    // farewell must not arm the exit (LVX96 route A), or the refusal is
+    // reversed inside its own turn.
+    await s.assistantTurn("No, this is Digile Media. Thanks for calling Digile Media, and have a wonderful day.");
+    expect(counters().live_goodbye_suppressed_by_refusal).toBe(1);
+    expect(counters().live_goodbye_armed_exit || 0).toBe(0);
+    expect(counters().live_exit_arm_checked || 0).toBe(0);
+    expect(s.ws.readyState).toBe(1);
+  });
+
+  it("after two holds end_call goes through: a caller asking three questions in a row", async () => {
+    const s = await questionedAfterAsk("CA_q_three");
+    const [r1] = await s.callTool("end_call", {});
+    expect(r1.response.success).toBe(false);
+    await s.assistantTurn(`No, this is Digile Media, a marketing agency. ${ASK_AGAIN}`);
+
+    await s.callerSays("Did you just say goodbye?");
+    const [r2] = await s.callTool("end_call", {});
+    expect(r2.response.success).toBe(false);
+    await s.assistantTurn(`Sorry about that. ${ASK_AGAIN}`);
+
+    // The third question. Two holds are spent; a third would be a caller who
+    // can never be let go (LVX21's trap), so this one goes through.
+    await s.callerSays("Can you say that one more time?");
+    const r3 = await s.callTool("end_call", {});
+    expect(ok(r3)).toBe(true);
+    expect(counters().end_call_refused_caller_question).toBe(2);
+    // The check still ran on the attempt it let through.
+    expect(counters().end_call_question_check_ran).toBe(3);
+  });
+
+  it("the sign-off door and end_call share the one limit of two", async () => {
+    const s = await questionedAfterAsk("CA_q_doors");
+    // Hold 1, at the OTHER door: a farewell spoken without end_call.
+    await s.assistantTurn("No, this is Digile Media. Thanks for calling Digile Media, and have a wonderful day.");
+    expect(counters().live_goodbye_exit_held_caller_question).toBe(1);
+    expect(counters().live_goodbye_armed_exit || 0).toBe(0);
+
+    // Hold 2, at end_call.
+    await s.callerSays("Did you just say goodbye?");
+    const [r2] = await s.callTool("end_call", {});
+    expect(r2.response.success).toBe(false);
+    expect(counters().end_call_refused_caller_question).toBe(1);
+    await s.assistantTurn(`Sorry about that. ${ASK_AGAIN}`);
+
+    // Both holds are spent, whichever door spent them.
+    await s.callerSays("Can you say that one more time?");
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_caller_question).toBe(1);
+  });
+
+  it.each([["No thanks."], ["No, that's all, thanks."], ["Okay, bye."]])("a clear no goes through: %j", async (said) => {
+    const s = await questionedAfterAsk("CA_q_no_" + said.length, said);
+    const res = await s.callTool("end_call", {});
+    expect(ok(res)).toBe(true);
+    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+    // The positive twin: the check ran, and found nothing open.
+    expect(counters().end_call_question_check_ran).toBe(1);
+  });
+
+  it("a caller question on a call nobody asked is still LVX132's refusal, not this one", async () => {
+    // Additive, like LVX132 itself: this gate only turns an otherwise-ALLOWED
+    // hang-up into a refusal. The no_ask refusal already holds this caller, and
+    // it keeps its own counter's meaning.
+    const s = await bookedCall("CA_q_precedence");
+    await s.assistantTurn("You're all booked for Friday at three thirty.");
+    await s.callerSays("Did you just say goodbye?");
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_no_ask).toBe(1);
+    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+  });
+
+  it("the caller's answer to a read-back is not a question back", async () => {
+    // Review I4's exclusion, at this gate too: "That's the one?" in answer to a
+    // read-back confirms it, and the model is free to close.
+    const s = await bookedCall("CA_q_readback");
+    await s.assistantTurn(ASKED);
+    await s.callerSays("No, that's everything.");
+    await s.assistantTurn(READ_BACK);
+    await s.callerSays("That's the one?");
+    const res = await s.callTool("end_call", {});
+    expect(ok(res)).toBe(true);
+    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+  });
+
+  it("carries the refusals and the holds on the call record", async () => {
+    const chunks = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      if (typeof chunk === "string" && chunk.includes('"event":"live_call_summary"')) chunks.push(chunk);
+      return true;
+    });
+    try {
+      const s = await questionedAfterAsk("CA_q_summary");
+      await s.callTool("end_call", {});
+      await s.hangUp();
+    } finally {
+      spy.mockRestore();
+    }
+    const [summary] = chunks
+      .flatMap((c) => c.split("\n"))
+      .filter((l) => l.includes('"event":"live_call_summary"'))
+      .map((l) => JSON.parse(l));
+
+    expect(summary.end_call_refusals.caller_question).toBe(1);
+    expect(summary.end_call_refusals.no_ask).toBe(1);
+    expect(summary.closing.caller_question_holds).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same gate, with the wires the drivers actually pass. services/tools.js is
+// shared and stateless; the per-call count lives on the Live front-end.
+// ---------------------------------------------------------------------------
+describe("LVX185 at the shared gate", () => {
+  const liveCtx = {
+    businessId: "biz-1",
+    config: CONFIG,
+    step: "confirm",
+    callerTurnCount: 4,
+    lastCallerText: "Did you just say goodbye?",
+    askedAnythingElse: true,
+    anythingElseRefusalSpent: true,
+  };
+
+  it("no callerQuestionHolds wire means no gate (the cascade)", async () => {
+    // The ask wire alone, then no wire at all: the cascade passes neither, and
+    // a gate without its count could refuse forever.
+    const withAskWire = await executeToolCall({ id: "q1", name: "end_call", args: {} }, liveCtx);
+    expect(withAskWire.functionResponse.response.success).toBe(true);
+    const cascadeCtx = { ...liveCtx };
+    delete cascadeCtx.askedAnythingElse;
+    delete cascadeCtx.anythingElseRefusalSpent;
+    const cascade = await executeToolCall({ id: "q2", name: "end_call", args: {} }, cascadeCtx);
+    expect(cascade.functionResponse.response.success).toBe(true);
+    // The positive twin stays 0: it did not run, rather than ran and passed.
+    expect(counters().end_call_question_check_ran || 0).toBe(0);
+    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+  });
+
+  it("refuses with the wire, and stops at two", async () => {
+    const held = await executeToolCall({ id: "q3", name: "end_call", args: {} }, { ...liveCtx, callerQuestionHolds: 1 });
+    expect(held.functionResponse.response.success).toBe(false);
+    expect(held.stateEffects.endCallRefusal).toBe("caller_question");
+    // Not LVX132's latch: this refusal must not spend the no_ask one-shot.
+    expect(held.stateEffects.endCallNoAskRefusal).toBeUndefined();
+    expect(held.stateEffects.toolResult).toEqual({
+      name: "end_call",
+      success: false,
+      message: ASK_AGAIN,
+      callerSafe: true,
+    });
+
+    const spent = await executeToolCall({ id: "q4", name: "end_call", args: {} }, { ...liveCtx, callerQuestionHolds: 2 });
+    expect(spent.functionResponse.response.success).toBe(true);
+  });
+
+  it("skipped on outbound", async () => {
+    // S3-1: Ava placed the call, so there is no "anything else" to ask.
+    const { functionResponse, stateEffects } = await executeToolCall(
+      { id: "q5", name: "end_call", args: {} },
+      { ...liveCtx, callerQuestionHolds: 0, outboundCall: { config: {}, contact: {}, campaign: {} } }
+    );
+    expect(functionResponse.response.success).toBe(true);
+    expect(stateEffects.endCallRefusal).toBeUndefined();
+    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+    expect(counters().end_call_question_check_ran || 0).toBe(0);
   });
 });
 

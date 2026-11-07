@@ -251,7 +251,11 @@ describe("LVX96 route A — a refusal outranks the sign-off detector", () => {
     await s.say(REFUSED_TURN);
     expect(c().live_goodbye_armed_exit).toBe(0);
 
-    await s.caller("Yes, actually — could you check tomorrow?");
+    // LVX185 (2026-11-07): this answer was "Yes, actually — could you check
+    // tomorrow?", and a farewell to a caller's question back is now held for a
+    // turn at this door. The case is about route A's per-turn scope, so the
+    // caller answers the ask instead.
+    await s.caller("No, that is everything.");
     await s.say(PLAIN_GOODBYE);
 
     expect(c().live_goodbye_armed_exit).toBe(1);

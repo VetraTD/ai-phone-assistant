@@ -10,7 +10,51 @@ import {
   asksMoreThanOneThing,
   looksNonEnglish,
   isUnusableTranscript,
+  callerLeftQuestionOpen,
+  MAX_CALLER_QUESTION_HOLDS,
 } from "../lib/transcriptUtils.js";
+
+// LVX185. The caller's answer to "anything else?" was a question, and the call
+// ended on them. A question back, or a request to hold on, is not "no, nothing
+// else". Lines here are the brief's examples or invented -- never corpus words.
+describe("callerLeftQuestionOpen() — LVX185", () => {
+  it("is true for a question back or a request to hold on", () => {
+    for (const t of [
+      "Wait, what? Wait, hold on. Wait, so this isn't the car insurance company number?",
+      "Did you just say goodbye?",
+      "Hold on a second.",
+    ]) {
+      expect(callerLeftQuestionOpen(t), t).toBe(true);
+    }
+  });
+
+  it("is false for a clear close, and for silence", () => {
+    for (const t of ["No thanks.", "No, that's all, thanks.", "Okay, bye.", ""]) {
+      expect(callerLeftQuestionOpen(t), t).toBe(false);
+    }
+  });
+
+  it("reads 'wait' only as an interjection, not inside a sentence", () => {
+    expect(callerLeftQuestionOpen("Okay, wait.")).toBe(true);
+    expect(callerLeftQuestionOpen("Hang on, let me find my diary.")).toBe(true);
+    expect(callerLeftQuestionOpen("I can't wait for the appointment.")).toBe(false);
+    expect(callerLeftQuestionOpen("Okay, I'll wait.")).toBe(false);
+  });
+
+  it("lets a close that follows the hold win", () => {
+    expect(callerLeftQuestionOpen("Wait, no, that's all, thanks.")).toBe(false);
+  });
+
+  it("is false for a turn with no readable words, and for rubbish input", () => {
+    expect(callerLeftQuestionOpen("???")).toBe(false);
+    expect(callerLeftQuestionOpen(null)).toBe(false);
+    expect(callerLeftQuestionOpen(42)).toBe(false);
+  });
+
+  it("holds a caller at most twice a call", () => {
+    expect(MAX_CALLER_QUESTION_HOLDS).toBe(2);
+  });
+});
 
 describe("stripFillers()", () => {
   it("removes standalone filler words, keeping the verb 'like'", () => {

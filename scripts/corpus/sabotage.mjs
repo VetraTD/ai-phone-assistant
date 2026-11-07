@@ -3472,6 +3472,14 @@ const SABOTAGES = [
     replace: 'return "911"; // SABOTAGE: always 911',
     red: ["tests/phone.test.js"],
   },
+  {
+    name: "question-hold",
+    why: "Ilija inbound Task 10, LVX185: a caller whose answer to 'anything else?' is a question back, or a request to hold on, keeps the call open for one more turn at both doors (end_call refused with caller_question, sign-off exit held), at most twice a call. Sabotaged, callerLeftQuestionOpen always says no, so both doors close the line on a caller who is still asking -- CA86103cd.",
+    file: "lib/transcriptUtils.js",
+    find: "  return asksBack || HOLD_REQUEST_RE.test(trimmed);",
+    replace: "  return false; // SABOTAGE: a question back reads as nothing else",
+    red: [ASK, EXITCLOSE, "tests/transcriptUtils.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
