@@ -76,7 +76,7 @@ function validateE164Phone(value) {
   if (!normalized) {
     return {
       error:
-        "must be in international format, including the country code — for example +442079460958 or +18176011171",
+        "must be in international format, including the country code — for example +442079460958 or +12025550123",
     };
   }
   return { value: normalized };
