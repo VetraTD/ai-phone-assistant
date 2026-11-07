@@ -640,10 +640,21 @@ const SABOTAGES = [
       "puts the identity section back to saying NOTHING about language for languagesSpoken: [\"en\"] -- length 1, and it is English, so neither existing branch fires. That silence is why CA5b7e359 answered in Spanish and CA58bb3640 in French: live transcription handed the model a foreign-language turn and nothing in the prompt said what the business speaks.",
     file: "services/gemini.js",
     find:
-      "  } else {\n    identity += `\\nThis business operates in English and ALWAYS replies in English.",
+      "  } else {\n    identity += `\\nReply in English only.",
     replace:
-      "  } else if (false) { // SABOTAGE\n    identity += `\\nThis business operates in English and ALWAYS replies in English.",
+      "  } else if (false) { // SABOTAGE\n    identity += `\\nReply in English only.",
     red: [LANG, PROMPTS],
+  },
+  {
+    name: "language-line-restored",
+    why:
+      "puts the old English-only wording back (\"This business operates in English ... Never apologise for the language\"): a sentence about language the model can recite to a caller who was only mis-transcribed. LVX187 replaced it with the plain re-ask; tests/promptSplit.test.js asserts the old phrases are absent and the re-ask present.",
+    file: "services/gemini.js",
+    find:
+      "    identity += `\\nReply in English only. If a caller's words reach you in another language, you misheard an English speaker. Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`;",
+    replace:
+      "    identity += `\\nThis business operates in English and ALWAYS replies in English. Never apologise for the language.`; // SABOTAGE",
+    red: ["tests/promptSplit.test.js"],
   },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that

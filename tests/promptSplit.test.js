@@ -184,6 +184,36 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(enOnly).not.toContain("Speak en by default");
   });
 
+  // LVX187: the English-only identity used to hand the model a sentence about
+  // language to say aloud. It must say nothing about language and give the
+  // plain re-ask. The two multi-language branches must not move a byte.
+  it("LVX187: English-only identity has no language line to recite", () => {
+    const REASK = "Sorry, I didn't catch that, could you say it again?";
+    for (const langs of [undefined, ["en"]]) {
+      const c = { ...config };
+      if (langs === undefined) delete c.languagesSpoken; else c.languagesSpoken = langs;
+      const p = buildStaticSystemPrefix(c, extras);
+      expect(p).not.toContain("operates in English");
+      expect(p).not.toContain("Never apologise for the language");
+      expect(p).toContain(REASK);
+    }
+  });
+
+  it("LVX187: the multi-language and single non-English identity lines are byte-identical", () => {
+    const REASK = "Sorry, I didn't catch that, could you say it again?";
+    const multi = buildStaticSystemPrefix({ ...config, languagesSpoken: ["en", "es"] }, extras);
+    expect(multi).toContain(
+      "\nYou can speak: en, es. ALWAYS reply in the language of the caller's most recent message — if they speak Spanish, reply in Spanish. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime."
+    );
+    expect(multi).not.toContain(REASK);
+
+    const esOnly = buildStaticSystemPrefix({ ...config, languagesSpoken: ["es"] }, extras);
+    expect(esOnly).toContain(
+      "\nSpeak es by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime."
+    );
+    expect(esOnly).not.toContain(REASK);
+  });
+
   // Guard added when the dashboard stopped offering "book for later" to
   // non-appointment businesses: a stored book_later policy must not still
   // instruct the model to call book_appointment when that tool was never

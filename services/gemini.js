@@ -1274,6 +1274,11 @@ export function voiceAndLanguageRules(config, direction) {
   //
   // It names the mis-hearing explicitly, because "reply in English" alone
   // competes with a whole French sentence sitting in the context and loses.
+  //
+  // LVX187. The first wording told the model the business "operates in English"
+  // and "never apologise for the language" -- a sentence about language it could
+  // recite back to a caller. The line now hands it the plain re-ask to say
+  // instead, and says not to mention language at all.
   // ---------------------------------------------------------------------------
   const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
   if (langs.length > 1) {
@@ -1281,7 +1286,7 @@ export function voiceAndLanguageRules(config, direction) {
   } else if (langs.length === 1 && langs[0] !== "en") {
     identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   } else {
-    identity += `\nThis business operates in English and ALWAYS replies in English. If a caller's words reach you as French, Spanish, German or any other language, that is the transcription mis-hearing an English speaker — it is not the caller switching language. Answer in English anyway. Never apologise for the language or offer to continue in another one.`;
+    identity += `\nReply in English only. If a caller's words reach you in another language, you misheard an English speaker. Do not mention language. Say: "Sorry, I didn't catch that, could you say it again?"`;
   }
   return identity;
 }

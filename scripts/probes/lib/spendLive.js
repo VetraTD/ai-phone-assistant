@@ -388,3 +388,51 @@ export function reserveLVX181(probe, worstCaseUsd, state = load()) {
   }
   return { lvx181Spent: spent, lvx181Remaining: LVX181_CAP_USD - spent, ledgerRemaining: CAP_USD - state.spent_usd };
 }
+
+// ---------------------------------------------------------------------------
+// LVX187 (no "this line operates in English"). Authorised by the owner
+// 2026-11-07 for LVX187 ONLY, hard cap $0.50 covering BOTH arms (old and new)
+// together, inside the overall CAP_USD. Same pattern as LVX181: every entry is
+// committed with a `probe` starting "LVX187", and reserveLVX187() refuses
+// anything that would take the LVX187 total past $0.50 OR the ledger past
+// CAP_USD.
+// ---------------------------------------------------------------------------
+export const LVX187_CAP_USD = 0.5;
+export const LVX187_PREFIX = "LVX187";
+
+/** Everything committed under an LVX187 probe label. */
+export function lvx187Spent(state = load()) {
+  return state.entries
+    .filter((e) => typeof e.probe === "string" && e.probe.startsWith(LVX187_PREFIX))
+    .reduce((s, e) => s + (e.usd || 0), 0);
+}
+
+/**
+ * Check before any LVX187 session. Throws BudgetExceeded, like reserveLVX181().
+ * @param {string} probe - must start with "LVX187"
+ * @param {number} worstCaseUsd
+ * @param {object} [state] - the ledger; injectable so the refusal can be tested
+ */
+export function reserveLVX187(probe, worstCaseUsd, state = load()) {
+  if (typeof probe !== "string" || !probe.startsWith(LVX187_PREFIX)) {
+    throw new TypeError(`reserveLVX187(): probe must start with "${LVX187_PREFIX}", got ${JSON.stringify(probe)}`);
+  }
+  if (typeof worstCaseUsd !== "number" || !(worstCaseUsd >= 0)) {
+    throw new TypeError(`reserveLVX187(): worstCaseUsd must be a non-negative number, got ${JSON.stringify(worstCaseUsd)}`);
+  }
+  const projected = state.spent_usd + worstCaseUsd;
+  if (projected > CAP_USD) {
+    throw new BudgetExceeded(
+      `BUDGET: ${probe} would take the ledger to $${projected.toFixed(4)} against the ` +
+      `$${CAP_USD.toFixed(2)} cap (spent $${state.spent_usd.toFixed(4)}). Aborting.`
+    );
+  }
+  const spent = lvx187Spent(state);
+  if (spent + worstCaseUsd > LVX187_CAP_USD) {
+    throw new BudgetExceeded(
+      `BUDGET: ${probe} would take LVX187 spend to $${(spent + worstCaseUsd).toFixed(4)} against the ` +
+      `$${LVX187_CAP_USD.toFixed(2)} LVX187 cap (spent $${spent.toFixed(4)}). Aborting.`
+    );
+  }
+  return { lvx187Spent: spent, lvx187Remaining: LVX187_CAP_USD - spent, ledgerRemaining: CAP_USD - state.spent_usd };
+}
