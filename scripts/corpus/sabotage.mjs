@@ -3392,6 +3392,14 @@ const SABOTAGES = [
     replace: "  if (incoming) return incoming; // SABOTAGE: merge skipped\n  const answers = Array.isArray(stored?.answers) ? stored.answers.map((a) => ({ ...a })) : [];",
     red: ["tests/customerRequestCorrection.test.js"],
   },
+  {
+    name: "email-tier-rule",
+    why: "Ilija inbound: the owner email carries caller details except for a healthcare-tier business. Sabotaged, detailsAllowed is always true and a clinic's email carries the caller's name and number.",
+    file: "services/notifications.js",
+    find: '    detailsAllowed: effectiveTier(business) !== "hipaa",',
+    replace: "    detailsAllowed: true, // SABOTAGE: tier ignored",
+    red: ["tests/notifications.phi.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

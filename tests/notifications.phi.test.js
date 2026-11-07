@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // new field that carries a sentinel fails without anyone remembering to add a
 // case.
 
-const ENV_KEYS = ["NOTIFICATIONS_ENABLED", "SMTP_USER", "SMTP_PASS", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM", "DASHBOARD_URL"];
+const ENV_KEYS = ["NOTIFICATIONS_ENABLED", "SMTP_USER", "SMTP_PASS", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM", "DASHBOARD_URL", "DEPLOYMENT_MODE"];
 const originalEnv = {};
 
 const sendMailMock = vi.fn(async () => ({ messageId: "1" }));
@@ -222,5 +222,69 @@ describe("notifyCustomerRequest says whether the owner was reached", () => {
     sendMailMock.mockRejectedValueOnce(new Error("535 auth"));
     messagesCreateMock.mockRejectedValueOnce(new Error("21610"));
     await expect(n.notifyCustomerRequest(request)).resolves.toBe(false);
+  });
+});
+
+// Ilija inbound, Task 5: the owner email for a call's saved messages carries the
+// caller's details -- except for a healthcare business, which gets the link-only
+// email. effectiveTier decides, from the business row or from the deployment.
+describe("notifyCallRequests and the healthcare tier", () => {
+  const SENTINELS = {
+    name: "Sentinel Pat Name",
+    callback: "+15557770001",
+    callerNumber: "+15557770002",
+    message: "sentinel message about my heart",
+    preferred: "sentinel Friday",
+    answerLabel: "SentinelLabel",
+    answer: "sentinel answer value",
+  };
+  const rows = [
+    {
+      id: "r1",
+      call_id: "c1",
+      request_type: "message",
+      caller_name: SENTINELS.name,
+      callback_number: SENTINELS.callback,
+      message: SENTINELS.message,
+      preferred_time: SENTINELS.preferred,
+      caller_number: SENTINELS.callerNumber,
+      created_at: "2026-11-09T14:32:00Z",
+      details: { callerType: "existing_customer", answers: [{ label: SENTINELS.answerLabel, answer: SENTINELS.answer }] },
+    },
+  ];
+
+  afterEach(() => {
+    delete BUSINESS.compliance_tier;
+  });
+
+  it("a hipaa-tier business gets one link-only email with no sentinel anywhere", async () => {
+    BUSINESS.compliance_tier = "hipaa";
+    const n = await loadNotifications();
+    await expect(n.notifyCallRequests({ businessId: "biz-1", rows })).resolves.toBe("sent");
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    expect(sendMailMock.mock.calls[0][0].subject).toBe("New customer request — Excel Cardiac Care");
+    const out = sentText();
+    for (const value of Object.values(SENTINELS)) expect(out).not.toContain(value);
+    expect(out).toContain("https://dashboard.example/app");
+  });
+
+  it("the same under DEPLOYMENT_MODE=hipaa, whatever the row says", async () => {
+    const n = await loadNotifications({ DEPLOYMENT_MODE: "hipaa" });
+    await n.notifyCallRequests({ businessId: "biz-1", rows });
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    expect(sendMailMock.mock.calls[0][0].subject).toBe("New customer request — Excel Cardiac Care");
+    const out = sentText();
+    for (const value of Object.values(SENTINELS)) expect(out).not.toContain(value);
+  });
+
+  it("a standard business's body carries them, and no subject does", async () => {
+    const n = await loadNotifications();
+    await n.notifyCallRequests({ businessId: "biz-1", rows });
+    const mail = sendMailMock.mock.calls[0][0];
+    for (const value of [SENTINELS.name, SENTINELS.callback, SENTINELS.message, SENTINELS.preferred, SENTINELS.answer]) {
+      expect(mail.text).toContain(value);
+      expect(mail.subject).not.toContain(value);
+    }
+    expect(messagesCreateMock.mock.calls[0][0].body).not.toContain(SENTINELS.name);
   });
 });

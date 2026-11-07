@@ -164,4 +164,13 @@ describeDb("owner notifications read the business as vetra_app (E1)", () => {
       spy.mockRestore();
     }
   });
+
+  // The tier reaches the decision through the REAL read: a mocked business row
+  // cannot show that fetchBusinessById returns compliance_tier at all.
+  it("detailsAllowed follows compliance_tier through the real business read", async () => {
+    await admin.query(`UPDATE businesses SET compliance_tier = 'hipaa' WHERE id = $1`, [TENANT]);
+    expect((await notifications.loadBusinessNotificationConfig(TENANT)).detailsAllowed).toBe(false);
+    await admin.query(`UPDATE businesses SET compliance_tier = 'standard' WHERE id = $1`, [TENANT]);
+    expect((await notifications.loadBusinessNotificationConfig(TENANT)).detailsAllowed).toBe(true);
+  });
 });

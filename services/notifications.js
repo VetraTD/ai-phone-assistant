@@ -7,6 +7,8 @@ import { normalizePhoneNumber } from "../lib/phone.js";
 import { smsTemplateProblem } from "../lib/smsConsent.js";
 import * as db from "./db.js";
 import { checkText } from "../lib/dialCost.js";
+import { effectiveTier } from "../lib/compliance.js";
+import { isRealCallerNumber, isOwnNumber } from "../lib/inboundGuards.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
@@ -82,7 +84,20 @@ function checkRateLimit(businessId) {
  * @returns {Promise<{ email: string | null, phone: string | null, businessName: string } | null>}
  */
 export async function loadBusinessNotificationConfig(businessId) {
-  if (!db.isEnabled() || !businessId) return null;
+  return (await resolveNotificationConfig(businessId)).config;
+}
+
+/**
+ * The same read, with the reason a config is absent kept apart: "unreadable"
+ * (no database, no row, a failed read) is a fault the caller must hear about,
+ * "off" (notifications disabled, nowhere to send) is a business's own choice.
+ * loadBusinessNotificationConfig collapses both to null for its older callers.
+ *
+ * @param {string} businessId
+ * @returns {Promise<{ state: "ok" | "off" | "unreadable", config: object | null, business: object | null }>}
+ */
+async function resolveNotificationConfig(businessId) {
+  if (!db.isEnabled() || !businessId) return { state: "unreadable", config: null, business: null };
   // Scoped, in its own unit of work (S6 finding E1). Every caller fires a
   // notify* AFTER its own withTenantSafe has resolved, so there is no scope to
   // inherit; unscoped, `businesses` (FORCE row-level security, read as the
@@ -94,20 +109,23 @@ export async function loadBusinessNotificationConfig(businessId) {
   if (!business) {
     // The silence is what hid E1. No address and no subject: the id is enough.
     log.error("notification_business_unreadable", { businessId, severity: "warn" });
-    return null;
+    return { state: "unreadable", config: null, business: null };
   }
-  if (business.notifications_enabled === false) return null;
+  if (business.notifications_enabled === false) return { state: "off", config: null, business };
   const email = typeof business.notification_email === "string" && business.notification_email.trim()
     ? business.notification_email.trim()
     : null;
   const phone = typeof business.notification_phone === "string" && business.notification_phone.trim()
     ? business.notification_phone.trim()
     : null;
-  if (!email && !phone) return null;
-  return {
+  if (!email && !phone) return { state: "off", config: null, business };
+  const config = {
     email,
     phone,
     businessName: business.name || "Business",
+    // May this business's owner email carry a caller's details? Decided by the
+    // compliance tier (the row's own, or the deployment's), nowhere else.
+    detailsAllowed: effectiveTier(business) !== "hipaa",
     // Kept on the config even though A1.3's link-only bodies no longer print a
     // time. It was added to fix a real defect — the formatters used bare
     // toLocaleString(), which renders in the Node process's zone, so a UK clinic
@@ -116,14 +134,19 @@ export async function loadBusinessNotificationConfig(businessId) {
     // needs this, and rediscovering that lesson is more expensive than a field.
     timezone: business.timezone || null,
   };
+  return { state: "ok", config, business };
 }
 
 /**
  * Send an email via SMTP (e.g. Gmail). Logs errors; never throws.
- * @param {{ to: string, subject: string, text: string, html?: string }} opts
+ * `plainOnly` sends NO html part. The default builds html from the text with the
+ * text unescaped, which is fine for our own sentences and not for a caller's
+ * words; it also logs the relay's error message, which can quote the recipient,
+ * so plainOnly logs a closed reason instead.
+ * @param {{ to: string, subject: string, text: string, html?: string, plainOnly?: boolean }} opts
  * @returns {Promise<boolean>} true when the relay accepted it
  */
-async function sendEmail({ to, subject, text, html }) {
+async function sendEmail({ to, subject, text, html, plainOnly = false }) {
   if (!mailTransport) {
     // A caller reaching here has a business row asking for email. The boot
     // check cannot see that — it only knows the env — so the drop is reported
@@ -133,15 +156,16 @@ async function sendEmail({ to, subject, text, html }) {
     return false;
   }
   try {
-    await mailTransport.sendMail({
-      from: SMTP_FROM_EMAIL,
-      to,
-      subject,
-      text,
-      html: html || text.replace(/\n/g, "<br>\n"),
-    });
+    const message = { from: SMTP_FROM_EMAIL, to, subject, text };
+    if (!plainOnly) message.html = html || text.replace(/\n/g, "<br>\n");
+    await mailTransport.sendMail(message);
     return true;
   } catch (err) {
+    if (plainOnly) {
+      log.error("notification_email", { reason: "smtp_refused" });
+      captureException(new Error("smtp_refused"), { context: "notifications.sendEmail" });
+      return false;
+    }
     log.error("notification_email", { message: err?.message });
     // No `to` and no `subject`: a recipient address and a subject line that
     // named a patient and an appointment time. lib/sentry.js would drop them
@@ -216,6 +240,16 @@ async function sendSms({ to, body }) {
 //   - "an appointment was booked" identifies no individual;
 //   - a Twilio call status ("no-answer", "busy") is carrier metadata.
 // Anything finer-grained than that stays in the dashboard, behind auth.
+//
+// ONE EMAIL IS NOT LINK-ONLY. notifyCallRequests (Ilija inbound) sends the
+// owner the call's saved messages WITH their details -- name, number, reason,
+// the answers to the business's own questions -- because an owner who has to log
+// in to learn who to ring back does not ring back. That is allowed for every
+// business except a healthcare-tier one (effectiveTier(business) === "hipaa",
+// from the row or from DEPLOYMENT_MODE), which still gets the link-only email
+// below. The mail relay is a sub-processor for that data: see
+// docs/compliance/sub-processor-register.md. tests/notifications.phi.test.js
+// holds the line, and no subject carries a name or number for anyone.
 
 // No default. A hardcoded fallback URL is how a notification quietly starts
 // pointing somewhere wrong; if it is not configured, the message says to open
@@ -223,11 +257,15 @@ async function sendSms({ to, body }) {
 // announces the absence at boot.
 const DASHBOARD_URL = process.env.DASHBOARD_URL || null;
 
-function ownerEmailBody(businessName, sentence) {
-  const where = DASHBOARD_URL
+function dashboardLine() {
+  return DASHBOARD_URL
     ? `Open your Vetra dashboard for the details:
 ${DASHBOARD_URL}`
     : "Open your Vetra dashboard for the details.";
+}
+
+function ownerEmailBody(businessName, sentence) {
+  const where = dashboardLine();
   return (
     `${businessName}
 
@@ -244,6 +282,84 @@ ${where}
 function ownerSmsBody(businessName, sentence) {
   const where = DASHBOARD_URL ? ` Details: ${DASHBOARD_URL}` : " Details in your Vetra dashboard.";
   return `Vetra — ${businessName}: ${sentence}${where}`;
+}
+
+// ---------------------------------------------------------------------------
+// The email for a call's saved messages
+// ---------------------------------------------------------------------------
+
+const CALLER_TYPE_LABELS = {
+  new_enquiry: "New enquiry",
+  existing_customer: "Existing customer message",
+  personal: "Personal message",
+  supplier: "Supplier message",
+  sales_pitch: "Sales call",
+};
+
+/** Every caller-supplied field passes through here: whitespace (newlines and
+ * carriage returns included) collapses to single spaces, so a caller's words
+ * cannot start a line of their own and forge a "Number:" the owner would trust. */
+function oneLine(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function callTimeText(createdAt, timezone) {
+  const when = new Date(createdAt);
+  if (Number.isNaN(when.getTime())) return "not recorded";
+  const options = { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short" };
+  try {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone: timezone || "UTC" }).format(when);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", { ...options, timeZone: "UTC" }).format(when);
+  }
+}
+
+function rowNumber(row) {
+  const callback = oneLine(row.callback_number);
+  if (callback) return callback;
+  return isRealCallerNumber(row.caller_number) ? row.caller_number : "not given";
+}
+
+function rowLines(row, timezone) {
+  const label = CALLER_TYPE_LABELS[row.details?.callerType];
+  const lines = [];
+  if (label) lines.push(`Type: ${label}`);
+  lines.push(`Name: ${oneLine(row.caller_name) || "not given"}`);
+  lines.push(`Number: ${rowNumber(row)}`);
+  lines.push(`Reason: ${oneLine(row.message) || "not given"}`);
+  for (const entry of Array.isArray(row.details?.answers) ? row.details.answers : []) {
+    const question = oneLine(entry?.label);
+    const answer = oneLine(entry?.answer);
+    if (question || answer) lines.push(`${question}: ${answer || "not given"}`);
+  }
+  const preferred = oneLine(row.preferred_time);
+  if (preferred) lines.push(`Preferred time: ${preferred}`);
+  lines.push(`Call time: ${callTimeText(row.created_at, timezone)}`);
+  return lines.join("\n");
+}
+
+function callRequestsSubject(businessName, first) {
+  const known = CALLER_TYPE_LABELS[first?.details?.callerType];
+  const label = known || (!first?.details?.callerType && first?.request_type === "quote" ? "New quote request" : "New message");
+  return `${label} — ${businessName}`;
+}
+
+/**
+ * The owner email for the messages one call saved. Plain text. The subject
+ * names the KIND of message and the business, never a caller's name or number.
+ *
+ * @param {{ businessName: string, timezone?: string|null, rows: object[] }} opts
+ * @returns {{ subject: string, text: string }}
+ */
+export function renderCallRequestsEmail({ businessName, timezone = null, rows }) {
+  const name = oneLine(businessName) || "Business";
+  const list = Array.isArray(rows) ? rows : [];
+  const text =
+    `${name}\n\n` +
+    list.map((r) => rowLines(r, timezone)).join("\n\n") +
+    "\n\nDetails were taken by phone, so spellings may be off.\n\n" +
+    dashboardLine();
+  return { subject: callRequestsSubject(name, list[0]), text };
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +461,82 @@ export async function notifyCustomerRequest({ businessId, customerRequest }) {
     log.error("notify_customer_request", { message: err?.message });
     captureException(err, { businessId });
     return false;
+  }
+}
+
+const CALL_REQUESTS_SEND_LIMIT_MS = 10_000;
+
+/**
+ * Tell the owner about the messages one call saved.
+ *
+ * Resolves "sent" (the owner was reached), "off" (nothing to do: notifications
+ * disabled, no rows, or nowhere to send) or "failed" (a fault the caller should
+ * retry). Never throws. The email goes first; the link-only text goes only after
+ * the email was accepted, or when there is no address, so a retry after a failed
+ * email cannot text twice. A healthcare-tier business gets the link-only email
+ * instead of the details.
+ *
+ * Logs carry closed reasons only: never the recipient, subject or caller words.
+ *
+ * @param {{ businessId: string, rows: object[] }} opts
+ * @returns {Promise<"sent" | "off" | "failed">}
+ */
+export async function notifyCallRequests({ businessId, rows }) {
+  if (!NOTIFICATIONS_ENABLED || !Array.isArray(rows) || rows.length === 0) return "off";
+  let timer = null;
+  try {
+    const found = await resolveNotificationConfig(businessId);
+    if (found.state === "unreadable") return "failed";
+    if (found.state === "off") return "off";
+    const { config, business } = found;
+    if (!config.email && !HAS_SMS_CREDS) return "off";
+    if (!checkRateLimit(businessId)) {
+      log.error("notify_call_requests", { reason: "rate_limited", businessId, severity: "warn" });
+      return "failed";
+    }
+
+    let email = null;
+    if (config.email) {
+      if (config.detailsAllowed) {
+        // The business's own number is not the caller's.
+        const shown = rows.map((r) => (isOwnNumber(business, r.caller_number) ? { ...r, caller_number: "" } : r));
+        email = renderCallRequestsEmail({ businessName: config.businessName, timezone: config.timezone, rows: shown });
+      } else {
+        email = {
+          subject: `New customer request — ${config.businessName}`,
+          text: ownerEmailBody(config.businessName, "A caller left a message or a callback request."),
+        };
+      }
+    }
+
+    let timedOut = false;
+    const send = (async () => {
+      if (email && !(await sendEmail({ to: config.email, ...email, plainOnly: true }))) return "failed";
+      if (config.phone && !timedOut) {
+        const handed = await sendSms({
+          to: config.phone,
+          body: ownerSmsBody(config.businessName, "A caller left a message or a callback request."),
+        });
+        // With an address, the email already reached the owner; the text is extra.
+        if (!email && !handed) return "failed";
+      }
+      return email || config.phone ? "sent" : "off";
+    })();
+    send.catch(() => {});
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        log.error("notify_call_requests", { reason: "timeout", businessId, severity: "warn" });
+        resolve("failed");
+      }, CALL_REQUESTS_SEND_LIMIT_MS);
+    });
+    return await Promise.race([send, deadline]);
+  } catch (err) {
+    log.error("notify_call_requests", { reason: "error", businessId });
+    captureException(err, { businessId });
+    return "failed";
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

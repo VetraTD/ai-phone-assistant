@@ -53,7 +53,7 @@ Everything here is inside the **Google Cloud BAA**, which is what the whole
 | **Google Cloud** | Artifact Registry | container images — no personal data | `us-central1` | Google Cloud BAA |
 | **Google Cloud** | Firebase Hosting | the SPA's static files — no personal data | Google CDN | Google Cloud BAA |
 | **Twilio** | programmable voice + SMS | **the call itself**: caller number, audio in transit, SMS bodies | US | **BAA NOT YET IN PLACE — ledger O5, `wip`** |
-| **Microsoft 365** | outbound email | owner notifications — **link-only, no PHI by design** | US | see "Email is deliberately out of scope" |
+| **Microsoft 365** | outbound email | owner notifications -- caller details (name, number, reason, answers), except healthcare-tier businesses, which stay link-only | US | see "Email carries caller details, except for healthcare businesses" |
 
 ### Two rows that need reading rather than scanning
 
@@ -98,26 +98,21 @@ promise somebody has to remember.
 
 ---
 
-## Email is deliberately out of scope, and that is a design decision
+## Email carries caller details, except for healthcare businesses
 
-`services/notifications.js` carries **no caller or patient information** — not in
-the body, not in the subject. A notification says which business and what *kind*
-of thing happened, and links to the dashboard. The details stay behind
-authentication.
+The mail relay is a sub-processor for caller data. The owner notification carries the caller's name, number, reason for calling and answers to the business's own questions, and all of that passes through the mail relay that `SMTP_HOST` points at (Microsoft 365 in the table above; see the OPEN note below on the credentials).
 
-That is why the mail relay is not listed as a PHI sub-processor. The alternative
-was negotiating BAAs down a delivery path whose entire job is to say "something
-happened, go look", and removing the payload is cheaper and stronger.
+Which emails carry those details is decided by `effectiveTier` in `lib/compliance.js`. A business whose effective tier is `hipaa` (its own `compliance_tier`, or a `hipaa` deployment) gets a link-only email with no caller details. Every other business gets the details. No subject line carries a caller's name or number, for any business.
 
-**This is load-bearing.** The moment anything patient-identifying is added to a
-notification, the relay becomes a sub-processor and needs a BAA. `tests/
-notifications.phi.test.js` is what keeps it true.
+`tests/notifications.phi.test.js` enforces this: no caller detail may appear in a healthcare-tier email, and none may appear in any subject line.
 
-> **OPEN, and it is an operational problem rather than a compliance one:** the
-> SMTP credentials are currently a **personal Gmail account**, so notifications
-> are sent *from* an individual rather than from the business. Ledger item
-> D1-mail. It is not a PHI exposure — the messages carry none — but it is a
-> workforce-offboarding problem now that there are two founders.
+Health details would need a signed agreement with the mail provider, and handling as health data, before a clinic could receive them. Until then a healthcare business gets the link only.
+
+> **OPEN:** the SMTP credentials are currently a **personal Gmail account**, so
+> notifications are sent *from* an individual rather than from the business.
+> Ledger item D1-mail. The messages now carry caller details for non-healthcare
+> businesses, so this is a data-handling problem as well as a workforce-offboarding
+> problem now that there are two founders.
 
 ---
 
