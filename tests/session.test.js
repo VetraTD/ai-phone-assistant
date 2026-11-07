@@ -5809,3 +5809,76 @@ describe("session.js -- a recognised callback carries the call sid to the tool c
     expect(extras.callbackOutreach.remainingQuestions.map((q) => q.key)).toEqual(["team_size"]);
   });
 });
+
+// Ilija inbound, Task 8: the business's own number is never the caller. The
+// webhook hands the stream an EMPTY callerPhone for such a call
+// (tests/inboundGuardRoutesCascade.test.js); this is the cascade's own start
+// handler and the REAL messages / quotes packs behind it. The Live half is
+// tests/ownNumberCallerLive.test.js.
+describe("session.js -- a call whose callerPhone parameter is empty (own number)", () => {
+  async function ownNumberCall(effect) {
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "Passing that on now." },
+        { type: "done", reply: { text: "Passing that on now.", capabilityEffects: [effect], toolResults: [{ name: "x", success: true }] } },
+      ]);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid(), { callerPhone: "" });
+    await flush();
+    H.turnManagerInstances[0].opts.onTurnEnd("please take a message.");
+    await vi.waitFor(() => expect(db.createCustomerRequest).toHaveBeenCalled());
+    return db.createCustomerRequest.mock.calls[0][0];
+  }
+
+  it("R29: the call row is created with an empty caller number", async () => {
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid(), { callerPhone: "" });
+    await flush();
+    await vi.waitFor(() => expect(db.createCall).toHaveBeenCalled());
+    expect(db.createCall.mock.calls[0][2]).toBe("");
+  });
+
+  it("R30: a message with no spoken callback number saves callback_number null", async () => {
+    const row = await ownNumberCall({
+      capability: "messages",
+      type: "recorded",
+      data: { request_type: "message", caller_name: "Sam", message: "about the invoice" },
+    });
+    expect(row.requestType).toBe("message");
+    expect(row.callbackNumber).toBeNull();
+  });
+
+  it("R30: a quote request with no spoken callback number saves callback_number null", async () => {
+    const row = await ownNumberCall({
+      capability: "quotes",
+      type: "requested",
+      data: { service_description: "replace a water heater", caller_name: "Sam" },
+    });
+    expect(row.requestType).toBe("quote");
+    expect(row.callbackNumber).toBeNull();
+  });
+
+  it("control: a real caller number still fills the callback fallback", async () => {
+    H.llmFactory = () =>
+      makeGen([
+        { type: "delta", text: "Passing that on now." },
+        {
+          type: "done",
+          reply: {
+            text: "Passing that on now.",
+            capabilityEffects: [{ capability: "messages", type: "recorded", data: { request_type: "message", caller_name: "Sam", message: "hi" } }],
+            toolResults: [{ name: "x", success: true }],
+          },
+        },
+      ]);
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    await startCall(ws, newSid());
+    await flush();
+    H.turnManagerInstances[0].opts.onTurnEnd("please take a message.");
+    await vi.waitFor(() => expect(db.createCustomerRequest).toHaveBeenCalled());
+    expect(db.createCustomerRequest.mock.calls[0][0].callbackNumber).toBe("+15559999999");
+  });
+});

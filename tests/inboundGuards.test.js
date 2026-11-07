@@ -6,6 +6,7 @@ import {
   inboundGuardTwiml,
   isRealCallerNumber,
   isOwnNumber,
+  callerIdentityNumber,
   REPEAT_CALLS_ALERT_AT,
   INBOUND_GUARD_TIMEOUT_MS,
 } from "../lib/inboundGuards.js";
@@ -252,5 +253,30 @@ describe("inboundGuardTwiml: bounded at 2 s (fails open on timeout)", () => {
     await vi.advanceTimersByTimeAsync(10);
     cap.restore();
     expect(cap.of("inbound_guard_failed")).toHaveLength(1);
+  });
+});
+
+describe("callerIdentityNumber", () => {
+  const b = { phone_number: "+441372656055", notification_phone: "+447700900111" };
+
+  it("is empty when From is one of the business's own numbers", () => {
+    expect(callerIdentityNumber(b, "+447700900111", "")).toBe("");
+  });
+
+  it("is empty when From just repeats the forwarding number", () => {
+    expect(callerIdentityNumber(b, "+447700900222", "+447700900222")).toBe("");
+  });
+
+  it("is From when it is a different number from the forwarding one", () => {
+    expect(callerIdentityNumber(b, "+447700900222", "+447700900111")).toBe("+447700900222");
+  });
+
+  it("is From when there is no business or no forwarding number", () => {
+    expect(callerIdentityNumber(null, "+447700900222", "")).toBe("+447700900222");
+    expect(callerIdentityNumber(b, "+447700900222", undefined)).toBe("+447700900222");
+  });
+
+  it("matches the business's numbers in any stored format", () => {
+    expect(callerIdentityNumber({ main_phone: "+1 817 555 0101" }, "+18175550101", "")).toBe("");
   });
 });

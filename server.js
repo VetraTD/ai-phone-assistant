@@ -17,7 +17,7 @@ import { WebSocketServer } from "ws";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber, last4 } from "./lib/phone.js";
-import { inboundGuardTwiml, isRealCallerNumber, isOwnNumber, AI_MINUTES_ALERT_SEC } from "./lib/inboundGuards.js";
+import { inboundGuardTwiml, isRealCallerNumber, isOwnNumber, callerIdentityNumber, AI_MINUTES_ALERT_SEC } from "./lib/inboundGuards.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
@@ -547,6 +547,10 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body.CallSid;
   const businessPhone = req.body.To || "";
   const callerPhone = req.body.From || "";
+  // What the stream is told the caller is. The raw From above still feeds the
+  // allowlist, guards, language and status handler; the business's own number
+  // is never a customer (callerIdentityNumber).
+  let streamCallerPhone = callerPhone;
 
   try {
 
@@ -609,6 +613,7 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
       // never throws: a throw here would land in the cascade-fallback catch
       // below and hand a refused caller to the cascade.
       if (business) {
+        streamCallerPhone = callerIdentityNumber(business, callerPhone, req.body.ForwardedFrom);
         const guardTwiml = await inboundGuardTwiml({ database: db, business, from: callerPhone, callSid, route: "live" });
         if (guardTwiml) return res.send(guardTwiml);
       }
@@ -629,7 +634,7 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
     // demo call that never reached this route at all both read as all zeros.
     bumpCounter("live_connect_ok");
 
-    return res.send(buildStreamTwiml("/twilio/live-stream", streamToken, businessPhone, callerPhone));
+    return res.send(buildStreamTwiml("/twilio/live-stream", streamToken, businessPhone, streamCallerPhone));
   } catch (err) {
     // Hand the caller to the cascade. They never know.
     bumpCounter("live_connect_fallback");
@@ -643,7 +648,7 @@ app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
       if (cascadeToken === null && mediaStreamTokenRequired()) {
         throw new Error("cascade stream token required and not minted");
       }
-      return res.send(buildStreamTwiml("/twilio/media-stream", cascadeToken, businessPhone, callerPhone));
+      return res.send(buildStreamTwiml("/twilio/media-stream", cascadeToken, businessPhone, streamCallerPhone));
     } catch (fallbackErr) {
       // Both front-ends are unreachable -- an unusable CallSid fails to mint on
       // either path. Voicemail is the floor, and it is still not silence.
@@ -843,7 +848,7 @@ app.post("/twilio/voice", twilioValidation, async (req, res) => {
     // ran on this route.
     const streamToken = mintMediaStreamToken(callSid);
     log.info("media_stream_initiated", { callSid, authenticated: streamToken !== null });
-    return res.send(buildStreamTwiml("/twilio/media-stream", streamToken, businessPhone, callerPhone));
+    return res.send(buildStreamTwiml("/twilio/media-stream", streamToken, businessPhone, callerIdentityNumber(business, callerPhone, req.body.ForwardedFrom)));
   }
   // Unexpected re-hit after the stream is already connected — there is no
   // legacy TwiML fallback anymore. Nothing useful to do; hang up gracefully.

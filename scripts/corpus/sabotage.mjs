@@ -3456,6 +3456,14 @@ const SABOTAGES = [
     replace: "  return null; // SABOTAGE: callbackLine ignored",
     red: ["tests/capabilityConfig.test.js"],
   },
+  {
+    name: "own-number-identity",
+    why: "Ilija inbound Task 8: a call from the business's own number is recorded and answered with no caller number. Sabotaged, the helper hands the own number through, so the stream's callerPhone is the business's own line and a message with no spoken number would call the business back on itself.",
+    file: "lib/inboundGuards.js",
+    find: '  if (isOwnNumber(business, from)) return "";',
+    replace: "  if (isOwnNumber(business, from)) return from; // SABOTAGE: own number kept as the caller",
+    red: ["tests/inboundGuardRoutes.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

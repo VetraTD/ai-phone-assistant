@@ -102,3 +102,37 @@ describe("/twilio/voice inbound guards", () => {
     expect(res.text).toContain("/twilio/media-stream");
   });
 });
+
+describe("/twilio/voice own number is not the caller", () => {
+  const OWN = "+447700900111";
+  const callerParam = (text) => /name="callerPhone" value="([^"]*)"/.exec(text)?.[1];
+
+  function postFrom(from, extra = {}) {
+    n += 1;
+    return request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: `CAcascadeown${String(n).padStart(8, "0")}`, From: from, To: "+18176011171", ...extra });
+  }
+
+  beforeEach(() => {
+    mockLookup.mockResolvedValue({ id: "biz-1", name: "Biz", phone_number: "+18176011171", notification_phone: OWN });
+  });
+
+  it("the stream's callerPhone is empty when From is the business's own number, and the guard still sees the raw From", async () => {
+    const res = await postFrom(OWN);
+    expect(res.text).toContain("/twilio/media-stream");
+    expect(callerParam(res.text)).toBe("");
+    expect(mockFacts).toHaveBeenCalledWith({ businessId: "biz-1", from: OWN, countCalls: false });
+  });
+
+  it("the stream's callerPhone is empty when From repeats ForwardedFrom", async () => {
+    const res = await postFrom("+447700900222", { ForwardedFrom: "+447700900222" });
+    expect(callerParam(res.text)).toBe("");
+  });
+
+  it("a real caller keeps their number", async () => {
+    const res = await postFrom("+447700900222");
+    expect(callerParam(res.text)).toBe("+447700900222");
+  });
+});
