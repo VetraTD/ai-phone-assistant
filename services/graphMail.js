@@ -30,10 +30,36 @@ export const GRAPH_FETCH_TIMEOUT_MS = 8_000;
 const TOKEN_EARLY_REFRESH_MS = 60_000;
 const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
 
-const REQUIRED_VARS = ["MS_GRAPH_TENANT_ID", "MS_GRAPH_CLIENT_ID", "MS_GRAPH_CLIENT_SECRET", "MS_GRAPH_SENDER"];
+/** The four variables graph mode needs, all of them. */
+export const GRAPH_MAIL_VARS = Object.freeze([
+  "MS_GRAPH_TENANT_ID",
+  "MS_GRAPH_CLIENT_ID",
+  "MS_GRAPH_CLIENT_SECRET",
+  "MS_GRAPH_SENDER",
+]);
 
 function present(value) {
   return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * Which transport MAIL_TRANSPORT selects, read the one way both readers use:
+ * services/notifications.js (which sends) and lib/bootChecks.js (which reports
+ * at boot), so the two cannot disagree about whether email is on. Pure: reads
+ * only the env it is handed, at call time.
+ *
+ * Unset or blank is "smtp". "graph" in any case, with surrounding space, is
+ * "graph". Anything else is "smtp" with `invalid` set.
+ *
+ * @param {Record<string, string|undefined>} env
+ * @returns {{ transport: "smtp" | "graph", invalid: boolean }}
+ */
+export function mailTransportSetting(env = process.env) {
+  const raw = typeof env.MAIL_TRANSPORT === "string" ? env.MAIL_TRANSPORT.trim().toLowerCase() : "";
+  return {
+    transport: raw === "graph" ? "graph" : "smtp",
+    invalid: raw !== "" && raw !== "smtp" && raw !== "graph",
+  };
 }
 
 /**
@@ -42,7 +68,7 @@ function present(value) {
  * @returns {string[]}
  */
 export function missingGraphMailVars(env = process.env) {
-  return REQUIRED_VARS.filter((name) => !present(env[name]));
+  return GRAPH_MAIL_VARS.filter((name) => !present(env[name]));
 }
 
 /**

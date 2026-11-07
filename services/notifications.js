@@ -9,7 +9,7 @@ import * as db from "./db.js";
 import { checkText } from "../lib/dialCost.js";
 import { effectiveTier } from "../lib/compliance.js";
 import { isRealCallerNumber, isOwnNumber } from "../lib/inboundGuards.js";
-import { createGraphMailer, graphMailConfig } from "./graphMail.js";
+import { createGraphMailer, graphMailConfig, mailTransportSetting } from "./graphMail.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
@@ -27,11 +27,9 @@ const TWILIO_SMS_FROM = process.env.TWILIO_SMS_FROM;
 // variables and ignores SMTP_* entirely: a half-configured graph mode is email
 // not configured, never a quiet fallback to a different relay. Anything else is
 // announced once, here at boot, and treated as "smtp". The value is not logged.
-const MAIL_TRANSPORT_SETTING = (process.env.MAIL_TRANSPORT || "").trim().toLowerCase();
-const MAIL_TRANSPORT = MAIL_TRANSPORT_SETTING === "graph" ? "graph" : "smtp";
-if (MAIL_TRANSPORT_SETTING && MAIL_TRANSPORT_SETTING !== "smtp" && MAIL_TRANSPORT_SETTING !== "graph") {
-  log.error("mail_transport_invalid", { severity: "warn" });
-}
+// lib/bootChecks.js reads the same setting through the same function.
+const { transport: MAIL_TRANSPORT, invalid: MAIL_TRANSPORT_INVALID } = mailTransportSetting(process.env);
+if (MAIL_TRANSPORT_INVALID) log.error("mail_transport_invalid", { severity: "warn" });
 const GRAPH_MAIL_CONFIG = MAIL_TRANSPORT === "graph" ? graphMailConfig(process.env) : null;
 
 const HAS_EMAIL_CREDS = MAIL_TRANSPORT === "graph" ? !!GRAPH_MAIL_CONFIG : !!(SMTP_USER && SMTP_PASS);

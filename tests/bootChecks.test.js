@@ -546,3 +546,162 @@ describe("checkLiveSurface — a front-end that cannot connect must not boot", (
     expect(announced.detail).toContain(LIVE_MODEL_DEFAULT);
   });
 });
+
+// Task M fix round 1: MAIL_TRANSPORT=graph sends owner email through Microsoft
+// Graph (services/graphMail.js) and needs all four MS_GRAPH_* values; SMTP_* is
+// ignored. The boot check must read email the same way, or a correct graph
+// deployment announces "email off" (and, with NOTIFICATIONS_ENABLED set and no
+// SMS, refuses to boot), while a half-configured one looks fine.
+// Placeholders only.
+describe("checkNotificationConfig — MAIL_TRANSPORT=graph", () => {
+  const GRAPH_VARS = {
+    MS_GRAPH_TENANT_ID: "00000000-0000-0000-0000-000000000000",
+    MS_GRAPH_CLIENT_ID: "11111111-1111-1111-1111-111111111111",
+    MS_GRAPH_CLIENT_SECRET: "placeholder-client-secret-NOT-REAL",
+    MS_GRAPH_SENDER: "notifications@example.com",
+  };
+  const GRAPH = { MAIL_TRANSPORT: "graph", ...GRAPH_VARS };
+  const SMTP = { SMTP_USER: "bot@example.com", SMTP_PASS: "secret" };
+  const SMS = { TWILIO_ACCOUNT_SID: SID, TWILIO_AUTH_TOKEN: TOKEN, TWILIO_SMS_FROM: FROM };
+  const DASH = { DASHBOARD_URL: "https://dashboard.example/app" };
+  const without = (env, key) => {
+    const copy = { ...env };
+    delete copy[key];
+    return copy;
+  };
+
+  it("fully configured with no SMTP_* at all: email on, no email_channel_off, nothing fatal", () => {
+    const summary = checkNotificationConfig({ ...GRAPH, ...DASH });
+    expect(summary.email).toBe(true);
+    expect(summary.notificationsEnabled).toBe(true);
+    expect(summary.findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(codes(summary.findings)).not.toContain("email_channel_off");
+    expect(codes(summary.findings)).not.toContain("notifications_off");
+  });
+
+  it("fully configured with SMS and DASHBOARD_URL produces no findings at all", () => {
+    expect(checkNotificationConfig({ ...GRAPH, ...SMS, ...DASH }).findings).toEqual([]);
+  });
+
+  it("NOTIFICATIONS_ENABLED=true over a complete graph setup and no SMS is not fatal", () => {
+    const { findings } = checkNotificationConfig({ ...GRAPH, ...DASH, NOTIFICATIONS_ENABLED: "true" });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+  });
+
+  it.each(Object.keys(GRAPH_VARS))("three of four (%s unset): email off, and half a setup is fatal", (key) => {
+    const summary = checkNotificationConfig({ ...without(GRAPH, key), ...SMS, ...DASH });
+    expect(summary.email).toBe(false);
+    expect(codes(summary.findings.filter((f) => f.severity === ANNOUNCE))).toContain("email_channel_off");
+    expect(codes(summary.findings.filter((f) => f.severity === FATAL))).toEqual(["graph_half_configured"]);
+  });
+
+  it("a blank value counts as unset", () => {
+    const summary = checkNotificationConfig({ ...GRAPH, MS_GRAPH_CLIENT_SECRET: "   ", ...SMS });
+    expect(summary.email).toBe(false);
+    expect(codes(summary.findings)).toContain("graph_half_configured");
+  });
+
+  it("half-configured with SMS off and NOTIFICATIONS_ENABLED=true: the no-channel FATAL fires too", () => {
+    const summary = checkNotificationConfig({ ...without(GRAPH, "MS_GRAPH_SENDER"), NOTIFICATIONS_ENABLED: "true" });
+    expect(summary.email).toBe(false);
+    expect(summary.notificationsEnabled).toBe(false);
+    const fatal = codes(summary.findings.filter((f) => f.severity === FATAL));
+    expect(fatal).toContain("notifications_forced_on_with_no_channel");
+    expect(fatal).toContain("graph_half_configured");
+  });
+
+  it("SMTP credentials do not stand in for a half-configured graph setup", () => {
+    const summary = checkNotificationConfig({ ...without(GRAPH, "MS_GRAPH_CLIENT_SECRET"), ...SMTP });
+    expect(summary.email).toBe(false);
+    expect(summary.notificationsEnabled).toBe(false);
+    expect(codes(summary.findings)).toContain("email_channel_off");
+  });
+
+  it("graph mode with none of the four set is announced off, not fatal (absent, like SMTP unset)", () => {
+    const summary = checkNotificationConfig({ MAIL_TRANSPORT: "graph" });
+    expect(summary.email).toBe(false);
+    expect(summary.findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(codes(summary.findings)).toContain("email_channel_off");
+  });
+
+  it("leftover half SMTP pair is not fatal in graph mode: SMTP_* is not read there", () => {
+    const { findings } = checkNotificationConfig({ ...GRAPH, ...DASH, SMTP_PASS: "secret" });
+    expect(findings.filter((f) => f.severity === FATAL)).toEqual([]);
+  });
+
+  it("findings name graph variables as set/unset only, never a value", () => {
+    const envs = [
+      { ...without(GRAPH, "MS_GRAPH_SENDER"), NOTIFICATIONS_ENABLED: "true" },
+      { ...without(GRAPH, "MS_GRAPH_TENANT_ID"), ...SMS },
+      { ...GRAPH, ...SMS, NOTIFICATIONS_ENABLED: "true" },
+    ];
+    for (const env of envs) {
+      const details = checkNotificationConfig(env).findings.map((f) => f.detail).join("\n");
+      for (const value of Object.values(GRAPH_VARS)) expect(details).not.toContain(value);
+      expect(details).not.toContain("example.com");
+    }
+    const half = checkNotificationConfig({ ...without(GRAPH, "MS_GRAPH_SENDER"), ...SMS }).findings;
+    const detail = half.find((f) => f.code === "graph_half_configured").detail;
+    expect(detail).toContain("MS_GRAPH_TENANT_ID is set");
+    expect(detail).toContain("MS_GRAPH_SENDER is unset");
+  });
+
+  it("default mode is untouched: graph variables without MAIL_TRANSPORT=graph count for nothing", () => {
+    const summary = checkNotificationConfig({ ...GRAPH_VARS, ...DASH });
+    expect(summary.email).toBe(false);
+    expect(codes(summary.findings)).toContain("email_channel_off");
+    expect(codes(summary.findings)).not.toContain("graph_half_configured");
+  });
+
+  it("an unknown MAIL_TRANSPORT is smtp: SMTP creds count, graph variables do not", () => {
+    expect(checkNotificationConfig({ MAIL_TRANSPORT: "sendgrid", ...SMTP, ...DASH }).email).toBe(true);
+    expect(checkNotificationConfig({ MAIL_TRANSPORT: "sendgrid", ...GRAPH_VARS, ...DASH }).email).toBe(false);
+    const { findings } = checkNotificationConfig({ MAIL_TRANSPORT: "sendgrid", SMTP_USER: "bot@example.com" });
+    expect(codes(findings.filter((f) => f.severity === FATAL))).toContain("smtp_half_configured");
+  });
+
+  describe("agrees with services/notifications.js across transports", () => {
+    const KEYS = [
+      "NOTIFICATIONS_ENABLED",
+      "SMTP_USER",
+      "SMTP_PASS",
+      "TWILIO_ACCOUNT_SID",
+      "TWILIO_AUTH_TOKEN",
+      "TWILIO_SMS_FROM",
+      "MAIL_TRANSPORT",
+      ...Object.keys(GRAPH_VARS),
+    ];
+    const cases = [
+      ["graph complete, no SMTP", { ...GRAPH }],
+      ["graph half, SMTP complete", { ...without(GRAPH, "MS_GRAPH_CLIENT_ID"), ...SMTP }],
+      ["graph half, SMS complete", { ...without(GRAPH, "MS_GRAPH_CLIENT_ID"), ...SMS }],
+      ["graph vars, no MAIL_TRANSPORT", { ...GRAPH_VARS }],
+      ["unknown transport, SMTP complete", { MAIL_TRANSPORT: "sendgrid", ...SMTP }],
+      ["' Graph ' complete", { ...GRAPH, MAIL_TRANSPORT: " Graph " }],
+      ["graph complete, explicitly off", { ...GRAPH, NOTIFICATIONS_ENABLED: "false" }],
+    ];
+
+    it.each(cases)("%s", async (_label, env) => {
+      const saved = {};
+      for (const k of KEYS) {
+        saved[k] = process.env[k];
+        delete process.env[k];
+      }
+      Object.assign(process.env, env);
+      const { vi } = await import("vitest");
+      try {
+        vi.resetModules();
+        const mod = await import("../services/notifications.js");
+        const summary = checkNotificationConfig(process.env);
+        expect(summary.notificationsEnabled).toBe(mod.NOTIFICATIONS_ENABLED);
+        expect(summary.sms).toBe(mod.HAS_SMS_CREDS);
+      } finally {
+        for (const k of KEYS) {
+          if (saved[k] === undefined) delete process.env[k];
+          else process.env[k] = saved[k];
+        }
+        vi.resetModules();
+      }
+    });
+  });
+});
