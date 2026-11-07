@@ -2462,8 +2462,8 @@ const SABOTAGES = [
     name: "request-no-reason-keeps-message",
     why: "round A1 S3 C1: a re-record that says only 'wants a call back' must not replace 'about invoice 4471' on the row.",
     file: "lib/capabilities/customerRequests.js",
-    find: "          const message = !hasReason(reasonOf(row.message), row.callerName)",
-    replace: "          const message = false // SABOTAGE",
+    find: "          const message = samePersonOnly || !hasReason(reasonOf(row.message), row.callerName)",
+    replace: "          const message = samePersonOnly || false // SABOTAGE",
     red: [S3_REQUESTS],
   },
   {
@@ -3391,6 +3391,14 @@ const SABOTAGES = [
     find: "          /[\\p{L}\\p{N}]/u.test(callerWords) &&",
     replace: "          true && // SABOTAGE",
     red: ["tests/liveSilence.test.js"],
+  },
+  {
+    name: "details-merge",
+    why: "Ilija inbound: a lead's later save merges its answers onto the stored ones. Sabotaged, mergeDetails returns the incoming details alone and a partial save wipes the earlier answers.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "  const answers = Array.isArray(stored?.answers) ? stored.answers.map((a) => ({ ...a })) : [];",
+    replace: "  if (incoming) return incoming; // SABOTAGE: merge skipped\n  const answers = Array.isArray(stored?.answers) ? stored.answers.map((a) => ({ ...a })) : [];",
+    red: ["tests/customerRequestCorrection.test.js"],
   },
 ];
 

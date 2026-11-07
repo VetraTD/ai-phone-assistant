@@ -13,7 +13,13 @@
 import { describe, it, expect, vi } from "vitest";
 import messages from "../capabilities/messages.js";
 import quotes from "../capabilities/quotes.js";
-import { sameRequest } from "../lib/capabilities/customerRequests.js";
+import {
+  sameRequest,
+  saveCustomerRequest,
+  detailsFromArgs,
+  mergeDetails,
+  CALLER_TYPES,
+} from "../lib/capabilities/customerRequests.js";
 import { STEPS } from "../lib/callState.js";
 
 /** An in-memory customer_requests table behind the three db functions the packs use. */
@@ -54,6 +60,8 @@ function makeEngine({ callId = "call-1", businessId = "biz-1", failUpdate = fals
         callback_number: r.callbackNumber ?? null,
         message: r.message ?? null,
         preferred_time: r.preferredTime ?? null,
+        details: r.details ?? null,
+        owner_notice_pending: r.ownerNoticePending ?? false,
         seq,
       });
       return id;
@@ -73,6 +81,7 @@ function makeEngine({ callId = "call-1", businessId = "biz-1", failUpdate = fals
       row.callback_number = u.callbackNumber ?? row.callback_number;
       row.message = u.message ?? row.message;
       row.preferred_time = u.preferredTime ?? row.preferred_time;
+      row.details = u.details ?? row.details;
       return row.id;
     }),
   };
@@ -352,6 +361,7 @@ describe("a single message is unchanged", () => {
       callbackNumber: "214 555 0123",
       message: "about the invoice",
       preferredTime: null,
+      ownerNoticePending: true,
     });
     expect(db.updateCustomerRequest).not.toHaveBeenCalled();
     expect(calls.notify).toHaveBeenCalledTimes(1);
@@ -368,5 +378,152 @@ describe("a single message is unchanged", () => {
     expect(db.listCallCustomerRequests).not.toHaveBeenCalled();
     expect(calls.rows).toHaveLength(2);
     expect(calls.notify).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a lead's answers merge onto one row", () => {
+  const D = (answers, callerType = "new_enquiry") => ({ callerType, answers });
+  const saveRow = (engine, row) =>
+    saveCustomerRequest({
+      db: engine.deps.db,
+      businessId: "biz-1",
+      callId: engine.call.callId,
+      row: { requestType: "message", callerName: "Jane Doe", callbackNumber: "214 555 0123", message: null, preferredTime: null, ...row },
+    });
+
+  it("a later save with details updates the row even when the reason was reworded", async () => {
+    const { engine, calls, db } = makeEngine();
+    await saveRow(engine, { message: "wants help with Meta ads" });
+    const res = await saveRow(engine, {
+      message: "interested in advertising",
+      details: D([{ label: "Company", answer: "Acme" }]),
+    });
+    expect(res).toMatchObject({ corrected: true, ownerNoticePending: true });
+    expect(db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(db.updateCustomerRequest).toHaveBeenCalledTimes(1);
+    const arg = db.updateCustomerRequest.mock.calls[0][0];
+    expect(arg.message).toBeNull();
+    expect(arg.details).toEqual(D([{ label: "Company", answer: "Acme" }]));
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message).toBe("wants help with Meta ads");
+  });
+
+  it("without details a reworded reason is still a new row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "wants help with Meta ads" });
+    await saveRow(engine, { message: "needs a copy of the invoice" });
+    expect(calls.rows).toHaveLength(2);
+  });
+
+  it("a partial save cannot wipe an earlier answer", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "ads", details: D([{ label: "Company", answer: "Acme" }, { label: "Industry", answer: "Retail" }]) });
+    await saveRow(engine, { message: "ads", details: D([{ label: "Email", answer: "j@acme.test" }]) });
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].details.answers.map((a) => a.label)).toEqual(["Company", "Industry", "Email"]);
+  });
+
+  it("a later answer for the same label replaces it", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "ads", details: D([{ label: "Company", answer: "Acme" }, { label: "Industry", answer: "Retail" }]) });
+    await saveRow(engine, { message: "ads", details: D([{ label: "company ", answer: "Acme Ltd" }]) });
+    expect(calls.rows[0].details.answers).toEqual([
+      { label: "company", answer: "Acme Ltd" },
+      { label: "Industry", answer: "Retail" },
+    ]);
+  });
+
+  it("a different person is still a new row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "ads", details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { callerName: "Tom Hill", message: "ads", details: D([{ label: "Company", answer: "Zed" }]) });
+    expect(calls.rows).toHaveLength(2);
+  });
+
+  it("a first save is pending when there is a call", async () => {
+    const { engine, db } = makeEngine();
+    const res = await saveRow(engine, { message: "ads" });
+    expect(res).toMatchObject({ corrected: false, ownerNoticePending: true });
+    expect(db.createCustomerRequest.mock.calls[0][0].ownerNoticePending).toBe(true);
+  });
+
+  it("a save with no call id is not pending", async () => {
+    const { engine, db } = makeEngine({ callId: null });
+    const res = await saveRow(engine, { message: "ads" });
+    expect(res).toMatchObject({ corrected: false, ownerNoticePending: false });
+    expect(db.createCustomerRequest.mock.calls[0][0].ownerNoticePending).toBe(false);
+  });
+
+  it("a plain correction leaves details out of the update", async () => {
+    const { engine, db } = makeEngine();
+    await saveRow(engine, { message: "about the invoice" });
+    await saveRow(engine, { message: "about the invoice", callbackNumber: "214 555 0124" });
+    expect("details" in db.updateCustomerRequest.mock.calls[0][0]).toBe(false);
+  });
+});
+
+describe("mergeDetails", () => {
+  const D = (answers, callerType = null) => ({ callerType, answers });
+  it("keeps the earlier position and takes the later spelling", () => {
+    const m = mergeDetails(D([{ label: "A", answer: "1" }, { label: "Company", answer: "x" }, { label: "Z", answer: "2" }]), D([{ label: " COMPANY  ", answer: "y" }]));
+    expect(m.answers).toEqual([
+      { label: "A", answer: "1" },
+      { label: "COMPANY", answer: "y" },
+      { label: "Z", answer: "2" },
+    ]);
+  });
+  it("collapses inner whitespace when comparing labels", () => {
+    const m = mergeDetails(D([{ label: "Job   title", answer: "x" }]), D([{ label: "job title", answer: "y" }]));
+    expect(m.answers).toHaveLength(1);
+    expect(m.answers[0].answer).toBe("y");
+  });
+  it("incoming callerType wins when present, else stored stays", () => {
+    expect(mergeDetails(D([], "personal"), D([], "supplier")).callerType).toBe("supplier");
+    expect(mergeDetails(D([{ label: "a", answer: "b" }], "personal"), D([{ label: "c", answer: "d" }], null)).callerType).toBe("personal");
+  });
+  it("returns null when both are empty, and tolerates a null side", () => {
+    expect(mergeDetails(null, null)).toBeNull();
+    expect(mergeDetails(D([]), D([]))).toBeNull();
+    expect(mergeDetails(null, D([{ label: "a", answer: "b" }]))).toEqual(D([{ label: "a", answer: "b" }]));
+    expect(mergeDetails(D([{ label: "a", answer: "b" }]), null)).toEqual(D([{ label: "a", answer: "b" }]));
+  });
+  it("caps at 20: a new label past the cap is dropped, a replacement still works", () => {
+    const full = D(Array.from({ length: 20 }, (_, i) => ({ label: `q${i}`, answer: "a" })));
+    const m = mergeDetails(full, D([{ label: "extra", answer: "z" }, { label: "Q3", answer: "new" }]));
+    expect(m.answers).toHaveLength(20);
+    expect(m.answers.some((a) => a.label === "extra")).toBe(false);
+    expect(m.answers[3]).toEqual({ label: "Q3", answer: "new" });
+  });
+});
+
+describe("detailsFromArgs", () => {
+  it("drops junk", () => {
+    expect(detailsFromArgs({ details: "nope" })).toBeNull();
+    expect(detailsFromArgs({ details: [{ label: "", answer: "x" }] })).toBeNull();
+    expect(detailsFromArgs({ caller_type: "vip" })).toBeNull();
+    expect(detailsFromArgs({})).toBeNull();
+    expect(detailsFromArgs()).toBeNull();
+  });
+  it("a valid caller_type alone is enough", () => {
+    expect(CALLER_TYPES).toContain("new_enquiry");
+    expect(detailsFromArgs({ caller_type: "supplier" })).toEqual({ callerType: "supplier", answers: [] });
+  });
+  it("drops bad entries one by one", () => {
+    const out = detailsFromArgs({
+      caller_type: "vip",
+      details: [null, "x", 4, { label: "Ok", answer: "yes" }, { label: 5, answer: "x" }, { label: "L", answer: "  " }, { label: "L", answer: 7 }],
+    });
+    expect(out).toEqual({ callerType: null, answers: [{ label: "Ok", answer: "yes" }] });
+  });
+  it("caps at 20, clamps 60/500, collapses whitespace first", () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ label: `l${i}`, answer: "a" }));
+    expect(detailsFromArgs({ details: many }).answers).toHaveLength(20);
+    const out = detailsFromArgs({ details: [{ label: "x".repeat(100), answer: "y".repeat(600) }] });
+    expect(out.answers[0].label).toHaveLength(60);
+    expect(out.answers[0].answer).toHaveLength(500);
+    const nl = detailsFromArgs({ details: [{ label: "  a\n\n b ", answer: "line one\r\n\tline   two\n" }] });
+    expect(nl.answers[0]).toEqual({ label: "a b", answer: "line one line two" });
+    const pad = detailsFromArgs({ details: [{ label: "a" + " ".repeat(100) + "b", answer: "ok" }] });
+    expect(pad.answers[0].label).toBe("a b");
   });
 });

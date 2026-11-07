@@ -79,7 +79,7 @@ const MESSAGE = {
 describeDb("a same-call correction as vetra_app (I3)", () => {
   it("a correction updates the row in place: one row, the corrected number, the rest kept", async () => {
     const first = await saveCustomerRequest({ db, businessId: TENANT, callId, row: MESSAGE });
-    expect(first).toEqual({ id: expect.any(String), corrected: false });
+    expect(first).toEqual({ id: expect.any(String), corrected: false, ownerNoticePending: true });
 
     // A re-record that names only the fixed number must not blank the message.
     const second = await saveCustomerRequest({
@@ -88,7 +88,7 @@ describeDb("a same-call correction as vetra_app (I3)", () => {
       callId,
       row: { ...MESSAGE, callbackNumber: "214 555 0124", message: null },
     });
-    expect(second).toEqual({ id: first.id, corrected: true });
+    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
 
     expect(await rowsOf(callId)).toEqual([
       { request_type: "message", caller_name: "Jon", callback_number: "214 555 0124", message: "about the invoice" },
