@@ -3499,6 +3499,22 @@ const SABOTAGES = [
     replace: "      `that is their name: use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +",
     red: ["tests/a1OnFileNote.test.js"],
   },
+  {
+    name: "ask-cap",
+    why: "Ilija inbound Task 13, LVX189/LVX169: one ask per need, counted in code. The ledger names an ask as a repeat after the caller asked something back or declined, and always after two answered asks. Sabotaged, repeatIn never names a repeat, so the contact number is asked on every turn again -- CAe52b758's seven asks.",
+    file: "lib/voice/askLedger.js",
+    find: "      if (callerWantsRepeat) return null;",
+    replace: "      return null; // SABOTAGE: no ask is ever a repeat",
+    red: ["tests/askLedger.test.js"],
+  },
+  {
+    name: "ask-wire",
+    why: "Ilija inbound Task 13, LVX189: the Live cutter judges every output fragment against the ask ledger and clears a repeated ask's audio with LVX78's tapered cut. Sabotaged, the per-fragment call is gone, so the ledger is never consulted on a live call and the repeated ask is heard.",
+    file: "lib/voice/live/index.js",
+    find: "        inspectAsk(sc.outputTranscription.text, atMs);",
+    replace: "        // SABOTAGE: the ask cutter is never called",
+    red: ["tests/liveRepeatCut.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

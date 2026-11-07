@@ -111,8 +111,15 @@ const STEP_NAME =
 // ("Read it back digit by digit to confirm") and the message saved "only
 // AFTER the read-back is confirmed" — two waits for a yes. Now one summary,
 // saved in the same breath; a correction files it again.
+//
+// LVX189 (2026-11-07): one ask, and the caller-ID number offered on it. The
+// number was asked seven turns running while the caller ID sat unused; the
+// ask cutter (lib/voice/askLedger.js) now counts it in code, and this offers
+// the number they are calling from first. "If you know" is false when there
+// is no usable caller number (withheld, or the business's own line, which is
+// recorded as none); Task 4's fallbackNumber covers a save with no number.
 const STEP_NUMBER =
-  `Number: ask for the best callback number. You will read it back digit by digit in your one summary — not now. If they say "the number I'm calling from", use it.`;
+  `Number: if you know the number they are calling from, ask once: "Is the number you're calling from the best one?" Anything other than a different number means use it. If you do not have it, ask for the best number once. You will read it back digit by digit in your one summary, not now.`;
 
 const STEP_REASON = `Reason: ask briefly what the call is regarding.`;
 
