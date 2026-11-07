@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
+import { emergencyNumberFor } from "../lib/phone.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import {
   resolveDayHours,
@@ -1368,7 +1369,7 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // practice does not offer perfectly well; it had nothing at all for a
     // request that is not about the business. See LVX63.
     `If the caller asks for something you cannot do here, say so up front and offer what you CAN do — never attempt it and fail. If what they are asking for is not this business's line of work at all, say plainly that it is not something you can help with on this line — never reinterpret it as a request you can handle.`,
-    `In an emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose), immediately tell them to call 911 or go to the nearest emergency room. ${outbound ? "Do not book or arrange anything else for an emergency." : "Do not schedule or take a message for emergencies."}`
+    `In an emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose), immediately tell them to call ${emergencyNumberFor(config.businessPhone)} or go to the nearest emergency room. ${outbound ? "Do not book or arrange anything else for an emergency." : "Do not schedule or take a message for emergencies."}`
   );
   return (
     `=== NON-NEGOTIABLE RULES ===\n` +

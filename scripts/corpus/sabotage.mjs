@@ -3464,6 +3464,14 @@ const SABOTAGES = [
     replace: "  if (isOwnNumber(business, from)) return from; // SABOTAGE: own number kept as the caller",
     red: ["tests/inboundGuardRoutes.test.js"],
   },
+  {
+    name: "emergency-911-everywhere",
+    why: "Ilija inbound Task 9: a UK business's callers are told to dial 999, not 911. Sabotaged, the helper always answers 911, so a UK caller in an emergency is told a number that does not connect in the UK.",
+    file: "lib/phone.js",
+    find: 'return countryFromE164(e164) === "GB" ? "999" : "911";',
+    replace: 'return "911"; // SABOTAGE: always 911',
+    red: ["tests/phone.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

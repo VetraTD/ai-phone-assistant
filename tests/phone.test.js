@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizePhoneNumber } from "../lib/phone.js";
+import { normalizePhoneNumber, emergencyNumberFor } from "../lib/phone.js";
 
 // ---------------------------------------------------------------------------
 // The bug this module exists for: every business row except the one the app
@@ -95,5 +95,19 @@ describe("normalizePhoneNumber — rejects rather than guesses", () => {
 
   it("accepts the maximum valid E.164 length (15 digits)", () => {
     expect(normalizePhoneNumber(`+${"9".repeat(15)}`)).toBe(`+${"9".repeat(15)}`);
+  });
+});
+
+describe("emergencyNumberFor — the emergency number follows the business's country", () => {
+  it("a UK business is told 999", () => {
+    expect(emergencyNumberFor("+441372656055")).toBe("999");
+  });
+
+  it("a US business, and anything that is not clearly UK, is told 911", () => {
+    expect(emergencyNumberFor("+18176011171")).toBe("911");
+    expect(emergencyNumberFor(null)).toBe("911");
+    expect(emergencyNumberFor(undefined)).toBe("911");
+    expect(emergencyNumberFor("")).toBe("911");
+    expect(emergencyNumberFor("not a number")).toBe("911");
   });
 });

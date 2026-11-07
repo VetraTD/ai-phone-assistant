@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   buildSystemInstruction,
+  nonNegotiableRulesSection,
   buildStaticSystemPrefix,
   buildDynamicTail,
   getClient,
@@ -602,5 +603,31 @@ describe("spelling guidance — the letters are authoritative", () => {
       const tail = buildDynamicTail("gather_details", "book_appointment", config, ctx);
       expect(tail).not.toMatch(/the letters normally win/i);
     }
+  });
+});
+
+describe("nonNegotiableRulesSection — the emergency line names the business's number", () => {
+  const EMERGENCY = /In an emergency \(chest pain[^\n]*/;
+  const line = (businessPhone) => {
+    const cfg = { businessName: "Test", capabilities: {} };
+    if (businessPhone !== undefined) cfg.businessPhone = businessPhone;
+    const out = nonNegotiableRulesSection(cfg, {}, "inbound");
+    return out.match(EMERGENCY)[0];
+  };
+
+  it("a UK business is told to call 999 and never 911", () => {
+    const text = nonNegotiableRulesSection(
+      { businessName: "Test", capabilities: {}, businessPhone: "+441372656055" },
+      {},
+      "inbound"
+    );
+    expect(text).toContain("call 999");
+    expect(text).not.toContain("911");
+  });
+
+  it("a US business, or no business number, keeps the 911 line byte-for-byte", () => {
+    const expected = "In an emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose), immediately tell them to call 911 or go to the nearest emergency room. Do not schedule or take a message for emergencies.";
+    expect(line("+18176011171")).toBe(expected);
+    expect(line(undefined)).toBe(expected);
   });
 });
