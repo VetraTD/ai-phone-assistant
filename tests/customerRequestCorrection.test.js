@@ -4,10 +4,10 @@
  *
  * The prompt still tells the model to record it again with the fix
  * (capabilities/messages.js MESSAGE_PROTOCOL_SECTION step 5). The CODE turns
- * that second record into an UPDATE of the first row, and the owner gets ONE
- * "New customer request" email -- sent at the first save, as before. The email
- * is link-only by design (services/notifications.js), so the details the owner
- * reads are the row's, and the row is the thing the correction fixes.
+ * that second record into an UPDATE of the first row. Ilija inbound, Task 4:
+ * a row filed on a call is saved pending and nothing is emailed at save; the
+ * owner's one email goes at call end (Tasks 5 and 6), so a correction has no
+ * email of its own to send or to withhold.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -167,17 +167,16 @@ describe("a correction on the same call updates the first message (I3)", () => {
     expect(calls.logs.some((l) => l.e === "customer_request_corrected")).toBe(true);
   });
 
-  it("the owner gets ONE email, at the first save, and none for the correction", async () => {
+  it("nothing is emailed at save or at a correction; the row stays pending", async () => {
     const { engine, calls } = makeEngine();
     messages.onEffect(recorded(MESSAGE), engine);
     await settle();
-    // Sent at the first save: an email held back for a correction that may
-    // never come is an email a dropped call can lose.
-    expect(calls.notify).toHaveBeenCalledTimes(1);
+    expect(calls.notify).not.toHaveBeenCalled();
+    expect(calls.rows[0].owner_notice_pending).toBe(true);
 
     messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
     await settle();
-    expect(calls.notify).toHaveBeenCalledTimes(1);
+    expect(calls.notify).not.toHaveBeenCalled();
     // The caller's acknowledgement text is not re-sent either.
     expect(calls.sms).toHaveBeenCalledTimes(1);
   });
@@ -192,7 +191,7 @@ describe("a correction on the same call updates the first message (I3)", () => {
 
     expect(calls.rows).toHaveLength(1);
     expect(calls.rows[0].caller_name).toBe("John");
-    expect(calls.notify).toHaveBeenCalledTimes(1);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("a corrected quote updates its row too", async () => {
@@ -206,7 +205,7 @@ describe("a correction on the same call updates the first message (I3)", () => {
     expect(calls.rows).toHaveLength(1);
     expect(calls.rows[0].request_type).toBe("quote");
     expect(calls.rows[0].callback_number).toBe("214 555 0178");
-    expect(calls.notify).toHaveBeenCalledTimes(1);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("a re-record that names no reason keeps the message it corrects", async () => {
@@ -240,36 +239,7 @@ describe("a correction on the same call updates the first message (I3)", () => {
     // Not the caller ID (+12145550100): that fills a NEW row only.
     expect(calls.rows[0].callback_number).toBe("214 555 0177");
     expect(calls.rows[0].message).toBe("replace a water heater — Address: 12 Oak Street");
-    expect(calls.notify).toHaveBeenCalledTimes(1);
-  });
-
-  it("a correction sends the email the first save could not", async () => {
-    const { engine, calls } = makeEngine();
-    calls.notify.mockResolvedValueOnce(false); // SMTP refused, or the rate limit dropped it
-    messages.onEffect(recorded(MESSAGE), engine);
-    await settle();
-    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
-    await settle();
-
-    expect(calls.rows).toHaveLength(1);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
-    // The caller's acknowledgement is still sent once.
-    expect(calls.sms).toHaveBeenCalledTimes(1);
-  });
-
-  it("a correction while the first email is still sending waits for it: one email", async () => {
-    const { engine, calls } = makeEngine();
-    let land;
-    calls.notify.mockImplementationOnce(() => new Promise((r) => (land = r)));
-    messages.onEffect(recorded(MESSAGE), engine);
-    await settle();
-    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
-    await settle();
-    land(true);
-    await settle();
-
-    expect(calls.rows).toHaveLength(1);
-    expect(calls.notify).toHaveBeenCalledTimes(1);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("a correction that cannot be written as an update is filed as new, never dropped", async () => {
@@ -280,12 +250,13 @@ describe("a correction on the same call updates the first message (I3)", () => {
     await settle();
 
     expect(calls.rows.map((r) => r.callback_number)).toEqual(["214 555 0123", "214 555 0124"]);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
+    expect(calls.rows.every((r) => r.owner_notice_pending)).toBe(true);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 });
 
 describe("different requests on one call stay separate", () => {
-  it("two unrelated messages file two rows and two emails", async () => {
+  it("two unrelated messages file two pending rows", async () => {
     const { engine, calls } = makeEngine();
     messages.onEffect(recorded(MESSAGE), engine);
     await settle();
@@ -293,10 +264,11 @@ describe("different requests on one call stay separate", () => {
     await settle();
 
     expect(calls.rows).toHaveLength(2);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
+    expect(calls.rows.every((r) => r.owner_notice_pending)).toBe(true);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
-  it("a message and a quote file two rows and two emails", async () => {
+  it("a message and a quote file two pending rows", async () => {
     const { engine, calls } = makeEngine();
     messages.onEffect(recorded({ ...MESSAGE, message: "the water heater quote" }), engine);
     await settle();
@@ -304,7 +276,7 @@ describe("different requests on one call stay separate", () => {
     await settle();
 
     expect(calls.rows.map((r) => r.request_type).sort()).toEqual(["message", "quote"]);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("two quotes for one address are two jobs", async () => {
@@ -318,7 +290,7 @@ describe("different requests on one call stay separate", () => {
     await settle();
 
     expect(calls.rows).toHaveLength(2);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("a message and a callback request are different request types", async () => {
@@ -329,7 +301,7 @@ describe("different requests on one call stay separate", () => {
     await settle();
 
     expect(calls.rows).toHaveLength(2);
-    expect(calls.notify).toHaveBeenCalledTimes(2);
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("the same message on another call is another row", async () => {
@@ -347,7 +319,7 @@ describe("different requests on one call stay separate", () => {
 });
 
 describe("a single message is unchanged", () => {
-  it("writes once inside the tenant scope and emails at once", async () => {
+  it("writes once inside the tenant scope, pending, and emails nothing", async () => {
     const { engine, calls, db } = makeEngine();
     messages.onEffect(recorded(MESSAGE), engine);
     await settle();
@@ -361,11 +333,11 @@ describe("a single message is unchanged", () => {
       callbackNumber: "214 555 0123",
       message: "about the invoice",
       preferredTime: null,
+      details: null,
       ownerNoticePending: true,
     });
     expect(db.updateCustomerRequest).not.toHaveBeenCalled();
-    expect(calls.notify).toHaveBeenCalledTimes(1);
-    expect(calls.notify.mock.calls[0][0]).toMatchObject({ businessId: "biz-1", customerRequest: MESSAGE });
+    expect(calls.notify).not.toHaveBeenCalled();
   });
 
   it("with no call row there is nothing to match against: each record files as today", async () => {
@@ -378,6 +350,25 @@ describe("a single message is unchanged", () => {
     expect(db.listCallCustomerRequests).not.toHaveBeenCalled();
     expect(calls.rows).toHaveLength(2);
     expect(calls.notify).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a withheld caller number", () => {
+  it("is never stored as the callback number when the caller gave none", async () => {
+    const { engine, calls } = makeEngine();
+    engine.call.callerNumber = "+266696687"; // what Twilio sends for a withheld caller
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: undefined }), engine);
+    quotes.onEffect(quoted({ service_description: "replace a water heater", caller_name: "Ann" }), engine);
+    await settle();
+    expect(calls.rows).toHaveLength(2);
+    expect(calls.rows.map((r) => r.callback_number)).toEqual([null, null]);
+  });
+
+  it("a real caller number still fills a missing one on a new row", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: undefined }), engine);
+    await settle();
+    expect(calls.rows[0].callback_number).toBe("+12145550100");
   });
 });
 

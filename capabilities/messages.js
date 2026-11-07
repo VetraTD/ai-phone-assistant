@@ -21,7 +21,16 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
-import { saveCustomerRequest, noteOwnerNotified, ownerNotifiedFor } from "../lib/capabilities/customerRequests.js";
+import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
+import { isRealCallerNumber } from "../lib/inboundGuards.js";
+
+/**
+ * Model-only, in the tool reply and never in toolResult (which may be spoken).
+ * Present only when the business wrote notes for taking messages: those notes
+ * are where its extra questions live.
+ */
+const NEXT_QUESTIONS_NOTE =
+  "[not caller speech] If this business's notes list more questions for this caller, ask them now, one at a time, before closing. Then save again with the same message and the answers in details.";
 
 
 /**
@@ -52,6 +61,25 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
         type: "string",
         description: "When they prefer to be called back (for callback type)",
       },
+      caller_type: {
+        type: "string",
+        enum: CALLER_TYPES,
+        description: "What kind of caller this is, whenever you can tell. Leave it out if unsure.",
+      },
+      details: {
+        type: "array",
+        description:
+          "The caller's answers to this business's extra questions, one entry per question they answered. " +
+          "Skip anything they would rather not answer.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "The question, in a few words (e.g. Company)" },
+            answer: { type: "string", description: "What the caller said" },
+          },
+          required: ["label", "answer"],
+        },
+      },
     },
     required: ["request_type"],
   },
@@ -80,7 +108,8 @@ const MESSAGE_PROTOCOL_SECTION =
   `3. Reason: ask briefly what the call is regarding.\n` +
   `4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"\n` +
   `5. Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time), the number digit by digit, the reason — and record it with record_customer_request in that same response: "So that's Jon, D-O-E, on 2 1 4, 5 5 5, 0 1 2 3 about the invoice — passing that on now." Do not wait for a yes. If they correct anything, record it again with the fix.\n` +
-  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."`;
+  `6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."\n` +
+  `7. Extra questions: if this business's notes list more questions, save as soon as you have name, number and reason, keep going one question at a time, then call record_customer_request once more with the same message and the answers in details. Skip anything they would rather not answer and never ask it again. Set caller_type whenever you can tell.`;
 
 /**
  * Step guidance for the two message intents. Callbacks additionally collect a
@@ -160,11 +189,17 @@ export default {
    * Message-taking is the safety net beneath every other capability, so it must
    * never be the thing that stalls a call.
    */
-  async execute(fc) {
+  async execute(fc, ctx = {}) {
     const args = fc.args ?? {};
     const message = "I'll make sure they get your message.";
+    const notes = capabilityConfig(ctx?.config, "messages").notes;
+    const hasNotes = typeof notes === "string" && notes.trim() !== "";
     return {
-      functionResponse: { id: fc.id, name: fc.name, response: { success: true, message } },
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: { success: true, message, ...(hasNotes ? { next: NEXT_QUESTIONS_NOTE } : {}) },
+      },
       stateEffects: {
         // Written for the caller, so it may be spoken if the model produces no
         // text of its own. See the callerSafe note in services/gemini.js.
@@ -176,9 +211,10 @@ export default {
   },
 
   /**
-   * Persist the message and tell the business about it.
+   * Persist the message. The business is told once, at call end, from the
+   * pending row; only a save with no call row emails here.
    *
-   * Notification is gated on the row actually being written: promising the
+   * Any email is gated on the row actually being written: promising the
    * caller a callback and storing nothing is the worst outcome this capability
    * has, because nobody finds out until the caller gives up waiting.
    */
@@ -224,11 +260,15 @@ export default {
     //
     // Round A1 S3 (I3): saveCustomerRequest opens that scope itself, and turns
     // a same-call correction ("no, it's 0 1 2 4") into an UPDATE of the row it
-    // corrects. A corrected row is already in the owner's inbox -- the email
-    // is link-only and went out at the first save -- so a correction sends
-    // nothing: one email per message. Unless that first send never reached the
-    // owner (SMTP refused it, the rate limit dropped it): then the correction
-    // sends it, as its own email always used to.
+    // corrects, so a caller who fixes something leaves one row.
+    //
+    // Ilija inbound, Task 4: a row filed on a call is saved with
+    // ownerNoticePending, and the owner's one email goes at call end (Tasks 5
+    // and 6), once the caller's answers are in. Only a save with no call row has
+    // nothing to hold the email, so it is sent here at once. The number the
+    // caller rang from fills a NEW row only when it is a real number: Twilio
+    // sends a withheld caller as a placeholder that must never be stored as a
+    // callback number.
     saveCustomerRequest({
       db,
       businessId,
@@ -240,17 +280,17 @@ export default {
         callbackNumber: args.callback_number || null,
         message: args.message || null,
         preferredTime: args.preferred_time || null,
+        details: detailsFromArgs(args),
       },
+      fallbackNumber: isRealCallerNumber(party.phone) ? party.phone : null,
     })
-      .then(async (saved) => {
+      .then((saved) => {
         if (!saved) return;
         if (saved.corrected) {
           // Names only: the message is the caller's own words (LVX24).
           log.info("customer_request_corrected", { callSid, tool: "record_customer_request" });
-          if (await ownerNotifiedFor(saved.id)) return;
         }
-        noteOwnerNotified(
-          saved.id,
+        if (!saved.ownerNoticePending) {
           notifications
             .notifyCustomerRequest({
               businessId,
@@ -259,9 +299,8 @@ export default {
             })
             .catch((err) => {
               log.error("notify_request_failed", { callSid, reason: err?.message });
-              return false;
-            })
-        );
+            });
+        }
         // Owner decision D-c: every TEXT-SENDING effect on an outbound call
         // requires party.verified. The caller's acknowledgement goes once, at
         // the first save.

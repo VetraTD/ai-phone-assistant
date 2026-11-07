@@ -102,6 +102,39 @@
         "preferred_time": {
           "type": "string",
           "description": "When they prefer to be called back (for callback type)"
+        },
+        "caller_type": {
+          "type": "string",
+          "enum": [
+            "new_enquiry",
+            "existing_customer",
+            "personal",
+            "supplier",
+            "sales_pitch",
+            "other"
+          ],
+          "description": "What kind of caller this is, whenever you can tell. Leave it out if unsure."
+        },
+        "details": {
+          "type": "array",
+          "description": "The caller's answers to this business's extra questions, one entry per question they answered. Skip anything they would rather not answer.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "The question, in a few words (e.g. Company)"
+              },
+              "answer": {
+                "type": "string",
+                "description": "What the caller said"
+              }
+            },
+            "required": [
+              "label",
+              "answer"
+            ]
+          }
         }
       },
       "required": [

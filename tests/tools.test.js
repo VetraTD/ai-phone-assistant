@@ -165,6 +165,24 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
     expect(stateEffects.toolResult.success).toBe(true);
   });
 
+  // Ilija inbound, Task 4: executeToolCall hands the pack ctx.config, so a
+  // business with messages notes gets the model-only `next`, and one without
+  // does not. This is the real door, not pack.execute called by hand.
+  it("record_customer_request through executeToolCall: next only when the business has messages notes", async () => {
+    const fc = { id: "fcn", name: "record_customer_request", args: { request_type: "message", caller_name: "Jane", message: "Call me back" } };
+    const withNotes = {
+      ...baseCtx,
+      config: { capabilities: { messages: { notes: "Ask which service they need." } } },
+    };
+    const a = await executeToolCall(fc, withNotes);
+    expect(a.functionResponse.response.next).toMatch(/^\[not caller speech\]/);
+    expect(a.functionResponse.response.message).toBe("I'll make sure they get your message.");
+    expect(JSON.stringify(a.stateEffects)).not.toContain("not caller speech");
+
+    const b = await executeToolCall(fc, { ...baseCtx, config: { capabilities: { messages: { notes: "  " } } } });
+    expect("next" in b.functionResponse.response).toBe(false);
+  });
+
   it("unknown tool name: falls through to the default branch and reports 'Unknown function'", async () => {
     const fc = { id: "fc3", name: "some_unregistered_tool", args: {} };
     const ctx = { ...baseCtx, integrations: [] };

@@ -284,7 +284,7 @@ describe("the last-chance message reaches the database and the owner (S3)", () =
     vi.mocked(notifications.notifyCustomerRequest).mockClear();
   });
 
-  it("writes the row and emails the owner once", async () => {
+  it("writes the row pending; the owner's one email waits for call end (Task 6)", async () => {
     const s = await bootRealPack();
     await s.takeMessage();
     expect(s.rows).toHaveLength(0);
@@ -294,7 +294,8 @@ describe("the last-chance message reaches the database and the owner (S3)", () =
     expect(c().message_saved_last_chance).toBe(1);
     expect(s.rows).toHaveLength(1);
     expect(s.rows[0]).toMatchObject({ requestType: "callback", callerName: "Nithin Dodla", message: MESSAGE_ARGS.message });
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(s.rows[0].ownerNoticePending).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
   });
 
   it("the post-call read counts it as recorded, not abandoned", async () => {

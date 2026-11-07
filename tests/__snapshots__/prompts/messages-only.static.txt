@@ -44,6 +44,7 @@ TAKING A MESSAGE — follow this exactly:
 4. Urgency: ask "Is this urgent, or is sometime in the next business day okay?"
 5. Summarise it ONCE, in one breath — name (a surname they spelled, one letter at a time), the number digit by digit, the reason — and record it with record_customer_request in that same response: "So that's Jon, D-O-E, on 2 1 4, 5 5 5, 0 1 2 3 about the invoice — passing that on now." Do not wait for a yes. If they correct anything, record it again with the fix.
 6. Promise the callback: "Someone will get back to you [urgent: as soon as possible / normal: by the next business day]."
+7. Extra questions: if this business's notes list more questions, save as soon as you have name, number and reason, keep going one question at a time, then call record_customer_request once more with the same message and the answers in details. Skip anything they would rather not answer and never ask it again. Set caller_type whenever you can tell.
 
 === TOOL CONTRACT ===
 You have access to tools (function calls). Follow these rules strictly:

@@ -168,9 +168,13 @@ describe("quotes — effects", () => {
   it("persists into the existing follow-up queue with the detail folded in", async () => {
     const { engine, calls } = makeEngine();
     quotes.onEffect(effect, engine);
-    await vi.waitFor(() => expect(calls.notifyCustomerRequest).toHaveBeenCalled());
+    await vi.waitFor(() => expect(calls.createCustomerRequest).toHaveBeenCalled());
 
     const row = calls.createCustomerRequest.mock.calls[0][0];
+    // Saved pending: the owner's one email goes at call end, not here.
+    expect(row.ownerNoticePending).toBe(true);
+    await new Promise((r) => setImmediate(r));
+    expect(calls.notifyCustomerRequest).not.toHaveBeenCalled();
     expect(row.requestType).toBe("quote");
     expect(row.businessId).toBe("biz-1");
     expect(row.callbackNumber).toBe("555-0134");

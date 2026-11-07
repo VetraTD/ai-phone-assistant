@@ -2572,7 +2572,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
   // Round A1 S3 (I3), the cascade wire: the same correction through
   // lib/voice/session.js's own dispatcher. The Live half is
   // tests/liveCustomerRequestCorrection.test.js.
-  it("12c. a corrected message on the cascade updates the first row and emails the owner once", async () => {
+  it("12c. a corrected message on the cascade updates the first row and emails nobody at save (pending)", async () => {
     const recorded = (callback_number) => ({
       capability: "messages",
       type: "recorded",
@@ -2593,8 +2593,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         },
       ]);
 
-    // The first save's email reached the owner.
-    notifications.notifyCustomerRequest.mockResolvedValueOnce(true);
+    notifications.notifyCustomerRequest.mockClear();
     // One filed row, as the database would hold it after the first save.
     const filed = [];
     db.createCustomerRequest.mockImplementationOnce(async (r) => {
@@ -2625,7 +2624,8 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(db.updateCustomerRequest).toHaveBeenCalledTimes(1);
     expect(filed).toHaveLength(1);
     expect(filed[0].callback_number).toBe("214 555 0124");
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    // Ilija inbound, Task 4: the owner's one email goes at call end.
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
   });
 
   it("13. multilingual: languagesSpoken.length > 1 -> STT connects with language=multi + endpointing=100", async () => {
@@ -5384,6 +5384,55 @@ describe("session.js — no database write escapes its tenant scope", () => {
     const requests = H.writes.filter((w) => w.op === "createCustomerRequest");
     expect(requests.length).toBeGreaterThan(0);
     for (const w of requests) expect(w.tenant).toBe("biz1");
+  });
+
+  // Ilija inbound, Task 4: the email waits for call end when there is a call
+  // row to hold it; with no call row nothing would ever send it, so it goes now.
+  async function fallbackComplete({ dropCallRow = false } = {}) {
+    H.llmFactory = () =>
+      (async function* () {
+        throw new Error("llm exploded");
+      })();
+    const ws = new FakeWs();
+    handleVoiceSessionConnection(ws);
+    const sid = newSid();
+    await startCall(ws, sid);
+    await settleGreeting();
+    // businessId and dbCallId are set together at pickup, so the only way to
+    // reach "a business but no call row" is to take the row away.
+    if (dropCallRow) callState.getState(sid).dbCallId = null;
+    const tm = H.turnManagerInstances[0];
+    tm.opts.onTurnEnd("what are your hours today please.");
+    await flush();
+    await flush();
+    tm.opts.onTurnEnd("can you check my appointment please.");
+    await flush();
+    await flush();
+    expect(H.fallbackFlowInstances.length).toBe(1);
+    await H.fallbackFlowInstances[0].opts.onComplete({
+      callerName: "Nithin",
+      callbackNumber: "+14699338887",
+      message: "Please call me back.",
+    });
+    await flush();
+  }
+
+  it("the fallback message is saved pending and not emailed when the call has a row", async () => {
+    vi.mocked(notifications.notifyCustomerRequest).mockClear();
+    db.createCustomerRequest.mockClear();
+    await fallbackComplete();
+    expect(db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(db.createCustomerRequest.mock.calls[0][0].ownerNoticePending).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("the fallback message is emailed at once when the call has no row", async () => {
+    vi.mocked(notifications.notifyCustomerRequest).mockClear();
+    db.createCustomerRequest.mockClear();
+    await fallbackComplete({ dropCallRow: true });
+    expect(db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(db.createCustomerRequest.mock.calls[0][0].ownerNoticePending).toBe(false);
+    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
   });
 
   it("NOTHING written during a call is unscoped", async () => {

@@ -469,3 +469,172 @@ describe("dispatchCapabilityEffects — several appointment effects in one turn"
     expect(() => dispatchCapabilityEffects([cancel("a1"), cancel("a2")], engine)).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 4 (Ilija inbound): the message and quote packs stop emailing at save.
+// A row filed on a call is saved PENDING and the owner's email is sent once, at
+// call end (Tasks 5 and 6). record_customer_request also takes a caller's
+// answers. The only email path left in onEffect is a save with no call row.
+// ---------------------------------------------------------------------------
+function requestSaveEngine({ callId = "call-1", callerNumber = "+442071234567", config = {} } = {}) {
+  const created = [];
+  const notifyCustomerRequest = vi.fn(async () => true);
+  return {
+    created,
+    notifyCustomerRequest,
+    engine: {
+      STEPS: { CONFIRM: "confirm" },
+      setStep: vi.fn(),
+      addHistoryNote: vi.fn(),
+      call: { callSid: "CA1", businessId: "biz-1", callId, callerNumber, config, party: null },
+      deps: {
+        db: {
+          withTenantSafe: async (_id, fn) => fn(),
+          listCallCustomerRequests: vi.fn(async () => []),
+          updateCustomerRequest: vi.fn(async () => null),
+          createCustomerRequest: vi.fn(async (r) => {
+            created.push(r);
+            return "req-1";
+          }),
+        },
+        notifications: { notifyCustomerRequest, sendCallerSms: vi.fn(async () => {}), MESSAGE_SLA_TEXT: "soon" },
+        log: { error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+        captureException: vi.fn(),
+      },
+    },
+  };
+}
+const settleWrites = () => new Promise((r) => setTimeout(r, 30));
+
+describe("messages pack: pending at save, answers in the tool", () => {
+  const ARGS = {
+    request_type: "message",
+    caller_name: "Jane",
+    callback_number: "214 555 0123",
+    message: "about the invoice",
+  };
+
+  it("record_customer_request saves pending and sends no email at save", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { engine, created, notifyCustomerRequest } = requestSaveEngine();
+    messages.onEffect({ capability: "messages", type: "recorded", data: ARGS }, engine);
+    await settleWrites();
+    expect(created).toHaveLength(1);
+    expect(created[0].ownerNoticePending).toBe(true);
+    expect(notifyCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("a save with no call id still notifies at once", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { engine, created, notifyCustomerRequest } = requestSaveEngine({ callId: null });
+    messages.onEffect({ capability: "messages", type: "recorded", data: ARGS }, engine);
+    await settleWrites();
+    expect(created[0].ownerNoticePending).toBe(false);
+    expect(notifyCustomerRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("the answers and caller type are stored on the row", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { engine, created } = requestSaveEngine();
+    messages.onEffect(
+      {
+        capability: "messages",
+        type: "recorded",
+        data: { ...ARGS, caller_type: "new_enquiry", details: [{ label: "Company", answer: "Acme" }] },
+      },
+      engine
+    );
+    await settleWrites();
+    expect(created[0].details).toEqual({ callerType: "new_enquiry", answers: [{ label: "Company", answer: "Acme" }] });
+  });
+
+  it("a withheld caller number is never stored as the callback number", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { engine, created } = requestSaveEngine({ callerNumber: "+266696687" });
+    messages.onEffect(
+      { capability: "messages", type: "recorded", data: { ...ARGS, callback_number: undefined } },
+      engine
+    );
+    await settleWrites();
+    expect(created).toHaveLength(1);
+    expect(created[0].callbackNumber).toBeNull();
+  });
+
+  it("a real caller number still fills a missing callback number", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { engine, created } = requestSaveEngine({ callerNumber: "+442071234567" });
+    messages.onEffect(
+      { capability: "messages", type: "recorded", data: { ...ARGS, callback_number: undefined } },
+      engine
+    );
+    await settleWrites();
+    expect(created[0].callbackNumber).toBe("+442071234567");
+  });
+
+  it("the declaration offers caller_type and details", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const { CALLER_TYPES } = await import("../lib/capabilities/customerRequests.js");
+    const props = messages.tools({}).find((d) => d.name === "record_customer_request").parameters.properties;
+    expect(props.caller_type.enum).toEqual(CALLER_TYPES);
+    expect(props.details.type).toBe("array");
+    expect(props.details.items.type).toBe("object");
+    expect(props.details.items.required).toEqual(["label", "answer"]);
+    expect(props.details.items.properties.label.type).toBe("string");
+    expect(props.details.items.properties.answer.type).toBe("string");
+  });
+
+  it("a business with messages notes gets next in the reply; spoken message unchanged", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const ctx = { config: { capabilities: { messages: { notes: "Ask which service they need." } } } };
+    const out = await messages.execute({ id: "f1", name: "record_customer_request", args: ARGS }, ctx);
+    expect(out.functionResponse.response.next).toMatch(/^\[not caller speech\]/);
+    expect(out.functionResponse.response.message).toBe("I'll make sure they get your message.");
+    expect(out.stateEffects.toolResult).toEqual({
+      name: "record_customer_request",
+      success: true,
+      message: "I'll make sure they get your message.",
+      callerSafe: true,
+    });
+    expect(JSON.stringify(out.stateEffects)).not.toContain("not caller speech");
+  });
+
+  it("a business without notes gets no next", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    for (const config of [
+      {},
+      { capabilities: { messages: { notes: "   " } } },
+      { capabilities: { messages: { notes: 5 } } },
+    ]) {
+      const out = await messages.execute({ id: "f1", name: "record_customer_request", args: ARGS }, { config });
+      expect("next" in out.functionResponse.response).toBe(false);
+    }
+    const bare = await messages.execute({ id: "f1", name: "record_customer_request", args: ARGS });
+    expect("next" in bare.functionResponse.response).toBe(false);
+  });
+});
+
+describe("quotes pack: pending at save", () => {
+  const Q = { service_description: "replace a water heater", caller_name: "Ann" };
+
+  it("a quote saved on a call is pending and sends no email", async () => {
+    const quotes = (await import("../capabilities/quotes.js")).default;
+    const { engine, created, notifyCustomerRequest } = requestSaveEngine();
+    quotes.onEffect({ capability: "quotes", type: "requested", data: Q }, engine);
+    await settleWrites();
+    expect(created[0].ownerNoticePending).toBe(true);
+    expect(notifyCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("a quote with no call id still notifies at once, without a withheld number", async () => {
+    const quotes = (await import("../capabilities/quotes.js")).default;
+    const { engine, created, notifyCustomerRequest } = requestSaveEngine({
+      callId: null,
+      callerNumber: "+266696687",
+    });
+    quotes.onEffect({ capability: "quotes", type: "requested", data: Q }, engine);
+    await settleWrites();
+    expect(created[0].callbackNumber).toBeNull();
+    expect(notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(notifyCustomerRequest.mock.calls[0][0].customerRequest.callback_number).toBeNull();
+  });
+});

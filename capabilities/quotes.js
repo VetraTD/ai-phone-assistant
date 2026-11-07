@@ -36,7 +36,8 @@ import {
 } from "../lib/capabilities/requirements.js";
 import { declineGuardrail } from "../lib/capabilities/decline.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
-import { saveCustomerRequest, noteOwnerNotified, ownerNotifiedFor } from "../lib/capabilities/customerRequests.js";
+import { saveCustomerRequest } from "../lib/capabilities/customerRequests.js";
+import { isRealCallerNumber } from "../lib/inboundGuards.js";
 
 
 const RECORD_QUOTE_REQUEST_DECLARATION = {
@@ -249,10 +250,15 @@ export default {
     // The caller was told their message had been taken. It had not.
     //
     // Round A1 S3 (I3): a same-call correction updates the quote it corrects
-    // and sends nothing unless the first send never reached the owner -- see
-    // capabilities/messages.js and lib/capabilities/customerRequests.js. The
-    // number the caller rang from fills a NEW row only: a correction that
-    // names no number keeps the one they gave.
+    // -- see capabilities/messages.js and lib/capabilities/customerRequests.js.
+    // The number the caller rang from fills a NEW row only, and only when it is
+    // a real number (a withheld caller arrives as a placeholder): a correction
+    // that names no number keeps the one they gave.
+    //
+    // Ilija inbound, Task 4: a quote filed on a call is saved pending and the
+    // owner's one email goes at call end. Only a save with no call row emails
+    // here, as messages does.
+    const realPhone = isRealCallerNumber(party.phone) ? party.phone : null;
     saveCustomerRequest({
       db: engine.deps.db,
       businessId,
@@ -265,34 +271,31 @@ export default {
         message: detail,
         preferredTime: null,
       },
-      fallbackNumber: party.phone || null,
+      fallbackNumber: realPhone,
       reasonOf: quoteReason,
       mergeMessage: mergeQuoteDetail,
     })
-      .then(async (saved) => {
+      .then((saved) => {
         if (!saved) return;
         if (saved.corrected) {
           engine.deps.log.info("customer_request_corrected", { callSid, tool: "record_quote_request" });
-          if (await ownerNotifiedFor(saved.id)) return;
         }
-        noteOwnerNotified(
-          saved.id,
+        if (!saved.ownerNoticePending) {
           engine.deps.notifications
             .notifyCustomerRequest({
               businessId,
               customerRequest: {
                 request_type: "quote",
                 caller_name: data.caller_name || null,
-                callback_number: data.callback_number || party.phone || null,
+                callback_number: data.callback_number || realPhone,
                 message: detail,
               },
               call: { callerNumber: party.phone },
             })
             .catch((err) => {
               engine.deps.log.error("notify_quote_failed", { reason: err?.message });
-              return false;
-            })
-        );
+            });
+        }
         // Owner decision D-c: every TEXT-SENDING effect on an outbound call
         // requires party.verified. Once, at the first save.
         if (!saved.corrected && party.verified) {

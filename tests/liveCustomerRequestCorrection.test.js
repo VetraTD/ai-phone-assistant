@@ -69,6 +69,7 @@ function storeDb() {
         callback_number: r.callbackNumber,
         message: r.message,
         preferred_time: r.preferredTime,
+        owner_notice_pending: r.ownerNoticePending ?? false,
       });
       return id;
     }),
@@ -123,8 +124,8 @@ describe("Live: a corrected message is one row and one email (I3)", () => {
     await leaveMessage(s);
     await s.turnEnds();
     await writesLand();
-    expect(rows).toHaveLength(1);
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(rows[0].owner_notice_pending).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
 
     await s.callerSays("No, it's 0 1 2 4 at the end.");
     await s.assistantSays("Sorry — 2 1 4, 5 5 5, 0 1 2 4. Passing that on now.");
@@ -136,12 +137,14 @@ describe("Live: a corrected message is one row and one email (I3)", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].callback_number).toBe("214 555 0124");
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    // Nothing is sent at save: the one email goes at call end (Task 6).
+    expect(rows[0].owner_notice_pending).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
   });
 });
 
-describe("Live: the email is never lost to the way the call ends", () => {
-  it("the line drops in the same turn as the record: the row is written and the owner emailed", async () => {
+describe("Live: the row is kept pending however the call ends", () => {
+  it("the line drops in the same turn as the record: the row is written and pending", async () => {
     const { s, rows } = await boot();
     await leaveMessage(s);
     // No turnComplete, no Twilio stop: the socket just closes.
@@ -149,7 +152,8 @@ describe("Live: the email is never lost to the way the call ends", () => {
     await writesLand();
 
     expect(rows).toHaveLength(1);
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(rows[0].owner_notice_pending).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
   });
 
   it("a correction still in flight when the line drops updates the row and sends nothing more", async () => {
@@ -163,10 +167,10 @@ describe("Live: the email is never lost to the way the call ends", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0].callback_number).toBe("214 555 0124");
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
   });
 
-  it("a second, different message on the same call is its own row and its own email", async () => {
+  it("a second, different message on the same call is its own pending row", async () => {
     const { s, rows } = await boot();
     await leaveMessage(s);
     await s.turnEnds();
@@ -177,6 +181,60 @@ describe("Live: the email is never lost to the way the call ends", () => {
     await writesLand();
 
     expect(rows).toHaveLength(2);
-    expect(notifications.notifyCustomerRequest).toHaveBeenCalledTimes(2);
+    expect(rows.every((r) => r.owner_notice_pending)).toBe(true);
+    expect(notifications.notifyCustomerRequest).not.toHaveBeenCalled();
+  });
+});
+
+// Task 4, the wire for `next`: the REAL record_customer_request goes through
+// executeToolCallGuarded -> executeToolCall -> pack.execute(fc, { ...ctx, deps }),
+// and the reply the model gets is what session.sendToolResponse is handed. The
+// model-only `next` has to survive every step, and the spoken message must not
+// change.
+describe("Live: next reaches the model when the business has messages notes", () => {
+  const NOTES = "For new enquiries also ask their company name and what they want help with.";
+  const withNotes = (notes) => ({ ...CONFIG, capabilities: { messages: { notes } } });
+
+  async function bootWith(config) {
+    const { db } = storeDb();
+    db.loadConfig = () => config;
+    return bootLive({ config, database: db, callSid: "CA_next_live" });
+  }
+
+  it("a business with notes: the function response carries next, the spoken message is unchanged", async () => {
+    const s = await bootWith(withNotes(NOTES));
+    await s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
+    await s.assistantSays(SUMMARY);
+    const [res] = await s.callTool("record_customer_request", MESSAGE);
+    expect(res.response.success).toBe(true);
+    expect(res.response.message).toBe("I'll make sure they get your message.");
+    expect(res.response.next).toMatch(/^\[not caller speech\] /);
+    expect(res.response.next).toContain("details");
+  });
+
+  it("a business without notes: no next on the wire", async () => {
+    for (const config of [CONFIG, withNotes("   ")]) {
+      const s = await bootWith(config);
+      await s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
+      await s.assistantSays(SUMMARY);
+      const [res] = await s.callTool("record_customer_request", MESSAGE);
+      expect(res.response.success).toBe(true);
+      expect("next" in res.response).toBe(false);
+    }
+  });
+
+  it("the declaration the model is given offers caller_type and details (array of objects)", async () => {
+    const { buildLiveTools } = await import("../lib/voice/live/tools.js");
+    const decl = buildLiveTools(CONFIG, { integrations: [] })[0].functionDeclarations.find(
+      (d) => d.name === "record_customer_request"
+    );
+    const props = decl.parameters.properties;
+    expect(props.caller_type.enum).toContain("new_enquiry");
+    expect(props.details).toMatchObject({
+      type: "array",
+      items: { type: "object", required: ["label", "answer"] },
+    });
+    // Survives JSON, which is how the SDK ships it.
+    expect(JSON.parse(JSON.stringify(decl)).parameters.properties.details.items.properties.answer.type).toBe("string");
   });
 });

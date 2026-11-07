@@ -2483,14 +2483,6 @@ const SABOTAGES = [
     red: [S3_REQUESTS],
   },
   {
-    name: "correction-resends-unlanded-email",
-    why: "round A1 S3 I2: a correction re-sends the owner email the first save could not deliver; otherwise a refused first send plus a correction leaves the owner never told.",
-    file: "capabilities/messages.js",
-    find: "          if (await ownerNotifiedFor(saved.id)) return;",
-    replace: "          return; // SABOTAGE",
-    red: [S3_REQUESTS],
-  },
-  {
     name: "notify-reports-delivery",
     why: "round A1 S3 I2: notifyCustomerRequest says whether the owner was reached; a constant answer makes every correction either silent after a failed send or a second email.",
     file: "services/notifications.js",
