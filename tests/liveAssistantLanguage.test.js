@@ -199,10 +199,10 @@ describe("LVX149 — what an English-only tenant is told", () => {
 
   it("tells an English-only tenant to answer in English", () => {
     const p = prefixFor(["en"]);
-    expect(p).toMatch(/ALWAYS replies in English/);
+    expect(p).toMatch(/Reply in English only/);
     // And names the mis-hearing, because "reply in English" on its own competes
     // with a whole French sentence in the context and loses.
-    expect(p).toMatch(/transcription mis-hearing an English speaker/);
+    expect(p).toMatch(/you misheard an English speaker/);
   });
 
   it("treats a missing languagesSpoken the same way", () => {
@@ -210,7 +210,7 @@ describe("LVX149 — what an English-only tenant is told", () => {
     // must not fall through into silence -- which is exactly how this defect
     // existed: by being the case no branch covered.
     const p = prefixFor(undefined);
-    expect(p).toMatch(/ALWAYS replies in English/);
+    expect(p).toMatch(/Reply in English only/);
   });
 
   it("leaves a multilingual tenant on the mirroring rule", () => {

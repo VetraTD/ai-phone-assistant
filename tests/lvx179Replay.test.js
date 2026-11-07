@@ -201,7 +201,7 @@ describe("LVX179 owner rule 2: a new person's FULL name is spelled", () => {
     expect(q).not.toMatch(/[A-Z]-[A-Z]/);
   });
 
-  it("the prompt asks for the first AND last name in one ask, and never asks an on-file caller for a name", async () => {
+  it("the prompt asks for the first AND last name in one ask, and an on-file caller is asked to confirm, not to spell", async () => {
     const { buildStaticSystemPrefix } = await import("../services/gemini.js");
     const { FIXTURES } = await import("./fixtures/businessConfigs.js");
     const f = FIXTURES["appointments-availability"];
@@ -210,7 +210,10 @@ describe("LVX179 owner rule 2: a new person's FULL name is spelled", () => {
     const prompt = buildStaticSystemPrefix(f.config, f.extras);
     if (saved !== undefined) process.env.VOICE_SPELL_POLICY = saved;
     expect(prompt).toContain("Could you spell the first and last name for me?");
-    expect(prompt).toContain("do not ask them for it at all — not even their full name");
+    // LVX188 (owner): an on-file name is a question, never a statement.
+    expect(prompt).toContain("it may not be who is calling: ask once \"Am I speaking with <name>?\"");
+    expect(prompt).toContain("If yes, use it and do not ask them to spell it.");
+    expect(prompt).toContain("If no, ask for their name.");
   });
 });
 

@@ -38,7 +38,7 @@ const WIRED_KEYS = {
     "require.identity",
   ],
   quotes: ["notes", "require.identity"],
-  messages: ["notes", "require.identity"],
+  messages: ["callbackLine", "notes", "require.identity"],
 };
 
 /** Dot-paths of every schema node that declares a `type`. */
@@ -265,5 +265,17 @@ describe("quotes & messages — identity + notes have effect", () => {
     const config = packConfig("messages", { notes: "Always ask which department." });
     const p = buildSystemInstruction("gather_details", "take_message", config, { knowledge: [], integrations: [], transferAllowed: true });
     expect(p).toContain("Always ask which department.");
+  });
+
+  it("messages callbackLine → the promised line appears in the prompt and the urgency question goes", () => {
+    const line = "Sam will call you back as soon as he can.";
+    const withLine = packConfig("messages", { callbackLine: line });
+    const without = packConfig("messages", {});
+    const extras = { knowledge: [], integrations: [], transferAllowed: true };
+    const p = buildSystemInstruction("gather_details", "take_message", withLine, extras);
+    const base = buildSystemInstruction("gather_details", "take_message", without, extras);
+    expect(p).toContain(line);
+    expect(base).not.toContain(line);
+    expect(p).not.toBe(base);
   });
 });
