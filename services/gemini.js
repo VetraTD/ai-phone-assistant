@@ -1101,6 +1101,10 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
       ctx += `Last call: "${callerContext.lastCallSummary}" `;
     }
   }
+  // LVX188: a name on file may belong to someone else on a shared phone.
+  if (callerContext.upcomingAppointments?.some((a) => a.client_name)) {
+    ctx += `\nNames below may belong to someone else on this phone. Do not call the caller by any of them until they confirm.`;
+  }
   if (callerContext.upcomingAppointments?.length > 0) {
     const appts = callerContext.upcomingAppointments.map((a) => {
       // speakableDateTime, not a hand-rolled toLocaleString.

@@ -3491,6 +3491,14 @@ const SABOTAGES = [
     replace: "  return false; // SABOTAGE: a question back reads as nothing else",
     red: [ASK, EXITCLOSE, "tests/transcriptUtils.test.js"],
   },
+  {
+    name: "onfile-name-asserted",
+    why: "Ilija inbound Task 12, LVX188: a name on file is a question, never assumed. The single-name note goes back to stating the on-file name as the caller's (\"that is their name: use it exactly as written\") with no 'Am I speaking with' check, so a name left on a shared phone by someone else is used without confirmation. tests/a1OnFileNote.test.js asserts the question and the absence of the old statement.",
+    file: "capabilities/appointments.js",
+    find: "      `If yes, use it exactly as written: do not ask for it again, do not ask them to spell it, and do not spell it back. If no, ask for their name.` +",
+    replace: "      `that is their name: use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +",
+    red: ["tests/a1OnFileNote.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

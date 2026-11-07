@@ -105,7 +105,7 @@ const MESSAGE_PROTOCOL_HEADER =
 // it renders on BOOKING calls too — leaving the old sentence here would have
 // reinstated the instruction on exactly the calls the other edit is for.
 const STEP_NAME =
-  `Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard, so "Thanks — and what's the best number to reach you on?" is all you need. Once they have spelled it you may use their first name — "Thanks, Nithin — ". If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them for it at all — not even their full name — or ask them to spell it. In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call. Do not ask them to spell anything unless you are told to.`;
+  `Name: ask for it. Do NOT say it back to them — a name you have only heard is one you may have misheard, so "Thanks — and what's the best number to reach you on?" is all you need. Once they have spelled it you may use their first name — "Thanks, Nithin — ". If a name is on their record from an earlier call, it may not be who is calling: ask once "Am I speaking with <name>?" If yes, use it and do not ask them to spell it. If no, ask for their name. In your one question, just say the name — "for Nithin Dodla" — and do not spell it; letters are only for a name they spelled for you on this call. Do not ask them to spell anything unless you are told to.`;
 
 // Round A1 (owner, 2026-10-13): the number used to be read back on its own
 // ("Read it back digit by digit to confirm") and the message saved "only

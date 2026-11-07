@@ -169,14 +169,16 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
   // file is SAID, not spelled; only a surname spelled this call gets letters.
   it("part 4: a name on file is never asked for and is said, not spelled, in the one read-back (booking + message)", () => {
     const p = prefix(avail);
-    const both = p.match(/If their name is already on their record from an earlier visit[^\n]*/g) || [];
-    expect(both.length).toBeGreaterThanOrEqual(2);
+    const both = p.match(/If a name is on their record from an earlier call[^\n]*/g) || [];
+    expect(both.length).toBeGreaterThanOrEqual(1);
     for (const line of both) {
       // LVX180 (d1b CAb3e55): an on-file caller was asked their full name.
-      expect(line).toMatch(/do not ask them for it at all — not even their full name — or ask them to spell it/);
-      expect(line).toMatch(/just say the name/);
+      // LVX188: an on-file name is asked once, never assumed.
+      expect(line).toMatch(/ask once "Am I speaking with <name>\?" If yes, use it and do not ask them to spell it/);
+      expect(line).toMatch(/If no, ask for their name/);
       expect(line).not.toMatch(/one letter at a time/);
     }
+    expect(p).toMatch(/just say the name/);
     expect(p).not.toMatch(/or one from their record, one letter at a time/);
     for (const intent of ["take_message", "callback_request"]) {
       expect(tail(avail, "gather_details", intent)).not.toMatch(/or one from their record, one letter at a time/);

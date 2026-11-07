@@ -990,8 +990,8 @@ export function onFileNameNote(ctx, intent) {
       : "";
   if (names.length === 1) {
     return (
-      `[not caller speech] On this caller's record: ${names[0]}. If they are booking for themselves, that is their ` +
-      `name: use it exactly as written. Do not ask for their name, do not ask them to spell it, and do not spell it back.` +
+      `[not caller speech] On this caller's record: ${names[0]}. That may not be who is calling. Before using it, ask once: "Am I speaking with ${names[0]}?" ` +
+      `If yes, use it exactly as written: do not ask for it again, do not ask them to spell it, and do not spell it back. If no, ask for their name.` +
       another
     );
   }

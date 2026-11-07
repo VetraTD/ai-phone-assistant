@@ -35,6 +35,9 @@ describe("Part 6: the on-file name in set_call_intent's reply", () => {
     expect(note).toMatch(/another or one more appointment, it is an extra booking/);
     expect(note).toMatch(/book it with in_addition_to_existing set to true/);
     expect(note).not.toMatch(/Is that under/);
+    // LVX188: an on-file name is a question, never assumed.
+    expect(onFileNameNote(live(one), BOOK)).toContain('Am I speaking with Ada Moss?');
+    expect(note).not.toMatch(/that is their name/);
   });
 
   // Opus review M2: a message has no read-back, so someone else on the
@@ -90,6 +93,58 @@ describe("Part 6: the on-file name in set_call_intent's reply", () => {
     expect(onLive.functionResponse.response).toEqual({ success: true, message: onFileNameNote(live(one), BOOK) });
     const cascade = await executeToolCall(fc, { callerContext: one, config: BOOKING });
     expect(cascade.functionResponse.response).toEqual({ success: true });
+  });
+});
+
+// LVX188 (calls, 2026-11): an on-file name is a question, never assumed. The
+// record can belong to someone else on a shared phone, so the caller confirms it.
+describe("LVX188: an on-file name is asked, never assumed", () => {
+  const jd = { upcomingAppointments: [row("Jonathan Daniel", "2030-01-15T15:00:00Z")] };
+
+  it("single name: ask once 'Am I speaking with <name>?', then use it; no 'that is their name'", () => {
+    const note = onFileNameNote(live(jd), BOOK);
+    expect(note).toContain(
+      "[not caller speech] On this caller's record: Jonathan Daniel. That may not be who is calling. " +
+        'Before using it, ask once: "Am I speaking with Jonathan Daniel?" If yes, use it exactly as written: ' +
+        "do not ask for it again, do not ask them to spell it, and do not spell it back. If no, ask for their name."
+    );
+    expect(note).not.toMatch(/that is their name/);
+    expect(note).not.toMatch(/Do not ask for their name/);
+  });
+
+  it("single name with another booking allowed: the 'another' clause is still appended", () => {
+    const note = onFileNameNote(live(jd), BOOK);
+    expect(note.endsWith(" If they ask for another or one more appointment, it is an extra booking: do not ask whether they want to move or reschedule one they already have, do not list the ones they already have, and book it with in_addition_to_existing set to true -- that extra booking only, never a change to one already booked.")).toBe(true);
+  });
+
+  it("protocol step 1 asks once and never assumes the on-record name", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    const { FIXTURES } = await import("./fixtures/businessConfigs.js");
+    const text = buildStaticSystemPrefix(FIXTURES["messages-only"].config, FIXTURES["messages-only"].extras);
+    expect(text).toContain(
+      'If a name is on their record from an earlier call, it may not be who is calling: ask once "Am I speaking with <name>?" If yes, use it and do not ask them to spell it. If no, ask for their name.'
+    );
+    expect(text).not.toContain("you have it right already");
+    expect(text).not.toContain("that is their name");
+  });
+
+  it("caller context names are flagged as possibly someone else's until confirmed", async () => {
+    const { buildDynamicTail } = await import("../services/gemini.js");
+    const { FIXTURES } = await import("./fixtures/businessConfigs.js");
+    const f = FIXTURES["appointments-db"];
+    const tail = buildDynamicTail("identify_intent", null, f.config, {
+      ...f.extras,
+      callerContext: { callCount: 1, upcomingAppointments: [row("Jonathan Daniel", "2030-01-15T15:00:00Z")] },
+    });
+    expect(tail).toContain("Upcoming appointments:");
+    expect(tail).toContain(
+      "Names below may belong to someone else on this phone. Do not call the caller by any of them until they confirm."
+    );
+    const bare = buildDynamicTail("identify_intent", null, f.config, {
+      ...f.extras,
+      callerContext: { callCount: 2, upcomingAppointments: [] },
+    });
+    expect(bare).not.toContain("Names below may belong");
   });
 });
 
