@@ -195,7 +195,8 @@ CREATE TABLE customer_requests (
   notes           text,
   created_at      timestamptz DEFAULT now(),
   details         jsonb,                              -- 059: { callerType?, answers: [{label, answer}] }
-  owner_notice_pending boolean NOT NULL DEFAULT false -- 059: claimed by the call-end hook, released on failure
+  owner_notice_pending boolean NOT NULL DEFAULT false, -- 059: true until the call-end hook completes the notice
+  owner_notice_claimed_at timestamptz                -- 060: the call-end hook's lease; NULL = not claimed
 );
 
 -- 7. Business knowledge (Q&A pairs injected into AI prompt)

@@ -3416,6 +3416,22 @@ const SABOTAGES = [
     replace: "    await sleep(0); // SABOTAGE: settleMs ignored",
     red: ["tests/ownerNotices.test.js"],
   },
+  {
+    name: "notice-lease-ignored",
+    why: "Ilija inbound Task L: a claim is a lease (migration 060). Sabotaged, the claim's WHERE ignores owner_notice_claimed_at, so a live lease is claimed twice and a Twilio retry of the status callback sends the owner a second email. Real-Postgres proof is tests/db/customerRequestDetails.test.js (the matrix cannot run DB suites); the root suite sees the predicate leave the UPDATE's own row.",
+    file: "services/db.js",
+    find: "cr.owner_notice_claimed_at IS NULL OR cr.owner_notice_claimed_at <",
+    replace: "cr.owner_notice_claimed_at IS NULL OR cr.owner_notice_claimed_at IS NOT NULL OR cr.owner_notice_claimed_at <",
+    red: ["tests/ownerNotices.test.js"],
+  },
+  {
+    name: "notice-sent-not-completed",
+    why: "Ilija inbound Task L: a sent group is completed (pending and the lease cleared). Sabotaged, the sent branch skips complete, so every row stays pending and is sent again by each later call once its lease runs out.",
+    file: "lib/ownerNotices.js",
+    find: "        if (outcome === \"sent\" || outcome === \"off\") {",
+    replace: "        if (outcome === \"off\") { // SABOTAGE: sent skips complete",
+    red: ["tests/ownerNotices.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

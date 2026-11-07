@@ -1648,24 +1648,51 @@ export async function updateCustomerRequest({ id, businessId, callerName, callba
 }
 
 /**
+ * How long a claimed owner notice belongs to the hook that claimed it (migration 060).
+ *
+ * It must outlast one flush's worst case, the 2 s settle plus the 10 s send cap
+ * (lib/ownerNotices.js, services/notifications.js), or a slow send would be
+ * claimed and sent a second time while the first was still running. Past it, a
+ * row whose claimer died is free for the business's next completed call.
+ */
+const OWNER_NOTICE_LEASE_SECONDS = 120;
+
+/**
  * Claim the owner notices this call-end hook is responsible for, atomically.
  *
- * A request is claimable when it is still pending (owner_notice_pending) and
- * either belongs to this call (calls.twilio_call_sid = callSid) or is older than
- * 15 minutes. The 15 minutes covers a call whose end hook never fired: a Live
- * call is hard-ended by 9:30, so a row that old cannot still be waiting on its
- * own call. A null callSid therefore claims only the old rows.
+ * A request is claimable when it is still pending (owner_notice_pending), is not
+ * under a live lease (owner_notice_claimed_at NULL, or older than
+ * OWNER_NOTICE_LEASE_SECONDS), and either belongs to this call
+ * (calls.twilio_call_sid = callSid) or is older than 15 minutes. The 15 minutes
+ * covers a call whose end hook never fired: a Live call is hard-ended by 9:30,
+ * so a row that old cannot still be waiting on its own call. A null callSid
+ * therefore claims only the old rows.
+ *
+ * A claim is a lease, not a delete (migration 060): it stamps
+ * owner_notice_claimed_at and leaves the row pending. The caller must settle
+ * every row it was given: completeOwnerNotices once the notice is sent (or the
+ * business takes none), releaseOwnerNotices when the send failed. A caller that
+ * dies before either leaves a lease that runs out, so the email is late, never
+ * lost.
  *
  * The claim is one UPDATE, so two hooks racing for the same row cannot both
- * get it. Rows come back oldest first. A caller that fails to send the notice
- * must hand the ids back with releaseOwnerNotices.
+ * get it: the second blocks on the row lock, and under READ COMMITTED Postgres
+ * re-checks the UPDATE's WHERE against the row as the first left it. That is
+ * why the lease test is on `cr`, the UPDATE's own target. `prior` exists only to
+ * report what owner_notice_claimed_at was before this claim (RETURNING shows the
+ * new value), and is read from the statement's snapshot, so it must never be
+ * the thing that decides.
+ *
+ * Each row carries `reclaimed`: true when the row was taken from an expired
+ * lease, which means an earlier claimer died or never settled it. Rows come
+ * back oldest first.
  *
  * Refuses an unscoped call (no businessId) and returns []: under FORCE RLS an
  * unscoped UPDATE matches no row, so the empty result would look like "nothing
  * pending" when it means "not scoped".
  *
  * @param {{ businessId: string, callSid?: string|null }} params - businessId REQUIRED
- * @returns {Promise<Array<{id: string, call_id: string, request_type: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null, details: object|null, created_at: Date, caller_number: string|null, twilio_call_sid: string|null}>>}
+ * @returns {Promise<Array<{id: string, call_id: string, request_type: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null, details: object|null, created_at: Date, caller_number: string|null, twilio_call_sid: string|null, reclaimed: boolean}>>}
  */
 export async function claimOwnerNotices({ businessId, callSid = null }) {
   if (!pool) return [];
@@ -1674,13 +1701,19 @@ export async function claimOwnerNotices({ businessId, callSid = null }) {
     return [];
   }
   const res = await q(
-    `UPDATE customer_requests cr SET owner_notice_pending = false
-       FROM calls c
-      WHERE cr.call_id = c.id AND cr.business_id = $1 AND cr.owner_notice_pending
+    `WITH prior AS (
+       SELECT id, owner_notice_claimed_at FROM customer_requests
+        WHERE business_id = $1 AND owner_notice_pending
+     )
+     UPDATE customer_requests cr SET owner_notice_claimed_at = now()
+       FROM calls c, prior p
+      WHERE cr.call_id = c.id AND p.id = cr.id AND cr.business_id = $1 AND cr.owner_notice_pending
+        AND (cr.owner_notice_claimed_at IS NULL OR cr.owner_notice_claimed_at < now() - make_interval(secs => $3))
         AND (c.twilio_call_sid = $2 OR cr.created_at < now() - interval '15 minutes')
      RETURNING cr.id, cr.call_id, cr.request_type, cr.caller_name, cr.callback_number, cr.message,
-               cr.preferred_time, cr.details, cr.created_at, c.caller_number, c.twilio_call_sid`,
-    [businessId, callSid || null]
+               cr.preferred_time, cr.details, cr.created_at, c.caller_number, c.twilio_call_sid,
+               (p.owner_notice_claimed_at IS NOT NULL) AS reclaimed`,
+    [businessId, callSid || null, OWNER_NOTICE_LEASE_SECONDS]
   );
   if (res.error) {
     log.error("db_error", { operation: "claimOwnerNotices", error: res.error.message });
@@ -1696,9 +1729,11 @@ export async function claimOwnerNotices({ businessId, callSid = null }) {
 /**
  * Hand claimed owner notices back, so the next call-end hook can claim them.
  *
- * Used when the notice could not be sent. Scoped by business_id as well as RLS,
- * the same as every customer_requests write. Returns the number of rows changed;
- * 0 for an empty id list (no query runs) or a refused or failed call.
+ * Used when the notice could not be sent. Clears the lease (migration 060), so
+ * the row is free at once rather than when the lease runs out; pending stays
+ * true. Scoped by business_id as well as RLS, the same as every
+ * customer_requests write. Returns the number of rows changed; 0 for an empty
+ * id list (no query runs) or a refused or failed call.
  *
  * @param {{ businessId: string, ids: string[] }} params - businessId REQUIRED
  * @returns {Promise<number>}
@@ -1711,7 +1746,7 @@ export async function releaseOwnerNotices({ businessId, ids }) {
     return 0;
   }
   const res = await q(
-    `UPDATE customer_requests SET owner_notice_pending = true
+    `UPDATE customer_requests SET owner_notice_pending = true, owner_notice_claimed_at = NULL
       WHERE business_id = $1 AND id = ANY($2::uuid[])
       RETURNING id`,
     [businessId, list]
@@ -1722,6 +1757,41 @@ export async function releaseOwnerNotices({ businessId, ids }) {
   }
   const rows = res.rows || [];
   noteAccess("releaseOwnerNotices", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
+  return rows.length;
+}
+
+/**
+ * Settle claimed owner notices for good: the owner was told, or the business
+ * takes no notice ("off"). Clears pending and the lease, so no later claim
+ * returns the row (migration 060).
+ *
+ * A caller that cannot complete leaves the lease to run out, which costs one
+ * duplicate email at worst, never a lost one. Scoped by business_id as well as
+ * RLS, like releaseOwnerNotices. Returns the number of rows changed; 0 for an
+ * empty id list (no query runs) or a refused or failed call.
+ *
+ * @param {{ businessId: string, ids: string[] }} params - businessId REQUIRED
+ * @returns {Promise<number>}
+ */
+export async function completeOwnerNotices({ businessId, ids }) {
+  const list = (ids || []).filter(Boolean);
+  if (!pool || list.length === 0) return 0;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "completeOwnerNotices" });
+    return 0;
+  }
+  const res = await q(
+    `UPDATE customer_requests SET owner_notice_pending = false, owner_notice_claimed_at = NULL
+      WHERE business_id = $1 AND id = ANY($2::uuid[])
+      RETURNING id`,
+    [businessId, list]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "completeOwnerNotices", error: res.error.message });
+    return 0;
+  }
+  const rows = res.rows || [];
+  noteAccess("completeOwnerNotices", { resourceIds: rows.map((r) => r.id), rowCount: rows.length });
   return rows.length;
 }
 

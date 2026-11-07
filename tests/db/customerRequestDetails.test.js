@@ -8,6 +8,11 @@
  * UPDATE matches no row and reports no error, so every claim and release here
  * runs inside db.withTenant as vetra_app, and the admin client reads the
  * result back.
+ *
+ * Migration 060 makes the claim a lease: it stamps `owner_notice_claimed_at`
+ * and leaves the row pending until completeOwnerNotices, so an instance that
+ * dies between the claim and the send leaves a row the next call can take
+ * once the lease runs out, instead of a row nobody will ever email.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -94,9 +99,33 @@ async function file({ callId = callA, pending = true, details = DETAILS, phone =
 }
 
 const stored = async (id) =>
-  (await admin.query(`SELECT details, owner_notice_pending FROM customer_requests WHERE id = $1`, [id])).rows[0];
+  (
+    await admin.query(
+      `SELECT details, owner_notice_pending, owner_notice_claimed_at,
+              owner_notice_claimed_at > now() - interval '1 minute' AS claimed_just_now
+         FROM customer_requests WHERE id = $1`,
+      [id]
+    )
+  ).rows[0];
 
 const claim = (businessId, callSid) => db.withTenant(businessId, () => db.claimOwnerNotices({ businessId, callSid }));
+const complete = (businessId, ids) => db.withTenant(businessId, () => db.completeOwnerNotices({ businessId, ids }));
+
+/** Back-date a row's lease and its age, as the admin (superuser) client. */
+async function backdate(id, { claimedMinutes = null, createdMinutes = null }) {
+  if (claimedMinutes != null) {
+    await admin.query(
+      `UPDATE customer_requests SET owner_notice_claimed_at = now() - make_interval(mins => $2) WHERE id = $1`,
+      [id, claimedMinutes]
+    );
+  }
+  if (createdMinutes != null) {
+    await admin.query(`UPDATE customer_requests SET created_at = now() - make_interval(mins => $2) WHERE id = $1`, [
+      id,
+      createdMinutes,
+    ]);
+  }
+}
 
 describeDb("customer request details and pending owner notices — as vetra_app", () => {
   it("claims a pending row for this call once", async () => {
@@ -116,7 +145,9 @@ describeDb("customer request details and pending owner notices — as vetra_app"
       })
     );
     expect(await claim(TENANT, SID_A)).toEqual([]);
-    expect((await stored(id)).owner_notice_pending).toBe(false);
+    // 060: a claim is a lease, not a delete. The row stays pending until the
+    // send is completed; the lease is what keeps the second claim out.
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, claimed_just_now: true }));
   });
 
   it("leaves a younger pending row from another call alone", async () => {
@@ -130,7 +161,7 @@ describeDb("customer request details and pending owner notices — as vetra_app"
 
     const got = await claim(TENANT, SID_A);
     expect(got.map((r) => r.id)).toEqual([id]);
-    expect((await stored(id)).owner_notice_pending).toBe(false);
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, claimed_just_now: true }));
   });
 
   it("does not claim a row whose owner_notice_pending is false", async () => {
@@ -147,9 +178,13 @@ describeDb("customer request details and pending owner notices — as vetra_app"
 
     const released = await db.withTenant(TENANT, () => db.releaseOwnerNotices({ businessId: TENANT, ids: [id] }));
     expect(released).toBe(1);
-    expect((await stored(id)).owner_notice_pending).toBe(true);
+    // 060: release clears the lease, so the row is free at once, not in 2 minutes.
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, owner_notice_claimed_at: null }));
 
-    expect((await claim(TENANT, SID_A)).map((r) => r.id)).toEqual([id]);
+    const again = await claim(TENANT, SID_A);
+    expect(again.map((r) => r.id)).toEqual([id]);
+    // A released row is not a lease that ran out.
+    expect(again[0].reclaimed).toBe(false);
   });
 
   it("claim is tenant scoped", async () => {
@@ -160,7 +195,7 @@ describeDb("customer request details and pending owner notices — as vetra_app"
     // Naming the right business while scoped to the other one is still nothing.
     expect(await db.withTenant(OTHER, () => db.claimOwnerNotices({ businessId: TENANT, callSid: SID_A }))).toEqual([]);
 
-    expect((await stored(id)).owner_notice_pending).toBe(true);
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, owner_notice_claimed_at: null }));
   });
 
   it("eraseCallerData nulls details", async () => {
@@ -196,5 +231,93 @@ describeDb("customer request details and pending owner notices — as vetra_app"
       db.updateCustomerRequest({ id, businessId: TENANT, message: "a corrected message", details: { answers: [] } })
     );
     expect((await stored(id)).details).toEqual(DETAILS);
+  });
+});
+
+describeDb("owner notice lease (migration 060) — as vetra_app", () => {
+  it("a second claim inside the lease gets nothing, even from the 15-minute sweep", async () => {
+    const id = await file({ callId: callA });
+
+    const first = await claim(TENANT, SID_A);
+    expect(first.map((r) => r.id)).toEqual([id]);
+    expect(first[0].reclaimed).toBe(false);
+
+    // Twilio retrying the same callback, inside the lease.
+    expect(await claim(TENANT, SID_A)).toEqual([]);
+    // Another call's sweep: the row is old enough, but its lease is live.
+    await backdate(id, { claimedMinutes: 1, createdMinutes: 16 });
+    expect(await claim(TENANT, SID_B)).toEqual([]);
+    expect((await stored(id)).owner_notice_pending).toBe(true);
+  });
+
+  it("an expired lease is claimed by the business's next call, and says it was reclaimed", async () => {
+    const id = await file({ callId: callA });
+    expect((await claim(TENANT, SID_A)).map((r) => r.id)).toEqual([id]);
+
+    // The instance that claimed it died: no send, no release, no complete.
+    await backdate(id, { claimedMinutes: 3, createdMinutes: 16 });
+
+    const got = await claim(TENANT, SID_B);
+    expect(got.map((r) => r.id)).toEqual([id]);
+    expect(got[0].reclaimed).toBe(true);
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, claimed_just_now: true }));
+  });
+
+  it("a completed row is never claimed again", async () => {
+    const id = await file({ callId: callA });
+    expect((await claim(TENANT, SID_A)).map((r) => r.id)).toEqual([id]);
+
+    expect(await complete(TENANT, [id])).toBe(1);
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: false, owner_notice_claimed_at: null }));
+
+    await backdate(id, { createdMinutes: 16 });
+    expect(await claim(TENANT, SID_A)).toEqual([]);
+    expect(await claim(TENANT, SID_B)).toEqual([]);
+  });
+
+  it("complete is scoped by business and refuses an unscoped call", async () => {
+    const id = await file({ callId: callA });
+    expect((await claim(TENANT, SID_A)).map((r) => r.id)).toEqual([id]);
+
+    expect(await db.completeOwnerNotices({ businessId: null, ids: [id] })).toBe(0);
+    expect(await db.withTenant(OTHER, () => db.completeOwnerNotices({ businessId: TENANT, ids: [id] }))).toBe(0);
+    expect(await complete(OTHER, [id])).toBe(0);
+    expect(await complete(TENANT, [])).toBe(0);
+
+    expect(await stored(id)).toEqual(expect.objectContaining({ owner_notice_pending: true, claimed_just_now: true }));
+  });
+
+  it("a claim that waited on another claim's row lock re-checks the lease and gets nothing", async () => {
+    // Two status callbacks for one call. The first has stamped the lease but
+    // not committed; the second's UPDATE reads the old row in its snapshot,
+    // blocks on the row lock, and after the commit must re-check the lease on
+    // the row as it now stands. A lease tested only in a snapshot (a CTE or a
+    // sub-select) would pass the second claim through and send twice.
+    const id = await file({ callId: callA });
+    const holder = new pg.Client({ connectionString: url });
+    await holder.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`UPDATE customer_requests SET owner_notice_claimed_at = now() WHERE id = $1`, [id]);
+
+      const racing = claim(TENANT, SID_A);
+      let waiting = 0;
+      for (let i = 0; i < 100 && waiting === 0; i += 1) {
+        await new Promise((r) => setTimeout(r, 50));
+        ({
+          rows: [{ waiting }],
+        } = await admin.query(
+          `SELECT count(*)::int AS waiting FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND query LIKE '%owner_notice_claimed_at%' AND pid <> pg_backend_pid()`
+        ));
+      }
+      expect(waiting, "the second claim never reached the row lock").toBe(1);
+
+      await holder.query("COMMIT");
+      expect(await racing).toEqual([]);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      await holder.end();
+    }
   });
 });
