@@ -96,6 +96,17 @@ describe("createAskLedger -- the edges the brief's cases do not reach", () => {
     expect(repeats).toBe(6);
   });
 
+  it("an ask that was cut is the one being answered, but not an ask heard again", () => {
+    // Review fix round 1, I1: the cutter passes the need it cut. It joins
+    // what the caller is answering (a further deflection is still cut) and
+    // adds nothing to the need's count (a plain answer leaves the second ask).
+    const l = createAskLedger({ maxAsks: 2 });
+    l.recordReply("What's the best number to reach you on?", { callerSpoke: true });
+    l.recordReply("Sure. What's the best number to reach you on?", { callerSpoke: true, cut: "number" });
+    expect(l.repeatIn("And the best number to reach you on?", { callerAsked: true })).toBe("number");
+    expect(l.repeatIn("And the best number to reach you on?", {})).toBeNull();
+  });
+
   it("an empty or missing reply records nothing", () => {
     const l = createAskLedger({ maxAsks: 2 });
     l.recordReply("", { callerSpoke: true });

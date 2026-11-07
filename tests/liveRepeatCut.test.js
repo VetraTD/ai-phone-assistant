@@ -719,6 +719,37 @@ describe("LVX189 -- a repeated ask is cut", () => {
     expect(s.cleared).toHaveLength(0);
   });
 
+  it("a cut ask is not a heard ask: the next ask after a plain answer is allowed", async () => {
+    // Review fix round 1, I1. The cut re-ask stays in the turn's transcript,
+    // so counting it as asked again put the need over its cap: the caller had
+    // heard the ask once, and the next legitimate ask was cut as a third.
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say(`Sure. ${NUMBER_ASK}`);
+    await s.caller("Why do you need that?");
+    await s.say(`So the team can call back. ${NUMBER_ASK}`); // cut 1
+    await s.caller("Okay.");
+    await s.say(`Thanks. ${NUMBER_ASK}`);
+
+    expect(c().live_ask_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
+  it("a cut ask still counts as the ask the caller is answering: a second deflection is cut", async () => {
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say(`Sure. ${NUMBER_ASK}`);
+    await s.caller("Why do you need that?");
+    await s.say(`So the team can call back. ${NUMBER_ASK}`); // cut 1
+    await s.caller("And who are you exactly?");
+    await s.say(`I'm the AI receptionist. ${NUMBER_ASK}`); // cut 2
+
+    expect(c().live_ask_repeat_cut).toBe(2);
+    expect(s.cleared).toHaveLength(2);
+  });
+
   it("can be switched off without a deploy", async () => {
     const s = await boot({ LIVE_ASK_CUT: "off" });
     await s.say(GREETING);

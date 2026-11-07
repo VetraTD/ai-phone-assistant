@@ -115,9 +115,11 @@ const STEP_NAME =
 // LVX189 (2026-11-07): one ask, and the caller-ID number offered on it. The
 // number was asked seven turns running while the caller ID sat unused; the
 // ask cutter (lib/voice/askLedger.js) now counts it in code, and this offers
-// the number they are calling from first. "If you know" is false when there
-// is no usable caller number (withheld, or the business's own line, which is
-// recorded as none); Task 4's fallbackNumber covers a save with no number.
+// the number they are calling from first. The model "knows" it only from the
+// THIS CALLER'S NUMBER block (services/gemini.js), which renders nothing for
+// a withheld caller (Twilio's placeholders, isWithheldCallerNumber) or a call
+// from the business's own line (recorded with no caller number). Task 4's
+// fallbackNumber covers a save with no number.
 const STEP_NUMBER =
   `Number: if you know the number they are calling from, ask once: "Is the number you're calling from the best one?" Anything other than a different number means use it. If you do not have it, ask for the best number once. You will read it back digit by digit in your one summary, not now.`;
 

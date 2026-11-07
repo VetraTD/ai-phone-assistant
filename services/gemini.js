@@ -3,6 +3,7 @@ import { captureException } from "../lib/sentry.js";
 import { log } from "../lib/logger.js";
 import { BUILTIN_TOOL_NAMES, normalizeAllowedTasks } from "./db.js";
 import { emergencyNumberFor } from "../lib/phone.js";
+import { isWithheldCallerNumber } from "../lib/inboundGuards.js";
 import { executeToolCall, executeToolCallGuarded } from "./tools.js";
 import {
   resolveDayHours,
@@ -2161,7 +2162,11 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
   // D-b (spec §9.2): never on outbound -- this whole function is inbound-only
   // now (assertInboundOnly), and the outbound prompt has no such block.
   const callerNumber = typeof extras?.callerPhone === "string" ? extras.callerPhone.trim() : "";
-  if (callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber)) {
+  // LVX189 review fix round 1 (I2): a withheld caller arrives as one of
+  // Twilio's shared placeholders, which pass the shape check below. Rendered,
+  // the model "knows the number they are calling from" and message step 2
+  // offers it -- a yes would save the placeholder as the callback number.
+  if (callerNumber && /^\+?\d[\d\s()-]{5,}$/.test(callerNumber) && !isWithheldCallerNumber(callerNumber)) {
     // SPOKEN form, not E.164.
     //
     // The first version handed the model `+14699338887` and it read the country

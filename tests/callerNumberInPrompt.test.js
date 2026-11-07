@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSystemInstruction } from "../services/gemini.js";
 import { STEPS } from "../lib/callState.js";
+import { isWithheldCallerNumber } from "../lib/inboundGuards.js";
 
 // ---------------------------------------------------------------------------
 // LVX16. The assistant must know the number the caller is calling FROM.
@@ -67,6 +68,26 @@ describe("the caller's own number", () => {
     const prompt = build({ callerPhone: null });
     expect(prompt).not.toContain("THIS CALLER'S NUMBER");
     expect(prompt).not.toMatch(/They are calling from/);
+  });
+
+  it("is absent for Twilio's withheld-number placeholders, which pass the shape check", () => {
+    // LVX189 review fix round 1, I2. A withheld caller arrives as one of four
+    // shared placeholders, not empty. Rendered, the model "knows the number
+    // they are calling from" and message step 2 offers it: a yes would save
+    // the placeholder as the callback number.
+    for (const placeholder of ["+266696687", "+7378742833", "+86282452253", "+2562533"]) {
+      expect(isWithheldCallerNumber(placeholder)).toBe(true);
+      const prompt = build({ callerPhone: placeholder });
+      expect(prompt).not.toContain("THIS CALLER'S NUMBER");
+      expect(prompt).not.toMatch(/They are calling from/);
+    }
+    // A formatted placeholder is still the placeholder.
+    expect(isWithheldCallerNumber("+266 696 687")).toBe(true);
+    // A real number is not, and still renders.
+    expect(isWithheldCallerNumber("+18175551234")).toBe(false);
+    expect(isWithheldCallerNumber("")).toBe(false);
+    expect(isWithheldCallerNumber(null)).toBe(false);
+    expect(build({ callerPhone: "+18175551234" })).toContain("THIS CALLER'S NUMBER");
   });
 
   it("tells the model not to guess a number it was never given", () => {
