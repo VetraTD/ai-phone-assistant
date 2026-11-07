@@ -805,11 +805,19 @@ export async function executeToolCall(fc, ctx) {
       // through: the caller had been asked, and had said something since. The
       // line dropped 1.6 s later with the caller still speaking.
       //
-      // ADDITIVE, like LVX132: it only converts an otherwise-ALLOWED hang-up
-      // into a refusal. Where the no_ask refusal below will fire anyway (never
-      // asked, refusal not yet spent) this steps aside, so that branch keeps
-      // its counter's meaning. Its own block rather than a conjunct, so the
-      // "hangup-without-asking" anchor below stays byte-identical.
+      // IT OUTRANKS THE no_ask REFUSAL BELOW, on purpose (review fix round 1).
+      // no_ask's text says "Say only this, nothing before it" and hands over
+      // the next ask, so a never-asked caller whose last words were a question
+      // ("is this the insurance company?") would be told nothing and asked
+      // something else -- the caller's question ignored for the next ask. This
+      // refusal makes the model answer, then ask "anything else?", which is
+      // no_ask's own purpose, and it does not spend the no_ask one-shot: once
+      // the holds here are spent, a never-asked hang-up still gets no_ask's
+      // refusal once. Bounded: two holds a call, plus one no_ask per action.
+      // end_call_would_refuse_no_ask, bumped above, still counts the
+      // never-asked situation whichever refusal held it. Its own block rather
+      // than a conjunct, so the "hangup-without-asking" anchor below stays
+      // byte-identical.
       //
       // INERT WITHOUT ITS WIRE (shared-gate-needs-the-latch-wire). The count
       // of holds lives on the Live front-end, which spends it from both doors
@@ -824,7 +832,6 @@ export async function executeToolCall(fc, ctx) {
       if (
         typeof ctx?.callerQuestionHolds === "number" &&
         allowedByExistingGates &&
-        (askedAnythingElse || noAskRefusalSpent) &&
         !skipOnOutbound("askBeforeHangup", Boolean(ctx?.outboundCall))
       ) {
         // The positive twin: bumped on every hang-up this check judged.

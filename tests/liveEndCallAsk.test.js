@@ -242,15 +242,23 @@ describe("a caller who closed the call themselves", () => {
     }
   );
 
-  it.each([["Thank you."], ["That's all, but can I ask one more thing"], ["That's it, and also my wife wants one."], ["That's all for now?"]])(
+  // LVX185 (2026-11-07): "That's all for now?" ends in a question, so it is a
+  // question back, and that refusal outranks this one -- its text asks
+  // "anything else?" too, after answering. Still refused, still not a close.
+  it.each([
+    ["Thank you.", "end_call_refused_no_ask"],
+    ["That's all, but can I ask one more thing", "end_call_refused_no_ask"],
+    ["That's it, and also my wife wants one.", "end_call_refused_no_ask"],
+    ["That's all for now?", "end_call_refused_caller_question"],
+  ])(
     "is still asked after %j",
-    async (said) => {
+    async (said, refusedBy) => {
       const s = await bookedCall("CA_noclose_" + said.length);
       await s.assistantTurn("You're all booked for Friday at three thirty.");
       await s.callerSays(said);
       const [res] = await s.callTool("end_call", {});
       expect(res.response.success).toBe(false);
-      expect(counters().end_call_refused_no_ask).toBe(1);
+      expect(counters()[refusedBy]).toBe(1);
       expect(counters().end_call_ask_satisfied_by_caller_close).toBeFalsy();
     }
   );
@@ -334,7 +342,8 @@ describe("LVX185: a caller's question back keeps the call open", () => {
 
     expect(res.response.success).toBe(false);
     expect(counters().end_call_refused_caller_question).toBe(1);
-    expect(counters().end_call_question_check_ran).toBe(1);
+    // Judged twice: the first hang-up (no question open, so no_ask's) and this.
+    expect(counters().end_call_question_check_ran).toBe(2);
     // The no_ask one-shot was the FIRST refusal and is still the only one.
     expect(counters().end_call_refused_no_ask).toBe(1);
     await s.settle();
@@ -380,8 +389,8 @@ describe("LVX185: a caller's question back keeps the call open", () => {
     const r3 = await s.callTool("end_call", {});
     expect(ok(r3)).toBe(true);
     expect(counters().end_call_refused_caller_question).toBe(2);
-    // The check still ran on the attempt it let through.
-    expect(counters().end_call_question_check_ran).toBe(3);
+    // The check ran on every attempt, the no_ask one and the one it let through.
+    expect(counters().end_call_question_check_ran).toBe(4);
   });
 
   it("the sign-off door and end_call share the one limit of two", async () => {
@@ -409,21 +418,57 @@ describe("LVX185: a caller's question back keeps the call open", () => {
     const res = await s.callTool("end_call", {});
     expect(ok(res)).toBe(true);
     expect(counters().end_call_refused_caller_question || 0).toBe(0);
-    // The positive twin: the check ran, and found nothing open.
-    expect(counters().end_call_question_check_ran).toBe(1);
+    // The positive twin: the check ran on both hang-ups, and found nothing
+    // open on this one.
+    expect(counters().end_call_question_check_ran).toBe(2);
   });
 
-  it("a caller question on a call nobody asked is still LVX132's refusal, not this one", async () => {
-    // Additive, like LVX132 itself: this gate only turns an otherwise-ALLOWED
-    // hang-up into a refusal. The no_ask refusal already holds this caller, and
-    // it keeps its own counter's meaning.
+  it("a caller question on a call nobody asked gets this refusal, not LVX132's", async () => {
+    // Review fix round 1. no_ask's text says "Say only this, nothing before
+    // it: Before you go -- is there anything else...", which tells the model to
+    // skip the caller's question. This refusal makes it answer, then ask
+    // "anything else?" -- no_ask's own purpose -- without spending no_ask's
+    // one-shot. The wrong-number caller is the case.
     const s = await bookedCall("CA_q_precedence");
     await s.assistantTurn("You're all booked for Friday at three thirty.");
-    await s.callerSays("Did you just say goodbye?");
+    await s.callerSays("Is this the insurance company?");
     const [res] = await s.callTool("end_call", {});
     expect(res.response.success).toBe(false);
+    expect(res.response.message).toBe(CALLER_QUESTION_REFUSAL);
+    expect(counters().end_call_refused_caller_question).toBe(1);
+    expect(counters().end_call_refused_no_ask || 0).toBe(0);
+    // The never-asked SITUATION is still counted, whichever refusal held it.
+    expect(counters().end_call_would_refuse_no_ask).toBe(1);
+  });
+
+  it("never asked: two caller_question holds, then no_ask once, then the hang-up goes through", async () => {
+    // The model answers each question but never asks "anything else?", so the
+    // never-asked situation stands throughout. The holds are spent first; the
+    // no_ask one-shot is still there after them, and then nothing holds.
+    const s = await bookedCall("CA_q_never_asked");
+    await s.assistantTurn("You're all booked for Friday at three thirty.");
+    await s.callerSays("Is this the insurance company?");
+    const [r1] = await s.callTool("end_call", {});
+    expect(r1.response.message).toBe(CALLER_QUESTION_REFUSAL);
+    await s.assistantTurn("No, this is Digile Media, a marketing agency.");
+
+    await s.callerSays("Did you just say goodbye?");
+    const [r2] = await s.callTool("end_call", {});
+    expect(r2.response.message).toBe(CALLER_QUESTION_REFUSAL);
+    await s.assistantTurn("Sorry about that.");
+
+    await s.callerSays("Can you say that one more time?");
+    const [r3] = await s.callTool("end_call", {});
+    expect(r3.response.success).toBe(false);
+    expect(r3.response.message).toMatch(/You have not yet asked this caller/);
+    expect(counters().end_call_refused_caller_question).toBe(2);
     expect(counters().end_call_refused_no_ask).toBe(1);
-    expect(counters().end_call_refused_caller_question || 0).toBe(0);
+
+    const r4 = await s.callTool("end_call", {});
+    expect(ok(r4)).toBe(true);
+    expect(counters().end_call_refused_caller_question).toBe(2);
+    expect(counters().end_call_refused_no_ask).toBe(1);
+    expect(counters().end_call_would_refuse_no_ask).toBe(4);
   });
 
   it("the caller's answer to a read-back is not a question back", async () => {
