@@ -222,6 +222,32 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     }
   });
 
+  it("a distant negation does not cancel an offer; a withheld detail is not an offer", () => {
+    const lifts = [
+      "Actually I don't mind you can take my number.",
+      "I don't mind, you can take my number.",
+      "I don't mind but you can take my number",
+    ];
+    for (const said of lifts) {
+      const l = createAskLedger();
+      declineAfter(l, NUMBER);
+      l.recordCallerTurn(said);
+      expect(l.isDeclined("number"), said).toBe(false);
+    }
+    const stays = [
+      ["number", NUMBER, "My number is private."],
+      ["email", EMAIL, "My email is personal."],
+      ["number", NUMBER, "Please don't call me."],
+      ["number", NUMBER, "No need to ring me back."],
+    ];
+    for (const [kind, ask, said] of stays) {
+      const l = createAskLedger();
+      declineAfter(l, ask);
+      l.recordCallerTurn(said);
+      expect(l.isDeclined(kind), said).toBe(true);
+    }
+  });
+
   it("explicit offers lift", () => {
     const phrases = [
       ["number", NUMBER, "Actually, you can take my number."],
