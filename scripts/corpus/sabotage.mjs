@@ -3515,6 +3515,38 @@ const SABOTAGES = [
     replace: "        // SABOTAGE: the ask cutter is never called",
     red: ["tests/liveRepeatCut.test.js"],
   },
+  {
+    name: "notice-not-awaited",
+    why: "Ilija inbound Task A1: Cloud Run throttles CPU once the response ends, so the status handler must await the flush. Sabotaged, the flush is fire-and-forget and the response goes out before the email is sent (it would be throttled and lost).",
+    file: "server.js",
+    find: "          await flushOwnerNotices({ db, notifications, log, captureException, businessId: noticeBusinessId, callSid });",
+    replace: "          void flushOwnerNotices({ db, notifications, log, captureException, businessId: noticeBusinessId, callSid }); // SABOTAGE: not awaited",
+    red: ["tests/statusCallbackNotices.test.js"],
+  },
+  {
+    name: "notice-settle-default",
+    why: "Ilija inbound Task A1: the server passes no settleMs and relies on the 2 s default for an in-flight write to land before the claim. Sabotaged, the default is 0 and nothing settles.",
+    file: "lib/ownerNotices.js",
+    find: "  settleMs = 2000,",
+    replace: "  settleMs = 0, // SABOTAGE: default settle gone",
+    red: ["tests/ownerNotices.test.js"],
+  },
+  {
+    name: "email-accepted-reads-failed",
+    why: "Ilija inbound Task A1, R12: once the email was accepted, a text still hanging at the 10 s deadline must not make the result failed (the rows would be released and the same email sent again). Sabotaged, the deadline resolves failed unconditionally.",
+    file: "services/notifications.js",
+    find: '        resolve(emailAccepted ? "sent" : "failed");',
+    replace: '        resolve("failed"); // SABOTAGE: accepted email reads failed',
+    red: ["tests/notifications.callRequests.test.js"],
+  },
+  {
+    name: "release-rearms-completed",
+    why: "Ilija inbound Task A1: a release may only touch a still-pending row. Sabotaged, the UPDATE has no pending predicate, so a flush stalled past its lease re-arms a row another flush already completed and it is emailed again. Real-Postgres proof is tests/db/customerRequestDetails.test.js; the root suite sees the SQL shape.",
+    file: "services/db.js",
+    find: "uuid[]) AND owner_notice_pending",
+    replace: "uuid[])",
+    red: ["tests/ownerNotices.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

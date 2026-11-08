@@ -560,8 +560,14 @@ export async function notifyCallRequests({ businessId, rows }) {
     }
 
     let timedOut = false;
+    // "sent" means the email was accepted when there is an address (R12): a text
+    // that hangs past the deadline must not turn it back into "failed".
+    let emailAccepted = false;
     const send = (async () => {
-      if (email && !(await sendEmail({ to: config.email, ...email, plainOnly: true }))) return "failed";
+      if (email) {
+        if (!(await sendEmail({ to: config.email, ...email, plainOnly: true }))) return "failed";
+        emailAccepted = true;
+      }
       if (config.phone && !timedOut) {
         const handed = await sendSms({
           to: config.phone,
@@ -576,8 +582,8 @@ export async function notifyCallRequests({ businessId, rows }) {
     const deadline = new Promise((resolve) => {
       timer = setTimeout(() => {
         timedOut = true;
-        log.error("notify_call_requests", { reason: "timeout", businessId, severity: "warn" });
-        resolve("failed");
+        log.error("notify_call_requests", { reason: "timeout", businessId, email_accepted: emailAccepted, severity: "warn" });
+        resolve(emailAccepted ? "sent" : "failed");
       }, CALL_REQUESTS_SEND_LIMIT_MS);
     });
     return await Promise.race([send, deadline]);

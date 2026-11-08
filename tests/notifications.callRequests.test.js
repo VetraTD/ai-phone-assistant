@@ -286,6 +286,16 @@ describe("notifyCallRequests", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("email accepted, then a text hanging at 10 s: sent (the owner was reached)", async () => {
+    const n = await load();
+    vi.useFakeTimers();
+    messagesCreateMock.mockImplementationOnce(() => new Promise(() => {}));
+    const p = n.notifyCallRequests({ businessId: "biz-1", rows });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(p).resolves.toBe("sent");
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+  });
+
   it("rate limited is failed", async () => {
     const n = await load();
     let last;

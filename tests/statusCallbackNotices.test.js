@@ -85,6 +85,28 @@ describe("POST /twilio/status owner notices", () => {
     expect(mockFlush).not.toHaveBeenCalled();
   });
 
+  it("the response waits for the flush (cpu_idle throttles a send that outlives the response)", async () => {
+    let settled = false;
+    mockFlush.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            settled = true;
+            resolve({ sent: 1, failed: 0, off: 0 });
+          }, 150),
+        ),
+    );
+    const res = await post({ CallSid: "CA_notice_awaited" });
+    expect(res.status).toBe(200);
+    expect(settled).toBe(true);
+  });
+
+  it("the server passes no settleMs, so the flush default applies", async () => {
+    await post({ CallSid: "CA_notice_default_settle" });
+    expect(mockFlush).toHaveBeenCalledTimes(1);
+    expect(mockFlush.mock.calls[0][0].settleMs).toBeUndefined();
+  });
+
   it("a throwing flush still answers 200", async () => {
     mockFlush.mockRejectedValue(new Error("boom"));
     const res = await post({ CallSid: "CA_notice_throw" });

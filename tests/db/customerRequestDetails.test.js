@@ -187,6 +187,19 @@ describeDb("customer request details and pending owner notices — as vetra_app"
     expect(again[0].reclaimed).toBe(false);
   });
 
+  it("a late release cannot re-arm a completed row", async () => {
+    const id = await file({ callId: callA });
+    const [got] = await claim(TENANT, SID_A);
+    expect(got.id).toBe(id);
+    expect(await complete(TENANT, [id])).toBe(1);
+
+    // A flush stalled past its lease releases after another flush completed the row.
+    const released = await db.withTenant(TENANT, () => db.releaseOwnerNotices({ businessId: TENANT, ids: [id] }));
+    expect(released).toBe(0);
+    expect((await stored(id)).owner_notice_pending).toBe(false);
+    expect(await claim(TENANT, SID_A)).toEqual([]);
+  });
+
   it("claim is tenant scoped", async () => {
     const id = await file({ callId: callA });
 

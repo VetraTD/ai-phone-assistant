@@ -1732,8 +1732,11 @@ export async function claimOwnerNotices({ businessId, callSid = null }) {
  * Hand claimed owner notices back, so the next call-end hook can claim them.
  *
  * Used when the notice could not be sent. Clears the lease (migration 060), so
- * the row is free at once rather than when the lease runs out; pending stays
- * true. Scoped by business_id as well as RLS, the same as every
+ * the row is free at once rather than when the lease runs out. Only a row that
+ * is still pending is touched: a completed row is never re-armed, so a flush
+ * that stalls past its lease cannot get a sent notice emailed again. Accepted:
+ * such a late release can still clear another flush's live lease on a pending
+ * row (one duplicate email at worst, never a loss). Scoped by business_id as well as RLS, the same as every
  * customer_requests write. Returns the number of rows changed; 0 for an empty
  * id list (no query runs) or a refused or failed call.
  *
@@ -1748,8 +1751,8 @@ export async function releaseOwnerNotices({ businessId, ids }) {
     return 0;
   }
   const res = await q(
-    `UPDATE customer_requests SET owner_notice_pending = true, owner_notice_claimed_at = NULL
-      WHERE business_id = $1 AND id = ANY($2::uuid[])
+    `UPDATE customer_requests SET owner_notice_claimed_at = NULL
+      WHERE business_id = $1 AND id = ANY($2::uuid[]) AND owner_notice_pending
       RETURNING id`,
     [businessId, list]
   );

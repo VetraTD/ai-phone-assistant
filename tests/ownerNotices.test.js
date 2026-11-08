@@ -72,6 +72,12 @@ describe("flushOwnerNotices", () => {
     expect(t.order).toEqual(["sleep", "claim"]);
   });
 
+  it("settleMs defaults to 2000 (the server passes none)", async () => {
+    const t = setup({ pending: [row("r1", "c1")] });
+    await flushOwnerNotices(t.args);
+    expect(t.sleep).toHaveBeenCalledWith(2000);
+  });
+
   it("groups rows by call and sends one email per call", async () => {
     const t = setup({ pending: [row("r1", "c1"), row("r2", "c2"), row("r3", "c1")] });
     const out = await flushOwnerNotices(t.args);
@@ -337,5 +343,17 @@ describe("claimOwnerNotices SQL", () => {
     );
     // Two minutes: more than one flush's worst case (2 s settle + 10 s send cap).
     expect(params(0)).toEqual(["b1", "CA1", 120]);
+  });
+
+  it("release only touches a still-pending row and never sets pending back to true", async () => {
+    const { releaseOwnerNotices } = await import("../services/db.js");
+    await releaseOwnerNotices({ businessId: "b1", ids: ["00000000-0000-0000-0000-000000000001"] });
+
+    const text = sql(0);
+    const set = text.slice(text.indexOf(" SET "), text.indexOf(" WHERE "));
+    const where = text.slice(text.indexOf(" WHERE "), text.indexOf(" RETURNING "));
+    expect(set).toContain("owner_notice_claimed_at = NULL");
+    expect(set).not.toMatch(/owner_notice_pending\s*=\s*true/);
+    expect(where).toContain("owner_notice_pending");
   });
 });
