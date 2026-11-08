@@ -536,4 +536,30 @@ describe("LVX185: a caller's question back at the sign-off door", () => {
     expect(counters().live_goodbye_exit_held_caller_question || 0).toBe(0);
     expect(counters().live_goodbye_armed_exit).toBe(1);
   });
+
+  // Task F (deferred from Task 10): the positive twin. Without it, "the door
+  // never held a caller" and "the door's check never ran" read the same zero.
+  it("counts every time the door's caller-question check runs, held or not", async () => {
+    const held = await bookedCall();
+    await held.assistantTurn("Of course. Is there anything else I can help you with today?");
+    await held.callerSays("Did you just say goodbye?");
+    await held.assistantTurn(SIGN_OFF);
+    await held.callerSays("Hold on a second.");
+    await held.assistantTurn(SIGN_OFF);
+    await held.callerSays("Wait, are you hanging up?");
+    await held.assistantTurn(SIGN_OFF);
+    expect(counters().live_goodbye_exit_held_caller_question).toBe(2);
+    // Judged three times: two holds, then the farewell it let through.
+    expect(counters().live_goodbye_exit_question_check_ran).toBe(3);
+  });
+
+  it("a clear no is checked and not held", async () => {
+    const s = await bookedCall();
+    await s.assistantTurn("Of course. Is there anything else I can help you with today?");
+    await s.callerSays("No, that's all, thanks.");
+    await s.assistantTurn(SIGN_OFF);
+
+    expect(counters().live_goodbye_exit_question_check_ran).toBe(1);
+    expect(counters().live_goodbye_exit_held_caller_question || 0).toBe(0);
+  });
 });

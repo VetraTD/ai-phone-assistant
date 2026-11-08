@@ -303,6 +303,8 @@ describe("a close that is really the answer to a read-back (review I4)", () => {
     await s.assistantTurn("You're all booked. Thank you for calling Brightwork, and have a great day.");
     expect(counters().live_goodbye_exit_held_no_ask).toBe(1);
     expect(counters().live_goodbye_exit_caller_closed || 0).toBe(0);
+    // The no_ask hold fired, so the caller-question check was never consulted.
+    expect(counters().live_goodbye_exit_question_check_ran || 0).toBe(0);
   });
 });
 
@@ -398,6 +400,7 @@ describe("LVX185: a caller's question back keeps the call open", () => {
     // Hold 1, at the OTHER door: a farewell spoken without end_call.
     await s.assistantTurn("No, this is Digile Media. Thanks for calling Digile Media, and have a wonderful day.");
     expect(counters().live_goodbye_exit_held_caller_question).toBe(1);
+    expect(counters().live_goodbye_exit_question_check_ran).toBe(1);
     expect(counters().live_goodbye_armed_exit || 0).toBe(0);
 
     // Hold 2, at end_call.

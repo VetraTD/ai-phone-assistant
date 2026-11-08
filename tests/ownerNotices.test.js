@@ -161,6 +161,22 @@ describe("flushOwnerNotices", () => {
     expect(t.bump).not.toHaveBeenCalledWith("owner_notice_sent");
   });
 
+  // Final review I-3: "off" completes the rows, so a deployment-wide off (graph
+  // mode with no graph values, notifications disabled) read the same as "nothing
+  // pending". Counted per group, counts only.
+  it("off bumps owner_notice_off once per group, and sent or failed never do", async () => {
+    const off = setup({ pending: [row("r1", "c1"), row("r2", "c2"), row("r3", "c1")], outcome: "off" });
+    await flushOwnerNotices(off.args);
+    expect(off.bump.mock.calls.filter(([n]) => n === "owner_notice_off")).toHaveLength(2);
+    for (const call of off.bump.mock.calls) expect(call).toHaveLength(1);
+
+    for (const outcome of ["sent", "failed"]) {
+      const t = setup({ pending: [row("r1", "c1")], outcome });
+      await flushOwnerNotices(t.args);
+      expect(t.bump, outcome).not.toHaveBeenCalledWith("owner_notice_off");
+    }
+  });
+
   it("a throwing db still resolves, and the report carries ids only", async () => {
     const t = setup();
     t.db.withTenantSafe.mockRejectedValue(new Error("boom to a@b.com"));
@@ -308,6 +324,7 @@ describe("flushOwnerNotices completes what it settled", () => {
     const src = fs.readFileSync(new URL("../lib/ownerNotices.js", import.meta.url), "utf8");
     const bumped = [...src.matchAll(/\bbump\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]);
     expect(bumped).toContain("owner_notice_reclaimed");
+    expect(bumped).toContain("owner_notice_off");
     const registered = new Set(Object.keys(getLatencyStats().turnTaking));
     for (const name of bumped) expect(registered.has(name), name).toBe(true);
   });

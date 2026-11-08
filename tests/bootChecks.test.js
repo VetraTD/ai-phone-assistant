@@ -617,11 +617,37 @@ describe("checkNotificationConfig — MAIL_TRANSPORT=graph", () => {
     expect(codes(summary.findings)).toContain("email_channel_off");
   });
 
-  it("graph mode with none of the four set is announced off, not fatal (absent, like SMTP unset)", () => {
+  // Final review I-3: graph mode with no graph values booted with a notice, and
+  // every lead saved on that revision was completed "off" and never emailed,
+  // even after the secrets arrived. Asking for graph and supplying none of it is
+  // as unintended as half a set (R35).
+  it("graph mode with none of the four set is fatal: graph_not_configured", () => {
     const summary = checkNotificationConfig({ MAIL_TRANSPORT: "graph" });
     expect(summary.email).toBe(false);
-    expect(summary.findings.filter((f) => f.severity === FATAL)).toEqual([]);
+    expect(codes(summary.findings.filter((f) => f.severity === FATAL))).toEqual(["graph_not_configured"]);
     expect(codes(summary.findings)).toContain("email_channel_off");
+  });
+
+  it("graph_not_configured holds with SMS configured, with blank values, and with the transport spelt loosely", () => {
+    const blank = Object.fromEntries(Object.keys(GRAPH_VARS).map((k) => [k, "  "]));
+    for (const env of [
+      { MAIL_TRANSPORT: "graph", ...SMS, ...DASH },
+      { MAIL_TRANSPORT: "graph", ...blank, ...SMS },
+      { MAIL_TRANSPORT: " Graph ", ...SMTP },
+    ]) {
+      const fatal = codes(checkNotificationConfig(env).findings.filter((f) => f.severity === FATAL));
+      expect(fatal, JSON.stringify(Object.keys(env))).toEqual(["graph_not_configured"]);
+    }
+  });
+
+  it("graph_not_configured names the variables only, and smtp or an invalid transport never raises it", () => {
+    const detail = checkNotificationConfig({ MAIL_TRANSPORT: "graph", ...SMS })
+      .findings.find((f) => f.code === "graph_not_configured").detail;
+    for (const name of Object.keys(GRAPH_VARS)) expect(detail).toContain(name);
+    expect(detail).not.toContain(SID);
+    for (const env of [{}, { MAIL_TRANSPORT: "smtp" }, { MAIL_TRANSPORT: "sendgrid" }, { ...SMS }]) {
+      expect(codes(checkNotificationConfig(env).findings)).not.toContain("graph_not_configured");
+    }
   });
 
   it("leftover half SMTP pair is not fatal in graph mode: SMTP_* is not read there", () => {

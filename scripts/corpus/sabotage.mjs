@@ -3611,6 +3611,14 @@ const SABOTAGES = [
     replace: "    if (SPELL_RE.test(sentence)) { kinds.push(\"spelling:any\"); } else if (false) { // SABOTAGE: every spelling is one need",
     red: ["tests/askLedger.test.js"],
   },
+  {
+    name: "graph-empty-boots",
+    why: "Ilija inbound Task F (final review I-3): MAIL_TRANSPORT=graph with none of the four MS_GRAPH_* values refuses to boot (graph_not_configured). Sabotaged, it boots with a notice, owner email is off, and every message saved on that revision is settled 'off' at call end and never emailed, even once the values arrive.",
+    file: "lib/bootChecks.js",
+    find: "  if (graphMode && graphMissing.length === GRAPH_MAIL_VARS.length) {",
+    replace: "  if (false) { // SABOTAGE: graph mode with no graph values boots",
+    red: ["tests/bootChecks.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
