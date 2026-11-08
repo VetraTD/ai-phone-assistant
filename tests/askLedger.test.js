@@ -200,6 +200,46 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     expect(em.isDeclined("email")).toBe(true);
   });
 
+  it("non-offers never lift: slot acceptance, other nouns, negated contact requests", () => {
+    const phrases = [
+      ["number", "I'll take that one."],
+      ["number", "Yes, I'll take it."],
+      ["number", "Can you take my booking?"],
+      ["number", "Here's my question for you."],
+      ["number", "Please don't call me."],
+      ["number", "No need to ring me back."],
+      ["number", "Don't call me on that."],
+      ["number", "I will not give you my number, ever."],
+      ["email", "Don't email me."],
+      ["email", "Never use my email at all."],
+    ];
+    for (const [kind, said] of phrases) {
+      const l = createAskLedger();
+      declineAfter(l, kind === "email" ? EMAIL : NUMBER);
+      l.recordCallerTurn(said);
+      expect(l.isDeclined(kind), said).toBe(true);
+      expect(l.repeatIn(kind === "email" ? EMAIL : NUMBER, { callerWords: said }), said).toBe(kind);
+    }
+  });
+
+  it("explicit offers lift", () => {
+    const phrases = [
+      ["number", NUMBER, "Actually, you can take my number."],
+      ["number", NUMBER, "My mobile number is fine to use."],
+      ["number", NUMBER, "Call me on this one."],
+      ["number", NUMBER, "Here's my number."],
+      ["email", EMAIL, "My email is fine, go ahead."],
+      ["email", EMAIL, "Let me give you my email."],
+      ["email", EMAIL, "You can use my email."],
+    ];
+    for (const [kind, ask, said] of phrases) {
+      const l = createAskLedger();
+      declineAfter(l, ask);
+      l.recordCallerTurn(said);
+      expect(l.isDeclined(kind), said).toBe(false);
+    }
+  });
+
   it("a caller's own offer lifts and is not cut even at the cap, then the cap applies again", () => {
     const l = createAskLedger({ maxAsks: 2 });
     l.recordReply(NUMBER, { callerSpoke: true });
