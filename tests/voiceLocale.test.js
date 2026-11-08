@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resolveLocale, resolveGoogleVoice, resolveRingTone } from "../lib/voice/voiceLocale.js";
+import { resolveLocale, resolveGoogleVoice, resolveRingTone, resolveSpeechLocale } from "../lib/voice/voiceLocale.js";
 
 const BELLA_US = "hpp4J3VqNfWAUOO0d1Us"; // accent: american
 const ALICE_GB = "Xb7hH8MSUJpSbSDYk0k2"; // accent: british
@@ -50,5 +50,38 @@ describe("voiceLocale.js — locale resolution", () => {
     expect(resolveLocale({})).toBe("en-US");
     expect(resolveGoogleVoice({})).toBe("en-US-Chirp3-HD-Aoede");
     expect(resolveRingTone({})).toBe("us");
+  });
+});
+
+// Speech recognition locale (cascade path). Fictional reserved numbers only.
+describe("voiceLocale.js — speech locale reads the business's own number", () => {
+  const UK_BUSINESS = "+447700900123";
+  const US_BUSINESS = "+12025550123";
+  const WITHHELD = "+266696687";
+
+  it("a UK business number beats a US timezone when no caller number is known", () => {
+    const config = { businessPhone: UK_BUSINESS, timezone: "America/Chicago" };
+    expect(resolveSpeechLocale(config)).toBe("en-GB");
+  });
+
+  it("a UK business number still wins over a withheld or non-GB/US caller number", () => {
+    const config = { businessPhone: UK_BUSINESS, timezone: "America/Chicago" };
+    expect(resolveSpeechLocale(config, { callerNumber: WITHHELD })).toBe("en-GB");
+    expect(resolveSpeechLocale(config, { callerNumber: "+33123456789" })).toBe("en-GB");
+  });
+
+  it("a US business number beats a UK timezone when no caller number is known", () => {
+    const config = { businessPhone: US_BUSINESS, timezone: "Europe/London" };
+    expect(resolveSpeechLocale(config)).toBe("en-US");
+  });
+
+  it("the caller's own number still wins over the business number", () => {
+    const config = { businessPhone: UK_BUSINESS, timezone: "America/Chicago" };
+    expect(resolveSpeechLocale(config, { callerNumber: "+12025550123" })).toBe("en-US");
+  });
+
+  it("mainPhone is still the fallback when businessPhone is absent", () => {
+    const config = { mainPhone: UK_BUSINESS, timezone: "America/Chicago" };
+    expect(resolveSpeechLocale(config)).toBe("en-GB");
   });
 });

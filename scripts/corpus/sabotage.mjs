@@ -3547,6 +3547,14 @@ const SABOTAGES = [
     replace: "uuid[])",
     red: ["tests/ownerNotices.test.js"],
   },
+  {
+    name: "speech-locale-phone-ignored",
+    why: "Ilija inbound Task A2: speech recognition locale reads the business's own number (businessPhone from loadConfig) before the timezone. Sabotaged, step 4 reads the never-set phoneNumber, so a UK-numbered business in a US timezone is recognised as en-US.",
+    file: "lib/voice/voiceLocale.js",
+    find: "countryFromE164(config?.businessPhone || config?.mainPhone);",
+    replace: "countryFromE164(config?.phoneNumber || config?.mainPhone); // SABOTAGE: business phone ignored",
+    red: ["tests/voiceLocale.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
