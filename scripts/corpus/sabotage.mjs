@@ -3603,6 +3603,14 @@ const SABOTAGES = [
     replace: "            : row.details // SABOTAGE: a caller_type alone takes the person-only match",
     red: [S3_REQUESTS],
   },
+  {
+    name: "spelling-one-need",
+    why: "Ilija inbound Task F (final review I-2): a spelling ask is keyed by what is spelled (name, email, other). Sabotaged, every spelling is one need again, so declining the name spelling cuts the email spelling for the whole call and two name spellings use up the email's.",
+    file: "lib/voice/askLedger.js",
+    find: "    if (SPELL_RE.test(sentence)) {",
+    replace: "    if (SPELL_RE.test(sentence)) { kinds.push(\"spelling:any\"); } else if (false) { // SABOTAGE: every spelling is one need",
+    red: ["tests/askLedger.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

@@ -76,7 +76,7 @@ describe("createAskLedger -- the edges the brief's cases do not reach", () => {
     const l = createAskLedger({ maxAsks: 2 });
     l.recordReply("Could you spell your surname for me?", { callerSpoke: true });
     l.recordReply("Could you spell your surname for me?", { callerSpoke: true });
-    expect(l.repeatIn("Could you spell your surname for me?", {})).toBe("spelling");
+    expect(l.repeatIn("Could you spell your surname for me?", {})).toBe("spelling:name");
     expect(
       l.repeatIn("Could you spell your surname for me?", { callerWantsRepeat: true, callerAsked: true })
     ).toBeNull();
@@ -308,6 +308,110 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     // The reply being spoken carries "my number" etc. but supplies no caller words.
     expect(l.repeatIn(`I'll take my number note. ${NUMBER}`, { callerWords: "Okay." })).toBe("number");
   });
+
+  // Final review M5: the decline is credited to what the caller said no to, not
+  // only to the reply they were answering.
+  it("a decline that names a fixed kind blocks that kind as well as the ask it answered", () => {
+    const l = createAskLedger();
+    const said = "I don't want to give my email, by the way. It's Rowe Garden Studio.";
+    declineAfter(l, "What's the name of your company?", said);
+    expect(l.isDeclined("email")).toBe(true);
+    expect(l.isDeclined("q:name company")).toBe(true);
+    l.recordReply("Thanks. And what does the studio do?", { callerSpoke: true });
+    l.recordCallerTurn("Garden design.");
+    expect(l.repeatIn("Lovely. And what's your email address?", { callerWords: "Garden design." })).toBe("email");
+  });
+
+  it("a kind named outside the declining clause is not blocked", () => {
+    const l = createAskLedger();
+    declineAfter(l, EMAIL, "I'd rather not give my email, but my number is fine.");
+    expect(l.isDeclined("email")).toBe(true);
+    expect(l.isDeclined("number")).toBe(false);
+  });
+
+  // Final review M6: a contraction is not a content word, so it cannot lift a
+  // declined q: need on its own.
+  it("contractions do not lift a declined lead question", () => {
+    const l = createAskLedger();
+    declineAfter(l, "What's the main challenge you're facing?");
+    expect(l.isDeclined("q:main challenge facing")).toBe(true);
+    const said = "I'm not sure what you're asking me.";
+    l.recordCallerTurn(said);
+    expect(l.isDeclined("q:main challenge facing")).toBe(true);
+    expect(l.repeatIn("So what's the main challenge you're facing?", { callerWords: said })).toBe("q:main challenge facing");
+  });
+});
+
+// Final review I-2: every spelling was one need, so declining the name spelling
+// blocked the email spelling for the whole call, and the name spelled twice
+// left the email no spelling at all under the two-ask cap.
+describe("createAskLedger -- a spelling ask is one need per thing spelled (final review I-2)", () => {
+  it("scenario A: the name spelling declined, the email spelling later is not cut", () => {
+    const l = createAskLedger();
+    l.recordReply("Could you spell your first name and surname?", { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not, it's spelled how it sounds.");
+    expect(l.isDeclined("spelling:name")).toBe(true);
+    l.recordReply("No problem. What's your email?", { callerSpoke: true });
+    const said = "anita at rowe dot com";
+    l.recordCallerTurn(said);
+    expect(l.repeatIn("Thanks, could you spell the email for me?", { callerWords: said })).toBeNull();
+    // A bare "spell that" after the email ask is the email's spelling too.
+    expect(l.repeatIn("Thanks, could you spell that for me?", { callerWords: said })).toBeNull();
+  });
+
+  it("a name-spelling decline still blocks the next name-spelling ask", () => {
+    const l = createAskLedger();
+    l.recordReply("Could you spell your first name and surname?", { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not.");
+    l.recordReply("No problem. What's your email?", { callerSpoke: true });
+    l.recordCallerTurn("anita at rowe dot com");
+    expect(l.repeatIn("And could you spell your surname?", { callerWords: "anita at rowe dot com" })).toBe("spelling:name");
+  });
+
+  it("scenario B: name spelled, email spelled, one email re-spell is not cut by the cap", () => {
+    const l = createAskLedger({ maxAsks: 2 });
+    l.recordReply("Could you spell your surname for me?", { callerSpoke: true });
+    l.recordCallerTurn("R O W E");
+    l.recordReply("Thanks. And could you spell your email for me?", { callerSpoke: true });
+    const said = "a n i t a at rowe dot com";
+    l.recordCallerTurn(said);
+    expect(l.repeatIn("Sorry, could you spell the email once more?", { callerWords: said })).toBeNull();
+    l.recordReply("Sorry, could you spell the email once more?", { callerSpoke: true });
+    l.recordCallerTurn(said);
+    // The email's third spelling ask is its cap; the name has had one.
+    expect(l.repeatIn("Could you spell the email one more time?", { callerWords: said })).toBe("spelling:email");
+    expect(l.repeatIn("Could you spell your surname again?", { callerWords: said })).toBeNull();
+  });
+
+  it("an offer to spell the email lifts the email spelling only", () => {
+    const l = createAskLedger();
+    l.recordReply("Could you spell your surname for me?", { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not.");
+    l.recordReply("Could you spell your email for me?", { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not.");
+    expect(l.isDeclined("spelling:name")).toBe(true);
+    expect(l.isDeclined("spelling:email")).toBe(true);
+    l.recordCallerTurn("Actually, I'll spell my email for you.");
+    expect(l.isDeclined("spelling:email")).toBe(false);
+    expect(l.isDeclined("spelling:name")).toBe(true);
+  });
+
+  it("a bare 'I'll spell it' lifts the spelling of what the caller was last asked", () => {
+    const named = createAskLedger();
+    named.recordReply("Could you spell your surname for me?", { callerSpoke: true });
+    named.recordCallerTurn("I'd rather not.");
+    named.recordReply("No problem at all.", { callerSpoke: true });
+    named.recordCallerTurn("Oh go on then, I'll spell it.");
+    expect(named.isDeclined("spelling:name")).toBe(false);
+
+    const other = createAskLedger();
+    other.recordReply("Could you spell your surname for me?", { callerSpoke: true });
+    other.recordCallerTurn("I'd rather not.");
+    other.recordReply("No problem. What's your email?", { callerSpoke: true });
+    other.recordCallerTurn("It's anita at rowe dot com, I'll spell it if you like.");
+    // "it" is the email they were just asked for, not the name they declined.
+    expect(other.isDeclined("spelling:name")).toBe(true);
+  });
 });
 
 describe("asksIn -- which needs a reply asks for", () => {
@@ -316,13 +420,21 @@ describe("asksIn -- which needs a reply asks for", () => {
     expect(asksIn("Is the number you're calling from the best one?")).toEqual(["number"]);
     expect(asksIn("Could I take your full name?")).toEqual(["name"]);
     expect(asksIn("Who am I speaking with?")).toEqual(["name"]);
-    expect(asksIn("Could you spell your surname for me?")).toEqual(["spelling"]);
+    expect(asksIn("Could you spell your surname for me?")).toEqual(["spelling:name"]);
     expect(asksIn("And what's your email address?")).toEqual(["email"]);
     expect(asksIn("Can I take your name and the best number to reach you on?")).toEqual(["name", "number"]);
   });
 
   it("a spelling ask is not also a name ask", () => {
-    expect(asksIn("Could you spell your full name for me?")).toEqual(["spelling"]);
+    expect(asksIn("Could you spell your full name for me?")).toEqual(["spelling:name"]);
+  });
+
+  it("a spelling ask is keyed by what is spelled (final review I-2)", () => {
+    expect(asksIn("Could you spell your first name and surname?")).toEqual(["spelling:name"]);
+    expect(asksIn("Thanks, could you spell the email for me?")).toEqual(["spelling:email"]);
+    expect(asksIn("Could you spell your email address, letter by letter?")).toEqual(["spelling:email"]);
+    expect(asksIn("Could you spell that for me?")).toEqual(["spelling:other"]);
+    expect(asksIn("And could you spell the company name?")).toEqual(["spelling:other"]);
   });
 
   it("only question sentences ask", () => {
@@ -429,7 +541,9 @@ describe("askKindLabel -- what a log may carry", () => {
   it("is a closed list: a q: key becomes 'question', never its words", () => {
     expect(askKindLabel("number")).toBe("number");
     expect(askKindLabel("name")).toBe("name");
-    expect(askKindLabel("spelling")).toBe("spelling");
+    expect(askKindLabel("spelling:name")).toBe("spelling");
+    expect(askKindLabel("spelling:email")).toBe("spelling");
+    expect(askKindLabel("spelling:other")).toBe("spelling");
     expect(askKindLabel("email")).toBe("email");
     expect(askKindLabel("q:monthly marketing budget")).toBe("question");
     expect(askKindLabel("anything else")).toBe("question");

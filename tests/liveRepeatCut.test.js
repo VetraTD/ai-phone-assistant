@@ -772,6 +772,31 @@ describe("LVX189 -- a repeated ask is cut", () => {
     expect(s.cleared).toHaveLength(0);
   });
 
+  it("a declined name spelling does not cut the email spelling later (final review I-2)", async () => {
+    const spies = [vi.spyOn(log, "error")];
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say("Sure. Could you spell your first name and surname?");
+    await s.caller("I'd rather not, it's spelled how it sounds.");
+    await s.say("No problem. What's your email?");
+    await s.caller("anita at rowe dot com");
+    await s.say("Thanks, could you spell the email for me?");
+
+    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+
+    // The name spelling the caller declined is still blocked, and logged by
+    // its closed kind.
+    await s.caller("a n i t a at rowe dot com");
+    await s.say("Thank you. And could you spell your surname?");
+    expect(c().live_ask_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_cut");
+    expect(cutLog[1].kind).toBe("spelling");
+    expect(cutLog[1].declined_earlier).toBe(true);
+  });
+
   it("a changed mind is not cut when the reply starts before the transcript lands", async () => {
     // Live often starts its reply first. With no caller words in yet the
     // whole-call block stands down, so the ask the caller is about to invite
