@@ -3555,6 +3555,22 @@ const SABOTAGES = [
     replace: "countryFromE164(config?.phoneNumber || config?.mainPhone); // SABOTAGE: business phone ignored",
     red: ["tests/voiceLocale.test.js"],
   },
+  {
+    name: "decline-not-sticky",
+    why: "Ilija inbound Task A3: a decline blocks that need for the whole call. Sabotaged, repeatIn never consults the declined set, so a declined ask is allowed again after one unrelated turn.",
+    file: "lib/voice/askLedger.js",
+    find: "if (declined.has(key) && !raisedNow.has(key)) return key;",
+    replace: "if (false && declined.has(key) && !raisedNow.has(key)) return key; // SABOTAGE: decline not sticky",
+    red: ["tests/askLedger.test.js"],
+  },
+  {
+    name: "decline-never-lifted",
+    why: "Ilija inbound Task A3: the caller's own later words lift a decline. Sabotaged, the lift is a no-op, so a caller who changes their mind is still never asked again.",
+    file: "lib/voice/askLedger.js",
+    find: "for (const key of liftedBy(t)) declined.delete(key);",
+    replace: "for (const key of liftedBy(t)) void key; // SABOTAGE: decline never lifted",
+    red: ["tests/askLedger.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

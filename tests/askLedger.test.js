@@ -116,6 +116,92 @@ describe("createAskLedger -- the edges the brief's cases do not reach", () => {
   });
 });
 
+describe("createAskLedger -- a decline holds for the whole call, the caller can lift it", () => {
+  const NUMBER = "What's the best number to reach you on?";
+  const EMAIL = "Could I take an email address for you?";
+  // The caller declines the ask just recorded, as the Live layer does at turn close.
+  function declineAfter(l, reply, said = "I'd rather not say.") {
+    l.recordReply(reply, { callerSpoke: true });
+    l.recordCallerTurn(said);
+  }
+
+  it("a decline, an unrelated answered turn, then the same ask: cut", () => {
+    const l = createAskLedger();
+    declineAfter(l, NUMBER);
+    l.recordReply("No problem. Our team is open on weekdays, anything else?", { callerSpoke: true });
+    l.recordCallerTurn("Okay, thanks for that.");
+    expect(l.repeatIn(`Right. ${NUMBER}`, {})).toBe("number");
+  });
+
+  it("a declined q: lead question stays blocked against a near-verbatim restatement", () => {
+    const l = createAskLedger();
+    declineAfter(l, "What industry is your company in?");
+    l.recordReply("Understood.", { callerSpoke: true });
+    l.recordCallerTurn("Fine.");
+    expect(l.repeatIn("So what industry is your company in?", {})).toMatch(/^q:/);
+  });
+
+  it("a caller asking to hear it again is not cut after a decline", () => {
+    const l = createAskLedger();
+    declineAfter(l, NUMBER);
+    l.recordReply("Okay.", { callerSpoke: true });
+    expect(l.repeatIn(NUMBER, { callerWantsRepeat: true })).toBeNull();
+  });
+
+  it("a refusal does not lift itself; a later 'take my email' does", () => {
+    const l = createAskLedger();
+    declineAfter(l, EMAIL, "I'd rather not give my email.");
+    expect(l.isDeclined("email")).toBe(true);
+    l.recordReply("Fine.", { callerSpoke: true });
+    expect(l.repeatIn(EMAIL, {})).toBe("email");
+    l.recordCallerTurn("Actually, you can take my email.");
+    expect(l.isDeclined("email")).toBe(false);
+    expect(l.repeatIn(EMAIL, {})).toBeNull();
+  });
+
+  it("the reply to the turn that raises it again is not cut (before the turn closes)", () => {
+    const l = createAskLedger();
+    declineAfter(l, EMAIL, "I'd rather not give my email.");
+    l.recordReply("Fine.", { callerSpoke: true });
+    expect(l.repeatIn(EMAIL, { callerWords: "Actually, you can take my email." })).toBeNull();
+    // ...but a refusal naming the email in this very turn lifts nothing.
+    expect(
+      l.repeatIn(EMAIL, { callerWords: "I'd rather not give my email.", callerDeclined: true })
+    ).toBe("email");
+  });
+
+  it("a later turn about an unrelated thing does not lift", () => {
+    const l = createAskLedger();
+    declineAfter(l, NUMBER);
+    l.recordReply("Okay.", { callerSpoke: true });
+    l.recordCallerTurn("What are your opening hours, and do you have a name for the plan?");
+    expect(l.isDeclined("number")).toBe(true);
+    l.recordCallerTurn("Which plans do you offer?");
+    expect(l.repeatIn(NUMBER, {})).toBe("number");
+  });
+
+  it("a q: need lifts when the caller's words share one of its content words", () => {
+    const l = createAskLedger();
+    declineAfter(l, "What industry is your company in?");
+    l.recordCallerTurn("Well, we do work in the retail industry actually.");
+    expect(l.repeatIn("So what industry is your company in?", {})).toBeNull();
+  });
+
+  it("a bare no is not a decline: nothing sticks", () => {
+    const l = createAskLedger();
+    l.recordReply(NUMBER, { callerSpoke: true });
+    l.recordCallerTurn("No.");
+    expect(l.isDeclined("number")).toBe(false);
+    expect(l.repeatIn(NUMBER, {})).toBeNull();
+  });
+
+  it("assistant text never declines or lifts: only recordCallerTurn writes", () => {
+    const l = createAskLedger();
+    l.recordReply("I'd rather not ask, but what's your number?", { callerSpoke: true });
+    expect(l.isDeclined("number")).toBe(false);
+  });
+});
+
 describe("asksIn -- which needs a reply asks for", () => {
   it("names the four fixed kinds", () => {
     expect(asksIn("What's the best contact number to reach you on?")).toEqual(["number"]);

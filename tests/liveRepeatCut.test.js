@@ -736,6 +736,42 @@ describe("LVX189 -- a repeated ask is cut", () => {
     expect(s.cleared).toHaveLength(1);
   });
 
+  it("a decline holds past an unrelated exchange: the same ask later is cut", async () => {
+    const spies = [vi.spyOn(log, "error")];
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say(`Sure. ${NUMBER_ASK}`);
+    await s.caller("I'd rather not give my number.");
+    await s.say("That's fine, we can go on without it.");
+    await s.caller("Do you open on Saturdays?");
+    await s.say("The office is closed at weekends.");
+    await s.caller("Okay, thanks.");
+    await s.say(`Right. ${NUMBER_ASK}`);
+
+    expect(c().live_ask_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_cut");
+    expect(cutLog[1].declined_earlier).toBe(true);
+    expect(cutLog[1].caller_declined).toBe(false);
+  });
+
+  it("a caller who raises the number again after declining is not cut", async () => {
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say(`Sure. ${NUMBER_ASK}`);
+    await s.caller("I'd rather not give my number.");
+    await s.say("That's fine, we can go on without it.");
+    await s.caller("Do you open on Saturdays?");
+    await s.say("The office is closed at weekends.");
+    await s.caller("Actually, you can take my number.");
+    await s.say(`Thank you. ${NUMBER_ASK}`);
+
+    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
   it("a cut ask still counts as the ask the caller is answering: a second deflection is cut", async () => {
     const s = await boot();
     await s.say(GREETING);
