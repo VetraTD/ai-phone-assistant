@@ -160,6 +160,31 @@ describe("renderCallRequestsEmail", () => {
     expect(text).toContain("Number: +447700900123");
   });
 
+  // Follow-up R65 (re-review m5): a label with trailing punctuation ("Number:")
+  // rendered "Number:: ...", which still starts like the fixed line.
+  it("a colliding label with trailing punctuation is prefixed too", async () => {
+    const n = await load();
+    const answers = [
+      { label: "Number:", answer: "+15550001111" },
+      { label: "name -", answer: "Someone Else" },
+      { label: "Reason.", answer: "a different reason" },
+      { label: "Call time :", answer: "midnight" },
+      { label: "Company:", answer: "Acme" },
+    ];
+    const { text } = render(n, [{ ...row, details: { callerType: "new_enquiry", answers } }]);
+    const fieldOf = (line) => line.split(":")[0].replace(/[\s.,;!?\-–—]+$/u, "").toLowerCase();
+    const lines = text.split("\n");
+    for (const field of ["type", "name", "number", "reason", "preferred time", "call time"]) {
+      expect(lines.filter((l) => fieldOf(l) === field), field).toHaveLength(1);
+    }
+    expect(text).toContain("Answer - Number: +15550001111");
+    expect(text).toContain("Answer - name: Someone Else");
+    expect(text).toContain("Answer - Reason: a different reason");
+    expect(text).toContain("Answer - Call time: midnight");
+    // A label that collides with nothing loses only its trailing colon.
+    expect(text).toContain("\nCompany: Acme");
+  });
+
   it("leaves out Preferred time when absent, and says 'not given' for a blank name", async () => {
     const n = await load();
     const { text } = render(n, [{ ...row, preferred_time: null, caller_name: "  " }]);

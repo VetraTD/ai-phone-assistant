@@ -3619,6 +3619,14 @@ const SABOTAGES = [
     replace: "  if (false) { // SABOTAGE: graph mode with no graph values boots",
     red: ["tests/bootChecks.test.js"],
   },
+  {
+    name: "decline-blocks-offered",
+    why: "Ilija inbound Task F follow-up R65 (re-review N-1): a declining clause blocks the fixed kinds it names, except one the same clause offers. Sabotaged, 'I'd rather not give my email just call me on my mobile' blocks the number for the whole call, and the later ask for the number the caller offered is cut.",
+    file: "lib/voice/askLedger.js",
+    find: "      if (!offersKind(key, clause, [])) out.push(key);",
+    replace: "      out.push(key); // SABOTAGE: an offered kind is blocked too",
+    red: ["tests/askLedger.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

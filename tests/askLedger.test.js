@@ -322,6 +322,28 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     expect(l.repeatIn("Lovely. And what's your email address?", { callerWords: "Garden design." })).toBe("email");
   });
 
+  // Follow-up R65 (re-review N-1): an unpunctuated refusal clause can also OFFER
+  // a second detail. The offered one is invited, not blocked (R56-R58).
+  it("a refusal that also offers a detail in the same clause blocks only the refused one", () => {
+    for (const said of [
+      "I'd rather not give my email just call me on my mobile",
+      "I don't want to give my email just use my phone number",
+    ]) {
+      const l = createAskLedger();
+      declineAfter(l, "And what's your email address?", said);
+      expect(l.isDeclined("email"), said).toBe(true);
+      expect(l.isDeclined("number"), said).toBe(false);
+      l.recordReply("Is the number you're calling from the best one to reach you on?", { callerSpoke: true });
+      l.recordCallerTurn("yes that's fine");
+      expect(l.repeatIn("Sorry, what's the best number to reach you on?", { callerWords: "yes that's fine" }), said).toBeNull();
+    }
+    // A refusal to SPELL is checked against an offer to spell, not an offer of
+    // the detail: "take my name as it is" offers the name, not its spelling.
+    const l = createAskLedger();
+    declineAfter(l, "What's your email?", "I'd rather not spell my name just take my name as it is");
+    expect(l.isDeclined("spelling:name")).toBe(true);
+  });
+
   it("a kind named outside the declining clause is not blocked", () => {
     const l = createAskLedger();
     declineAfter(l, EMAIL, "I'd rather not give my email, but my number is fine.");

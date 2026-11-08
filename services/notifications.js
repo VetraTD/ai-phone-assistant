@@ -384,7 +384,10 @@ function rowLines(row, timezone) {
   for (const entry of Array.isArray(row.details?.answers) ? row.details.answers : []) {
     const question = oneLine(entry?.label);
     const answer = oneLine(entry?.answer);
-    const shown = FIXED_FIELDS.has(question.toLowerCase()) ? `Answer - ${question}` : question;
+    // Trailing punctuation off first (follow-up R65): "Number:" rendered as
+    // "Number:: ...", which still starts like the fixed line.
+    const bare = question.replace(/[\s:.,;!?\-–—]+$/u, "") || question;
+    const shown = FIXED_FIELDS.has(bare.toLowerCase()) ? `Answer - ${bare}` : bare;
     if (question || answer) lines.push(`${shown}: ${answer || "not given"}`);
   }
   const preferred = oneLine(row.preferred_time);
