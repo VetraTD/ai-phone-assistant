@@ -72,7 +72,10 @@
  *   --from <e164>     the caller. On staging CALLER_ALLOWLIST decides whether
  *                     it is answered at all
  *   --script <name>   speak a script: demo_booking, demo_cancel, diagnostic,
- *                     representative. Omit for silent mode
+ *                     representative, inbound_lead_full,
+ *                     inbound_lead_correct_number, inbound_lead_hangup (pair
+ *                     with --hangup-after ih_company), inbound_wrong_number.
+ *                     Omit for silent mode
  *   --synth           synthesise the script's caller audio and exit
  *   --tts <engine>    google (default) or elevenlabs, for --synth
  *   --caller-voice <v> override the TTS voice
@@ -82,6 +85,13 @@
  *   --debug-token <t> read /api/debug/latency before and after, print the delta
  *   --out <file>      write every received event to a JSONL file
  *   --confirm         required for a non-loopback --base
+ *   --post-status     when the call ends (script done, hang-up, or the socket
+ *                     closing), POST the signed completed-call status callback
+ *                     to <base>/twilio/status, as Twilio would, with the same
+ *                     CallSid, To, From and CallDuration (whole seconds). The
+ *                     owner's email of saved messages is sent only on that
+ *                     callback. Prints one line with the HTTP status. Off by
+ *                     default; inbound mode only
  *
  *   --hangup-after <label>      hang up once that scripted line's audio has
  *                               finished sending
@@ -184,6 +194,7 @@ import {
   buildOutboundAnswerRequest,
   buildOutboundStatusRequest,
   buildOutboundAmdRequest,
+  buildStatusCallbackRequest,
   parseAmdFlag,
   parseTwiml,
 } from "../lib/probe/twilioRequests.js";
@@ -298,6 +309,7 @@ const AUTH_TOKEN = opt("auth-token", process.env.TWILIO_AUTH_TOKEN || process.en
 
 // Both modes (Task 15).
 const DRY_RUN = flag("dry-run");
+const POST_STATUS = flag("post-status");
 const SERVER_LOG = opt("server-log", "");
 const P1_PROBE = opt("p1-probe", "");
 // --outbound only.
@@ -382,6 +394,7 @@ if (OUTBOUND) {
         `person picking up one Ava placed.`
     );
   }
+  if (POST_STATUS) die("--post-status is inbound only (--outbound sends its own status callbacks).");
   if (SCRIPT_NAME && OUTBOUND_SILENT) die(`--outbound --script speaks; --silent is for when nobody does. Pick one.`);
   if (HANGUP_AFTER || HANGUP_ARM_AFTER || HANGUP_ON_COUNTER || EXPECTATIONS.length) {
     die("--hangup-* and --expect-counter are inbound only.");
@@ -533,6 +546,19 @@ function inboundAnswerRequest() {
   });
 }
 
+/** The completed-call status callback --post-status sends (lib/probe/twilioRequests.js). */
+function inboundStatusRequest(durationSec) {
+  return buildStatusCallbackRequest({
+    base: BASE,
+    callSid,
+    to: TO,
+    from: FROM,
+    durationSec,
+    accountSid: HARNESS_ACCOUNT_SID,
+    authToken: AUTH_TOKEN,
+  });
+}
+
 async function answerCall() {
   const req = inboundAnswerRequest();
   const res = await fetch(req.url, req.init);
@@ -616,6 +642,7 @@ async function main() {
   // no socket, no reserve.
   if (DRY_RUN) {
     printRequest("answer", inboundAnswerRequest());
+    if (POST_STATUS) printRequest("status", inboundStatusRequest(0));
     return;
   }
 
@@ -1024,6 +1051,15 @@ async function main() {
       resolve();
     });
   });
+
+  // --post-status: the call is over, whichever way it ended. Twilio sends this
+  // after the stream closes, and the server's own teardown (the saved messages)
+  // runs just before it, so give that a moment first.
+  if (POST_STATUS) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const statusRes = await postSigned(inboundStatusRequest((Date.now() - t0) / 1000));
+    console.log(`status     POST /twilio/status CallStatus=completed -> HTTP ${statusRes}`);
+  }
 
   const after = await readCounters();
 
