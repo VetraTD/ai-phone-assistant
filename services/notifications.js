@@ -460,17 +460,24 @@ export async function notifyAppointmentBooked({ businessId, appointment }) {
  * fabricates on every call has a bigger problem than a throttled alert, and an
  * unthrottled path here would be the loudest way to discover it.
  *
- * @param {{ businessId: string, callbackNumber?: string|null }} opts
+ * `kind` words it by what was lost: "message" when only a message save was
+ * refused ("their message was not saved"); anything else, or nothing, is the
+ * appointment sentence. The subject is the same either way and never carries a
+ * name or number.
+ *
+ * @param {{ businessId: string, callbackNumber?: string|null, kind?: "message"|"appointment" }} opts
  */
-export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null }) {
+export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null, kind = "appointment" }) {
   if (!NOTIFICATIONS_ENABLED) return;
   try {
     if (!checkRateLimit(businessId)) return;
     const config = await loadBusinessNotificationConfig(businessId);
     if (!config) return;
     const sentence =
-      "A caller may need a quick call back to confirm their appointment" +
-      (callbackNumber ? ` (${callbackNumber}).` : ".");
+      kind === "message"
+        ? "A caller may need a call back: their message was not saved" + (callbackNumber ? ` (${callbackNumber}).` : ".")
+        : "A caller may need a quick call back to confirm their appointment" +
+          (callbackNumber ? ` (${callbackNumber}).` : ".");
     const subject = `A caller may need a call back — ${config.businessName}`;
     if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
     if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });

@@ -352,3 +352,32 @@ describe("notifyCallRequests", () => {
     for (const s of ["owner@example.com", "Jane", "New enquiry", "+4477"]) expect(logged).not.toContain(s);
   });
 });
+
+describe("notifyUnconfirmedClaim", () => {
+  it("kind message: says the message was not saved, never an appointment", async () => {
+    const n = await load();
+    await n.notifyUnconfirmedClaim({ businessId: "biz-1", callbackNumber: "+447700900123", kind: "message" });
+    const mail = sendMailMock.mock.calls[0][0];
+    expect(mail.text).toContain("A caller may need a call back: their message was not saved (+447700900123).");
+    expect(mail.text).not.toMatch(/appointment/i);
+    expect(mail.subject).toBe("A caller may need a call back — Acme Plumbing");
+    expect(mail.subject).not.toContain("4477");
+    const sms = messagesCreateMock.mock.calls[0][0].body;
+    expect(sms).toContain("their message was not saved");
+    expect(sms).not.toMatch(/appointment/i);
+  });
+
+  it("kind message without a number drops the brackets", async () => {
+    const n = await load();
+    await n.notifyUnconfirmedClaim({ businessId: "biz-1", callbackNumber: null, kind: "message" });
+    expect(sendMailMock.mock.calls[0][0].text).toContain("A caller may need a call back: their message was not saved.");
+  });
+
+  it("default kind keeps the appointment sentence, byte for byte", async () => {
+    const n = await load();
+    await n.notifyUnconfirmedClaim({ businessId: "biz-1", callbackNumber: "+447700900123" });
+    const mail = sendMailMock.mock.calls[0][0];
+    expect(mail.text).toContain("A caller may need a quick call back to confirm their appointment (+447700900123).");
+    expect(mail.subject).not.toContain("4477");
+  });
+});

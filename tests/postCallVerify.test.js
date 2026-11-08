@@ -1180,3 +1180,44 @@ describe("verifyCall - a saved message explains a claim on a call with no appoin
     expect(getLatencyStats().turnTaking.postcall_claim_explained_by_message ?? 0).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Rehearsal 2026-11-08 (R1): a refused MESSAGE save is a lost message, not a
+// lost appointment. A business with no appointments must not read otherwise.
+// ---------------------------------------------------------------------------
+describe("an abandoned write is worded by what was refused", () => {
+  const abandonedInput = (abandoned) => input({ abandoned, claims: [], mode: "count" });
+
+  it("a message save alone: the row and the alert say message, not appointment", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(abandonedInput(["record_customer_request"]), d);
+    expect(out.verdict).toBe("write_abandoned");
+    const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
+    expect(notes).toMatch(/message/i);
+    expect(notes).not.toMatch(/appointment/i);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledWith(expect.objectContaining({ kind: "message" }));
+  });
+
+  it("a quote-request save alone is a message too", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(abandonedInput(["record_quote_request"]), d);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).not.toMatch(/appointment/i);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBe("message");
+  });
+
+  it("a refused booking tool keeps the appointment wording and no kind", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(abandonedInput(["book_appointment"]), d);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toContain(
+      "this call tried to book or change an appointment and that change was not saved"
+    );
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
+  });
+
+  it("a mixed call (message and booking tool) keeps the appointment wording", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(abandonedInput(["record_customer_request", "reschedule_appointment_db"]), d);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toMatch(/appointment/i);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
+  });
+});

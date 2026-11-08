@@ -3587,6 +3587,14 @@ const SABOTAGES = [
     replace: "if (false) { // SABOTAGE: tier optional",
     red: ["tests/importTenantFields.test.js"],
   },
+  {
+    name: "abandoned-message-said-appointment",
+    why: "Ilija inbound Task R1: a refused message save must be worded as a message, not a lost appointment. Sabotaged, the message-only branch is neutralised, so the row notes fall back to the booking sentence and no kind reaches the owner alert.",
+    file: "lib/postCallVerify.js",
+    find: "    abandonedOutstanding &&",
+    replace: "    false &&",
+    red: ["tests/postCallVerify.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

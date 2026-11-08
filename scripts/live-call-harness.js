@@ -74,7 +74,7 @@
  *   --script <name>   speak a script: demo_booking, demo_cancel, diagnostic,
  *                     representative, inbound_lead_full,
  *                     inbound_lead_correct_number, inbound_lead_hangup (pair
- *                     with --hangup-after ih_company), inbound_wrong_number.
+ *                     with --hangup-after ih_email_hang), inbound_wrong_number.
  *                     Omit for silent mode
  *   --synth           synthesise the script's caller audio and exit
  *   --tts <engine>    google (default) or elevenlabs, for --synth
