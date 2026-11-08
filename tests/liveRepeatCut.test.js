@@ -772,6 +772,27 @@ describe("LVX189 -- a repeated ask is cut", () => {
     expect(s.cleared).toHaveLength(0);
   });
 
+  it("a changed mind is not cut when the reply starts before the transcript lands", async () => {
+    // Live often starts its reply first. With no caller words in yet the
+    // whole-call block stands down, so the ask the caller is about to invite
+    // is not cleared mid-question.
+    const s = await boot();
+    await s.say(GREETING);
+    await s.caller("I'd like to leave a message.");
+    await s.say(`Sure. ${NUMBER_ASK}`);
+    await s.caller("I'd rather not give my number.");
+    await s.say("That's fine, we can go on without it.");
+    await s.caller("Do you open on Saturdays?");
+    await s.say("The office is closed at weekends.");
+    s.fragment(`Sure. ${NUMBER_ASK}`);
+    await s.caller("Actually, you can take my number.");
+    s.fragment(" Thank you.");
+    await s.endTurn();
+
+    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
   it("a cut ask still counts as the ask the caller is answering: a second deflection is cut", async () => {
     const s = await boot();
     await s.say(GREETING);

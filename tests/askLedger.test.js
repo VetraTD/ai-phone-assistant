@@ -130,15 +130,17 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     declineAfter(l, NUMBER);
     l.recordReply("No problem. Our team is open on weekdays, anything else?", { callerSpoke: true });
     l.recordCallerTurn("Okay, thanks for that.");
-    expect(l.repeatIn(`Right. ${NUMBER}`, {})).toBe("number");
+    expect(l.repeatIn(`Right. ${NUMBER}`, { callerWords: "Okay, thanks for that." })).toBe("number");
+    // Transcript not landed yet: Task 13's per-turn rules decide, nothing is cut.
+    expect(l.repeatIn(`Right. ${NUMBER}`, {})).toBeNull();
   });
 
   it("a declined q: lead question stays blocked against a near-verbatim restatement", () => {
     const l = createAskLedger();
-    declineAfter(l, "What industry is your company in?");
+    declineAfter(l, "What colour is your van?");
     l.recordReply("Understood.", { callerSpoke: true });
     l.recordCallerTurn("Fine.");
-    expect(l.repeatIn("So what industry is your company in?", {})).toMatch(/^q:/);
+    expect(l.repeatIn("So what colour is your van?", { callerWords: "Fine." })).toMatch(/^q:/);
   });
 
   it("a caller asking to hear it again is not cut after a decline", () => {
@@ -153,7 +155,7 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     declineAfter(l, EMAIL, "I'd rather not give my email.");
     expect(l.isDeclined("email")).toBe(true);
     l.recordReply("Fine.", { callerSpoke: true });
-    expect(l.repeatIn(EMAIL, {})).toBe("email");
+    expect(l.repeatIn(EMAIL, { callerWords: "Hm, okay." })).toBe("email");
     l.recordCallerTurn("Actually, you can take my email.");
     expect(l.isDeclined("email")).toBe(false);
     expect(l.repeatIn(EMAIL, {})).toBeNull();
@@ -177,14 +179,48 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     l.recordCallerTurn("What are your opening hours, and do you have a name for the plan?");
     expect(l.isDeclined("number")).toBe(true);
     l.recordCallerTurn("Which plans do you offer?");
-    expect(l.repeatIn(NUMBER, {})).toBe("number");
+    expect(l.repeatIn(NUMBER, { callerWords: "Which plans do you offer?" })).toBe("number");
   });
 
-  it("a q: need lifts when the caller's words share one of its content words", () => {
+  it("asking for the business's own detail is not offering ours: nothing lifts", () => {
+    const num = createAskLedger();
+    declineAfter(num, NUMBER);
+    num.recordCallerTurn("What's your phone number then? I'll ring you.");
+    expect(num.isDeclined("number")).toBe(true);
+    expect(num.repeatIn(NUMBER, { callerWords: "What's your phone number then? I'll ring you." })).toBe("number");
+
+    const nm = createAskLedger();
+    declineAfter(nm, "Could I take your name?");
+    nm.recordCallerTurn("Well, what's your name?");
+    expect(nm.isDeclined("name")).toBe(true);
+
+    const em = createAskLedger();
+    declineAfter(em, EMAIL);
+    em.recordCallerTurn("Do you have an email I can send it to?");
+    expect(em.isDeclined("email")).toBe(true);
+  });
+
+  it("a caller's own offer lifts and is not cut even at the cap, then the cap applies again", () => {
+    const l = createAskLedger({ maxAsks: 2 });
+    l.recordReply(NUMBER, { callerSpoke: true });
+    l.recordReply(NUMBER, { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not say.");
+    expect(l.repeatIn(NUMBER, { callerWords: "Okay." })).toBe("number");
+    const offer = "Actually, call me on my mobile.";
+    expect(l.repeatIn(NUMBER, { callerWords: offer })).toBeNull();
+    l.recordCallerTurn(offer);
+    expect(l.isDeclined("number")).toBe(false);
+    expect(l.repeatIn(NUMBER, { callerWords: "Mm." })).toBe("number"); // cap again
+  });
+
+  it("a q: need lifts when the caller speaks as themselves with a shared content word", () => {
     const l = createAskLedger();
-    declineAfter(l, "What industry is your company in?");
-    l.recordCallerTurn("Well, we do work in the retail industry actually.");
-    expect(l.repeatIn("So what industry is your company in?", {})).toBeNull();
+    declineAfter(l, "What colour is your van?");
+    l.recordCallerTurn("What colour are vans usually?");
+    expect(l.isDeclined("q:colour van")).toBe(true);
+    l.recordCallerTurn("Well, my van is a red one actually.");
+    expect(l.repeatIn("So what colour is your van?", { callerWords: "Well, my van is red." })).toBeNull();
+    expect(l.isDeclined("q:colour van")).toBe(false);
   });
 
   it("a bare no is not a decline: nothing sticks", () => {
@@ -195,10 +231,16 @@ describe("createAskLedger -- a decline holds for the whole call, the caller can 
     expect(l.repeatIn(NUMBER, {})).toBeNull();
   });
 
-  it("assistant text never declines or lifts: only recordCallerTurn writes", () => {
+  it("assistant text never declines or lifts: only the caller's words do", () => {
     const l = createAskLedger();
     l.recordReply("I'd rather not ask, but what's your number?", { callerSpoke: true });
     expect(l.isDeclined("number")).toBe(false);
+    // A decline, then assistant replies full of lifting words and offers.
+    declineAfter(l, NUMBER);
+    l.recordReply("Of course, take your time. I can call you on your phone number or mobile.", { callerSpoke: true });
+    expect(l.isDeclined("number")).toBe(true);
+    // The reply being spoken carries "my number" etc. but supplies no caller words.
+    expect(l.repeatIn(`I'll take my number note. ${NUMBER}`, { callerWords: "Okay." })).toBe("number");
   });
 });
 

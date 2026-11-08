@@ -3559,8 +3559,8 @@ const SABOTAGES = [
     name: "decline-not-sticky",
     why: "Ilija inbound Task A3: a decline blocks that need for the whole call. Sabotaged, repeatIn never consults the declined set, so a declined ask is allowed again after one unrelated turn.",
     file: "lib/voice/askLedger.js",
-    find: "if (declined.has(key) && !raisedNow.has(key)) return key;",
-    replace: "if (false && declined.has(key) && !raisedNow.has(key)) return key; // SABOTAGE: decline not sticky",
+    find: "if (declined.has(key) && hasWords) return key;",
+    replace: "if (false && declined.has(key) && hasWords) return key; // SABOTAGE: decline not sticky",
     red: ["tests/askLedger.test.js"],
   },
   {
@@ -3570,6 +3570,14 @@ const SABOTAGES = [
     find: "for (const key of liftedBy(t)) declined.delete(key);",
     replace: "for (const key of liftedBy(t)) void key; // SABOTAGE: decline never lifted",
     red: ["tests/askLedger.test.js"],
+  },
+  {
+    name: "decline-lift-late",
+    why: "Ilija inbound Task A3 fix round 1: the reply to the turn that changes the caller's mind is spoken before turn close records the lift, so repeatIn lifts in-turn from callerWords. Sabotaged, the in-turn lift is empty and the ask the caller just invited is cut.",
+    file: "lib/voice/askLedger.js",
+    find: "liftedBy(callerWords);",
+    replace: "new Set(); // SABOTAGE: in-turn lift neutralised",
+    red: ["tests/askLedger.test.js", "tests/liveRepeatCut.test.js"],
   },
   {
     name: "onboarding-tier-optional",
