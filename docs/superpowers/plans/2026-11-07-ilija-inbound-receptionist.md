@@ -33,7 +33,7 @@
 - **Booking emails stay link-only** in this plan (`notifyAppointmentBooked` is untouched).
 - **Greeting, exact:** `Hello, this is Ilija's AI assistant. Ilija can't get to the phone right now, how can I help you?`
 - **Do not rebuild** the pronunciation box, recorded greeting or sound-spelling without asking the owner.
-- **Never route traffic to `voice-uk-prod-00114-zub`** (reverted build, latest ready, 0% today). Rollback: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00112-boh=100 --project=vetra-uk-edc8ca --region=europe-west2`, with `CLOUDSDK_CONFIG=~/.gcloud-vetra2`.
+- **Never route traffic to `voice-uk-prod-00114-zub`** (reverted build, latest ready, 0% today). Rollback: `gcloud run services update-traffic voice-uk-prod --to-revisions=voice-uk-prod-00112-boh=100 --project=vetra-uk-edc8ca --region=europe-west2`, with `CLOUDSDK_CONFIG=~/.gcloud-vetra2`. Before moving traffic back, count the `owner_notice_pending` rows per business with db-inspect and hand the counts to the owner: the old revision has no flush, so those rows are never emailed after the rollback (count again after it). Or roll forward.
 - **Red first.** Every behaviour change starts with a failing test. Each fix gets a sabotage row in `scripts/corpus/sabotage.mjs`, run in the batch at Task 16. Run `node scripts/corpus/sabotage.mjs --census` after touching any anchored file. `replace` strings expand `$`-sequences. Never `import()` that script.
 - **Every new counter on a gate has a positive twin** (memory `negative-counters-cannot-confirm`).
 - **Golden prompts:** `tests/__snapshots__/prompts/` must change only where a task says so. A business with no new settings keeps its wording, apart from the prompt edits Tasks 4, 11, 12 and 13 name.
@@ -594,7 +594,7 @@ gcloud builds submit --config=cloudbuild.yaml --substitutions=_TAG=<sha> \
   --project=vetra-core-edc8ca
 ```
 
-- [ ] **Step 5: Migrate.** Update job `vetra-migrate-uk-prod` to the image, run `migrate.js --status` (expected: only 059 pending), apply, re-run status.
+- [ ] **Step 5: Migrate.** Update job `vetra-migrate-uk-prod` to the image, run `migrate.js --status` (expected: 059 and 060 pending, nothing else), apply, re-run status.
 
 - [ ] **Step 6: Deploy with no traffic, then move it.** Owner pre-approved this if the gate passed. `gcloud run services update voice-uk-prod --image=us-central1-docker.pkg.dev/vetra-core-edc8ca/vetra/voice:<sha> --no-traffic --project=vetra-uk-edc8ca --region=europe-west2`, read the new revision's env back, then `update-traffic --to-revisions=<new>=100`.
 
