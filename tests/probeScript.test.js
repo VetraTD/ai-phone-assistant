@@ -86,7 +86,7 @@ describe("resolveScriptLines", () => {
 // numbers (UK 07700 900xxx), an example.com email.
 // ---------------------------------------------------------------------------
 const INBOUND_NAMES = ["inbound_lead_full", "inbound_lead_correct_number", "inbound_lead_hangup", "inbound_wrong_number"];
-const INBOUND_HANGUP_LABEL = "ih_company";
+const INBOUND_HANGUP_LABEL = "ih_email_hang";
 
 describe("inbound enquiry scripts (Task 15h)", () => {
   it("each resolves by name to non-empty { label, text } lines", () => {
@@ -129,7 +129,24 @@ describe("inbound enquiry scripts (Task 15h)", () => {
     expect(all).not.toMatch(/brightwork|digile|vetra|ilija/i);
   });
 
-  it("the hang-up script ends on its company line, and that label is ih_company", () => {
+  it("each lead script opens with one dense line that answers the likely first questions", () => {
+    for (const name of ["inbound_lead_full", "inbound_lead_correct_number", "inbound_lead_hangup"]) {
+      const first = resolveScriptLines(name)[0].text;
+      expect(first, name).toMatch(/I'm .+ from .+/);
+      expect(first, name).toMatch(/advertising/i);
+      expect(first, name).toMatch(/haven't worked with you before/i);
+      expect(first, name).toMatch(/enquiries|customers|clients/i);
+    }
+  });
+
+  it("later answers restate their subject so a one-question shift still reads right", () => {
+    const full = resolveScriptLines("inbound_lead_full").map((l) => l.text);
+    expect(full.some((t) => /^My email is /i.test(t))).toBe(true);
+    expect(full.some((t) => /^My budget is about /i.test(t))).toBe(true);
+    expect(full.some((t) => /consultation/i.test(t))).toBe(true);
+  });
+
+  it("the hang-up script ends on its email line, and that label is ih_email_hang", () => {
     const lines = resolveScriptLines("inbound_lead_hangup");
     expect(lines.at(-1).label).toBe(INBOUND_HANGUP_LABEL);
     expect(lines.map((l) => l.label)).toContain(INBOUND_HANGUP_LABEL);
