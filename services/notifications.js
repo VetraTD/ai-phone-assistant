@@ -370,6 +370,10 @@ function rowNumber(row) {
   return isRealCallerNumber(row.caller_number) ? row.caller_number : "not given";
 }
 
+// The fixed lines' names. A model-written answer label equal to one ("Number")
+// is prefixed, so it can never read as a second fixed line (final review M4).
+const FIXED_FIELDS = new Set(["type", "name", "number", "reason", "preferred time", "call time"]);
+
 function rowLines(row, timezone) {
   const label = CALLER_TYPE_LABELS[row.details?.callerType];
   const lines = [];
@@ -380,7 +384,8 @@ function rowLines(row, timezone) {
   for (const entry of Array.isArray(row.details?.answers) ? row.details.answers : []) {
     const question = oneLine(entry?.label);
     const answer = oneLine(entry?.answer);
-    if (question || answer) lines.push(`${question}: ${answer || "not given"}`);
+    const shown = FIXED_FIELDS.has(question.toLowerCase()) ? `Answer - ${question}` : question;
+    if (question || answer) lines.push(`${shown}: ${answer || "not given"}`);
   }
   const preferred = oneLine(row.preferred_time);
   if (preferred) lines.push(`Preferred time: ${preferred}`);

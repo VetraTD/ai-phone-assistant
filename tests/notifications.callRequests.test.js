@@ -135,6 +135,31 @@ describe("renderCallRequestsEmail", () => {
     expect(render(n, [{ ...row, details: null }]).text).not.toContain("Type:");
   });
 
+  // Final review M4: a model-written label equal to a fixed field name rendered
+  // a second "Number:" line under the real one. It is prefixed instead.
+  it("an answer label that copies a fixed field name can never read as that field", async () => {
+    const n = await load();
+    const answers = [
+      { label: "Number", answer: "+15550001111" },
+      { label: " name ", answer: "Someone Else" },
+      { label: "REASON", answer: "a different reason" },
+      { label: "Type", answer: "Supplier message" },
+      { label: "preferred time", answer: "never" },
+      { label: "Call time", answer: "midnight" },
+      { label: "Company", answer: "Acme" },
+    ];
+    const { text } = render(n, [{ ...row, details: { callerType: "new_enquiry", answers } }]);
+    const lines = text.split("\n");
+    for (const field of ["Type", "Name", "Number", "Reason", "Preferred time", "Call time"]) {
+      expect(lines.filter((l) => l.toLowerCase().startsWith(`${field.toLowerCase()}:`)), field).toHaveLength(1);
+    }
+    expect(text).toContain("Answer - Number: +15550001111");
+    expect(text).toContain("Answer - name: Someone Else");
+    expect(text).toContain("Answer - Call time: midnight");
+    expect(text).toContain("\nCompany: Acme");
+    expect(text).toContain("Number: +447700900123");
+  });
+
   it("leaves out Preferred time when absent, and says 'not given' for a blank name", async () => {
     const n = await load();
     const { text } = render(n, [{ ...row, preferred_time: null, caller_name: "  " }]);
