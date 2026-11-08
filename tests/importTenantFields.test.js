@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { importTenant } from "../scripts/import-tenant.js";
 
 // ---------------------------------------------------------------------------
 // The tenant importer names columns. The schema is 38 migration files. Nothing
@@ -41,6 +42,73 @@ function importerFields() {
     .map((l) => l.replace(/[",]/g, "").trim())
     .filter(Boolean);
 }
+
+// A client that records every statement. `business_directory` finds nothing, so
+// the payload is a NEW business unless a test says otherwise.
+function fakeClient({ existing = false } = {}) {
+  const sql = [];
+  return {
+    sql,
+    async query(text) {
+      sql.push(String(text));
+      if (/FROM business_directory/.test(text)) {
+        return { rows: existing ? [{ business_id: "11111111-1111-1111-1111-111111111111" }] : [], rowCount: existing ? 1 : 0 };
+      }
+      if (/gen_random_uuid/.test(text)) return { rows: [{ id: "22222222-2222-2222-2222-222222222222" }], rowCount: 1 };
+      if (/FROM businesses WHERE id/.test(text)) {
+        return { rows: [{ id: "x", name: "n", phone_number: "p", timezone: "Europe/London" }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+const payloadWith = (extra = {}) => ({
+  business: { name: "Example Plumbing Co", timezone: "Europe/London", phone_number: "+15550100000", ...extra },
+  ignored: [],
+  capabilities: [],
+});
+const wrote = (c) => c.sql.some((s) => /^\s*(INSERT|UPDATE)\b/i.test(s));
+
+describe("import-tenant compliance_tier", () => {
+  it("compliance_tier is an imported field", () => {
+    expect(importerFields()).toContain("compliance_tier");
+  });
+
+  it("a new business with no compliance_tier is refused", async () => {
+    const c = fakeClient();
+    await expect(importTenant(c, payloadWith())).rejects.toThrow(/is this a healthcare business/);
+    expect(wrote(c)).toBe(false);
+    expect(c.sql[c.sql.length - 1]).toMatch(/ROLLBACK/);
+  });
+
+  it("a new business with no phone number and no compliance_tier is refused too", async () => {
+    const c = fakeClient();
+    const p = payloadWith();
+    delete p.business.phone_number;
+    await expect(importTenant(c, p)).rejects.toThrow(/is this a healthcare business/);
+    expect(wrote(c)).toBe(false);
+  });
+
+  it("a value other than standard or hipaa is refused", async () => {
+    const c = fakeClient();
+    await expect(importTenant(c, payloadWith({ compliance_tier: "maybe" }))).rejects.toThrow(/is this a healthcare business/);
+    expect(wrote(c)).toBe(false);
+  });
+
+  it("a new business with standard or hipaa is created", async () => {
+    for (const tier of ["standard", "hipaa"]) {
+      const c = fakeClient();
+      await importTenant(c, payloadWith({ compliance_tier: tier }));
+      expect(c.sql.some((s) => /^\s*INSERT INTO businesses/i.test(s))).toBe(true);
+    }
+  });
+
+  it("an update to an existing business does not need it", async () => {
+    const c = fakeClient({ existing: true });
+    await importTenant(c, payloadWith());
+    expect(c.sql.some((s) => /^\s*UPDATE businesses/i.test(s))).toBe(true);
+  });
+});
 
 describe("import-tenant BUSINESS_FIELDS vs the migration history", () => {
   it("names no column that a migration dropped", () => {

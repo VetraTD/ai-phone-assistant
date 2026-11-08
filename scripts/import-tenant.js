@@ -91,6 +91,10 @@ const BUSINESS_FIELDS = [
   "notification_email",
   "notification_phone",
   "notifications_enabled",
+  // Required for a NEW business (see importTenant): the column defaults to
+  // 'standard', and a default that nobody chose is how a healthcare client ends
+  // up on the wrong tier.
+  "compliance_tier",
   "voice_provider",
   "voice_id",
   // NO voice_style. Migration 002 added it and 012 dropped it, but this list
@@ -101,6 +105,8 @@ const BUSINESS_FIELDS = [
   "sms_followup_enabled",
   "sms_templates",
 ];
+
+const COMPLIANCE_TIERS = ["standard", "hipaa"];
 
 // Named so the refusal is specific rather than a general "looks like PHI".
 const REFUSED_TABLES = [
@@ -237,6 +243,11 @@ export async function importTenant(client, { business, ignored, capabilities }) 
       );
       console.log(`updated existing tenant ${id} (matched on ${phone})`);
     } else {
+      if (!COMPLIANCE_TIERS.includes(business.compliance_tier)) {
+        throw new Error(
+          'A new business needs an answer to "is this a healthcare business?": set business.compliance_tier to "hipaa" (yes) or "standard" (no). Nothing was written.'
+        );
+      }
       const cols = ["id", ...fields];
       const ph = cols.map((_, i) => `$${i + 1}`);
       await client.query(

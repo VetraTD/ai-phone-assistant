@@ -33,6 +33,7 @@ const CONFIG = {
     name: "Probe Media",
     phone_number: "+441372000001",
     timezone: "Europe/London",
+    compliance_tier: "standard",
     greeting: "Thanks for calling Probe Media.",
     business_hours: { mon: { open: "09:00", close: "17:00", closed: false } },
     allowed_tasks: ["book_appointment"],

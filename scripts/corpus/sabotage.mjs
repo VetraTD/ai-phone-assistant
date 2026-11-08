@@ -3571,6 +3571,14 @@ const SABOTAGES = [
     replace: "for (const key of liftedBy(t)) void key; // SABOTAGE: decline never lifted",
     red: ["tests/askLedger.test.js"],
   },
+  {
+    name: "onboarding-tier-optional",
+    why: "Ilija inbound Task 14: a new business must answer the healthcare question. Sabotaged, the refusal is removed, so a new business silently takes the column default 'standard' and a healthcare client can go live on the wrong tier.",
+    file: "scripts/import-tenant.js",
+    find: "if (!COMPLIANCE_TIERS.includes(business.compliance_tier)) {",
+    replace: "if (false) { // SABOTAGE: tier optional",
+    red: ["tests/importTenantFields.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
