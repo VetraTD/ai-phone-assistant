@@ -19,7 +19,9 @@ import {
   detailsFromArgs,
   mergeDetails,
   CALLER_TYPES,
+  MAX_MESSAGE_LENGTH,
 } from "../lib/capabilities/customerRequests.js";
+import { renderCallRequestsEmail } from "../services/notifications.js";
 import { STEPS } from "../lib/callState.js";
 
 /** An in-memory customer_requests table behind the three db functions the packs use. */
@@ -393,10 +395,12 @@ describe("a lead's answers merge onto one row", () => {
     expect(db.createCustomerRequest).toHaveBeenCalledTimes(1);
     expect(db.updateCustomerRequest).toHaveBeenCalledTimes(1);
     const arg = db.updateCustomerRequest.mock.calls[0][0];
-    expect(arg.message).toBeNull();
+    // Final review I-1: a reworded reason the matcher cannot pair is appended,
+    // so the owner reads both wordings; a second request would not be lost.
+    expect(arg.message).toBe("wants help with Meta ads / interested in advertising");
     expect(arg.details).toEqual(D([{ label: "Company", answer: "Acme" }]));
     expect(calls.rows).toHaveLength(1);
-    expect(calls.rows[0].message).toBe("wants help with Meta ads");
+    expect(calls.rows[0].message).toBe("wants help with Meta ads / interested in advertising");
   });
 
   it("without details a reworded reason is still a new row", async () => {
@@ -450,6 +454,116 @@ describe("a lead's answers merge onto one row", () => {
     await saveRow(engine, { message: "about the invoice" });
     await saveRow(engine, { message: "about the invoice", callbackNumber: "214 555 0124" });
     expect("details" in db.updateCustomerRequest.mock.calls[0][0]).toBe(false);
+  });
+});
+
+// Final review I-1: the person-only match was taken by any save with details,
+// and a caller_type alone is details. A second, different request from the
+// same caller was merged onto the first row with its reason thrown away, and
+// the tool still answered success.
+describe("a second, different message from the same caller is never dropped (final review I-1)", () => {
+  const D = (answers, callerType = "new_enquiry") => ({ callerType, answers });
+  const saveRow = (engine, row) =>
+    saveCustomerRequest({
+      db: engine.deps.db,
+      businessId: "biz-1",
+      callId: engine.call.callId,
+      row: { requestType: "message", callerName: "Jane Doe", callbackNumber: "214 555 0123", message: null, preferredTime: null, ...row },
+    });
+  const emailOf = (rows) => renderCallRequestsEmail({ businessName: "Brightwork", rows }).text;
+
+  it("two different reasons, both saved with caller_type, both reach the rows and the email", async () => {
+    const { engine, calls } = makeEngine();
+    const first = { ...MESSAGE, caller_name: "Sam Client", caller_type: "existing_customer", message: "call me about invoice 4471" };
+    messages.onEffect(recorded(first), engine);
+    await settle();
+    messages.onEffect(recorded({ ...first, message: "the contact form on our site has been broken since Monday" }), engine);
+    await settle();
+
+    expect(calls.rows).toHaveLength(2);
+    expect(calls.rows.map((r) => r.message)).toEqual([
+      "call me about invoice 4471",
+      "the contact form on our site has been broken since Monday",
+    ]);
+    const text = emailOf(calls.rows);
+    expect(text).toContain("invoice 4471");
+    expect(text).toContain("contact form on our site has been broken since Monday");
+  });
+
+  it("a caller_type-only second save with a different reason does not take the person-only path", async () => {
+    const { engine, db } = makeEngine();
+    await saveRow(engine, { message: "wants help with Meta ads", details: D([]) });
+    await saveRow(engine, { message: "needs a copy of the invoice", details: D([], "existing_customer") });
+    expect(db.updateCustomerRequest).not.toHaveBeenCalled();
+    expect(db.createCustomerRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("a lead with answers who adds a different request keeps both reasons on the one row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "about invoice 4471", details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { message: "contact form broken since Monday", details: D([{ label: "Email", answer: "j@acme.test" }]) });
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message).toBe("about invoice 4471 / contact form broken since Monday");
+    expect(calls.rows[0].details.answers.map((a) => a.label)).toEqual(["Company", "Email"]);
+    const text = emailOf(calls.rows);
+    expect(text).toContain("invoice 4471");
+    expect(text).toContain("contact form broken since Monday");
+  });
+
+  it("a later correction of one of two joined reasons keeps the other", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "about invoice 4471", details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { message: "contact form broken since Monday", details: D([{ label: "Email", answer: "j@acme.test" }]) });
+    // Close enough to the whole stored message to be a correction of it.
+    await saveRow(engine, {
+      message: "the contact form has been broken since Monday morning",
+      details: D([{ label: "Email", answer: "j@acme.test" }]),
+    });
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message).toBe("about invoice 4471 / the contact form has been broken since Monday morning");
+  });
+
+  it("the same reason again is not appended twice", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "about invoice 4471", details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { message: "contact form broken since Monday", details: D([{ label: "Email", answer: "j@acme.test" }]) });
+    await saveRow(engine, { message: "contact form broken since Monday", details: D([{ label: "Industry", answer: "Retail" }]) });
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message).toBe("about invoice 4471 / contact form broken since Monday");
+  });
+
+  it("a nameless save with only a caller_type and a different reason files a row of its own", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "about invoice 4471", details: D([], "existing_customer") });
+    await saveRow(engine, { callerName: null, message: "the gate code changed", details: D([], "existing_customer") });
+
+    expect(calls.rows).toHaveLength(2);
+    expect(calls.rows.map((r) => r.message)).toEqual(["about invoice 4471", "the gate code changed"]);
+  });
+
+  it("a nameless save with answers merges onto the call's row and keeps both reasons", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "about invoice 4471", details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { callerName: null, message: "the gate code changed", details: D([{ label: "Email", answer: "j@acme.test" }]) });
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].caller_name).toBe("Jane Doe");
+    expect(calls.rows[0].message).toBe("about invoice 4471 / the gate code changed");
+  });
+
+  it("an appended message is clamped", async () => {
+    const { engine, calls } = makeEngine();
+    // Each about 1,200 characters: under the cap alone, over it joined.
+    const long = (w) => Array.from({ length: 150 }, (_, i) => `${w}${i}`).join(" ");
+    await saveRow(engine, { message: long("alpha"), details: D([{ label: "Company", answer: "Acme" }]) });
+    await saveRow(engine, { message: long("bravo"), details: D([{ label: "Email", answer: "j@acme.test" }]) });
+
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].message.length).toBe(MAX_MESSAGE_LENGTH);
+    expect(calls.rows[0].message.startsWith(long("alpha"))).toBe(true);
   });
 });
 

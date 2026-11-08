@@ -2473,8 +2473,8 @@ const SABOTAGES = [
     name: "request-no-reason-keeps-message",
     why: "round A1 S3 C1: a re-record that says only 'wants a call back' must not replace 'about invoice 4471' on the row.",
     file: "lib/capabilities/customerRequests.js",
-    find: "          const message = samePersonOnly || !hasReason(reasonOf(row.message), row.callerName)",
-    replace: "          const message = samePersonOnly || false // SABOTAGE",
+    find: "          const message = !hasReason(reasonOf(row.message), row.callerName)",
+    replace: "          const message = false // SABOTAGE",
     red: [S3_REQUESTS],
   },
   {
@@ -3594,6 +3594,14 @@ const SABOTAGES = [
     find: "    abandonedOutstanding &&",
     replace: "    false &&",
     red: ["tests/postCallVerify.test.js"],
+  },
+  {
+    name: "second-message-dropped",
+    why: "Ilija inbound Task F (final review I-1): only a save that carries answers matches the same person whatever its reason. Sabotaged, a caller_type alone is enough, so a second, different request from the same caller merges onto the first row instead of filing a row of its own.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "            : row.details?.answers?.length > 0",
+    replace: "            : row.details // SABOTAGE: a caller_type alone takes the person-only match",
+    red: [S3_REQUESTS],
   },
 ];
 
