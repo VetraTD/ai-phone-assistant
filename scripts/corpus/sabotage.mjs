@@ -3751,6 +3751,22 @@ const SABOTAGES = [
     red: ["tests/askLedger.test.js"],
   },
   {
+    name: "withheld-number-block",
+    why: "Task W: a caller whose number did not come through gets a block saying so and to ask for the digits. Sabotaged, the block keeps its header but loses the instruction, as before the fix a *67 caller 'using the number I am calling from' was told nothing.",
+    file: "services/gemini.js",
+    find: "        `Their number did not come through (it is withheld or hidden). If they say to use ` +",
+    replace: "        `` +",
+    red: ["tests/callerNumberInPrompt.test.js"],
+  },
+  {
+    name: "withheld-save-asks-digits",
+    why: "Task W: a save with no callback_number on a call with no usable caller number tells the model to ask for the digits. Sabotaged, the reply is a plain success again.",
+    file: "capabilities/messages.js",
+    find: "    const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);",
+    replace: "    const needsNumber = false;",
+    red: ["tests/withheldSaveAsksDigits.test.js"],
+  },
+  {
     name: "message-owed-transfer-latch",
     why: "Ilija inbound Task N fix round 3 (I1): transferStarted is set when the transfer's redirect has succeeded, not when the exit is armed. Sabotaged, the latch is never set, so a call really handed to a person files 'none was saved'.",
     file: "lib/voice/live/index.js",

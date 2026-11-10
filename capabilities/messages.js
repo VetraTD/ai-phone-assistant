@@ -35,6 +35,14 @@ const MESSAGE_PACK_TYPES = ["message", "callback"];
 const NEXT_QUESTIONS_NOTE =
   "[not caller speech] If this business's notes list more questions for this caller, ask them now, one at a time, before closing. Then save again with the same message and the answers in details.";
 
+/**
+ * Model-only, like the note above. Present when the save carries no
+ * callback_number and the call has no usable caller number either (withheld,
+ * a placeholder, or the business's own line). The message IS saved; this only
+ * makes the model get the digits, and a later save merges onto the same row.
+ */
+const NO_NUMBER_NOTE =
+  "[not caller speech] Their message is saved, but there is no number to call them back on because their number did not come through. Ask them for the digits now, read them back, and save again with the same message and the number.";
 
 /**
  * Previously registered unconditionally at services/gemini.js:144. It used to
@@ -261,11 +269,16 @@ export default {
     const message = "I'll make sure they get your message.";
     const notes = capabilityConfig(ctx?.config, "messages").notes;
     const hasNotes = typeof notes === "string" && notes.trim() !== "";
+    const hasCallback = typeof args.callback_number === "string" && args.callback_number.trim() !== "";
+    const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);
+    const next = [needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? NEXT_QUESTIONS_NOTE : null]
+      .filter(Boolean)
+      .join(" ");
     return {
       functionResponse: {
         id: fc.id,
         name: fc.name,
-        response: { success: true, message, ...(hasNotes ? { next: NEXT_QUESTIONS_NOTE } : {}) },
+        response: { success: true, message, ...(next ? { next } : {}) },
       },
       stateEffects: {
         // Written for the caller, so it may be spoken if the model produces no

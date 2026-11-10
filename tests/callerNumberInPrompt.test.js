@@ -58,6 +58,24 @@ describe("the caller's own number", () => {
     expect(build({ callerPhone: "+33123456789" })).toContain("+33123456789");
   });
 
+  it("a caller with no number is told it did not come through, never given a number", () => {
+    // Task W: the "never invent a number" rule used to live only inside the
+    // real-number block, so a *67 caller got no instruction at all and the
+    // save went through with no callback number.
+    for (const callerPhone of [null, "", "+266696687", "+7378742833", "not a number"]) {
+      const prompt = build({ callerPhone });
+      expect(prompt).toContain("=== THIS CALLER'S NUMBER ===\nTheir number did not come through");
+      expect(prompt).toMatch(/ask them for the digits/);
+      expect(prompt).toMatch(/Never state, guess or invent a phone number/);
+      expect(prompt).not.toMatch(/They are calling from/);
+    }
+  });
+
+  it("the no-number block is in the dynamic tail, not the static prefix", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    expect(buildStaticSystemPrefix(CONFIG, { integrations: [], callerPhone: null })).not.toContain("did not come through");
+  });
+
   it("is absent when the caller withheld their number, rather than invented", () => {
     // A withheld number must leave NO claim in the prompt. Anything else and
     // the model has a placeholder it can read out as though it were real.
@@ -66,7 +84,7 @@ describe("the caller's own number", () => {
     // which is itself part of why the model invented one. It was told a number
     // existed and never shown it.
     const prompt = build({ callerPhone: null });
-    expect(prompt).not.toContain("THIS CALLER'S NUMBER");
+    expect(prompt).not.toContain("They are calling from");
     expect(prompt).not.toMatch(/They are calling from/);
   });
 
@@ -78,7 +96,6 @@ describe("the caller's own number", () => {
     for (const placeholder of ["+266696687", "+7378742833", "+86282452253", "+2562533"]) {
       expect(isWithheldCallerNumber(placeholder)).toBe(true);
       const prompt = build({ callerPhone: placeholder });
-      expect(prompt).not.toContain("THIS CALLER'S NUMBER");
       expect(prompt).not.toMatch(/They are calling from/);
     }
     // A formatted placeholder is still the placeholder.

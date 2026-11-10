@@ -2184,6 +2184,17 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         `Never state, guess or invent a phone number you were not given: if you do not ` +
         `have one, say so and ask them for it.`
     );
+  } else {
+    // Task W: a withheld, empty or malformed number still gets the rule. It
+    // used to live only inside the block above, so a *67 caller who said "use
+    // the number I'm calling from" was told nothing and the message was saved
+    // with no way to call them back.
+    sections.push(
+      `=== THIS CALLER'S NUMBER ===\n` +
+        `Their number did not come through (it is withheld or hidden). If they say to use ` +
+        `"the number I'm calling from", tell them it did not come through and ask them for ` +
+        `the digits. Never state, guess or invent a phone number.`
+    );
   }
 
   // === KNOWN CALLER FACTS ===
