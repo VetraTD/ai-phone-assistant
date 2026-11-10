@@ -223,3 +223,20 @@ describe("I3 (fix round 1): post-call read, party-gated on outbound", () => {
     expect(s.recover).not.toHaveBeenCalled();
   });
 });
+
+// Fix round 5: an outbound call never saves a message, so the post-call message
+// net (a caller's contact read back, nothing saved) must not run there. A contact
+// who says "ring my mobile" and books a callback is not a lost lead.
+describe("the message net is inbound only (round 5)", () => {
+  it("an outbound call that reads a number back hands verify callerContactReadBack: false", async () => {
+    const s = await boot();
+    await s.callTool("confirm_identity", { name_confirmed: true });
+    s.live.push({ serverContent: { outputTranscription: { text: "Got it, I'll ring you on 0 7 7 0 0, 9 0 0 1 2 3." } } });
+    s.live.push({ serverContent: { turnComplete: true } });
+    await s.settle();
+    await s.hangUp();
+
+    expect(s.verify).toHaveBeenCalledTimes(1);
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+  });
+});

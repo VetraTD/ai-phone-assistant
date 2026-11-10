@@ -1292,6 +1292,21 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     );
   });
 
+  // Positive twin of the net's trigger: the only way to tell "no call read a
+  // contact back" from "the check is not wired" when the net itself reads zero.
+  it("counts every call on which a contact was read back, whether or not it filed", async () => {
+    const saved = fakeDeps({ booked: [] });
+    await verifyCall(owed({ messagesRecorded: 1, actionToolsAttempted: ["record_customer_request"] }), saved);
+    const quiet = fakeDeps({ booked: [] });
+    await verifyCall(owed({ callerContactReadBack: false }), quiet);
+    expect(getLatencyStats().turnTaking.postcall_caller_contact_read_back).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row ?? 0).toBe(0);
+    expect(saved.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ caller_contact_read_back: true })
+    );
+  });
+
   it("nothing read back (wrong number, silence, a declined offer) -> no row, no alert", async () => {
     const d = fakeDeps({ booked: [] });
     await verifyCall(owed({ messageIntent: false, callerContactReadBack: false }), d);

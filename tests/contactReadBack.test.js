@@ -94,3 +94,44 @@ describe("readsCallerContactBack", () => {
     expect(readsCallerContactBack("Ring 01372 656055.", undefined)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 5: a website read out is not a caller's email. Spoken " at " becomes
+// "@" for matching, so "find us at digile.co.uk" reads as us@digile.co.uk. The
+// business's own DOMAINS (its notification email's, and every URL, bare domain
+// and email in its notes) are excluded, and a host that starts with www. is
+// never an email host.
+// ---------------------------------------------------------------------------
+describe("a website is not a caller's email (round 5)", () => {
+  const SITE = collectBusinessContacts({
+    business: {
+      notification_email: "owner@digile.co.uk",
+      general_info: "Book at https://www.digile.co.uk/book. Our shop is shop.digile.co.uk.",
+      custom_instructions: "Say the site as: digile dot co dot uk.",
+    },
+    config: { capabilities: { messages: { notes: "Press kit lives at press.example-press.com" } } },
+  });
+
+  it("collects the domains", () => {
+    expect(SITE.domains.has("digile.co.uk")).toBe(true);
+    expect(SITE.domains.has("shop.digile.co.uk")).toBe(true);
+    expect(SITE.domains.has("press.example-press.com")).toBe(true);
+  });
+
+  it.each([
+    "You can find us at digile.co.uk",
+    "You can find our website at digile dot co dot uk.",
+    "Have a look at www.digile.co.uk",
+    "Our shop is at shop.digile.co.uk",
+    "Press material is at press.example-press.com",
+    "You can email info@mail.digile.co.uk",
+    // A www. host is never an email host, whoever owns the site.
+    "Have a look at www.somewhere-else.com",
+  ])("does not count: %s", (s) => expect(readsCallerContactBack(s, SITE)).toBe(false));
+
+  it.each([
+    "Is that ellie.hughes@gmail.com?",
+    "That's ellie dot hughes at gmail dot com.",
+    "So that's ellie at digile-fans dot co dot uk?",
+  ])("still counts a caller's own address: %s", (s) => expect(readsCallerContactBack(s, SITE)).toBe(true));
+});

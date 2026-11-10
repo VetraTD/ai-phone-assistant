@@ -1111,3 +1111,49 @@ describe("the message net on a tenant that can only declare general_question (ro
     expect(arg(s.verify).callerContactReadBack).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 5: a website read out to a caller who asked for it is not a caller's
+// email. The domain is the business's own (its record's notes), so it is
+// excluded; a caller's gmail-style address still latches.
+// ---------------------------------------------------------------------------
+describe("a website read out is not a read-back (round 5)", () => {
+  const siteDb = () => {
+    const d = fakeDb();
+    const cfg = d.loadConfig();
+    return {
+      ...d,
+      lookupBusinessByPhone: vi.fn(async () => ({
+        id: "biz-1",
+        name: "Digile Media",
+        phone_number: "+441372656055",
+        general_info: "Our website is digile.co.uk.",
+      })),
+      loadConfig: () => ({ ...cfg, allowedTasks: [] }),
+    };
+  };
+  const bootSite = () => boot({ POSTCALL_VERIFY: "count" }, [], siteDb(), { realIntentTool: true });
+  const speak = async (s, text) => {
+    s.say(text);
+    s.endTurn();
+    await s.settle();
+  };
+
+  it.each([
+    "You can find us at digile.co.uk, anything else?",
+    "You can find our website at digile dot co dot uk, anything else?",
+    "Have a look at www.digile.co.uk, anything else?",
+  ])("no latch: %s", async (text) => {
+    const s = await bootSite();
+    await speak(s, text);
+    await s.hangUp();
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+  });
+
+  it("a caller's own gmail-style address latches", async () => {
+    const s = await bootSite();
+    await speak(s, "Is that ellie.hughes at gmail dot com?");
+    await s.hangUp();
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
+  });
+});
