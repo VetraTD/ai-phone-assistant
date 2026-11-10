@@ -3637,8 +3637,9 @@ const SABOTAGES = [
     name: "message-owed-no-row",
     why: "Ilija inbound Task N: a message intent with no save and no attempt files the call-back row and the alert (production 2026-11-10: a lead hung up after the read-back and nobody was told). Sabotaged, the fact is never true, so such a call files nothing and the lead is lost silently again.",
     file: "lib/postCallVerify.js",
-    // Re-anchored in fix round 1: the expression is now one conjunct per line.
-    find: "    messageIntent === true &&",
+    // Re-anchored in fix round 4: the intent is no longer a conjunct, so the
+    // fact is broken at another one.
+    find: "    !messageAttempted &&",
     replace: "    false &&",
     red: ["tests/postCallVerify.test.js"],
   },
@@ -3670,26 +3671,43 @@ const SABOTAGES = [
     name: "message-owed-needs-readback",
     why: "Ilija inbound Task N fix round 1 (I2, ruling R71): the model declares take_message for a mere offer, so the net also needs a spoken read-back of details after that intent. Sabotaged, an intent alone is enough, and a caller who declines the offer (or a robocall) files a call-back row.",
     file: "lib/postCallVerify.js",
-    find: "    messageReadBack === true &&",
+    // Re-anchored in fix round 4 (renamed callerContactReadBack).
+    find: "    callerContactReadBack === true &&",
     replace: "    true &&",
     red: ["tests/postCallVerify.test.js"],
+  },
+  {
+    name: "message-owed-intent-free",
+    why: "Ilija inbound Task N fix round 4: a tenant with no allowed tasks can only declare general_question, so the net must not need a declared message intent. Sabotaged, the intent is a conjunct again, and the lost-lead call's tenant files nothing (message_owed false on every call).",
+    file: "lib/postCallVerify.js",
+    find: "    callerContactReadBack === true &&",
+    replace: "    messageIntent === true && callerContactReadBack === true &&",
+    red: ["tests/postCallVerify.test.js", "tests/livePostCall.test.js"],
+  },
+  {
+    name: "message-readback-business-number",
+    why: "Ilija inbound Task N fix round 4: a number the assistant reads out that is the business's own (its line, main, transfer or notification number, or one in its notes) is not a caller's detail. Sabotaged, the exclusion is dropped, so 'you can reach the office on <our number>, or I can take a message?' to a caller who declines files a call-back row.",
+    file: "lib/voice/contactReadBack.js",
+    find: "    if (!own.numbers.has(run.slice(-TAIL))) return true;",
+    replace: "    return true;",
+    red: ["tests/livePostCall.test.js", "tests/contactReadBack.test.js"],
   },
   {
     name: "message-readback-strict",
     why: "Ilija inbound Task N fix round 2 (R71): the message read-back latch asks readsContactBack (a 7-digit number, an email or a spelling), not 'any digit'. Sabotaged, any digit counts, so 'We open at 9 tomorrow. Would you like to leave a message?' after a take_message intent latches a read-back and a declined offer files a call-back row.",
     file: "lib/voice/live/index.js",
-    // Re-anchored in fix round 3: the latch is readsContactBack alone and no
-    // longer waits for the intent.
-    find: "    if (readsContactBack(replyText)) messageReadBackThisCall = true;",
-    replace: "    if (/\\d/.test(replyText)) messageReadBackThisCall = true;",
+    // Re-anchored in fix rounds 3 and 4: the latch is readsCallerContactBack
+    // alone, needs no intent, and skips the business's own contacts.
+    find: "    if (readsCallerContactBack(replyText, businessContacts)) callerContactReadBackThisCall = true;",
+    replace: "    if (/\\d/.test(replyText)) callerContactReadBackThisCall = true;",
     red: ["tests/livePostCall.test.js"],
   },
   {
     name: "message-readback-confirm-regex",
     why: "Ilija inbound Task N fix round 3 (R71): the booking confirm regex also matches an offer ('I can take a message for him, is that okay?'). Sabotaged, it feeds the message read-back latch again, so a declined offer files a call-back row.",
     file: "lib/voice/live/index.js",
-    find: "    if (readsContactBack(replyText)) messageReadBackThisCall = true;",
-    replace: "    if (confirmReadBack || readsContactBack(replyText)) messageReadBackThisCall = true;",
+    find: "    if (readsCallerContactBack(replyText, businessContacts)) callerContactReadBackThisCall = true;",
+    replace: "    if (confirmReadBack || readsCallerContactBack(replyText, businessContacts)) callerContactReadBackThisCall = true;",
     red: ["tests/livePostCall.test.js"],
   },
   {

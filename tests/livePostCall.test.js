@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { clearStats } from "../lib/voice/metrics.js";
 import { executeToolCall } from "../services/tools.js";
+import { verifyCall } from "../lib/postCallVerify.js";
 
 // The transfer wire below arms a real exit; no REST call may ever leave this file.
 vi.mock("twilio", () => ({
@@ -912,30 +913,30 @@ describe("a read-back and a transfer reach the post-call read", () => {
     await s.settle();
   };
 
-  it("a read-back spoken after the message intent -> messageReadBack true", async () => {
+  it("a read-back spoken after the message intent -> callerContactReadBack true", async () => {
     const s = await bootReal();
     await s.callTool("set_call_intent", { intent: "take_message" });
     await speak(s, READ_BACK);
     await s.hangUp();
-    expect(arg(s.verify).messageReadBack).toBe(true);
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
   });
 
-  it("an offer to take a message, never read back -> messageReadBack false", async () => {
+  it("an offer to take a message, never read back -> callerContactReadBack false", async () => {
     const s = await bootReal();
     await s.callTool("set_call_intent", { intent: "take_message" });
     await speak(s, OFFER);
     await s.hangUp();
     expect(arg(s.verify).messageIntent).toBe(true);
-    expect(arg(s.verify).messageReadBack).toBe(false);
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
   });
 
-  it("an offer that mentions a time (a digit) is not a read-back -> messageReadBack false", async () => {
+  it("an offer that mentions a time (a digit) is not a read-back -> callerContactReadBack false", async () => {
     const s = await bootReal();
     await s.callTool("set_call_intent", { intent: "take_message" });
     await speak(s, "We open at 9 tomorrow. Would you like to leave a message?");
     await s.hangUp();
     expect(arg(s.verify).messageIntent).toBe(true);
-    expect(arg(s.verify).messageReadBack).toBe(false);
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
   });
 
   // Round 3, item 1: "is that okay?" matches the booking confirm regex, and a
@@ -944,13 +945,13 @@ describe("a read-back and a transfer reach the post-call read", () => {
     "I can take a message for him, is that okay?",
     "Would you like me to go ahead and take a message?",
     "Does that sound good?",
-  ])("a yes/no offer is not a read-back -> messageReadBack false: %s", async (offer) => {
+  ])("a yes/no offer is not a read-back -> callerContactReadBack false: %s", async (offer) => {
     const s = await bootReal();
     await s.callTool("set_call_intent", { intent: "take_message" });
     await speak(s, offer);
     await s.hangUp();
     expect(arg(s.verify).messageIntent).toBe(true);
-    expect(arg(s.verify).messageReadBack).toBe(false);
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
   });
 
   // Round 3, item 4: the read-back is its own fact for the whole call; the
@@ -961,7 +962,7 @@ describe("a read-back and a transfer reach the post-call read", () => {
     await s.callTool("set_call_intent", { intent: "take_message" });
     await s.hangUp();
     expect(arg(s.verify).messageIntent).toBe(true);
-    expect(arg(s.verify).messageReadBack).toBe(true);
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
   });
 
   it("no transfer on the call -> transferStarted false", async () => {
@@ -994,6 +995,119 @@ describe("a read-back and a transfer reach the post-call read", () => {
     await speak(s, READ_BACK);
     await s.hangUp();
     expect(arg(s.verify).transferStarted).toBe(false);
-    expect(arg(s.verify).messageReadBack).toBe(true);
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 4. A tenant with allowed_tasks [] is offered set_call_intent with
+// the single value general_question, so a message intent can never be declared
+// there. The net must not depend on it: the lost-lead call that started all this
+// was exactly such a tenant. These drive the Live session on that tenant, take
+// what it hands verify, and feed THAT to the real verifyCall.
+// ---------------------------------------------------------------------------
+describe("the message net on a tenant that can only declare general_question (round 4)", () => {
+  const READ_BACK =
+    "So that's Ellie, Hughes, H-U-G-H-E-S, on 4 6 9, 9 3 3, 8 8 8 7 about marketing for your salon, and Ilija will get back to you as soon as he can.";
+
+  const noTasksDb = (row = {}) => {
+    const d = fakeDb();
+    const cfg = d.loadConfig();
+    return {
+      ...d,
+      lookupBusinessByPhone: vi.fn(async () => ({
+        id: "biz-1",
+        name: "Digile Media",
+        phone_number: "+441372656055",
+        ...row,
+      })),
+      loadConfig: () => ({ ...cfg, allowedTasks: [] }),
+    };
+  };
+  const bootNoTasks = (row) => boot({ POSTCALL_VERIFY: "count" }, [], noTasksDb(row), { realIntentTool: true });
+  const speak = async (s, text) => {
+    s.say(text);
+    s.endTurn();
+    await s.settle();
+  };
+  /** The real verifyCall, handed exactly what the session built. */
+  async function realVerify(s) {
+    const filed = [];
+    const alerts = [];
+    const deps = {
+      db: {
+        isEnabled: () => true,
+        withTenantSafe: async (_id, fn) => fn(),
+        listAppointmentsByCallId: async () => [],
+        getAppointmentById: async () => null,
+        createCustomerRequest: async (r) => {
+          filed.push(r);
+          return "req-1";
+        },
+      },
+      notifications: { sendCallerSms: async () => true, notifyUnconfirmedClaim: async (a) => alerts.push(a) },
+      log: { info: () => {}, error: () => {} },
+    };
+    await verifyCall(arg(s.verify), deps);
+    return { filed, alerts };
+  }
+
+  it("the caller's details read back, no save, hang up -> one row and one alert, with no message intent declared", async () => {
+    const s = await bootNoTasks();
+    // The only intent this tenant's model can declare.
+    await s.callTool("set_call_intent", { intent: "general_question" });
+    await speak(s, READ_BACK);
+    await s.hangUp();
+
+    expect(arg(s.verify).messageIntent).toBe(false);
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
+    const { filed, alerts } = await realVerify(s);
+    expect(filed).toHaveLength(1);
+    expect(filed[0].notes).toBe(
+      "Follow-up needed: the caller gave their details on this call and no message was saved. Please call them back."
+    );
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].kind).toBe("message");
+  });
+
+  it("the business's own number offered to a caller who declines -> no row", async () => {
+    const s = await bootNoTasks();
+    await speak(s, "You can reach the office on 01372 656055, or I can take a message?");
+    await s.hangUp();
+
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+    const { filed, alerts } = await realVerify(s);
+    expect(filed).toHaveLength(0);
+    expect(alerts).toHaveLength(0);
+  });
+
+  it("the business's own email read out -> no row", async () => {
+    const s = await bootNoTasks({ notification_email: "Office@Example-Studio.com" });
+    await speak(s, "You can email office at example-studio dot com.");
+    await s.hangUp();
+
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+    expect((await realVerify(s)).filed).toHaveLength(0);
+  });
+
+  it("a number from the business's own prose is not the caller's either", async () => {
+    const s = await bootNoTasks({ general_info: "The studio is on 020 7946 0958." });
+    await speak(s, "The studio is on 020 7946 0958, shall I take a message?");
+    await s.hangUp();
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+  });
+
+  it("a spelled-only read-back does not latch", async () => {
+    const s = await bootNoTasks();
+    await speak(s, "So that's Ellie, H-U-G-H-E-S, is that okay?");
+    await s.hangUp();
+    expect(arg(s.verify).callerContactReadBack).toBe(false);
+  });
+
+  it("a caller's own email read back latches", async () => {
+    const s = await bootNoTasks({ notification_email: "office@example-studio.com" });
+    await speak(s, "Is that ellie dot hughes at example dot com?");
+    await s.hangUp();
+    expect(arg(s.verify).callerContactReadBack).toBe(true);
   });
 });

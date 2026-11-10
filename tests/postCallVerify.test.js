@@ -1233,9 +1233,9 @@ describe("an abandoned write is worded by what was refused", () => {
 describe("a message that was wanted and never attempted reaches a person", () => {
   beforeEach(() => clearStats());
   const owed = (over = {}) =>
-    input({ messageIntent: true, messageReadBack: true, messagesRecorded: 0, actionToolsAttempted: [], ...over });
+    input({ messageIntent: true, callerContactReadBack: true, messagesRecorded: 0, actionToolsAttempted: [], ...over });
 
-  it("message intent, nothing saved, nothing attempted -> one call-back row and one message-worded alert", async () => {
+  it("contact details read back, nothing saved, nothing attempted -> one call-back row and one message-worded alert", async () => {
     const d = fakeDeps({ booked: [] });
     const out = await verifyCall(owed(), d);
     expect(out.verdict).toBe("ok");
@@ -1243,7 +1243,7 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     const arg = d.db.createCustomerRequest.mock.calls[0][0];
     expect(arg.requestType).toBe("unconfirmed_claim");
     expect(arg.notes).toBe(
-      "Follow-up needed: the caller wanted to leave a message on this call and none was saved. Please call them back."
+      "Follow-up needed: the caller gave their details on this call and no message was saved. Please call them back."
     );
     expect(arg.notes).not.toMatch(/assistant|appointment/i);
     expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
@@ -1273,9 +1273,28 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     );
   });
 
-  it("no message intent (wrong number, silence) -> no row, no alert", async () => {
+  // Round 4: a tenant with no allowed tasks can only declare general_question,
+  // so the declared intent cannot be a condition. It is telemetry.
+  it("NO declared message intent, but contact details read back -> still one row and one alert", async () => {
     const d = fakeDeps({ booked: [] });
     await verifyCall(owed({ messageIntent: false }), d);
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toBe(
+      "Follow-up needed: the caller gave their details on this call and no message was saved. Please call them back."
+    );
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBe("message");
+    expect(getLatencyStats().turnTaking.postcall_message_owed ?? 0).toBe(0);
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row).toBe(1);
+    expect(d.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ message_owed: false, message_owed_no_row: true })
+    );
+  });
+
+  it("nothing read back (wrong number, silence, a declined offer) -> no row, no alert", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ messageIntent: false, callerContactReadBack: false }), d);
     expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
     expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
     expect(getLatencyStats().turnTaking.postcall_message_owed ?? 0).toBe(0);
@@ -1336,7 +1355,7 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
     const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
     expect(notes).toContain("this call tried to book or change an appointment");
-    expect(notes).not.toMatch(/wanted to leave a message/);
+    expect(notes).not.toMatch(/gave their details/);
     expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
     expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
   });
@@ -1353,7 +1372,7 @@ describe("a message that was wanted and never attempted reaches a person", () =>
   // I2 (ruling R71): the model declares take_message when it merely OFFERS one.
   it("message intent, but the details were never read back -> no row, no alert", async () => {
     const d = fakeDeps({ booked: [] });
-    await verifyCall(owed({ messageReadBack: false }), d);
+    await verifyCall(owed({ callerContactReadBack: false }), d);
     expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
     expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
     expect(getLatencyStats().turnTaking.postcall_message_owed).toBe(1);
