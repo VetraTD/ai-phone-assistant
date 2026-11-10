@@ -30,7 +30,13 @@ class FakeSocket extends EventEmitter {
     this.OPEN = 1;
     this.readyState = 1;
   }
-  send() {}
+  send(raw) {
+    this.sent = this.sent || [];
+    this.sent.push(JSON.parse(raw));
+  }
+  marks() {
+    return (this.sent || []).filter((m) => m.event === "mark").map((m) => m.mark?.name);
+  }
   close() {
     this.readyState = 3;
   }
@@ -189,6 +195,7 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = 
 
   return {
     live,
+    ws,
     verify,
     recover,
     judge,
@@ -931,25 +938,62 @@ describe("a read-back and a transfer reach the post-call read", () => {
     expect(arg(s.verify).messageReadBack).toBe(false);
   });
 
-  it("a read-back spoken BEFORE any message intent does not count", async () => {
+  // Round 3, item 1: "is that okay?" matches the booking confirm regex, and a
+  // declined offer says exactly that.
+  it.each([
+    "I can take a message for him, is that okay?",
+    "Would you like me to go ahead and take a message?",
+    "Does that sound good?",
+  ])("a yes/no offer is not a read-back -> messageReadBack false: %s", async (offer) => {
+    const s = await bootReal();
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await speak(s, offer);
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(true);
+    expect(arg(s.verify).messageReadBack).toBe(false);
+  });
+
+  // Round 3, item 4: the read-back is its own fact for the whole call; the
+  // intent is ANDed in at verify time, so the order they happen in is moot.
+  it("a read-back spoken BEFORE the message intent still counts", async () => {
     const s = await bootReal();
     await speak(s, READ_BACK);
     await s.callTool("set_call_intent", { intent: "take_message" });
     await s.hangUp();
-    expect(arg(s.verify).messageReadBack).toBe(false);
+    expect(arg(s.verify).messageIntent).toBe(true);
+    expect(arg(s.verify).messageReadBack).toBe(true);
   });
 
-  it("a transfer that was started -> transferStarted true; none -> false", async () => {
-    const s = await bootReal(transferDb());
-    await s.callTool("set_call_intent", { intent: "take_message" });
-    await s.callTool("request_transfer", {});
-    await speak(s, "Putting you through now.");
-    await s.hangUp();
-    expect(arg(s.verify).transferStarted).toBe(true);
-
+  it("no transfer on the call -> transferStarted false", async () => {
     const t = await bootReal(transferDb());
     await t.callTool("set_call_intent", { intent: "take_message" });
     await t.hangUp();
     expect(arg(t.verify).transferStarted).toBe(false);
+  });
+
+  // Round 3, item 3: the latch is the REDIRECT having succeeded, not the exit
+  // having been armed.
+  it("a transfer actually redirected -> transferStarted true", async () => {
+    const s = await bootReal(transferDb());
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await s.callTool("request_transfer", {});
+    await speak(s, "Putting you through now.");
+    s.ws.deliver({ event: "mark", mark: { name: s.ws.marks().at(-1) } });
+    await vi.waitFor(() => expect(s.verify).toHaveBeenCalled());
+    expect(arg(s.verify).transferStarted).toBe(true);
+  });
+
+  it("a transfer armed and then called off by the caller talking over it -> transferStarted false", async () => {
+    const s = await bootReal(transferDb());
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await s.callTool("request_transfer", {});
+    await speak(s, "Putting you through now.");
+    // The caller speaks before the handover mark: the exit is called off.
+    s.live.push({ serverContent: { inputTranscription: { text: "Actually, wait, never mind, just take a message." } } });
+    await s.settle();
+    await speak(s, READ_BACK);
+    await s.hangUp();
+    expect(arg(s.verify).transferStarted).toBe(false);
+    expect(arg(s.verify).messageReadBack).toBe(true);
   });
 });

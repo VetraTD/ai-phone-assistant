@@ -3678,8 +3678,34 @@ const SABOTAGES = [
     name: "message-readback-strict",
     why: "Ilija inbound Task N fix round 2 (R71): the message read-back latch asks readsContactBack (a 7-digit number, an email or a spelling), not 'any digit'. Sabotaged, any digit counts, so 'We open at 9 tomorrow. Would you like to leave a message?' after a take_message intent latches a read-back and a declined offer files a call-back row.",
     file: "lib/voice/live/index.js",
-    find: "    if (messageIntentThisCall && (confirmReadBack || readsContactBack(replyText))) {",
-    replace: "    if (messageIntentThisCall && (confirmReadBack || /\\d/.test(replyText))) {",
+    // Re-anchored in fix round 3: the latch is readsContactBack alone and no
+    // longer waits for the intent.
+    find: "    if (readsContactBack(replyText)) messageReadBackThisCall = true;",
+    replace: "    if (/\\d/.test(replyText)) messageReadBackThisCall = true;",
+    red: ["tests/livePostCall.test.js"],
+  },
+  {
+    name: "message-readback-confirm-regex",
+    why: "Ilija inbound Task N fix round 3 (R71): the booking confirm regex also matches an offer ('I can take a message for him, is that okay?'). Sabotaged, it feeds the message read-back latch again, so a declined offer files a call-back row.",
+    file: "lib/voice/live/index.js",
+    find: "    if (readsContactBack(replyText)) messageReadBackThisCall = true;",
+    replace: "    if (confirmReadBack || readsContactBack(replyText)) messageReadBackThisCall = true;",
+    red: ["tests/livePostCall.test.js"],
+  },
+  {
+    name: "message-readback-run",
+    why: "Ilija inbound Task N fix round 3: a number read out is 7+ digits in ONE run. Sabotaged, digits are summed across the turn, so opening hours ('8:30 to 5:30 ... 9 to 12') read as a phone number.",
+    file: "lib/voice/askLedger.js",
+    find: "    if (n > best) best = n;",
+    replace: "    best += n;",
+    red: ["tests/askLedger.test.js"],
+  },
+  {
+    name: "message-owed-transfer-latch",
+    why: "Ilija inbound Task N fix round 3 (I1): transferStarted is set when the transfer's redirect has succeeded, not when the exit is armed. Sabotaged, the latch is never set, so a call really handed to a person files 'none was saved'.",
+    file: "lib/voice/live/index.js",
+    find: "    transferStartedThisCall = true;",
+    replace: "    void 0;",
     red: ["tests/livePostCall.test.js"],
   },
 ];

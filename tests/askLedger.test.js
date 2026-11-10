@@ -595,6 +595,9 @@ describe("readsContactBack", () => {
     "Thursday at 2 p.m.",
     "Wednesday at 11 a.m. works.",
     "That would be 750 dollars.",
+    // Digits scattered across a turn are not a number read out (round 3).
+    "We're open 8:30 to 5:30 weekdays and 9 to 12 on Saturdays, would you like to leave a message?",
+    "Projects usually run from 1,500 to 2,500, would you like me to take a message?",
     "Your number ends in 7, is that right?",
     "If this is an emergency, please call 999.",
     "I can take a message for Ilija. What's your name?",
