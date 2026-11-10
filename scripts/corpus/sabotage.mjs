@@ -3638,7 +3638,7 @@ const SABOTAGES = [
     why: "Ilija inbound Task N: a message intent with no save and no attempt files the call-back row and the alert (production 2026-11-10: a lead hung up after the read-back and nobody was told). Sabotaged, the fact is never true, so such a call files nothing and the lead is lost silently again.",
     file: "lib/postCallVerify.js",
     find: "  const messageOwedNoRow = messageIntent === true &&",
-    replace: "  const messageOwedNoRow = false && // SABOTAGE: a message owed is never seen",
+    replace: "  const messageOwedNoRow = false &&",
     red: ["tests/postCallVerify.test.js"],
   },
   {
