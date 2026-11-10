@@ -3637,8 +3637,9 @@ const SABOTAGES = [
     name: "message-owed-no-row",
     why: "Ilija inbound Task N: a message intent with no save and no attempt files the call-back row and the alert (production 2026-11-10: a lead hung up after the read-back and nobody was told). Sabotaged, the fact is never true, so such a call files nothing and the lead is lost silently again.",
     file: "lib/postCallVerify.js",
-    find: "  const messageOwedNoRow = messageIntent === true &&",
-    replace: "  const messageOwedNoRow = false &&",
+    // Re-anchored in fix round 1: the expression is now one conjunct per line.
+    find: "    messageIntent === true &&",
+    replace: "    false &&",
     red: ["tests/postCallVerify.test.js"],
   },
   {
@@ -3648,6 +3649,30 @@ const SABOTAGES = [
     find: "        messageIntent: messageIntentThisCall,",
     replace: "        messageIntent: false, // SABOTAGE: the declared intent never reaches the read",
     red: ["tests/livePostCall.test.js"],
+  },
+  {
+    name: "message-owed-booked-call",
+    why: "Ilija inbound Task N fix round 1 (C1): a caller who declared a message intent and then booked (or tried to) is not 'a message was not saved'. Sabotaged, the appointment-tool exclusion is gone, so a served caller gets a false call-back row and alert, and a refused booking is worded as a message.",
+    file: "lib/postCallVerify.js",
+    find: "    !appointmentToolAttempted;",
+    replace: "    true;",
+    red: ["tests/postCallVerify.test.js"],
+  },
+  {
+    name: "message-owed-transfer",
+    why: "Ilija inbound Task N fix round 1 (I1): request_transfer is not an action tool, so only the session's own latch tells the read that a person took the caller. Sabotaged, the session never reports a started transfer, and a message intent followed by a transfer files 'none was saved'.",
+    file: "lib/voice/live/index.js",
+    find: "        transferStarted: transferStartedThisCall,",
+    replace: "        transferStarted: false,",
+    red: ["tests/livePostCall.test.js"],
+  },
+  {
+    name: "message-owed-needs-readback",
+    why: "Ilija inbound Task N fix round 1 (I2, ruling R71): the model declares take_message for a mere offer, so the net also needs a spoken read-back of details after that intent. Sabotaged, an intent alone is enough, and a caller who declines the offer (or a robocall) files a call-back row.",
+    file: "lib/postCallVerify.js",
+    find: "    messageReadBack === true &&",
+    replace: "    true &&",
+    red: ["tests/postCallVerify.test.js"],
   },
 ];
 

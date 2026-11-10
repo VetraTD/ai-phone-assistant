@@ -1232,7 +1232,8 @@ describe("an abandoned write is worded by what was refused", () => {
 // ---------------------------------------------------------------------------
 describe("a message that was wanted and never attempted reaches a person", () => {
   beforeEach(() => clearStats());
-  const owed = (over = {}) => input({ messageIntent: true, messagesRecorded: 0, actionToolsAttempted: [], ...over });
+  const owed = (over = {}) =>
+    input({ messageIntent: true, messageReadBack: true, messagesRecorded: 0, actionToolsAttempted: [], ...over });
 
   it("message intent, nothing saved, nothing attempted -> one call-back row and one message-worded alert", async () => {
     const d = fakeDeps({ booked: [] });
@@ -1306,6 +1307,57 @@ describe("a message that was wanted and never attempted reaches a person", () =>
       "postcall_verify",
       expect.objectContaining({ message_owed: false, message_owed_no_row: false })
     );
+  });
+
+  // Fix round 1, C1: a caller who declared a message intent and then BOOKED was
+  // served; one whose booking was refused is the abandoned path's, with its own
+  // appointment wording. Neither is "a message was not saved".
+  it("message intent, then an appointment was booked, no message -> no row, no alert", async () => {
+    const d = fakeDeps({ booked: [row()] });
+    await verifyCall(
+      owed({
+        mode: "count",
+        actionToolsAttempted: ["book_appointment"],
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "row-1" }],
+      }),
+      d
+    );
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row ?? 0).toBe(0);
+  });
+
+  it("message intent, then a booking was refused and never completed -> ONE row, the appointment sentence", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(
+      owed({ mode: "count", abandoned: ["book_appointment"], actionToolsAttempted: ["book_appointment"] }),
+      d
+    );
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
+    expect(notes).toContain("this call tried to book or change an appointment");
+    expect(notes).not.toMatch(/wanted to leave a message/);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
+  });
+
+  // I1: request_transfer is not an action tool. A caller put through to a person
+  // (or sent to the voicemail fallback) is handled by that path.
+  it("message intent, then the caller was transferred, no message -> no row, no alert", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ transferStarted: true }), d);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  // I2 (ruling R71): the model declares take_message when it merely OFFERS one.
+  it("message intent, but the details were never read back -> no row, no alert", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ messageReadBack: false }), d);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_message_owed).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row ?? 0).toBe(0);
   });
 
   it("a booking owed with no row keeps the booking sentence and no kind, and files once", async () => {

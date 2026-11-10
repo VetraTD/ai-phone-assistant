@@ -4,6 +4,11 @@ import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { clearStats } from "../lib/voice/metrics.js";
 import { executeToolCall } from "../services/tools.js";
 
+// The transfer wire below arms a real exit; no REST call may ever leave this file.
+vi.mock("twilio", () => ({
+  default: vi.fn(() => ({ calls: () => ({ update: async () => ({}) }) })),
+}));
+
 // ---------------------------------------------------------------------------
 // LVX29's wiring, which is the half that a unit test of the module cannot
 // reach: does a finished Live call actually hand the post-call read the right
@@ -109,7 +114,9 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = 
   const execute = vi.fn(async (fc, ctx) => {
     // The REAL engine tool: set_call_intent's intentArgs come from
     // services/tools.js, not from a shape this file invented.
-    if (realIntentTool && fc.name === "set_call_intent") return executeToolCall(fc, ctx);
+    if (realIntentTool && (fc.name === "set_call_intent" || fc.name === "request_transfer")) {
+      return executeToolCall(fc, ctx);
+    }
     if (refuse.includes(fc.name)) {
       return {
         functionResponse: {
@@ -864,5 +871,76 @@ describe("a declared message intent reaches the post-call read", () => {
     await s.callTool("set_call_intent", { intent: "general_question" });
     await s.hangUp();
     expect(arg(s.verify).messageIntent).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (I1, I2): the other two facts the net needs, on the same wire.
+// ---------------------------------------------------------------------------
+describe("a read-back and a transfer reach the post-call read", () => {
+  // CA08e7e66, verbatim apart from the name: the sentence the net exists for.
+  const READ_BACK =
+    "So that's Ellie, Hughes, H-U-G-H-E-S, on 4 6 9, 9 3 3, 8 8 8 7 about marketing for your salon, and Ilija will get back to you as soon as he can.";
+  const OFFER = "We're closed right now, I'm afraid. Would you like to leave a message?";
+
+  const transferDb = () => {
+    const d = fakeDb();
+    const cfg = d.loadConfig();
+    return {
+      ...d,
+      loadConfig: () => ({
+        ...cfg,
+        allowedTasks: [...cfg.allowedTasks, "transfer_human"],
+        transferPhoneNumber: "+441111222333",
+        transferPolicy: "always",
+      }),
+      recordPendingDial: async () => "1",
+      markCallTransferred: async () => {},
+    };
+  };
+  const bootReal = (db = fakeDb()) => boot({ POSTCALL_VERIFY: "count" }, [], db, { realIntentTool: true });
+  const speak = async (s, text) => {
+    s.say(text);
+    s.endTurn();
+    await s.settle();
+  };
+
+  it("a read-back spoken after the message intent -> messageReadBack true", async () => {
+    const s = await bootReal();
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await speak(s, READ_BACK);
+    await s.hangUp();
+    expect(arg(s.verify).messageReadBack).toBe(true);
+  });
+
+  it("an offer to take a message, never read back -> messageReadBack false", async () => {
+    const s = await bootReal();
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await speak(s, OFFER);
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(true);
+    expect(arg(s.verify).messageReadBack).toBe(false);
+  });
+
+  it("a read-back spoken BEFORE any message intent does not count", async () => {
+    const s = await bootReal();
+    await speak(s, READ_BACK);
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await s.hangUp();
+    expect(arg(s.verify).messageReadBack).toBe(false);
+  });
+
+  it("a transfer that was started -> transferStarted true; none -> false", async () => {
+    const s = await bootReal(transferDb());
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await s.callTool("request_transfer", {});
+    await speak(s, "Putting you through now.");
+    await s.hangUp();
+    expect(arg(s.verify).transferStarted).toBe(true);
+
+    const t = await bootReal(transferDb());
+    await t.callTool("set_call_intent", { intent: "take_message" });
+    await t.hangUp();
+    expect(arg(t.verify).transferStarted).toBe(false);
   });
 });
