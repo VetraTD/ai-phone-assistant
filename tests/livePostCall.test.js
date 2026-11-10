@@ -922,6 +922,15 @@ describe("a read-back and a transfer reach the post-call read", () => {
     expect(arg(s.verify).messageReadBack).toBe(false);
   });
 
+  it("an offer that mentions a time (a digit) is not a read-back -> messageReadBack false", async () => {
+    const s = await bootReal();
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await speak(s, "We open at 9 tomorrow. Would you like to leave a message?");
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(true);
+    expect(arg(s.verify).messageReadBack).toBe(false);
+  });
+
   it("a read-back spoken BEFORE any message intent does not count", async () => {
     const s = await bootReal();
     await speak(s, READ_BACK);

@@ -20,6 +20,7 @@ import {
   callerDeclined,
   callerWantsRepeat,
   askKindLabel,
+  readsContactBack,
   ASK_SIMILARITY,
   MAX_ASKS_PER_NEED,
 } from "../lib/voice/askLedger.js";
@@ -570,4 +571,37 @@ describe("askKindLabel -- what a log may carry", () => {
     expect(askKindLabel("q:monthly marketing budget")).toBe("question");
     expect(askKindLabel("anything else")).toBe("question");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Ilija inbound Task N fix round 2 (ruling R71): the post-call message net asks
+// whether a turn READ CONTACT DETAILS BACK, not whether it mentions a digit. A
+// declined offer ("We open at 9 tomorrow. Would you like to leave a message?")
+// must not look like a read-back. The rule was prototyped on five production
+// calls plus synthetic offers; the sentences here are invented or the brief's.
+// ---------------------------------------------------------------------------
+describe("readsContactBack", () => {
+  const POS = [
+    "So that's Ellie, Hughes, H-U-G-H-E-S, on 4 6 9, 9 3 3, 8 8 8 7 about marketing for your salon, and Ilija will get back to you as soon as he can.",
+    "So that's Priya on oh seven seven zero zero nine one two three four five, is that right?",
+    "The number you provided is 469, 933, 8878.",
+    "Your email is tom at example dot com.",
+    "Is it tom@example.com?",
+    "Just to confirm, the number is 07700 900123.",
+  ];
+  const NEG = [
+    "We open at 9 tomorrow. Would you like to leave a message?",
+    "Our hours are Monday to Friday, 9am to 5pm UK time. Can I take a message?",
+    "Thursday at 2 p.m.",
+    "Wednesday at 11 a.m. works.",
+    "That would be 750 dollars.",
+    "Your number ends in 7, is that right?",
+    "If this is an emergency, please call 999.",
+    "I can take a message for Ilija. What's your name?",
+    "Sorry, I didn't catch that, could you say it again?",
+    "",
+    undefined,
+  ];
+  it.each(POS)("reads back: %s", (s) => expect(readsContactBack(s)).toBe(true));
+  it.each(NEG)("does not: %s", (s) => expect(readsContactBack(s)).toBe(false));
 });

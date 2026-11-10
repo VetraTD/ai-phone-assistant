@@ -3674,6 +3674,14 @@ const SABOTAGES = [
     replace: "    true &&",
     red: ["tests/postCallVerify.test.js"],
   },
+  {
+    name: "message-readback-strict",
+    why: "Ilija inbound Task N fix round 2 (R71): the message read-back latch asks readsContactBack (a 7-digit number, an email or a spelling), not 'any digit'. Sabotaged, any digit counts, so 'We open at 9 tomorrow. Would you like to leave a message?' after a take_message intent latches a read-back and a declined offer files a call-back row.",
+    file: "lib/voice/live/index.js",
+    find: "    if (messageIntentThisCall && (confirmReadBack || readsContactBack(replyText))) {",
+    replace: "    if (messageIntentThisCall && (confirmReadBack || /\\d/.test(replyText))) {",
+    red: ["tests/livePostCall.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
