@@ -289,8 +289,13 @@ const SABOTAGES = [
     // times, which this script reports rather than skipping -- but a row that
     // cannot run is a row that proves nothing, and the first sign of it is a
     // matrix that suddenly counts one lower.
-    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding) {',
-    replace: '  if (verdict === "claim_without_row" || bookingOwedNoRow) { // SABOTAGE',
+    //
+    // RE-ANCHORED again for the never-attempted-message net (Ilija inbound
+    // Task N), which added `|| messageOwedNoRow` to the same condition. The
+    // replace keeps that disjunct, so this row still removes only the abandoned
+    // one.
+    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding || messageOwedNoRow) {',
+    replace: '  if (verdict === "claim_without_row" || bookingOwedNoRow || messageOwedNoRow) { // SABOTAGE',
     red: [VERIFY],
   },
   {
@@ -618,9 +623,10 @@ const SABOTAGES = [
     why:
       "puts `&& bookedRows.length === 0` back in front of the abandoned-write escalation. `abandoned` already excludes any tool that later succeeded, so that conjunct never tested what its comment claimed -- it tested whether some OTHER tool succeeded. On CAd978554 an unrelated booking four minutes later vouched for an abandoned reschedule and nobody was told that a caller had been lied to.",
     file: "lib/postCallVerify.js",
-    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding) {',
+    // Re-anchored for Task N's `|| messageOwedNoRow` (kept in the replace).
+    find: '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedOutstanding || messageOwedNoRow) {',
     replace:
-      '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow) { // SABOTAGE',
+      '  if (verdict === "claim_without_row" || bookingOwedNoRow || abandonedWithNoRow || messageOwedNoRow) { // SABOTAGE',
     red: [VERIFY],
   },
   {
@@ -3626,6 +3632,22 @@ const SABOTAGES = [
     find: "      if (!offersKind(key, clause, [])) out.push(key);",
     replace: "      out.push(key); // SABOTAGE: an offered kind is blocked too",
     red: ["tests/askLedger.test.js"],
+  },
+  {
+    name: "message-owed-no-row",
+    why: "Ilija inbound Task N: a message intent with no save and no attempt files the call-back row and the alert (production 2026-11-10: a lead hung up after the read-back and nobody was told). Sabotaged, the fact is never true, so such a call files nothing and the lead is lost silently again.",
+    file: "lib/postCallVerify.js",
+    find: "  const messageOwedNoRow = messageIntent === true &&",
+    replace: "  const messageOwedNoRow = false && // SABOTAGE: a message owed is never seen",
+    red: ["tests/postCallVerify.test.js"],
+  },
+  {
+    name: "message-intent-wire",
+    why: "Ilija inbound Task N: the Live session latches a declared message intent and hands it to the post-call read. Sabotaged, the session passes false whatever intent was declared, so the net in lib/postCallVerify.js is correct and dead on every real call.",
+    file: "lib/voice/live/index.js",
+    find: "        messageIntent: messageIntentThisCall,",
+    replace: "        messageIntent: false, // SABOTAGE: the declared intent never reaches the read",
+    red: ["tests/livePostCall.test.js"],
   },
 ];
 

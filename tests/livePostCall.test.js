@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { executeToolCall } from "../services/tools.js";
 
 // ---------------------------------------------------------------------------
 // LVX29's wiring, which is the half that a unit test of the module cannot
@@ -92,7 +93,7 @@ const SLOT = "2026-09-07T10:00:00";
 
 // `refuse` names tools this run should answer with success:false, for the
 // abandoned-write case (LVX72). Everything else behaves as before.
-async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = fakeDb()) {
+async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = fakeDb(), { realIntentTool = false } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   const verify = vi.fn(async () => ({ verdict: "ok" }));
@@ -105,7 +106,10 @@ async function boot(env = { POSTCALL_VERIFY: "count" }, refuse = [], database = 
   });
   const judge = vi.fn(async () => ({ ran: true, agreedAction: "none" }));
 
-  const execute = vi.fn(async (fc) => {
+  const execute = vi.fn(async (fc, ctx) => {
+    // The REAL engine tool: set_call_intent's intentArgs come from
+    // services/tools.js, not from a shape this file invented.
+    if (realIntentTool && fc.name === "set_call_intent") return executeToolCall(fc, ctx);
     if (refuse.includes(fc.name)) {
       return {
         functionResponse: {
@@ -815,5 +819,50 @@ describe("LVX176 — a saved message reaches the post-call read", () => {
     expect(arg(s.verify).actionToolsAttempted).toEqual(
       expect.arrayContaining(["book_appointment", "record_customer_request"])
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The wire for the never-attempted-message net (production, 2026-11-10: the
+// caller gave name, number and reason, hung up, and no save was ever tried).
+// lib/postCallVerify.js tests its rule with messageIntent handed in; this
+// asserts the Live session actually derives it from set_call_intent. The
+// intent tool here is the real services/tools.js one, and verify receives
+// exactly what the session built at teardown.
+// ---------------------------------------------------------------------------
+describe("a declared message intent reaches the post-call read", () => {
+  const boot3 = () => boot({ POSTCALL_VERIFY: "count" }, [], fakeDb(), { realIntentTool: true });
+
+  it.each(["take_message", "callback_request", "quote_request"])(
+    "set_call_intent %s, no save, hang up -> messageIntent true",
+    async (intent) => {
+      const s = await boot3();
+      await s.callTool("set_call_intent", { intent });
+      await s.hangUp();
+      expect(arg(s.verify).messageIntent).toBe(true);
+      expect(arg(s.verify).messagesRecorded).toBe(0);
+      expect(arg(s.verify).actionToolsAttempted).toEqual([]);
+    }
+  );
+
+  it("general_question only -> messageIntent false", async () => {
+    const s = await boot3();
+    await s.callTool("set_call_intent", { intent: "general_question" });
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(false);
+  });
+
+  it("no intent at all (silence, wrong number) -> messageIntent false", async () => {
+    const s = await boot3();
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(false);
+  });
+
+  it("a later general_question does not erase a message intent", async () => {
+    const s = await boot3();
+    await s.callTool("set_call_intent", { intent: "take_message" });
+    await s.callTool("set_call_intent", { intent: "general_question" });
+    await s.hangUp();
+    expect(arg(s.verify).messageIntent).toBe(true);
   });
 });

@@ -1221,3 +1221,98 @@ describe("an abandoned write is worded by what was refused", () => {
     expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Live evidence, 2026-11-10 (call CA08e7e6...): the caller gave name, number and
+// reason, the details were read back, the caller hung up, and
+// record_customer_request was NEVER called. messages_recorded 0, abandoned [],
+// claims 0, verdict ok: no row, no email. The declared message intent is the
+// only trace of what the caller came for, so a message intent with no save and
+// no attempt files the existing call-back row and sends the existing alert.
+// ---------------------------------------------------------------------------
+describe("a message that was wanted and never attempted reaches a person", () => {
+  beforeEach(() => clearStats());
+  const owed = (over = {}) => input({ messageIntent: true, messagesRecorded: 0, actionToolsAttempted: [], ...over });
+
+  it("message intent, nothing saved, nothing attempted -> one call-back row and one message-worded alert", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(owed(), d);
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    const arg = d.db.createCustomerRequest.mock.calls[0][0];
+    expect(arg.requestType).toBe("unconfirmed_claim");
+    expect(arg.notes).toBe(
+      "Follow-up needed: the caller wanted to leave a message on this call and none was saved. Please call them back."
+    );
+    expect(arg.notes).not.toMatch(/assistant|appointment/i);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      callbackNumber: "+447700900123",
+      kind: "message",
+    });
+    expect(getLatencyStats().turnTaking.postcall_message_owed).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row).toBe(1);
+    expect(d.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ message_owed: true, message_owed_no_row: true })
+    );
+  });
+
+  it("a message was saved -> no row, no alert, and the twin counter reads owed-but-not-missing", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ messagesRecorded: 1, actionToolsAttempted: ["record_customer_request"] }), d);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_message_owed).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row ?? 0).toBe(0);
+    expect(d.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ message_owed: true, message_owed_no_row: false })
+    );
+  });
+
+  it("no message intent (wrong number, silence) -> no row, no alert", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ messageIntent: false }), d);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_message_owed ?? 0).toBe(0);
+  });
+
+  it("a message save that was refused and never completed -> exactly ONE row, the refused-message sentence", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      owed({ abandoned: ["record_customer_request"], actionToolsAttempted: ["record_customer_request"] }),
+      d
+    );
+    expect(out.verdict).toBe("write_abandoned");
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toBe(
+      "Follow-up needed: the caller left their details for a message on this call and it was not saved. Please call them back."
+    );
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBe("message");
+    expect(getLatencyStats().turnTaking.postcall_message_owed_no_row ?? 0).toBe(0);
+  });
+
+  it("the input omitted (the cascade, every older caller) -> behaves as before", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ messagesRecorded: 0, actionToolsAttempted: [] }), d);
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+    expect(d.log.info).toHaveBeenCalledWith(
+      "postcall_verify",
+      expect.objectContaining({ message_owed: false, message_owed_no_row: false })
+    );
+  });
+
+  it("a booking owed with no row keeps the booking sentence and no kind, and files once", async () => {
+    const d = fakeDeps({ booked: [] });
+    await verifyCall(owed({ bookingOwed: { agreed: true, pointVerified: 1, verified: 1 } }), d);
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toMatch(/appointment/i);
+    expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
+  });
+});
