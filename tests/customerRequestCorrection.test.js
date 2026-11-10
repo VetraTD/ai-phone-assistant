@@ -71,7 +71,7 @@ function makeEngine({ callId = "call-1", businessId = "biz-1", failUpdate = fals
     listCallCustomerRequests: vi.fn(async (cid, biz, type) => {
       if (calls.activeTenant !== biz) return [];
       return rows
-        .filter((r) => r.call_id === cid && r.business_id === biz && r.request_type === type)
+        .filter((r) => r.call_id === cid && r.business_id === biz && [].concat(type).includes(r.request_type))
         .sort((a, b) => b.seq - a.seq);
     }),
     updateCustomerRequest: vi.fn(async (u) => {
@@ -295,15 +295,56 @@ describe("different requests on one call stay separate", () => {
     expect(calls.notify).not.toHaveBeenCalled();
   });
 
-  it("a message and a callback request are different request types", async () => {
+  // Production call CA082a6db7: one caller, one request, saved twice -- once as
+  // "message", once as "callback" -- made TWO rows and an email listing the caller
+  // twice, because the lookup for a same-call match filtered on the request type.
+  // The two types are one pack and one request; quotes stay separate.
+  it("the same request saved as a message and then as a callback is ONE row", async () => {
     const { engine, calls } = makeEngine();
     messages.onEffect(recorded(MESSAGE), engine);
     await settle();
     messages.onEffect(recorded({ ...MESSAGE, request_type: "callback", preferred_time: "after 3" }), engine);
     await settle();
 
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.logs.some((l) => l.e === "customer_request_corrected")).toBe(true);
+    expect(calls.notify).not.toHaveBeenCalled();
+  });
+
+  it("and the other way round, callback then message", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded({ ...MESSAGE, request_type: "callback" }), engine);
+    await settle();
+    messages.onEffect(recorded(MESSAGE), engine);
+    await settle();
+    expect(calls.rows).toHaveLength(1);
+  });
+
+  it("a callback about a different reason is still a second row", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded(MESSAGE), engine);
+    await settle();
+    messages.onEffect(
+      recorded({ ...MESSAGE, request_type: "callback", message: "running late for the appointment", preferred_time: "after 3" }),
+      engine
+    );
+    await settle();
+
     expect(calls.rows).toHaveLength(2);
     expect(calls.notify).not.toHaveBeenCalled();
+  });
+
+  it("a quote never merges with a message or a callback of the same caller and reason", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded({ ...MESSAGE, request_type: "callback", message: "replace a water heater" }), engine);
+    await settle();
+    quotes.onEffect(
+      quoted({ service_description: "replace a water heater", caller_name: "Jon", callback_number: "214 555 0123" }),
+      engine
+    );
+    await settle();
+
+    expect(calls.rows.map((r) => r.request_type).sort()).toEqual(["callback", "quote"]);
   });
 
   it("the same message on another call is another row", async () => {

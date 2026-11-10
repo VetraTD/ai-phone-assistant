@@ -1573,7 +1573,8 @@ export async function createCustomerRequest({
 }
 
 /**
- * The customer requests one call has already filed, of one type, newest first.
+ * The customer requests one call has already filed, of one type (or of any of
+ * several), newest first.
  *
  * Round A1 S3 (I3): what a same-call correction is matched against
  * (lib/capabilities/customerRequests.js). Same rule as
@@ -1582,11 +1583,15 @@ export async function createCustomerRequest({
  *
  * @param {string} callId - calls.id
  * @param {string} businessId - REQUIRED
- * @param {string} requestType
+ * @param {string|string[]} requestType - default "message"
  * @returns {Promise<Array<{id: string, caller_name: string|null, callback_number: string|null, message: string|null, preferred_time: string|null, details: object|null}>|null>}
  */
 export async function listCallCustomerRequests(callId, businessId, requestType) {
   if (!pool || !callId) return null;
+  // One type or several: the messages pack is two request types ("message" and
+  // "callback") that are one request to the caller, so its same-call match
+  // looks across both. A single string behaves exactly as it always did.
+  const requestTypes = [].concat(requestType ?? []).filter((t) => typeof t === "string" && t);
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "listCallCustomerRequests" });
     return null;
@@ -1594,9 +1599,9 @@ export async function listCallCustomerRequests(callId, businessId, requestType) 
   const res = await q(
     `SELECT id, caller_name, callback_number, message, preferred_time, details
        FROM customer_requests
-      WHERE call_id = $1 AND business_id = $2 AND request_type = $3
+      WHERE call_id = $1 AND business_id = $2 AND request_type = ANY($3::text[])
       ORDER BY created_at DESC, id DESC`,
-    [callId, businessId, requestType || "message"]
+    [callId, businessId, requestTypes.length ? requestTypes : ["message"]]
   );
   if (res.error) {
     log.error("db_error", { operation: "listCallCustomerRequests", error: res.error.message });

@@ -24,6 +24,9 @@ import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
 
+/** record_customer_request's request_type enum: two types, one request to the caller (see matchTypes below). */
+const MESSAGE_PACK_TYPES = ["message", "callback"];
+
 /**
  * Model-only, in the tool reply and never in toolResult (which may be spoken).
  * Present only when the business wrote notes for taking messages: those notes
@@ -347,6 +350,9 @@ export default {
         details: detailsFromArgs(args),
       },
       fallbackNumber: isRealCallerNumber(party.phone) ? party.phone : null,
+      // CA082a6db7: the model sent "message" on one save and "callback" on the
+      // other for one request; both are this pack's, so the match looks at both.
+      matchTypes: MESSAGE_PACK_TYPES,
     })
       .then((saved) => {
         if (!saved) return;

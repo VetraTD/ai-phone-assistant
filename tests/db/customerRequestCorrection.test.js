@@ -114,6 +114,44 @@ describeDb("a same-call correction as vetra_app (I3)", () => {
     expect(listed.map((r) => r.message)).toEqual(["running late for Thursday", "about the invoice"]);
   });
 
+  // Production call CA082a6db7: the lookup filtered on ONE request type, so a
+  // request saved as "message" and then as "callback" was two rows.
+  it("lists several request types at once; a single type string still lists one", async () => {
+    await saveCustomerRequest({ db, businessId: TENANT, callId, row: MESSAGE });
+    await saveCustomerRequest({
+      db,
+      businessId: TENANT,
+      callId,
+      row: { ...MESSAGE, requestType: "callback", message: "running late for Thursday" },
+    });
+    await saveCustomerRequest({ db, businessId: TENANT, callId, row: { ...MESSAGE, requestType: "quote" } });
+
+    const ids = async (types) =>
+      (await db.withTenant(TENANT, () => db.listCallCustomerRequests(callId, TENANT, types))).map((r) => r.message);
+    expect(await ids(["message", "callback"])).toEqual(["running late for Thursday", "about the invoice"]);
+    expect(await ids("message")).toEqual(["about the invoice"]);
+    expect(await ids(["quote"])).toHaveLength(1);
+  });
+
+  it("a request saved as a message and then as a callback is one row when the pack matches across both", async () => {
+    const first = await saveCustomerRequest({
+      db,
+      businessId: TENANT,
+      callId,
+      row: MESSAGE,
+      matchTypes: ["message", "callback"],
+    });
+    const second = await saveCustomerRequest({
+      db,
+      businessId: TENANT,
+      callId,
+      row: { ...MESSAGE, requestType: "callback", preferredTime: "after 3" },
+      matchTypes: ["message", "callback"],
+    });
+    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(await rowsOf(callId)).toHaveLength(1);
+  });
+
   it("another tenant's scope can neither see nor correct the row", async () => {
     const { id } = await saveCustomerRequest({ db, businessId: TENANT, callId, row: MESSAGE });
 

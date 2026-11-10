@@ -74,7 +74,7 @@ function storeDb() {
       return id;
     }),
     listCallCustomerRequests: vi.fn(async (callId, businessId, type) =>
-      rows.filter((r) => r.call_id === callId && r.business_id === businessId && r.request_type === type).reverse()
+      rows.filter((r) => r.call_id === callId && r.business_id === businessId && [].concat(type).includes(r.request_type)).reverse()
     ),
     updateCustomerRequest: vi.fn(async (u) => {
       const row = rows.find((r) => r.id === u.id && r.business_id === u.businessId && tenant === u.businessId);

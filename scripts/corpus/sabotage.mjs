@@ -3693,6 +3693,14 @@ const SABOTAGES = [
     red: ["tests/livePostCall.test.js", "tests/contactReadBack.test.js"],
   },
   {
+    name: "request-type-split",
+    why: "Ilija inbound Task N round 4b (production call CA082a6db7): message and callback are one pack and one request to the caller, so a same-call correction looks across both. Sabotaged, the messages pack matches on the save's own request type again, and a request saved as 'message' and then as 'callback' makes two rows and an owner email that lists the caller twice.",
+    file: "capabilities/messages.js",
+    find: "      matchTypes: MESSAGE_PACK_TYPES,",
+    replace: "      matchTypes: null,",
+    red: ["tests/customerRequestCorrection.test.js"],
+  },
+  {
     name: "message-readback-strict",
     why: "Ilija inbound Task N fix round 2 (R71): the message read-back latch asks readsContactBack (a 7-digit number, an email or a spelling), not 'any digit'. Sabotaged, any digit counts, so 'We open at 9 tomorrow. Would you like to leave a message?' after a take_message intent latches a read-back and a declined offer files a call-back row.",
     file: "lib/voice/live/index.js",
