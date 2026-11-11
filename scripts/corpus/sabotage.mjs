@@ -3774,6 +3774,22 @@ const SABOTAGES = [
     replace: "    void 0;",
     red: ["tests/livePostCall.test.js"],
   },
+  {
+    name: "seller-default-replaced",
+    why: "S4-F1 (live seller call): a business's own sales-call rule REPLACES our seller default in the prompt, so the two never contradict. Sabotaged, the detector never sees the business's rule, our 'do not take a message' default sits beside 'take a short message' again, and the default won on the call that found this.",
+    file: "lib/sellerCalls.js",
+    find: "  return texts.some((t) => sellerRuleCategory(t) !== null);",
+    replace: "  return texts.length < 0;",
+    red: ["tests/promptSellerDefault.test.js"],
+  },
+  {
+    name: "wrong-number-close-asks",
+    why: "S4-F1 (live wrong-number call): the wrong-number close asks 'anything else?' once, in the shape closingTicRe reads, because the ask-gate holds an exit that never asked. Sabotaged, the bullet goes straight to goodbye and the gate holds that goodbye, as it did on the call.",
+    file: "services/gemini.js",
+    find: 'wrong number, tell them politely in one sentence, then ask once: "Is there anything else I can help you with?" If not, say goodbye',
+    replace: "wrong number, tell them politely in one sentence, then say goodbye",
+    red: ["tests/promptSellerDefault.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
