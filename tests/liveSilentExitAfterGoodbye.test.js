@@ -264,6 +264,40 @@ describe("S4-F1: a caller silent after a held goodbye is hung up on without anot
     expect(s.marks).toContain(EXIT_MARK);
   });
 
+  // Review fix (S4-F1). The no_ask refusal tells the model to say exactly this
+  // as its next turn. The caller has now been ASKED something; a silent
+  // hang-up ~6 s after a question is not the owner's rule.
+  it("held goodbye, then a separate turn that asks, then silence: the question gets the normal ladder", async () => {
+    const s = await heldGoodbye();
+    expect(c().live_goodbye_latched_silent).toBe(1);
+    await s.says("Before you go - is there anything else I can help you with?");
+    await s.feed(30_000);
+
+    expect(c().nudges_fired).toBeGreaterThanOrEqual(1);
+    expect(s.silenceLines()[0]).toContain("Hello? Are you still there?");
+    expect(c().live_silence_exit_after_goodbye ?? 0).toBe(0);
+  });
+
+  it("ONE turn that says goodbye and then asks (backwards), then silence: still the silent exit", async () => {
+    // The caller heard a goodbye in that turn, so the ask in it does not clear
+    // the latch. The same turn sets it: the ask has not been answered (LVX145's
+    // marker), so the no_ask hold fires on this turn's own farewell.
+    const s = await boot();
+    await s.callerSays("Oh, sorry, I think I dialled the wrong number.");
+    await s.says(
+      "No problem. Thanks for calling Harbour Lane Studio, have a great day. Is there anything else I can help you with?"
+    );
+    expect(c().live_goodbye_exit_held_no_ask).toBe(1);
+    expect(c().live_goodbye_latched_silent).toBe(1);
+
+    await s.feed(30_000);
+
+    expect(s.silenceLines()).toEqual([]);
+    expect(c().nudges_fired ?? 0).toBe(0);
+    expect(c().live_silence_exit_after_goodbye).toBe(1);
+    expect(s.marks).toContain(EXIT_MARK);
+  });
+
   it("a transcript of only punctuation in the grace window is not the caller: the silent exit re-arms", async () => {
     const s = await heldGoodbye();
     await s.feed(30_000);
