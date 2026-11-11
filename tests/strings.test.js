@@ -125,6 +125,7 @@ describe("signOffRe hears a 'wish them well' goodbye after thanks-for-calling", 
       "Thanks for calling, wishing you a nice day",
       "Thank you for calling, I wish you well.",
       "Thank you for calling. Wishing you a lovely evening!",
+      "Thank you for calling. All the best!",
     ]) {
       expect(en.test(t), t).toBe(true);
     }
@@ -134,6 +135,9 @@ describe("signOffRe hears a 'wish them well' goodbye after thanks-for-calling", 
     for (const t of [
       "I wish you well with the move. What time works for you?",
       "All the best options are in the morning.",
+      // Mid-call: the thanks is real but a period and a question follow. signOffRe hangs up.
+      "Thanks for calling back so quickly, I wish you well with the move. What time works?",
+      "Thank you for calling about the invoice. All the best options are mornings, does 9 work?",
       "Thanks for calling Acme, how can I help you today?",
       "Wishing you a nice day.",
       "All the best!",
@@ -152,7 +156,11 @@ describe("signOffRe hears a 'wish them well' goodbye after thanks-for-calling", 
   });
 
   it("es: the same words without gracias-por-llamar do not match", () => {
-    for (const t of ["Que le vaya bien con la mudanza. ¿A qué hora le viene bien?", "Le deseo lo mejor."]) {
+    for (const t of [
+      "Que le vaya bien con la mudanza. ¿A qué hora le viene bien?",
+      "Le deseo lo mejor.",
+      "Gracias por llamar tan pronto, que le vaya bien con la mudanza. ¿Qué hora le viene bien?",
+    ]) {
       expect(es.test(t), t).toBe(false);
     }
   });
