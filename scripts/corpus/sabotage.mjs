@@ -3790,6 +3790,14 @@ const SABOTAGES = [
     replace: "wrong number, tell them politely in one sentence, then say goodbye",
     red: ["tests/promptSellerDefault.test.js"],
   },
+  {
+    name: "silent-exit-after-goodbye",
+    why: "S4-F1 (live wrong-number call): a goodbye spoken and held, then a quiet caller, ends the call with no line. Sabotaged, the latch never sets, so the ladder speaks 'Hello? Are you still there?' after the goodbye and then a second goodbye, as on the call.",
+    file: "lib/voice/live/index.js",
+    find: "    farewellHeldQuiet = true;",
+    replace: "    farewellHeldQuiet = false;",
+    red: ["tests/liveSilentExitAfterGoodbye.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
