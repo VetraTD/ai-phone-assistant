@@ -81,6 +81,15 @@ describe("farewellIndex — the farewell shapes on record", () => {
     expect(farewellIndex(text, EN)).toBeGreaterThanOrEqual(0);
   });
 
+  // S4-F4: the close no longer names the business.
+  it.each([
+    "Thanks for calling, have a wonderful day.",
+    "Thank you for calling. Have a great day!",
+    "Thank you for calling. Take care!",
+  ])("finds the NAME-FREE goodbye in %#", (text) => {
+    expect(farewellIndex(text, EN)).toBeGreaterThanOrEqual(0);
+  });
+
   it("a mid-turn 'thanks for calling' counts — only the turn-opening one is the greeting", () => {
     const t = "That is all booked. Thanks for calling Digile Media. Is there anything else I can help you with?";
     expect(farewellBeforeAsk(t, EN)).toBe(true);

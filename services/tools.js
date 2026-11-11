@@ -964,7 +964,7 @@ export async function executeToolCall(fc, ctx) {
               success: true,
               message: ctx?.outboundCall
                 ? getOutboundStrings(ctx?.config).signOffOutbound(ctx.outboundCall?.contact?.firstName || null)
-                : getStrings(ctx?.config).signOff(ctx?.config?.businessName || "us"),
+                : getStrings(ctx?.config).signOff,
               callerSafe: true,
             },
             toolCallEvent: { name: fc.name, args: fc.args },

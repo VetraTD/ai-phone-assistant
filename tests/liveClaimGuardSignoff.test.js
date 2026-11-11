@@ -177,6 +177,19 @@ describe("a false claim made on the way out of the call", () => {
     expect(unbacked()).toBe(1);
   });
 
+  it("fires on the NAME-FREE close too (S4-F4: the goodbye no longer says the business name)", async () => {
+    const s = await boot();
+    await s.callTool("cancel_appointment_db", "end_call");
+    s.say(
+      "I have cancelled your existing appointment on Friday, September eighteenth at four thirty PM. " +
+        "Thank you for calling. Have a great day!"
+    );
+    s.endTurn();
+    await s.settle();
+
+    expect(unbacked()).toBe(1);
+  });
+
   it("fires when the refused action was the PREVIOUS turn", async () => {
     const s = await boot();
     await s.callTool("cancel_appointment_db");

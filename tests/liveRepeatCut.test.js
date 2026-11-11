@@ -299,6 +299,25 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     expect(s.cleared).toHaveLength(1);
   });
 
+  it("cuts a doubled NAME-FREE goodbye too (S4-F4: the close no longer says the business name)", async () => {
+    const s = await boot();
+    await s.say("Of course. Is there anything else?");
+    await s.caller("no that's everything thanks");
+    const bye = "Thank you for calling. Have a great day!";
+    await s.say(bye + " " + bye);
+
+    expect(c().live_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
+  it("leaves a single name-free goodbye alone (S4-F4)", async () => {
+    const s = await boot();
+    await s.say("Of course. Thank you for calling. Have a great day!");
+
+    expect(c().live_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
   it("leaves a short turn that says one thing once alone", async () => {
     // The other side of dropping the length gate: short turns are now examined,
     // so a short turn is where a false positive would appear first.

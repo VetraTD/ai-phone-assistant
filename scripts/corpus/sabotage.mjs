@@ -3798,6 +3798,14 @@ const SABOTAGES = [
     replace: "    farewellHeldQuiet = false;",
     red: ["tests/liveSilentExitAfterGoodbye.test.js"],
   },
+  {
+    name: "signoff-name-free",
+    why: "S4-F4 (owner 2026-11-11): the goodbye thanks the caller without the business name, because a hard name is misheard on the line. Sabotaged, the canned close names the business again.",
+    file: "lib/voice/strings.js",
+    find: '    signOff: "Thank you for calling. Have a great day!",',
+    replace: '    signOff: "Thank you for calling Acme Dental. Have a great day!",',
+    red: ["tests/goodbyeNameFree.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

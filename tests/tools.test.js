@@ -572,6 +572,16 @@ describe("services/tools.js — executeToolCall (extracted from getReplyStreamin
       expect(stateEffects.toolResult.message).not.toBe("Goodbye!");
     });
 
+    it("the end_call fallback close is name-free: no business name, never 'us' or 'undefined' (S4-F4)", async () => {
+      const fc = { id: "fc7n", name: "end_call", args: { reason: "done" } };
+      for (const config of [{}, { businessName: "Brightwork Studio" }, { businessName: "Brightwork Studio", languagesSpoken: ["es"] }]) {
+        const { stateEffects } = await executeToolCall(fc, { ...baseCtx, step: "confirm", config });
+        const msg = stateEffects.toolResult.message;
+        expect(msg).toBe(config.languagesSpoken ? "Gracias por llamar. ¡Que tenga un buen día!" : "Thank you for calling. Have a great day!");
+        expect(msg).not.toMatch(/Brightwork|undefined|\bus\b/);
+      }
+    });
+
     it("honors end_call during the ending step", async () => {
       const fc = { id: "fc7b", name: "end_call", args: { reason: "done" } };
       const ctx = { ...baseCtx, step: "ending" };
