@@ -18,6 +18,54 @@ import { getStrings, getOutboundStrings } from "../lib/voice/strings.js";
 const EN = { mainPhone: "+18175803291" };
 const ES = { mainPhone: "+18175803291", languagesSpoken: ["es"] };
 const esConfig = ES;
+const BOOKS = { ...EN, allowedTasks: ["take_message", "book_appointment"] };
+const ES_BOOKS = { ...ES, allowedTasks: ["book_appointment"] };
+
+// S4-F2 (call 13): the stage-2 check-in offered "book an appointment" on a line
+// whose business takes no bookings. It offers a booking only where one exists.
+describe("rung 2 at greeting / identify — offers a booking only where the business takes one", () => {
+  const BOOK_EN = "I'm here to help — are you calling to book an appointment, leave a message, or something else?";
+  const NO_BOOK_EN = "I'm here to help — are you calling to leave a message, or something else?";
+  const NO_BOOK_ES = "Estoy aquí para ayudarle — ¿llama para dejar un mensaje, o algo más?";
+
+  it("booking in allowedTasks keeps today's line, byte for byte", () => {
+    for (const step of [STEPS.GREETING, STEPS.IDENTIFY_INTENT]) {
+      expect(buildSilenceNudge(2, step, null, BOOKS)).toBe(BOOK_EN);
+    }
+    expect(buildSilenceNudge(2, STEPS.IDENTIFY_INTENT, null, ES_BOOKS)).toBe(
+      "Estoy aquí para ayudarle — ¿llama para agendar una cita, dejar un mensaje, o algo más?"
+    );
+  });
+
+  it("allowedTasks empty, missing or config null/undefined gets the no-booking line, without throwing", () => {
+    for (const cfg of [{ ...EN, allowedTasks: [] }, EN, { ...EN, allowedTasks: ["take_message"] }, null, undefined]) {
+      for (const step of [STEPS.GREETING, STEPS.IDENTIFY_INTENT]) {
+        expect(buildSilenceNudge(2, step, null, cfg)).toBe(NO_BOOK_EN);
+      }
+    }
+  });
+
+  it("es twin", () => {
+    expect(buildSilenceNudge(2, STEPS.IDENTIFY_INTENT, null, { ...ES, allowedTasks: [] })).toBe(NO_BOOK_ES);
+    expect(buildSilenceNudge(2, STEPS.GREETING, null, ES)).toBe(NO_BOOK_ES);
+  });
+
+  it("stage 1 and the other steps do not change with the booking setting", () => {
+    const none = { ...EN, allowedTasks: [] };
+    expect(buildSilenceNudge(1, STEPS.IDENTIFY_INTENT, null, none)).toBe("Hello? Are you still there?");
+    expect(buildSilenceNudge(2, STEPS.CONFIRM, null, none)).toBe(buildSilenceNudge(2, STEPS.CONFIRM, null, BOOKS));
+    expect(buildSilenceNudge(2, STEPS.GATHER_DETAILS, "take_message", none)).toBe(
+      buildSilenceNudge(2, STEPS.GATHER_DETAILS, "take_message", BOOKS)
+    );
+    expect(buildSilenceNudge(2, "ending", null, none)).toBe(buildSilenceNudge(2, "ending", null, BOOKS));
+  });
+
+  it("outbound is unchanged: nudgeOutbound1 first", () => {
+    expect(buildSilenceNudge(2, STEPS.IDENTIFY_INTENT, null, { ...EN, allowedTasks: [] }, { config: {} })).toBe(
+      getOutboundStrings({ ...EN, allowedTasks: [] }).nudgeOutbound1
+    );
+  });
+});
 
 const INBOUND_STEPS = [STEPS.GREETING, STEPS.IDENTIFY_INTENT, STEPS.GATHER_DETAILS, STEPS.CONFIRM, "ending"];
 
@@ -47,7 +95,7 @@ describe("rung 2 — never asks for a yes", () => {
 
   it("identify / gather lines are kept (they help a caller who is thinking)", () => {
     const S = getStrings(EN);
-    expect(buildSilenceNudge(2, STEPS.IDENTIFY_INTENT, null, EN)).toBe(S.nudgeIdentify);
+    expect(buildSilenceNudge(2, STEPS.IDENTIFY_INTENT, null, BOOKS)).toBe(S.nudgeIdentify);
     expect(buildSilenceNudge(2, STEPS.GATHER_DETAILS, "book_appointment", EN)).toBe(S.nudgeGatherBooking);
     expect(buildSilenceNudge(2, STEPS.GATHER_DETAILS, "take_message", EN)).toBe(S.nudgeGatherMessage);
   });

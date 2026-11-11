@@ -1236,7 +1236,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
         t.write.mock.calls.some(([txt]) =>
           // T5b: rung 1 is now "Hello? Are you still there?" (was "I'm still here
           // whenever you're ready."), so the generic-ladder detector follows it.
-          /Are you still there\?|calling to book an appointment, leave a message/i.test(txt || "")
+          /Are you still there\?|calling to (book an appointment, )?leave a message/i.test(txt || "")
         )
       );
       expect(wroteGenericNudge).toBe(false);

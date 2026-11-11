@@ -438,6 +438,17 @@ function hasExternalBook(config, integrations) {
 const APPOINTMENT_MODULE_TASKS = ["book_appointment", "check_appointment", "cancel_reschedule"];
 
 /**
+ * Does this business take bookings on a call: "book_appointment" is in its
+ * allowed tasks. The one test for it -- the spoken lines that name a booking
+ * (the silence check-in) and the on-file-name note both read it.
+ * @param {object} [config] - the business config (camelCase)
+ * @returns {boolean}
+ */
+export function offersBooking(config) {
+  return Array.isArray(config?.allowedTasks) && config.allowedTasks.includes("book_appointment");
+}
+
+/**
  * Read the availability settings, defaulting at read-time so a business that
  * never touched them still books into 30-minute, single-capacity slots.
  * WHETHER availability is checked is not a per-business flag — it is inherent to
@@ -979,7 +990,7 @@ export function onFileNameNote(ctx, intent) {
     .slice(0, 3)
     .map((e) => e.name);
   const config = ctx?.config || {};
-  const canBook = Array.isArray(config.allowedTasks) && config.allowedTasks.includes("book_appointment");
+  const canBook = offersBooking(config);
   // Review M1: the flag the in-addition guard reads, or it asks its own
   // "shall I book this additional one?" after the read-back -- a second question.
   const another =

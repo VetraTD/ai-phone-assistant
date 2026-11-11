@@ -3806,6 +3806,14 @@ const SABOTAGES = [
     replace: '    signOff: "Thank you for calling Acme Dental. Have a great day!",',
     red: ["tests/goodbyeNameFree.test.js"],
   },
+  {
+    name: "nudge-identify-no-booking",
+    why: "S4-F2 (call 13): the second silence nudge offered 'book an appointment' on a line whose business takes no bookings. Sabotaged, it always returns the booking line again.",
+    file: "lib/voice/session.js",
+    find: "      return offersBooking(config) ? S.nudgeIdentify : S.nudgeIdentifyNoBooking;",
+    replace: "      return S.nudgeIdentify;",
+    red: ["tests/silenceLadderWords.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

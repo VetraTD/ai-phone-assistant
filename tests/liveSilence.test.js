@@ -72,11 +72,11 @@ const CONFIG = {
   businessHours: {},
 };
 
-function fakeDb() {
+function fakeDb(config = CONFIG) {
   return {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Digile Media" })),
-    loadConfig: () => CONFIG,
+    loadConfig: () => config,
     withTenantSafe: async (_id, fn) => fn(),
     createCall: async () => "call-1",
     listIntegrationsForBusiness: async () => [],
@@ -97,7 +97,7 @@ function modelAudio(ms = 400) {
   return buf.toString("base64");
 }
 
-async function boot() {
+async function boot(config = CONFIG) {
   const ws = new FakeSocket();
   const live = fakeLive();
   let clock = 0;
@@ -108,7 +108,7 @@ async function boot() {
   await handleLiveSessionConnection(ws, {}, {
     now: () => clock,
     connect: live.connect,
-    database: fakeDb(),
+    database: fakeDb(config),
     env: {},
     execute,
   });
@@ -176,6 +176,18 @@ describe("LVX19 silence ladder", () => {
     expect(getLatencyStats().turnTaking.nudges_fired).toBe(2);
     // step is identify_intent at this point in a call.
     expect(notes(s.live)[1]).toContain("are you calling to book an appointment");
+  });
+
+  it("S4-F2: on a line that takes no bookings the second nudge does not offer one", async () => {
+    // Call 13: allowed_tasks [] and the check-in still asked about booking.
+    const s = await boot({ ...CONFIG, allowedTasks: ["general_question", "take_message"], capabilities: { messages: { enabled: true } } });
+    s.greet();
+    s.quiet(13_000);
+
+    expect(getLatencyStats().turnTaking.nudges_fired).toBe(2);
+    const second = notes(s.live)[1];
+    expect(second).toContain("are you calling to leave a message, or something else?");
+    expect(second).not.toContain("book an appointment");
   });
 
   it("says goodbye and hangs up when both nudges go unanswered", async () => {
