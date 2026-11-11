@@ -333,7 +333,7 @@ const SABOTAGES = [
     // ("outbound-signoff-alternation"), so this row goes back to its
     // pre-Task-17 find/replace/red, unchanged from before that task existed.
     find:
-      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
+      "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|(?:great|good|lovely|wonderful)\\s+(?:day|weekend)|take\\s+care|all\\s+the\\s+best|wish(?:ing)?\\s+you\\s+(?:a\\s+[a-z]+\\s+(?:day|weekend|evening)|well))\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
     replace:
       "      /\\b(?:thanks|thank you)(?:\\s+(?:again|so\\s+much|very\\s+much))?\\s+for\\s+calling\\b[^!?]{0,80}?\\b(?:good\\s*bye|bye|great\\s+day|good\\s+day|great\\s+weekend|lovely\\s+day|take\\s+care)\\b|\\bhave\\s+a\\s+(?:great|good|lovely)\\s+(?:day|weekend|evening)\\b/i, // SABOTAGE",
     red: [GOODBYE],
@@ -3813,6 +3813,14 @@ const SABOTAGES = [
     find: "      return offersBooking(config) ? S.nudgeIdentify : S.nudgeIdentifyNoBooking;",
     replace: "      return S.nudgeIdentify;",
     red: ["tests/silenceLadderWords.test.js"],
+  },
+  {
+    name: "signoff-wish-well",
+    why: "S4-F2 part 2: end_call now says 'thank them for calling and wish them well'. Sabotaged, signOffRe stops hearing 'all the best' / 'wishing you a nice day' / 'I wish you well' after thanks-for-calling, so that goodbye does not arm the exit.",
+    file: "lib/voice/strings.js",
+    find: "take\\s+care|all\\s+the\\s+best|wish(?:ing)?\\s+you\\s+(?:a\\s+[a-z]+\\s+(?:day|weekend|evening)|well))\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
+    replace: "take\\s+care)\\b|\\bhave\\s+a\\s+[a-z]+\\s+(?:day|weekend|evening|afternoon)\\b[^a-z]{0,3}$/i,",
+    red: ["tests/strings.test.js"],
   },
 ];
 

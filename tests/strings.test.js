@@ -111,3 +111,49 @@ describe("es signOffRe — repaired from literal backspace bytes (732f6ed)", () 
     );
   });
 });
+
+// S4-F2 part 2: the inbound end_call instruction says "thank them for calling and
+// wish them well", so the model's goodbye often lacks "bye"/"have a great day".
+// signOffRe HANGS UP, so the widening stays behind "thank(s) ... for calling".
+describe("signOffRe hears a 'wish them well' goodbye after thanks-for-calling", () => {
+  const en = getStrings({}).signOffRe;
+  const es = getStrings({ languagesSpoken: ["es"] }).signOffRe;
+
+  it("en: these goodbyes match", () => {
+    for (const t of [
+      "Thank you for calling, all the best!",
+      "Thanks for calling, wishing you a nice day",
+      "Thank you for calling, I wish you well.",
+      "Thank you for calling. Wishing you a lovely evening!",
+    ]) {
+      expect(en.test(t), t).toBe(true);
+    }
+  });
+
+  it("en: mid-call uses of the same words do not match", () => {
+    for (const t of [
+      "I wish you well with the move. What time works for you?",
+      "All the best options are in the morning.",
+      "Thanks for calling Acme, how can I help you today?",
+      "Wishing you a nice day.",
+      "All the best!",
+    ]) {
+      expect(en.test(t), t).toBe(false);
+    }
+  });
+
+  it("es: these goodbyes match", () => {
+    for (const t of [
+      "Gracias por llamar, que le vaya bien.",
+      "Gracias por llamar, le deseo lo mejor.",
+    ]) {
+      expect(es.test(t), t).toBe(true);
+    }
+  });
+
+  it("es: the same words without gracias-por-llamar do not match", () => {
+    for (const t of ["Que le vaya bien con la mudanza. ¿A qué hora le viene bien?", "Le deseo lo mejor."]) {
+      expect(es.test(t), t).toBe(false);
+    }
+  });
+});
