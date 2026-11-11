@@ -23,6 +23,13 @@ import {
 import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
+import {
+  spelledNameReadBack,
+  nameVoicedIn,
+  emailsInAnswer,
+  spelledEmailReadBack,
+  emailVoicedIn,
+} from "../lib/voice/spelledReadBack.js";
 
 /** record_customer_request's request_type enum: two types, one request to the caller (see matchTypes below). */
 const MESSAGE_PACK_TYPES = ["message", "callback"];
@@ -43,6 +50,55 @@ const NEXT_QUESTIONS_NOTE =
  */
 const NO_NUMBER_NOTE =
   "[not caller speech] Their message is saved, but there is no number to call them back on because their number did not come through. Ask them for the digits now, read them back, and save again with the same message and the number.";
+
+/**
+ * S4-F3. Model-only, like the notes above, and FIRST in `next`: a spelled name
+ * or an email, read back one letter at a time from the args this save wrote,
+ * before anything else is said. Null when there is nothing to read.
+ *
+ * The prompt's own rule (spell a spelled name back) held on about half the
+ * 2026-11 test calls, and call 15 saved "Roman" for a caller who spelled
+ * R-A-M-A-N with no read-back at all. On Live a tool's reply is obeyed at once,
+ * in the same turn; a note appended elsewhere is not. The letters are composed
+ * here, from what was saved, so the caller hears what the business will get.
+ *
+ * Fires only when all of these hold:
+ * - inbound (no ctx.outboundCall);
+ * - on Live: ctx.assistantSaidThisCall is a string. The cascade does not pass
+ *   it, and without it "already read back" cannot be known, so no note there;
+ * - something to read: a name, when the caller spelled on this call
+ *   (ctx.callerSpelled), and/or an email-shaped answer in details. An email
+ *   needs no spelling signal: on the phone it is always spelled, and the
+ *   spelling detector ignores volunteered emails on purpose
+ *   (lib/voice/replyState.js);
+ * - those letters are not already in what the assistant said: earlier turns
+ *   (assistantSaidThisCall) or this turn before the call (inTurnReplyText --
+ *   call 14 spelled the surname in the same breath as the save). A corrected
+ *   save carries new letters, so it fires again.
+ *
+ * Carries the caller's name and email to the MODEL only: function responses
+ * are not logged (LVX24), and nothing here logs.
+ */
+function spelledReadBackNote(args, ctx) {
+  if (ctx?.outboundCall) return null;
+  if (typeof ctx?.assistantSaidThisCall !== "string") return null;
+  const said = `${ctx.assistantSaidThisCall} ${typeof ctx.inTurnReplyText === "string" ? ctx.inTurnReplyText : ""}`;
+  const items = [];
+  const name = typeof args.caller_name === "string" ? args.caller_name.trim() : "";
+  const nameLetters = ctx.callerSpelled === true && name ? spelledNameReadBack(name) : null;
+  if (nameLetters) items.push({ say: `their name, "${nameLetters}"`, voiced: nameVoicedIn(name, said) });
+  const emails = new Set((detailsFromArgs(args)?.answers || []).flatMap((a) => emailsInAnswer(a.answer)));
+  for (const email of emails) {
+    items.push({ say: `their email, "${spelledEmailReadBack(email)}"`, voiced: emailVoicedIn(email, said) });
+  }
+  const unread = items.filter((item) => !item.voiced);
+  if (!unread.length) return null;
+  return (
+    "[not caller speech] Before anything else, read back to the caller exactly what was saved, one letter at a time: " +
+    unread.map((item) => item.say).join(", and ") +
+    ". Then ask whether that is right. If they correct anything, save again with the fix."
+  );
+}
 
 /**
  * Previously registered unconditionally at services/gemini.js:144. It used to
@@ -271,14 +327,17 @@ export default {
     const hasNotes = typeof notes === "string" && notes.trim() !== "";
     const hasCallback = typeof args.callback_number === "string" && args.callback_number.trim() !== "";
     const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);
-    const next = [needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? NEXT_QUESTIONS_NOTE : null]
+    // S4-F3: the spelled read-back first, then the number, then the questions.
+    const readBack = spelledReadBackNote(args, ctx);
+    const next = [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? NEXT_QUESTIONS_NOTE : null]
       .filter(Boolean)
       .join(" ");
     return {
       functionResponse: {
         id: fc.id,
         name: fc.name,
-        response: { success: true, message, ...(next ? { next } : {}) },
+        // `next` before `message`, so the reply the model reads leads with it.
+        response: { success: true, ...(next ? { next } : {}), message },
       },
       stateEffects: {
         // Written for the caller, so it may be spoken if the model produces no

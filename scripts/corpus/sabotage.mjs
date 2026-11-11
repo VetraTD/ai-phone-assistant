@@ -3822,6 +3822,22 @@ const SABOTAGES = [
     replace: "/i,",
     red: ["tests/strings.test.js"],
   },
+  {
+    name: "spelled-readback-note",
+    why: "S4-F3 (call 15): a save made after the caller spelled carries a model-only note, first in next, to read back what was saved one letter at a time. Sabotaged, the note is never added, and a misheard surname ('Roman' for R-A-M-A-N) reaches the owner unread, as on the call.",
+    file: "capabilities/messages.js",
+    find: "    const readBack = spelledReadBackNote(args, ctx);",
+    replace: "    const readBack = null;",
+    red: ["tests/spelledReadBackNote.test.js"],
+  },
+  {
+    name: "spelled-readback-no-double",
+    why: "S4-F3: letters the assistant has already spoken (earlier, or in the same breath as the save, call 14's shape) are not read back a second time. Sabotaged, every item counts as unread, so a caller who just heard R-A-M-A-N is read it again.",
+    file: "capabilities/messages.js",
+    find: "  const unread = items.filter((item) => !item.voiced);",
+    replace: "  const unread = items;",
+    red: ["tests/spelledReadBackNote.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
