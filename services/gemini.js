@@ -20,7 +20,7 @@ import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js"
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
 import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
-import { INTAKE_CALLER_TYPES } from "../lib/capabilities/intakeSettings.js";
+import { INTAKE_CALLER_TYPES, isHealthcareTier, spellUpFrontOf } from "../lib/capabilities/intakeSettings.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime, relativeDayLabel } from "../lib/capabilities/datetime.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
@@ -1323,6 +1323,8 @@ export function voiceAndLanguageRules(config, direction) {
  */
 export function nonNegotiableRulesSection(config, extras, direction) {
   const outbound = direction === "outbound" ? extras?.outboundCall || {} : null;
+  // Caller-experience Task 3 fix: the standard tier's message clause follows the message protocol.
+  const msgRuleOnStandard = !outbound && !isHealthcareTier(config);
   // === NON-NEGOTIABLE RULES ===
   // The load-bearing behavior rules, lifted out of the GUARDRAILS wall so they
   // are not buried among a dozen other bullets. Built from an array and numbered
@@ -1360,7 +1362,7 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // one rule for every write: read back, then wait for a clear "yes". The
     // gate now saves a message as soon as it is called, and a booking after
     // ONE read-back unless the caller objects; cancellations keep the yes.
-    `Before saving anything, read the details back ONCE, then do it. A message or quote request: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: ask ONE question that names the day, the time and the name — for example "So that's Tuesday at 3 p.m. for Jon Doe, is that right?" — wait for the answer, and book it when they answer with anything but a no; then say only "Done, you're all set." A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
+    `${msgRuleOnStandard ? "Before saving anything but a message, read the details back ONCE, then do it. A message: save it as soon as this caller's minimum is in hand, then follow the message protocol (the questions, the one read-back, a correction saves again). A quote request" : "Before saving anything, read the details back ONCE, then do it. A message or quote request"}: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: ask ONE question that names the day, the time and the name — for example "So that's Tuesday at 3 p.m. for Jon Doe, is that right?" — wait for the answer, and book it when they answer with anything but a no; then say only "Done, you're all set." A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
     // From a live call: asked about "my wife Sarah", the assistant went looking
     // for a third party's booking by name — and on another it read the name
     // OUT of the record and asked the caller to confirm it, which is
@@ -1529,7 +1531,7 @@ export function toolContractSection(config, extras, direction, { markerMode, app
   toolContract +=
     `- When the caller says something you need to check, check it in your very next reply — not later, and never after you have started booking.` +
     (!outbound && spellPolicy() !== "off"
-      ? ` A name you are going to write down that is not already on their record, and that they have not spelled for you: ask them to spell the first AND last name in one go, in your very next reply — "Could you spell the first and last name for me?" — before you look up times and before any read-back. Ask once; if they decline or carry on, use it as you heard it.`
+      ? ` A name you are going to write down${isHealthcareTier(config) ? "" : " for a booking"} that is not already on their record, and that they have not spelled for you: ask them to spell the first AND last name in one go, in your very next reply — "Could you spell the first and last name for me?" — before you look up times and before any read-back. Ask once; if they decline or carry on, use it as you heard it.${isHealthcareTier(config) ? "" : " For a message, follow the message protocol's Spelling rule instead."}`
       : "") +
     ` Never ask your one confirming question while a question like that is still open.` +
     // LVX179 (owner, 2026-10-16): "it should not ask again for anything it
@@ -2278,7 +2280,14 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
     // returning caller to spell a name the business already has right — the
     // exact repetition this round set out to remove. Caught by the eval arm,
     // 1 run in 5.
-    !callerHasNameOnFile(extras?.callerContext)
+    !callerHasNameOnFile(extras?.callerContext) &&
+    // Caller-experience Task 3 fix: on the standard tier a message is not held for a
+    // spelling when the business asks nobody to spell up front.
+    !(
+      !isHealthcareTier(config) &&
+      (intent === "take_message" || intent === "callback_request") &&
+      spellUpFrontOf(config) === "no"
+    )
   ) {
     // The same fact, the other way round — and it exists because of WHEN the
     // code gate fires.

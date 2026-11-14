@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import messages from "../capabilities/messages.js";
+import { buildStaticSystemPrefix, buildDynamicTail } from "../services/gemini.js";
+import { FIXTURES } from "./fixtures/businessConfigs.js";
 
 // Captured from capabilities/messages.js BEFORE the change (HEAD 70f1a6b).
 const OLD = JSON.parse(readFileSync(new URL("./fixtures/oldMessageProtocol.json", import.meta.url), "utf8"));
@@ -111,10 +113,11 @@ describe("confirmStyle", () => {
     expect(protocol).toContain("no closing recap");
   });
 
-  it("personal and seller callers get a plain confirmation, no read-back", () => {
-    for (const style of ["end", "each"]) {
-      expect(render({ confirmStyle: style }).protocol).toMatch(/Personal and seller callers[^.]*plain confirmation/);
-    }
+  // Fix round 1: the plain-confirmation rule for personal and seller callers
+  // lives in the path note (tests/intakePath.test.js); the protocol only says
+  // who gets the read-back.
+  it("the read-back is for new enquiries and existing clients only", () => {
+    expect(render({ confirmStyle: "end" }).protocol).toMatch(/Confirming: [^\n]*new enquir/);
   });
 });
 
@@ -165,5 +168,75 @@ describe("healthcare tier: today's protocol, byte for byte, both settings ignore
     expect(s.functionResponse.response.next).toMatch(/short of time/);
     expect(s.functionResponse.response.next).not.toBe(old);
     expect(noQuotedQuestion(s.functionResponse.response.next)).toBe(true);
+  });
+});
+
+// Fix round 1 (reviewer, Important): the standard tier's other inbound lines
+// must not contradict the message protocol's Spelling and save rules.
+describe("standard tier: no contradicting spelling or save instruction elsewhere in the prompt", () => {
+  const msgOnly = FIXTURES["messages-only"];
+  const withSpell = (v, extra = {}) => ({
+    ...msgOnly.config,
+    capabilities: { ...msgOnly.config.capabilities, messages: { spellUpFront: v } },
+    ...extra,
+  });
+  const prefix = (config) => buildStaticSystemPrefix(config, msgOnly.extras);
+  const tail = (config, intent) => buildDynamicTail("gather_details", intent, config, msgOnly.extras);
+  const OLD_SPELL = "ask them to spell the first AND last name in one go";
+  const OLD_GUARDRAIL = "A message or quote request: one short summary, then record it straight away";
+  const BLOCK = "=== SPELLING NOT YET CONFIRMED ===";
+
+  it("the tool contract scopes the spelling ask to a booking and points a message at the Spelling rule", () => {
+    const p = prefix(withSpell("no"));
+    expect(p).toContain("A name you are going to write down for a booking that is not already on their record");
+    expect(p).toContain("For a message, follow the message protocol's Spelling rule instead.");
+    expect(p).toContain("Spelling: do not ask anyone to spell");
+    // The old unscoped sentence is gone: nothing tells the model to ask a message caller to spell.
+    expect(p).not.toContain("A name you are going to write down that is not already on their record");
+  });
+
+  it("the guardrail saves a message when the minimum is in hand and follows the protocol; quote keeps its words", () => {
+    const p = prefix(withSpell("no"));
+    expect(p).not.toContain(OLD_GUARDRAIL);
+    expect(p).toContain("A message: save it as soon as this caller's minimum is in hand, then follow the message protocol");
+    expect(p).toContain("A quote request: one short summary, then record it straight away");
+  });
+
+  it("the SPELLING NOT YET CONFIRMED block is omitted on message intents when spellUpFront is no", () => {
+    for (const intent of ["take_message", "callback_request"]) {
+      expect(tail(withSpell("no"), intent)).not.toContain(BLOCK);
+      expect(tail(withSpell("leads"), intent)).toContain(BLOCK);
+      expect(tail(withSpell("everyone"), intent)).toContain(BLOCK);
+    }
+  });
+
+  it("booking intents keep the block whatever spellUpFront says", () => {
+    const f = FIXTURES["appointments-db"];
+    const cfg = { ...f.config, capabilities: { ...f.config.capabilities, messages: { spellUpFront: "no" } } };
+    expect(buildDynamicTail("gather_details", "book_appointment", cfg, f.extras)).toContain(BLOCK);
+  });
+
+  it("the lines this fix adds or changes carry no quoted question", () => {
+    const p = prefix(withSpell("no"));
+    for (const line of p.split("\n")) {
+      if (/For a message, follow the message protocol|A message: save it as soon/.test(line)) {
+        // The booking question quoted earlier on the tool-contract line is old text, not added here.
+        const added = line
+          .replace(/"Could you spell the first and last name for me\?"/, "")
+          .replace(/A booking or a reschedule.*$/, "");
+        expect(/"[^"]+\?"/.test(added), line).toBe(false);
+      }
+    }
+  });
+
+  it("healthcare tier keeps all three old lines exactly", () => {
+    const hipaa = withSpell("no", { complianceTier: "hipaa" });
+    const p = prefix(hipaa);
+    expect(p).toContain(
+      "A name you are going to write down that is not already on their record, and that they have not spelled for you: ask them to spell the first AND last name in one go, in your very next reply"
+    );
+    expect(p).toContain("Ask once; if they decline or carry on, use it as you heard it. Never ask your one confirming question");
+    expect(p).toContain("Before saving anything, read the details back ONCE, then do it. " + OLD_GUARDRAIL.replace("Before ", ""));
+    for (const intent of ["take_message", "callback_request"]) expect(tail(hipaa, intent)).toContain(BLOCK);
   });
 });

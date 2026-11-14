@@ -228,7 +228,7 @@ function callbackLineOf(cfg) {
 
 const STANDARD_PROTOCOL_HEADER =
   `=== MESSAGE PROTOCOL ===\n` +
-  `TAKING A MESSAGE — a goal, not a script. Use your own words, and keep it as short as a good receptionist would:\n`;
+  `TAKING A MESSAGE — a goal, not a script. Use your own words:\n`;
 
 /**
  * The standard tier's protocol lines, shared by the Live static prefix
@@ -251,8 +251,8 @@ function standardLines(cfg, config, { callback = false } = {}) {
   const lines = [
     `Goal: get what the business needs to pass this on. Anything the caller has already said counts as answered: never ask it again, and never guess a detail. If something is unclear, ask once.`,
     `Before your first question, say one short line tied to what they asked for, saying why a few questions follow. Never repeat the greeting's words. Ask one question per turn, acknowledging the last answer without opening every question with thanks.`,
-    `Name: ask a personal caller for their first name only, and everyone else for their name. If a name is on their record from an earlier call, use it only to confirm once, and only when the caller has not given a name; never ask them to spell a confirmed on-file name. What the caller says about who they are wins over the record: a seller or a wrong number calling from a known number is not that person.`,
-    `Number: when THIS CALLER'S NUMBER is known, do not ask for a number; it is the callback number. When it is not known, ask for the best number once.`,
+    `Name: ask a personal caller for their first name only, and everyone else for their name. If a name is on their record from an earlier call, use it only to confirm once, and only when the caller has not given a name; never ask them to spell a confirmed on-file name. What the caller says about who they are wins over the record.`,
+    `Number: when THIS CALLER'S NUMBER is known, do not ask for a number; it is the callback number, and they can give another. When it is not known, ask for the best number once.`,
   ];
   if (!callbackLine) {
     lines.push(
@@ -265,8 +265,8 @@ function standardLines(cfg, config, { callback = false } = {}) {
       ` plus a number if theirs did not come through. Set caller_type whenever you can tell.`,
     `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`,
     each
-      ? `Confirming: confirm each answer briefly as it is given, spelling the surname back from what you heard and saying any number digit by digit; there is no closing recap. Personal and seller callers get a plain confirmation of what you will pass on, no read-back.`
-      : `Confirming: for new enquiries and existing clients, make one read-back at the end: ${END_READ_BACK}. Personal and seller callers get a plain confirmation of what you will pass on, no read-back.`
+      ? `Confirming: confirm each answer briefly as it is given, spelling the surname back from what you heard and saying any number digit by digit; there is no closing recap.`
+      : `Confirming: for new enquiries and existing clients, make one read-back at the end: ${END_READ_BACK}.`
   );
   lines.push(
     spell === "leads"
