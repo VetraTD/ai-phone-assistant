@@ -120,8 +120,11 @@ choice REPLACES the default, so the model never sees both.
 - The two style choices businesses are most likely to make, confirmation style and spelling, become two simple
   settings on the message-taking capability: `confirm_style: end | each` and `spell_up_front: no | leads | everyone`.
   When set, the default sentence is left out of the prompt and the code checks follow the setting.
-- Status: PROPOSED by the controller, awaiting the owner's yes. Estimate +1 h. The future caller-type table and config
-  chatbot would set the same settings.
+- Status: APPROVED by the owner, 2026-11-14 ("yes add the two settings"). In this round. Estimate +1 h. The future
+  caller-type table and config chatbot set the same settings. Unset = our default. Both are generic capability
+  settings (messages pack config), never per-business code. They must be readable by the prompt builder and the code
+  checks (spelling gate, ask ledger, read-back note), and guarded by the WIRED_KEYS tripwire
+  (tests/capabilityConfigEffects.test.js).
 - Code enforcement never fights a business choice. For example, the ask ledger must not cut a confirmation question
   when confirm_style is "each".
 9. **Plain goodbye.** Thank them and wish them well WITHOUT the business name.
