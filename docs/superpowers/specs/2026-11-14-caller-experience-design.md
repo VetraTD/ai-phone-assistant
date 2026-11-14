@@ -1,6 +1,7 @@
 # Caller experience: a sharp human receptionist, not a form (design)
 
-Date: 2026-11-14. Status: approach A chosen by the owner; this document awaits the owner's approval.
+Date: 2026-11-14. Status: APPROVED by the owner 2026-11-14 ("yes approved, write the build plan"), approach A, with no
+cap on a business's questions and the two settings.
 Applies to EVERY business (generic code). Inbound calls only. No business is named in code.
 
 ## Intent
