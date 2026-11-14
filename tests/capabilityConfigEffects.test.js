@@ -38,7 +38,7 @@ const WIRED_KEYS = {
     "require.identity",
   ],
   quotes: ["notes", "require.identity"],
-  messages: ["callbackLine", "notes", "require.identity"],
+  messages: ["callbackLine", "confirmStyle", "notes", "require.identity", "spellUpFront"],
 };
 
 /** Dot-paths of every schema node that declares a `type`. */

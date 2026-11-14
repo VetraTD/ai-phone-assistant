@@ -3838,6 +3838,14 @@ const SABOTAGES = [
     replace: "  const unread = items;",
     red: ["tests/spelledReadBackNote.test.js"],
   },
+  {
+    name: "intake-settings-validate",
+    why: "Caller-experience Task 1: the options check on confirmStyle / spellUpFront is skipped, so an unknown value reaches the pack as if it were a real choice. tests/intakeSettings.test.js expects the bad value dropped.",
+    file: "lib/capabilities/configSchema.js",
+    find: "    } else if (Array.isArray(allowed) && !allowed.includes(raw[key])) {",
+    replace: "    } else if (false) { // SABOTAGE",
+    red: ["tests/intakeSettings.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

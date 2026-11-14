@@ -9,6 +9,7 @@ import { normalizePhoneNumber } from "../lib/phone.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
 import { PHI_ACCESS, NON_PHI_EXPORTS, mergeAccess, validateAccessRecord } from "../lib/phiAudit.js";
 import { IS_HIPAA_MODE } from "../lib/deploymentMode.js";
+import { effectiveTier } from "../lib/compliance.js";
 import { cloudSqlConfig, cloudSqlPoolConfig } from "../lib/db/cloudSqlPool.js";
 
 // Re-exported so tests/phiAuditCoverage.test.js can check the classification
@@ -501,6 +502,7 @@ export function loadConfig(business, capabilityRows = null) {
       transferPhoneNumber: null,
       allowedTasks: normalizeAllowedTasks(null),
       capabilities: {},
+      complianceTier: effectiveTier(null),
       mainPhone: null,
       businessPhone: null,
       generalInfo: null,
@@ -552,6 +554,8 @@ export function loadConfig(business, capabilityRows = null) {
     transferPhoneNumber: business.transfer_phone_number || null,
     allowedTasks,
     capabilities,
+    // The tier this call runs under: the stricter of deployment and tenant.
+    complianceTier: effectiveTier(business),
     mainPhone: business.main_phone || null,
     businessPhone: business.phone_number || null,
     generalInfo: business.general_info || null,

@@ -282,6 +282,31 @@ export default {
       label: "What should the assistant promise about getting back to the caller?",
       placeholder: "e.g. Sam will call you back as soon as he can.",
     },
+    // How the assistant checks what it heard. "end" reads the details back once
+    // when the message is complete; "each" confirms each answer as it is given.
+    confirmStyle: {
+      type: "choice",
+      label: "How should answers be confirmed?",
+      options: ["end", "each"],
+      optionLabels: {
+        end: "Once, at the end",
+        each: "After each answer",
+      },
+      default: "end",
+    },
+    // When the assistant asks the caller to spell their name before the reason
+    // for the call, rather than only when it is needed.
+    spellUpFront: {
+      type: "choice",
+      label: "Ask callers to spell their name up front?",
+      options: ["no", "leads", "everyone"],
+      optionLabels: {
+        no: "No, only when it is unclear",
+        leads: "Yes, for new enquiries and existing clients",
+        everyone: "Yes, for every caller who leaves a message",
+      },
+      default: "no",
+    },
   },
 
 
