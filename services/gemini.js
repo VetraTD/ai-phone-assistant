@@ -20,6 +20,7 @@ import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js"
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
 import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
+import { INTAKE_CALLER_TYPES } from "../lib/capabilities/intakeSettings.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime, relativeDayLabel } from "../lib/capabilities/datetime.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
@@ -661,7 +662,9 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
           "Never mention it, and never let it change what you say next."
         : "Call this as soon as you understand why the caller is calling. " +
           "Do NOT wait — identify the intent and call this immediately, " +
-          "then continue helping in the same response.",
+          "then continue helping in the same response. " +
+          "Also report what kind of caller this is and whether they have already said what the call is about, " +
+          "and call this again if either changes.",
       parameters: {
         type: "object",
         properties: {
@@ -670,6 +673,21 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
             enum: intents,
             description: "The caller's primary intent",
           },
+          // Inbound only: outbound's declaration is deep-equal to what it was.
+          ...(outbound
+            ? {}
+            : {
+                caller_type: {
+                  type: "string",
+                  enum: INTAKE_CALLER_TYPES,
+                  description:
+                    "What kind of caller this is: a prospective customer, an existing customer, a personal call, a supplier, a sales pitch, a wrong number, or unclear",
+                },
+                reason_given: {
+                  type: "boolean",
+                  description: "True once the caller has said what the call is about",
+                },
+              }),
         },
         required: ["intent"],
       },

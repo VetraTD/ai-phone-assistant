@@ -1,7 +1,7 @@
 [
   {
     "name": "set_call_intent",
-    "description": "Call this as soon as you understand why the caller is calling. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
+    "description": "Call this as soon as you understand why the caller is calling. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response. Also report what kind of caller this is and whether they have already said what the call is about, and call this again if either changes.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -17,6 +17,23 @@
             "cancel_reschedule"
           ],
           "description": "The caller's primary intent"
+        },
+        "caller_type": {
+          "type": "string",
+          "enum": [
+            "new_enquiry",
+            "existing_customer",
+            "personal",
+            "supplier",
+            "sales_pitch",
+            "other",
+            "wrong_number"
+          ],
+          "description": "What kind of caller this is: a prospective customer, an existing customer, a personal call, a supplier, a sales pitch, a wrong number, or unclear"
+        },
+        "reason_given": {
+          "type": "boolean",
+          "description": "True once the caller has said what the call is about"
         }
       },
       "required": [

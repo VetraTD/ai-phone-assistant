@@ -3846,6 +3846,14 @@ const SABOTAGES = [
     replace: "    } else if (false) { // SABOTAGE",
     red: ["tests/intakeSettings.test.js"],
   },
+  {
+    name: "caller-type-stored",
+    why: "Caller-experience Task 2: the reducer stops storing the caller type the model reports, so state.callerType stays null on every call and nothing built on it (read-back, spelling, path) ever sees a type. tests/liveCallerType.test.js reads state.callerType and the intake block.",
+    file: "lib/voice/replyState.js",
+    find: "    if (INTAKE_CALLER_TYPES.includes(intentArgs.caller_type)) state.callerType = intentArgs.caller_type;",
+    replace: "    if (false) state.callerType = intentArgs.caller_type; // SABOTAGE",
+    red: ["tests/liveCallerType.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
