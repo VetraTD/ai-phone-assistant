@@ -19,6 +19,8 @@ import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { inAdditionWouldRefuse, afterSaveQuestion, onFileNameNote } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
+import { INTAKE_CALLER_TYPES } from "../lib/capabilities/intakeSettings.js";
+import { intakePathNote } from "../lib/voice/intakePath.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
 import { normalizeName, shouldConfirmSpelling, spellPolicy } from "../lib/nameQuality.js";
@@ -537,11 +539,27 @@ export async function executeToolCall(fc, ctx) {
       // Round A1 Part 6: the on-file name (and "another" = extra) in the reply
       // the model acts on before its words this turn. Live + inbound only.
       const onFile = onFileNameNote(ctx, intentArgs?.intent);
+      // Caller-experience Task 3: the short path for the type reported ON THIS
+      // CALL (the args, not ctx.callerType, which is call state from before this
+      // tool ran). Live + inbound only, the gate the other model notes use; the
+      // cascade reply stays as it was.
+      const reportedType = INTAKE_CALLER_TYPES.includes(intentArgs?.caller_type) ? intentArgs.caller_type : null;
+      const path =
+        reportedType && typeof ctx?.assistantSaidThisCall === "string" && !ctx?.outboundCall
+          ? intakePathNote({
+              callerType: reportedType,
+              config: ctx?.config,
+              callerNumberReal: ctx?.callerNumberReal === true,
+              outbound: false,
+            })
+          : null;
+      // `next` before `message`, so the reply the model reads leads with it.
+      const response = { success: true, ...(path ? { next: path } : {}), ...(onFile ? { message: onFile } : {}) };
       return {
         functionResponse: {
           id: fc.id,
           name: fc.name,
-          response: onFile ? { success: true, message: onFile } : { success: true },
+          response,
         },
         stateEffects: {
           intentArgs,

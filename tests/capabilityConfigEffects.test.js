@@ -278,4 +278,36 @@ describe("quotes & messages — identity + notes have effect", () => {
     expect(base).not.toContain(line);
     expect(p).not.toBe(base);
   });
+
+  // Caller-experience Task 3: each intake setting changes the static prefix (the
+  // Live path's prompt), on a standard-tier business only.
+  it("messages confirmStyle → the static prefix confirms per answer instead of reading back at the end", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    const extras = { knowledge: [], integrations: [], transferAllowed: true };
+    const end = buildStaticSystemPrefix(packConfig("messages", { confirmStyle: "end" }), extras);
+    const each = buildStaticSystemPrefix(packConfig("messages", { confirmStyle: "each" }), extras);
+    expect(end).toContain("one read-back at the end");
+    expect(each).not.toContain("one read-back at the end");
+    expect(each).toContain("confirm each answer briefly as it is given");
+    expect(each).not.toBe(end);
+  });
+
+  it("messages spellUpFront → the static prefix asks for the spelling it names", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    const extras = { knowledge: [], integrations: [], transferAllowed: true };
+    const at = (v) => buildStaticSystemPrefix(packConfig("messages", { spellUpFront: v }), extras);
+    expect(at("no")).toContain("do not ask anyone to spell");
+    expect(at("leads")).toContain("ask new enquiries and existing clients to spell their surname");
+    expect(at("everyone")).toContain("ask every caller who leaves a message to spell their name");
+    expect(new Set([at("no"), at("leads"), at("everyone")]).size).toBe(3);
+  });
+
+  it("messages intake settings are ignored on the healthcare tier", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    const extras = { knowledge: [], integrations: [], transferAllowed: true };
+    const hipaa = (cfg) => ({ ...packConfig("messages", cfg), complianceTier: "hipaa" });
+    expect(buildStaticSystemPrefix(hipaa({ confirmStyle: "each", spellUpFront: "everyone" }), extras)).toBe(
+      buildStaticSystemPrefix(hipaa({}), extras)
+    );
+  });
 });

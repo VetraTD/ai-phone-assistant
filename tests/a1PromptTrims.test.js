@@ -157,11 +157,24 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
     expect(p).toMatch(/for Nithin, N-I-T-H-I-N, Dodla, D-O-D-L-A, is that right\?/);
   });
 
-  it("F3: the message summary spells a surname they spelled (prefix step 5 and the step guidance)", () => {
-    expect(prefix(avail)).toMatch(/5\. Summarise it ONCE, in one breath — name \(a surname they spelled[^)]*one letter at a time\)/);
+  // Caller-experience Task 3: the numbered "summarise it ONCE" step is the
+  // healthcare tier's protocol (byte-identical); the standard tier's read-back
+  // is the described "Confirming" line, which spells the surname.
+  it("F3, healthcare tier: the message summary spells a surname they spelled (prefix step 5 and the step guidance)", () => {
+    const hipaa = { ...avail, config: { ...avail.config, complianceTier: "hipaa" } };
+    expect(prefix(hipaa)).toMatch(/5\. Summarise it ONCE, in one breath — name \(a surname they spelled[^)]*one letter at a time\)/);
     for (const intent of ["take_message", "callback_request"]) {
-      expect(tail(avail, "gather_details", intent)).toMatch(/\(5\) summarise it once — name \(a surname they spelled[^)]*one letter at a time\)/);
+      expect(tail(hipaa, "gather_details", intent)).toMatch(/\(5\) summarise it once — name \(a surname they spelled[^)]*one letter at a time\)/);
     }
+  });
+
+  it("F3, standard tier: the one read-back spells the surname; with confirmStyle each the confirmation does", () => {
+    expect(prefix(avail)).toMatch(/Confirming: [^\n]*make one read-back at the end: the surname spelled/);
+    for (const intent of ["take_message", "callback_request"]) {
+      expect(tail(avail, "gather_details", intent)).toMatch(/Confirming: [^\n]*the surname spelled/);
+    }
+    const each = { ...avail, config: { ...avail.config, capabilities: { ...avail.config.capabilities, messages: { confirmStyle: "each" } } } };
+    expect(prefix(each)).toMatch(/confirm each answer briefly as it is given, spelling the surname back from what you heard/);
   });
 
   // OLD BEHAVIOUR (part 3, F4): the read-back spelled an on-file surname as a
@@ -169,7 +182,16 @@ describe("round A1 part 3 — the one read-back spells the surname (F3, F4)", ()
   // file is SAID, not spelled; only a surname spelled this call gets letters.
   it("part 4: a name on file is never asked for and is said, not spelled, in the one read-back (booking + message)", () => {
     const p = prefix(avail);
-    const both = p.match(/If a name is on their record from an earlier call[^\n]*/g) || [];
+    const record = /If a name is on their record from an earlier call[^\n]*/g;
+    // Standard tier (Task 3): the messages copy is described ("confirm once"),
+    // the booking guardrail copy is untouched.
+    const std = p.match(record) || [];
+    expect(std.length).toBe(2);
+    expect(std.filter((l) => /use it only to confirm once/.test(l)).length).toBe(1);
+    expect(std.filter((l) => /ask once "Am I speaking with <name>\?"/.test(l)).length).toBe(1);
+    // Healthcare tier: both copies are the old scripted line.
+    const hp = prefix({ ...avail, config: { ...avail.config, complianceTier: "hipaa" } });
+    const both = hp.match(record) || [];
     // LVX188 (R39): one copy in the messages protocol, one in the booking guardrail.
     expect(both.length).toBe(2);
     expect(p).not.toMatch(/you have it right already/);

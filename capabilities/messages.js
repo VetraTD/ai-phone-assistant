@@ -23,6 +23,8 @@ import {
 import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
+import { confirmStyleOf, spellUpFrontOf, isHealthcareTier } from "../lib/capabilities/intakeSettings.js";
+import { END_READ_BACK } from "../lib/voice/intakePath.js";
 import {
   spelledNameReadBack,
   nameVoicedIn,
@@ -41,6 +43,18 @@ const MESSAGE_PACK_TYPES = ["message", "callback"];
  */
 const NEXT_QUESTIONS_NOTE =
   "[not caller speech] If this business's notes list more questions for this caller, ask them now, one at a time, before closing. Then save again with the same message and the answers in details.";
+
+/**
+ * The standard tier's version of the note above (caller-experience Task 3,
+ * wording only: a business's own notes beat our default, so no code gate on
+ * caller type). The healthcare tier keeps the note above byte for byte.
+ */
+const NEXT_QUESTIONS_NOTE_STANDARD =
+  "[not caller speech] If this business's notes list questions, ask them now: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any this caller already answered. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.";
+
+function nextQuestionsNote(config) {
+  return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : NEXT_QUESTIONS_NOTE_STANDARD;
+}
 
 /**
  * Model-only, like the note above. Present when the save carries no
@@ -212,14 +226,74 @@ function callbackLineOf(cfg) {
   return typeof cfg?.callbackLine === "string" && cfg.callbackLine.trim() ? cfg.callbackLine : null;
 }
 
+const STANDARD_PROTOCOL_HEADER =
+  `=== MESSAGE PROTOCOL ===\n` +
+  `TAKING A MESSAGE — a goal, not a script. Use your own words, and keep it as short as a good receptionist would:\n`;
+
+/**
+ * The standard tier's protocol lines, shared by the Live static prefix
+ * (messageProtocol) and the cascade step guidance (messageGuidance) so the two
+ * say the same thing. Described, never scripted: no quoted question for the
+ * model to recite (the 2026-09-05 tic rule). The callbackLine is the business's
+ * own text and stays quoted. The healthcare tier does not use this.
+ *
+ * What each caller type needs is also handed back per type, in the
+ * set_call_intent reply (lib/voice/intakePath.js).
+ * @param {object} cfg - the messages capability config
+ * @param {object} config - the business config (tier and the two intake settings)
+ * @param {{ callback?: boolean }} [opts]
+ * @returns {string[]}
+ */
+function standardLines(cfg, config, { callback = false } = {}) {
+  const callbackLine = callbackLineOf(cfg);
+  const each = confirmStyleOf(config) === "each";
+  const spell = spellUpFrontOf(config);
+  const lines = [
+    `Goal: get what the business needs to pass this on. Anything the caller has already said counts as answered: never ask it again, and never guess a detail. If something is unclear, ask once.`,
+    `Before your first question, say one short line tied to what they asked for, saying why a few questions follow. Never repeat the greeting's words. Ask one question per turn, acknowledging the last answer without opening every question with thanks.`,
+    `Name: ask a personal caller for their first name only, and everyone else for their name. If a name is on their record from an earlier call, use it only to confirm once, and only when the caller has not given a name; never ask them to spell a confirmed on-file name. What the caller says about who they are wins over the record: a seller or a wrong number calling from a known number is not that person.`,
+    `Number: when THIS CALLER'S NUMBER is known, do not ask for a number; it is the callback number. When it is not known, ask for the best number once.`,
+  ];
+  if (!callbackLine) {
+    lines.push(
+      `Urgency: ask an existing client whether it is urgent only when what they said suggests it matters; do not ask anyone else.`
+    );
+  }
+  lines.push(
+    `Save with record_customer_request as soon as you have the minimum: their name and what it is about` +
+      (callback ? `, their preferred callback time,` : ``) +
+      ` plus a number if theirs did not come through. Set caller_type whenever you can tell.`,
+    `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`,
+    each
+      ? `Confirming: confirm each answer briefly as it is given, spelling the surname back from what you heard and saying any number digit by digit; there is no closing recap. Personal and seller callers get a plain confirmation of what you will pass on, no read-back.`
+      : `Confirming: for new enquiries and existing clients, make one read-back at the end: ${END_READ_BACK}. Personal and seller callers get a plain confirmation of what you will pass on, no read-back.`
+  );
+  lines.push(
+    spell === "leads"
+      ? `Spelling: ask new enquiries and existing clients to spell their surname before you save. Ask nobody else.`
+      : spell === "everyone"
+        ? `Spelling: ask every caller who leaves a message to spell their name before you save.`
+        : `Spelling: do not ask anyone to spell; the ${each ? "confirmation" : "read-back"} spells it.`
+  );
+  lines.push(
+    callbackLine
+      ? `Promise the callback: "${callbackLine}"`
+      : `Promise the callback: say someone will get back to them as soon as possible if it is urgent, otherwise by the next business day.`
+  );
+  return lines;
+}
+
 /**
  * The message-taking protocol for one business. With no callbackLine this is
  * the protocol the golden snapshots hold, byte for byte. With one, the urgency
  * question goes and the promise becomes the business's own line.
  * @param {object} cfg - the messages capability config
  */
-function messageProtocol(cfg) {
+function messageProtocol(cfg, config) {
   const callbackLine = callbackLineOf(cfg);
+  if (!isHealthcareTier(config)) {
+    return STANDARD_PROTOCOL_HEADER + standardLines(cfg, config).map((line, i) => `${i + 1}. ${line}`).join("\n");
+  }
   const steps = callbackLine
     ? [STEP_NAME, STEP_NUMBER, STEP_REASON, STEP_SUMMARISE, `Promise the callback: "${callbackLine}"`, STEP_EXTRA_QUESTIONS]
     : [STEP_NAME, STEP_NUMBER, STEP_REASON, STEP_URGENCY, STEP_SUMMARISE, STEP_PROMISE_STANDING, STEP_EXTRA_QUESTIONS];
@@ -233,8 +307,16 @@ function messageProtocol(cfg) {
  * @param {"take_message"|"callback_request"} intent
  * @param {object} cfg - the messages capability config
  */
-function messageGuidance(intent, cfg) {
+function messageGuidance(intent, cfg, config) {
   const callbackLine = callbackLineOf(cfg);
+  if (!isHealthcareTier(config)) {
+    return (
+      `Your task: take the message by this goal, one question at a time. ` +
+      standardLines(cfg, config, { callback: intent === "callback_request" })
+        .map((line, i) => `(${i + 1}) ${line}`)
+        .join(" ")
+    );
+  }
   const steps = [
     `ask for their name`,
     `if you know the number they are calling from, ask once whether it is the best one; otherwise ask for the best number once`,
@@ -322,15 +404,15 @@ export default {
     return {
       static: {
         capabilities: ["take messages and schedule callbacks for follow-up"],
-        protocols: [messageProtocol(cfg)],
+        protocols: [messageProtocol(cfg, config)],
         guardrails: requirementPromptLines(cfg).map((l) => `${l}
 `),
         capabilityNotes: notesPromptLines(cfg),
       },
       dynamic: {
         stepGuidance: {
-          take_message: messageGuidance("take_message", cfg),
-          callback_request: messageGuidance("callback_request", cfg),
+          take_message: messageGuidance("take_message", cfg, config),
+          callback_request: messageGuidance("callback_request", cfg, config),
         },
       },
     };
@@ -354,7 +436,7 @@ export default {
     const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);
     // S4-F3: the spelled read-back first, then the number, then the questions.
     const readBack = spelledReadBackNote(args, ctx);
-    const next = [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? NEXT_QUESTIONS_NOTE : null]
+    const next = [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? nextQuestionsNote(ctx?.config) : null]
       .filter(Boolean)
       .join(" ");
     return {

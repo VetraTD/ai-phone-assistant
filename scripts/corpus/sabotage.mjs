@@ -3237,8 +3237,8 @@ const SABOTAGES = [
     name: "p6-onfile-note-in-reply",
     why: "Round A1 Part 6 Fix 2 (calls a/c; probe P6ONFILE spell 5/10 -> 0/10): set_call_intent's reply carries the on-file name, the moment the model acts on before its words. Sabotaged, the reply is bare and the on-file caller is asked to spell again.",
     file: "services/tools.js",
-    find: "          response: onFile ? { success: true, message: onFile } : { success: true },",
-    replace: "          response: { success: true }, // SABOTAGE",
+    find: "...(onFile ? { message: onFile } : {}) };",
+    replace: "}; // SABOTAGE",
     red: ["tests/a1OnFileNote.test.js"],
   },
   {
@@ -3853,6 +3853,30 @@ const SABOTAGES = [
     find: "    if (INTAKE_CALLER_TYPES.includes(intentArgs.caller_type)) state.callerType = intentArgs.caller_type;",
     replace: "    if (false) state.callerType = intentArgs.caller_type; // SABOTAGE",
     red: ["tests/liveCallerType.test.js"],
+  },
+  {
+    name: "intake-protocol-no-reask",
+    why: "Caller-experience Task 3: the standard-tier protocol loses its 'anything the caller already said counts as answered, never ask it again' rule, so the model is free to re-ask a reason the caller already gave. tests/intakeProtocol.test.js expects the rule.",
+    file: "capabilities/messages.js",
+    find: "Anything the caller has already said counts as answered: never ask it again, and never guess a detail. ",
+    replace: "",
+    red: ["tests/intakeProtocol.test.js"],
+  },
+  {
+    name: "intake-path-note",
+    why: "Caller-experience Task 3: the set_call_intent handler stops attaching the per-caller-type path note to its reply, so the Live model never gets the short path for the type it reported. tests/intakePath.test.js reads the reply's next.",
+    file: "services/tools.js",
+    find: "...(path ? { next: path } : {}), ",
+    replace: "",
+    red: ["tests/intakePath.test.js"],
+  },
+  {
+    name: "healthcare-keeps-protocol",
+    why: "Caller-experience Task 3: messageProtocol stops seeing the healthcare tier, so a hipaa business gets the new described protocol instead of today's checklist. tests/intakeProtocol.test.js pins the old text byte for byte.",
+    file: "capabilities/messages.js",
+    find: "function messageProtocol(cfg, config) {",
+    replace: "function messageProtocol(cfg, config) { config = {}; // SABOTAGE",
+    red: ["tests/intakeProtocol.test.js"],
   },
 ];
 

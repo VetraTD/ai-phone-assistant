@@ -120,12 +120,20 @@ describe("LVX188: an on-file name is asked, never assumed", () => {
   it("protocol step 1 asks once and never assumes the on-record name", async () => {
     const { buildStaticSystemPrefix } = await import("../services/gemini.js");
     const { FIXTURES } = await import("./fixtures/businessConfigs.js");
-    const text = buildStaticSystemPrefix(FIXTURES["messages-only"].config, FIXTURES["messages-only"].extras);
-    expect(text).toContain(
+    const { config, extras } = FIXTURES["messages-only"];
+    // Healthcare tier: the old scripted line, byte for byte.
+    const hipaa = buildStaticSystemPrefix({ ...config, complianceTier: "hipaa" }, extras);
+    expect(hipaa).toContain(
       'If a name is on their record from an earlier call, it may not be who is calling: ask once "Am I speaking with <name>?" If yes, use it and do not ask them to spell it. If no, ask for their name.'
     );
-    expect(text).not.toContain("you have it right already");
-    expect(text).not.toContain("that is their name");
+    // Standard tier (Task 3): the same rule, described rather than scripted.
+    const text = buildStaticSystemPrefix(config, extras);
+    expect(text).toContain("use it only to confirm once, and only when the caller has not given a name");
+    expect(text).toContain("never ask them to spell a confirmed on-file name");
+    for (const t of [text, hipaa]) {
+      expect(t).not.toContain("you have it right already");
+      expect(t).not.toContain("that is their name");
+    }
   });
 
   it("caller context names are flagged as possibly someone else's until confirmed", async () => {

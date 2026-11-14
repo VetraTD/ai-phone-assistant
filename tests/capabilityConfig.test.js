@@ -314,8 +314,13 @@ describe("loadConfig — transferNoAnswer (migration 052)", () => {
 describe("messages — callbackLine (who calls back and how soon)", () => {
   const CALLBACK = "Sam will call you back as soon as he can.";
   const validateMessages = (raw) => validateCapabilityConfig(raw, messages, "biz-1");
-  const rendered = (config) => {
-    const out = messages.prompt({ capabilities: { messages: config } });
+  // Caller-experience Task 3: the numbered checklist is the HEALTHCARE tier's
+  // protocol now (byte-identical to before); the standard tier has a described
+  // goal. The checklist assertions below therefore run on a hipaa config, and
+  // the standard tier gets its own counterparts.
+  const HIPAA = { complianceTier: "hipaa" };
+  const rendered = (config, tier = HIPAA) => {
+    const out = messages.prompt({ capabilities: { messages: config }, ...tier });
     return {
       protocol: out.static.protocols[0],
       take: out.dynamic.stepGuidance.take_message,
@@ -323,7 +328,33 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     };
   };
 
-  it("with no callbackLine the protocol keeps the urgency step and the standing promise", () => {
+  it("standard tier: with no callbackLine the goal has an urgency line and the standing promise", () => {
+    const { protocol, take } = rendered({}, {});
+    expect(protocol).toContain("Urgency: ask an existing client");
+    expect(protocol).toContain("Promise the callback: say someone will get back to them as soon as possible if it is urgent");
+    expect(take).toContain("Urgency: ask an existing client");
+    expect(take).toContain("Promise the callback: say someone will get back");
+  });
+
+  it("standard tier: callbackLine replaces the promise and removes the urgency line", () => {
+    const { protocol, take, callback } = rendered({ callbackLine: CALLBACK }, {});
+    expect(protocol).toContain(`Promise the callback: "${CALLBACK}"`);
+    expect(protocol).not.toContain("Urgency:");
+    expect(protocol).not.toContain("as soon as possible if it is urgent");
+    for (const g of [take, callback]) {
+      expect(g).toContain(`Promise the callback: "${CALLBACK}"`);
+      expect(g).not.toContain("Urgency:");
+    }
+  });
+
+  it("standard tier: the guidance says the caller-ID number is not asked for, as the protocol does", () => {
+    const { protocol, take, callback } = rendered({}, {});
+    for (const text of [protocol, take, callback]) {
+      expect(text).toContain("Number: when THIS CALLER'S NUMBER is known, do not ask for a number");
+    }
+  });
+
+  it("healthcare tier: with no callbackLine the protocol keeps the urgency step and the standing promise", () => {
     const { protocol, take } = rendered({});
     expect(protocol).toContain("4. Urgency: ask");
     expect(protocol).toContain('6. Promise the callback: "Someone will get back to you');
@@ -332,7 +363,7 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     expect(take).toContain("(6) promise the callback.");
   });
 
-  it("callbackLine replaces the promise and removes the urgency step", () => {
+  it("healthcare tier: callbackLine replaces the promise and removes the urgency step", () => {
     const { protocol, take, callback } = rendered({ callbackLine: CALLBACK });
     expect(protocol).toContain(`Promise the callback: "${CALLBACK}"`);
     expect(protocol).not.toContain("Is this urgent");
@@ -346,7 +377,7 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     expect(callback).toContain(`(5) promise the callback: "${CALLBACK}".`);
   });
 
-  it("LVX189: the step guidance offers the caller's number once, as protocol step 2 does", () => {
+  it("healthcare tier, LVX189: the step guidance offers the caller's number once, as protocol step 2 does", () => {
     // The guidance tail reaches the cascade path, so it must not keep the old
     // "ask for the best callback number" beside a step 2 that offers the
     // caller-ID number first. Both intents, with and without a callbackLine.
@@ -372,10 +403,11 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     expect(out.callbackLine).toBe("Sam says hi thanks");
   });
 
-  it("a blank callbackLine is absence, not an empty promise", () => {
+  it("a blank callbackLine is absence, not an empty promise (both tiers)", () => {
     expect(validateMessages({ callbackLine: "   " }).callbackLine).toBeUndefined();
     const { protocol } = rendered({ callbackLine: "   " });
     expect(protocol).toContain("4. Urgency: ask");
+    expect(rendered({ callbackLine: "   " }, {}).protocol).toContain("Urgency: ask an existing client");
   });
 
   it("a pack that does not declare callbackLine ignores it", () => {
