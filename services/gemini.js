@@ -1734,10 +1734,11 @@ export function guardrailsSection(config, extras, direction, { appointmentsEnabl
   // Inbound only: outbound has its own wrong-number SITUATIONS row, and "is
   // selling something" describes a caller, not a contact Ava rang.
   //
-  // S4-F1. Two bullets, and both ASK ONCE before the goodbye, in the exact
-  // shape closingTicRe (lib/voice/strings.js) recognises: the ask-gate holds an
-  // exit that never asked, so a close that skips the question is a close the
-  // gate refuses (end_call refused three times on a live seller call).
+  // S4-F1. Two bullets, and both ASK ONCE before the goodbye: the ask-gate
+  // holds an exit that never asked, so a close that skips the question is a
+  // close the gate refuses (end_call refused three times on a live seller
+  // call). Described, never scripted: handing the model the sentence itself is
+  // the 2026-09-05 "anything else" tic (tests/promptConversationTruth.test.js).
   //
   // The seller bullet is OUR DEFAULT, and a business's own rule REPLACES it: it
   // is left out entirely when the business's prose already says how to handle
@@ -1746,9 +1747,9 @@ export function guardrailsSection(config, extras, direction, { appointmentsEnabl
   // message", and this line won. Leaving it out is what makes the business's
   // rule the only one the model reads.
   if (!outbound) {
-    guardrails += `- If the caller has the wrong number, tell them politely in one sentence, then ask once: "Is there anything else I can help you with?" If not, say goodbye and end the call; do not take a message.\n`;
+    guardrails += `- If the caller has the wrong number, tell them politely in one sentence, then ask once whether there is anything else you can help with. If not, say goodbye and end the call; do not take a message.\n`;
     if (!businessHandlesSellerCalls(config)) {
-      guardrails += `- If the caller is selling something, decline politely once, then ask once: "Is there anything else I can help you with?" If not, say goodbye and end the call; do not take a message.\n`;
+      guardrails += `- If the caller is selling something, decline politely once, then ask once whether there is anything else you can help with. If not, say goodbye and end the call; do not take a message.\n`;
     }
   }
   guardrails += `- Do not make promises the business hasn't authorized.\n`;

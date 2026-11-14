@@ -3784,9 +3784,9 @@ const SABOTAGES = [
   },
   {
     name: "wrong-number-close-asks",
-    why: "S4-F1 (live wrong-number call): the wrong-number close asks 'anything else?' once, in the shape closingTicRe reads, because the ask-gate holds an exit that never asked. Sabotaged, the bullet goes straight to goodbye and the gate holds that goodbye, as it did on the call.",
+    why: "S4-F1 (live wrong-number call): the wrong-number close asks 'anything else?' once (described, never scripted: the quoted sentence is the 2026-09-05 tic), because the ask-gate holds an exit that never asked. Sabotaged, the bullet goes straight to goodbye and the gate holds that goodbye, as it did on the call.",
     file: "services/gemini.js",
-    find: 'wrong number, tell them politely in one sentence, then ask once: "Is there anything else I can help you with?" If not, say goodbye',
+    find: "wrong number, tell them politely in one sentence, then ask once whether there is anything else you can help with. If not, say goodbye",
     replace: "wrong number, tell them politely in one sentence, then say goodbye",
     red: ["tests/promptSellerDefault.test.js"],
   },

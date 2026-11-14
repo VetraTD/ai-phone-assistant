@@ -141,7 +141,10 @@ describe("zero-text turns never speak an unmarked tool message", () => {
 describe("the end_call sign-off", () => {
   const cfg = { businessName: "Brightwork Dental" };
 
-  it("thanks the caller and names the business", async () => {
+  // S4-F4 (owner, 2026-11-11): the goodbye no longer names the business -- a
+  // hard name is misheard on the line (heard as a similar common word). The name
+  // stays in the prompt, so "who am I speaking to?" still gets it.
+  it("thanks the caller without naming the business", async () => {
     const { executeToolCall } = await import("../services/tools.js");
     const res = await executeToolCall(
       { id: "e1", name: "end_call", args: { reason: "caller is done" } },
@@ -150,7 +153,7 @@ describe("the end_call sign-off", () => {
     const msg = res.stateEffects.toolResult.message;
     expect(res.stateEffects.toolResult.success).toBe(true);
     expect(res.stateEffects.toolResult.callerSafe).toBe(true);
-    expect(msg).toContain("Brightwork Dental");
+    expect(msg).not.toContain("Brightwork Dental");
     expect(msg).toMatch(/thank you for calling/i);
     expect(msg).not.toBe("Goodbye!");
   });
@@ -178,7 +181,9 @@ describe("the end_call sign-off", () => {
       toolParamNames: ["reason", "client_name"],
       fallback: "Sorry, let me get someone to help with that.",
     });
-    expect(spoken).toContain("Brightwork Dental");
+    // Unchanged apart from dampEmphasis ("!" is read as volume, so it becomes ".").
+    expect(spoken).toBe(res.stateEffects.toolResult.message.replace(/!/g, "."));
+    expect(spoken).not.toContain("Brightwork Dental");
     expect(spoken).not.toMatch(/[{}]|reason\s*:|end_call/i);
   });
 });

@@ -11,19 +11,20 @@
 // calls, our default bullet is not in the prompt at all, so the contradiction
 // never reaches the model.
 //
-// Both bullets also ASK ONCE whether there is anything else, in the exact shape
-// closingTicRe recognises, so the close the model copies is the close the
-// ask-gate is waiting for.
+// Both bullets also ASK ONCE whether there is anything else, so the close is
+// the one the ask-gate is waiting for. Described, never scripted: the quoted
+// sentence is the 2026-09-05 "anything else" tic
+// (tests/promptConversationTruth.test.js).
 //
 // Every fixture here is made-up wording. No real business's text.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from "vitest";
 import { buildStaticSystemPrefix, guardrailsSection } from "../services/gemini.js";
 import { businessHandlesSellerCalls, sellerRuleCategory } from "../lib/sellerCalls.js";
-import { getStrings } from "../lib/voice/strings.js";
 import { FIXTURES } from "./fixtures/businessConfigs.js";
 
-const ASK = "Is there anything else I can help you with?";
+const ASK = "then ask once whether there is anything else you can help with";
+const SCRIPTED = "Is there anything else I can help you with?";
 const SALES_RULE = "Sales pitch: take a short message.";
 
 const base = () => ({ ...FIXTURES["messages-only"].config, generalInfo: null, customInstructions: null });
@@ -33,8 +34,8 @@ const prefixFor = (config) => buildStaticSystemPrefix(config, extras);
 const wrongNumberBullets = (p) => p.split("\n").filter((l) => l.startsWith("- If the caller has the wrong number"));
 const sellerDefaultBullets = (p) => p.split("\n").filter((l) => l.startsWith("- If the caller is selling something"));
 
-/** The quoted question inside a bullet, which is what the model copies. */
-const quotedAsk = (line) => (line.match(/"([^"]+\?)"/) || [])[1];
+/** The bullet asks once, in words, and hands the model no sentence to recite. */
+const asksOnce = (line) => line.includes(ASK) && !line.includes(SCRIPTED) && !/"[^"]+\?"/.test(line);
 
 // The three places a business writes its own prose.
 const IN_FIELD = {
@@ -121,9 +122,7 @@ describe("inbound guardrails: wrong number always, seller default unless the bus
     expect(wrongNumberBullets(p)).toHaveLength(1);
     expect(sellerDefaultBullets(p)).toHaveLength(1);
     for (const line of [wrong, seller]) {
-      expect(quotedAsk(line)).toBe(ASK);
-      // The shape the ask-gate's detector reads off the model's reply.
-      expect(getStrings(base()).closingTicRe.test(quotedAsk(line))).toBe(true);
+      expect(asksOnce(line)).toBe(true);
       expect(line).toMatch(/say goodbye and end the call/);
       expect(line).toMatch(/do not take a message/i);
     }
@@ -139,7 +138,7 @@ describe("inbound guardrails: wrong number always, seller default unless the bus
       expect(sellerDefaultBullets(p)).toHaveLength(0);
       expect(p).not.toMatch(/selling something/);
       expect(wrongNumberBullets(p)).toHaveLength(1);
-      expect(quotedAsk(wrongNumberBullets(p)[0])).toBe(ASK);
+      expect(asksOnce(wrongNumberBullets(p)[0])).toBe(true);
       // The business's line is still there for the model to follow.
       expect(p).toContain(SALES_RULE);
     }
