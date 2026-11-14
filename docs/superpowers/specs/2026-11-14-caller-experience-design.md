@@ -77,11 +77,53 @@ The model is following our rules, not failing to understand.
    - One question per turn, never two at once.
    - No "Thanks." in front of every question.
    - Described in the prompt, never scripted: a quoted sentence becomes a tic (2026-09-05).
-8. **Save early, then the extras.**
-   - Save as soon as the type's minimum is in hand.
-   - The business's own extra questions come after the save: at most THREE on the call (lead type only, by default).
-   - The rest are left for the callback ("<owner> will go through the rest when they call you back"). The business's
-     list keeps its own order.
+8. **Save early, then ALL the business's questions, asked well.**
+   - Save as soon as the type's minimum is in hand, so a lead is never lost.
+   - Then ask the business's own questions, in the business's order. NO CAP: a business asks as many as it wants
+     (owner, 2026-11-14: customisation is never compromised).
+   - What we guarantee is HOW they are asked: one at a time, with a short natural transition, acknowledging the last
+     answer (no "Thanks." on every turn), and SKIPPING any the caller already answered in passing ("I run a consulting
+     firm" answers "what is your industry?").
+   - Caller-first default: if the caller says they are short of time, offer to leave the rest for the callback; the
+     caller decides.
+
+## Always-on rules vs defaults a business can replace
+
+The approved three layers (memory "business setting beats default", 2026-11-11): always-on, then the business's
+setting, then our default. Everything in this design is a DEFAULT unless listed as always-on.
+
+**Always-on (no business can change):**
+- Says it is an AI when asked.
+- Emergency guidance.
+- Never reads back full card, date-of-birth or ID numbers.
+- Never claims something is done when it is not.
+- Never invents a detail the caller did not give.
+- Never asks again a question the caller has already ANSWERED. Confirming an answer ("Did you say 2 pm?") is not
+  re-asking, and is allowed when a business wants it.
+- Never reveals one caller's details to another.
+- Consent and legal rules. The healthcare tier.
+
+**Defaults (a business's own instruction replaces them):**
+- How answers are confirmed: one read-back at the end, then "is that right?". A business may want each answer
+  confirmed as it is given; then that REPLACES the end read-back. It is not added on top.
+- Spelling: leads and clients spelled back in the read-back, nobody asked to spell up front. A business may require
+  spelling up front, or for every caller type.
+- Which questions each caller type gets: a business may ask friends for their number, or ask sellers its own questions.
+- Which questions, how many, and their order: entirely the business's.
+- The goodbye wording: our default thanks without the business name. A business may give its own sign-off.
+- Seller handling (already built: lib/sellerCalls.js).
+
+**Reliability.** A business's free-text instruction beats a default only about half the time when both sit in the
+prompt (call 11: Ilija's seller rule lost to our generic line). It works reliably by construction: the business's
+choice REPLACES the default, so the model never sees both.
+- Free text stays fully supported.
+- The two style choices businesses are most likely to make, confirmation style and spelling, become two simple
+  settings on the message-taking capability: `confirm_style: end | each` and `spell_up_front: no | leads | everyone`.
+  When set, the default sentence is left out of the prompt and the code checks follow the setting.
+- Status: PROPOSED by the controller, awaiting the owner's yes. Estimate +1 h. The future caller-type table and config
+  chatbot would set the same settings.
+- Code enforcement never fights a business choice. For example, the ask ledger must not cut a confirmation question
+  when confirm_style is "each".
 9. **Plain goodbye.** Thank them and wish them well WITHOUT the business name.
    - The wrong-number line keeps saying where they reached ("you've reached <business>"): owner, 2026-11-14.
 10. **Measured on every call.** Counters in live_call_summary, each with a denominator:
@@ -101,8 +143,7 @@ The model is following our rules, not failing to understand.
 - Booking flows (appointments pack): the booking read-back, the booking spelling gate and the slot logic are unchanged.
   Only the shared rules apply to booking calls too: one question per turn, no repeated greeting, plain goodbye.
 - Outbound calls: unchanged and byte-identical.
-- Pronunciation work. Forwarding. The config chatbot. Ilija's own question list (the owner trims it with Ilija; it is
-  config).
+- Pronunciation work. Forwarding. The config chatbot. Any business's own question list (it is config, uncapped).
 - S4-B1 "(No speech detected)" markup: not heard; stays backlog.
 
 ## Anti-goals (a failure even if it "works")
@@ -152,7 +193,6 @@ The model is following our rules, not failing to understand.
    - Code enforces the parts that matter:
      - the spelling gate is skipped for message saves (leads correct the spelled read-back instead)
      - the ask ledger refuses a number ask when a real caller ID exists, and a reason ask once one was given
-     - the extras cap is counted
      - the goodbye check
    - Counters measure the rest. Matches the approved "business setting beats default" design: types now, the
      dashboard table later.
@@ -166,7 +206,7 @@ The model sets the type once it is clear and may change it when the call turns o
 | Type | Minimum before saving | Asked only if missing | Read-back | Spelling |
 |---|---|---|---|---|
 | **personal** (friend, family, someone the owner knows) | first name + message | number only if withheld | none; a plain "I'll let them know you called about …" | never |
-| **new lead / enquiry** (wants a service, price, consultation) | name + what they want | when suits (if they want a call back); then the business's extras, max 3, after the save; email only if the business asks for it or the caller offers it | one, ends with "is that right?" | surname + email (if given) spelled in the read-back, never asked first |
+| **new lead / enquiry** (wants a service, price, consultation) | name + what they want | when suits (if they want a call back); then ALL the business's questions after the save, skipping any already answered; email only if the business asks for it or the caller offers it | one, ends with "is that right?" | surname + email (if given) spelled in the read-back, never asked first |
 | **existing client** | name (on file: confirm once) + what it's about | when suits, urgency if relevant | one, ends with "is that right?" | as lead; never if on file and confirmed |
 | **seller / supplier** | per the business's rule; our default when none: decline politely, or if taking a message: name + company + one line | nothing else | none | never |
 | **wrong number** | nothing | nothing | none | never |
@@ -175,6 +215,18 @@ The model sets the type once it is clear and may change it when the call turns o
 Urgency is asked only for existing clients and only when the reason suggests it might matter. The business's extra
 questions apply to the lead type by default; a business that wants them for others says so in its notes (and later
 in the table).
+
+**The types are generic, not Ilija's.** The same six types fit any business; only the words change.
+
+| Business | personal | new lead | existing client | seller / supplier |
+|---|---|---|---|---|
+| Dental clinic | the dentist's family | new patient wanting a check-up | patient asking about their appointment | dental-supply rep |
+| Plumber | the owner's mate | "my boiler's broken, can you come?" | customer chasing last week's job | parts wholesaler |
+| Law firm | a partner's friend | someone needing advice on a case | client asking for an update | legal software sales |
+| Marketing agency (Ilija) | a friend about Saturday | wants Meta ads | current client with a question | SEO list seller |
+
+Each business's own questions, settings and seller rule ride on these types. The future dashboard table lets a
+business rename a type or add its own (e.g. "insurance company calling" for a clinic).
 
 ## What a call should sound like (targets, not scripts)
 
@@ -187,7 +239,8 @@ in the table).
 > Caller: I'd like to learn more about Meta ads and book a consultation.
 > Receptionist: Happy to help. Ilija runs those consultations himself, so I'll take a couple of quick details for
 > him. What's your name?
-> ... name ... "And the business?" ... (saved) ... at most three of the business's questions, one at a time ...
+> ... name ... "And the business?" ... (saved) ... the business's questions, one at a time, with transitions,
+> skipping any already answered ...
 > "When suits you for a call back?" ...
 > Receptionist: So that's Jonathan Daniel, D-A-N-I-E-L, from Daniel Consulting, about Meta ads; Ilija will call you
 > on this number tomorrow around 2. Is that right?
