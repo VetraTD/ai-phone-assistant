@@ -710,8 +710,9 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
           "is ready to hang up: you have asked whether there is anything else " +
           "and they said no, or they said goodbye. Never say goodbye before " +
           "that question has been answered. You MUST write your warm sign-off in the SAME " +
-          "response as this call — thank them for calling " +
-          "and wish them well. Nothing you say after this is heard.",
+          "response as this call — thank them and wish them well, without " +
+          "saying the business's name unless this business's own instructions " +
+          "give their own sign-off. Nothing you say after this is heard.",
       parameters: {
         type: "object",
         properties: {

@@ -3910,6 +3910,30 @@ const SABOTAGES = [
     replace: "    if (state.reasonGiven === true || pendingIntentArgs?.reason_given === true) return false; // SABOTAGE",
     red: ["tests/liveReasonReask.test.js"],
   },
+  {
+    name: "goodbye-named-counter",
+    why: "Caller-experience Task 6: the business-name check on an armed goodbye is negated, so a goodbye that says the name is not counted and a plain one is. tests/liveGoodbyeNamedBusiness.test.js pins both.",
+    file: "lib/voice/live/index.js",
+    find: "      if (saysBusinessName(replyText, state.config?.businessName)) {",
+    replace: "      if (!saysBusinessName(replyText, state.config?.businessName)) { // SABOTAGE",
+    red: ["tests/liveGoodbyeNamedBusiness.test.js"],
+  },
+  {
+    name: "readback-check-counter",
+    why: "Caller-experience Task 6: the read-back check is never tested, so every read-back in scope counts as unchecked. tests/liveReadbackCheck.test.js has a read-back that ends in a check and expects no readbacks_without_check.",
+    file: "lib/voice/live/index.js",
+    find: "          if (!readbackHasCheck(replyText, S.readbackCheckRe)) intakeAudit.readbacks_without_check += 1;",
+    replace: "          intakeAudit.readbacks_without_check += 1; // SABOTAGE",
+    red: ["tests/liveReadbackCheck.test.js"],
+  },
+  {
+    name: "readback-spelled-same-turn",
+    why: "S4-B5 (Caller-experience Task 6): spelled letters read back with the caller's details in the same turn as a message save stop counting as a spelled read-back, so readback_spelled_missing reads 1 again. tests/liveReadbackCheck.test.js reproduces the prod shape.",
+    file: "lib/voice/live/index.js",
+    find: '      if (save.rule === "message" && spelledContactReadBack) save.spelled = true;',
+    replace: "      if (false) save.spelled = true; // SABOTAGE",
+    red: ["tests/liveReadbackCheck.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

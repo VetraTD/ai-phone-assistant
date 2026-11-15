@@ -130,15 +130,23 @@ describe("end_call description", () => {
       .flatMap((d) => d.functionDeclarations || [d])
       .find((d) => d.name === "end_call");
 
-  it("inbound asks for a thank-you and a good wish, with no business-name instruction", () => {
+  it("inbound asks for a thank-you and a good wish, without the business's name unless its own instructions give a sign-off", () => {
     const d = endCallOf({}).description;
-    expect(d).toMatch(/thank them for calling and wish them well/);
-    expect(d).not.toMatch(/business name/i);
+    expect(d).toMatch(/thank them and wish them well/);
+    expect(d).toMatch(/without saying the business's name/);
+    expect(d).toMatch(/unless this business's own instructions give their own sign-off/);
+    // Described, never a sentence for the model to recite.
+    expect(d).not.toMatch(/"[^"]+\?"/);
+    expect(d).not.toMatch(/thank them for calling/);
   });
 
-  it("outbound is unchanged", () => {
+  it("outbound is unchanged, byte for byte", () => {
     const d = endCallOf({ outboundCall: { contact: { firstName: "Sam" } } }).description;
-    expect(d).toMatch(/thank them for their time and wish them well/);
-    expect(d).not.toMatch(/business name/i);
+    expect(d).toBe(
+      "Signal that the conversation is naturally complete and it is time " +
+        "to end the call. You MUST write your warm sign-off in the SAME " +
+        "response as this call — thank them for their time and wish them " +
+        "well. Nothing you say after this is heard."
+    );
   });
 });
