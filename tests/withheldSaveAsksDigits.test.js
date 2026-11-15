@@ -55,6 +55,6 @@ describe("record_customer_request with no number to call back on", () => {
     });
     const next = r.functionResponse.response.next;
     expect(next).toMatch(NOTE);
-    expect(next).toMatch(/business's notes list more questions/);
+    expect(next).toMatch(/business's notes list questions/);
   });
 });

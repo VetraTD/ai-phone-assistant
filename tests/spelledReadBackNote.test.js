@@ -37,6 +37,8 @@ const LIVE = {
   inTurnReplyText: "",
 };
 
+const HIPAA = { complianceTier: "hipaa" };
+
 const run = (args, ctx = {}) => messages.execute(fc(args), { ...LIVE, ...ctx });
 const replyOf = (r) => r.functionResponse.response;
 
@@ -111,13 +113,15 @@ describe("record_customer_request: the spelled read-back note", () => {
     expect(again.next).toBeUndefined();
   });
 
-  it("the caller did not spell their name and gave no email: no note", async () => {
-    const res = replyOf(await run(BASE, { callerSpelled: false }));
+  it("the caller did not spell their name and gave no email, on a personal call: no note", async () => {
+    // (A lead gets the end read-back even unspelled; see the caller-type block below.)
+    const res = replyOf(await run(BASE, { callerSpelled: false, callerType: "personal" }));
     expect(res.next).toBeUndefined();
   });
 
   it("an email needs no spelling signal: the note reads the email only", async () => {
-    const res = replyOf(await run(EMAIL_ARGS, { callerSpelled: false }));
+    // Healthcare tier: the rule as it always was, whatever the settings say.
+    const res = replyOf(await run(EMAIL_ARGS, { callerSpelled: false, config: HIPAA }));
     expect(res.next).toMatch(READ_BACK);
     expect(res.next).toContain(EMAIL_LETTERS);
     expect(res.next).not.toContain("P-R-I-Y-A, Raman");
@@ -132,13 +136,13 @@ describe("record_customer_request: the spelled read-back note", () => {
 
   it("an email answer said in words is still read back from what was saved", async () => {
     const args = { ...BASE, details: [{ label: "Email", answer: "priya dot raman23 at gmail dot com" }] };
-    const res = replyOf(await run(args, { callerSpelled: false }));
+    const res = replyOf(await run(args, { callerSpelled: false, config: HIPAA }));
     expect(res.next).toContain(EMAIL_LETTERS);
   });
 
   it("an answer that is not an email is not read back", async () => {
     const args = { ...BASE, details: [{ label: "Company", answer: "Raman Design" }, { label: "Website", answer: "they found us at www.example.com" }] };
-    const res = replyOf(await run(args, { callerSpelled: false }));
+    const res = replyOf(await run(args, { callerSpelled: false, config: HIPAA }));
     expect(res.next).toBeUndefined();
   });
 
@@ -153,7 +157,7 @@ describe("record_customer_request: the spelled read-back note", () => {
     ];
     for (const said of VOICED) {
       it(said, async () => {
-        const quiet = replyOf(await run(EMAIL_ARGS, { callerSpelled: false, assistantSaidThisCall: said }));
+        const quiet = replyOf(await run(EMAIL_ARGS, { callerSpelled: false, assistantSaidThisCall: said, config: HIPAA }));
         expect(quiet.next).toBeUndefined();
         // The name is still owed when it was spelled and never read back.
         const nameOnly = replyOf(await run(EMAIL_ARGS, { inTurnReplyText: said }));
@@ -202,7 +206,7 @@ describe("record_customer_request: the spelled read-back note", () => {
     const next = replyOf(r).next;
     const a = next.indexOf(NAME_LETTERS);
     const b = next.indexOf("did not come through");
-    const c = next.indexOf("notes list more questions");
+    const c = next.indexOf("notes list questions");
     expect(a).toBeGreaterThan(0);
     expect(b).toBeGreaterThan(a);
     expect(c).toBeGreaterThan(b);
@@ -215,5 +219,54 @@ describe("record_customer_request: the spelled read-back note", () => {
       expect(r.stateEffects.toolResult.success).toBe(true);
       expect(r.stateEffects.capabilityEffects).toHaveLength(1);
     }
+  });
+});
+
+describe("the read-back note follows the caller type and the settings (standard tier)", () => {
+  const unspelled = { callerSpelled: false };
+
+  it("a new enquiry who did not spell: the note starts next and spells the saved name", async () => {
+    const res = replyOf(await run(BASE, { ...unspelled, callerType: "new_enquiry" }));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain(NAME_LETTERS);
+  });
+
+  it("a personal call: no note", async () => {
+    expect(replyOf(await run(BASE, { ...unspelled, callerType: "personal" })).next).toBeUndefined();
+    // Even one who spelled, unless the business asked everyone to spell.
+    expect(replyOf(await run(BASE, { callerSpelled: true, callerType: "personal" })).next).toBeUndefined();
+  });
+
+  it("a personal caller who spelled, at a business that asks everyone: the note fires", async () => {
+    const config = { capabilities: { messages: { spellUpFront: "everyone" } } };
+    const res = replyOf(await run(BASE, { callerSpelled: true, callerType: "personal", config }));
+    expect(res.next).toContain(NAME_LETTERS);
+  });
+
+  it("a type never reported is read as a new enquiry: the note fires", async () => {
+    const res = replyOf(await run(BASE, { ...unspelled, callerType: null }));
+    expect(res.next).toContain(NAME_LETTERS);
+  });
+
+  it('confirmStyle "each": no end note for an unspelled lead', async () => {
+    const config = { capabilities: { messages: { confirmStyle: "each" } } };
+    expect(replyOf(await run(BASE, { ...unspelled, callerType: "new_enquiry", config })).next).toBeUndefined();
+  });
+
+  it("a personal save, then the caller turns out to be a lead: the note fires on the second save", async () => {
+    const first = replyOf(await run(BASE, { ...unspelled, callerType: "personal" }));
+    expect(first.next).toBeUndefined();
+    const second = replyOf(await run({ ...BASE, caller_type: "new_enquiry" }, { ...unspelled, callerType: "personal" }));
+    expect(second.next).toContain(NAME_LETTERS);
+  });
+
+  it("an email follows the type too: a lead's is read back, a personal caller's is not", async () => {
+    expect(replyOf(await run(EMAIL_ARGS, { ...unspelled, callerType: "new_enquiry" })).next).toContain(EMAIL_LETTERS);
+    expect(replyOf(await run(EMAIL_ARGS, { ...unspelled, callerType: "personal" })).next).toBeUndefined();
+  });
+
+  it("the healthcare tier keeps today's rule: no name letters unless the caller spelled", async () => {
+    expect(replyOf(await run(BASE, { ...unspelled, callerType: "new_enquiry", config: HIPAA })).next).toBeUndefined();
+    expect(replyOf(await run(BASE, { callerSpelled: true, callerType: "personal", config: HIPAA })).next).toContain(NAME_LETTERS);
   });
 });

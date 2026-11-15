@@ -19,7 +19,7 @@ import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { inAdditionWouldRefuse, afterSaveQuestion, onFileNameNote } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
-import { INTAKE_CALLER_TYPES } from "../lib/capabilities/intakeSettings.js";
+import { INTAKE_CALLER_TYPES, intakeTypeFor, messagesSpellingRequired } from "../lib/capabilities/intakeSettings.js";
 import { intakePathNote } from "../lib/voice/intakePath.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
@@ -2653,10 +2653,14 @@ export async function executeToolCall(fc, ctx) {
           // A name on file is the spelling (outboundNameOnFile), so there is
           // nothing to ask -- the full name, or (owner, 2026-10-02 night) the
           // first name with whatever surname the model heard.
-          const pendingName =
+          // A message save follows the business's spelling setting and the caller's
+          // type: where spelling is not required the gate has nothing to hold.
+          // Bookings, quotes and the healthcare tier never take this exit.
+          const nameToSpell =
             CONFIRM_HARD_NAMES && ctx?.lastChance !== true && !nameOnFile
               ? callerNameFromArgs(fc.args)
               : null;
+          const pendingName = messagesSpellingOptional(fc, ctx, pack) ? null : nameToSpell;
           // How many times has this gate refused on this call?
           //
           // A phrasing-independent backstop for the shared counter, which only
@@ -3033,6 +3037,18 @@ function writeAttemptBudget(ctx, packId, fc) {
 }
 
 /**
+ * True when this is a message-pack save and the business's setting, with the
+ * caller's type, does not ask for a spelled name. The healthcare tier is never
+ * optional (messagesSpellingRequired is true there).
+ */
+function messagesSpellingOptional(fc, ctx, pack) {
+  if (pack?.id !== "messages") return false;
+  return !messagesSpellingRequired({ config: ctx?.config, callerType: intakeTypeFor(fc?.args, ctx) });
+}
+
+export { messagesSpellingRequired };
+
+/**
  * Would the spelling gate hold this write if it were reached? The same inputs
  * as that gate's refusal branch, read without its counters. Round A1 part 3,
  * F2: the write-order gate steps aside for it, so the spelling question comes
@@ -3040,6 +3056,7 @@ function writeAttemptBudget(ctx, packId, fc) {
  */
 function spellingGateWouldHold(fc, ctx, pack, nameOnFile) {
   if (!CONFIRM_HARD_NAMES || ctx?.lastChance === true || nameOnFile) return false;
+  if (messagesSpellingOptional(fc, ctx, pack)) return false;
   const name = callerNameFromArgs(fc.args);
   if (!name) return false;
   const scratch = ctx?.capabilityState?.[pack?.id] || {};

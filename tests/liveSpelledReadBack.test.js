@@ -94,10 +94,12 @@ describe("Live: a spelled name is read back from what was saved", () => {
     expect("next" in second.response).toBe(false);
   });
 
-  it("the caller never spelled: no note", async () => {
+  it("the caller never spelled, on a personal call: no note", async () => {
+    // A lead gets the end read-back even unspelled (tests/spelledReadBackNote.test.js);
+    // a personal caller does not, so the type rides on the save here.
     const s = await boot("CA_f3_unspelled");
     await s.callerSays("It's Priya Raman, on 214 555 0123, about the invoice.");
-    const [res] = await s.callTool("record_customer_request", MESSAGE);
+    const [res] = await s.callTool("record_customer_request", { ...MESSAGE, caller_type: "personal" });
     expect(res.response.success).toBe(true);
     expect("next" in res.response).toBe(false);
   });

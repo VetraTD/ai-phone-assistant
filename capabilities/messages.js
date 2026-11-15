@@ -23,7 +23,13 @@ import {
 import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
-import { confirmStyleOf, spellUpFrontOf, isHealthcareTier } from "../lib/capabilities/intakeSettings.js";
+import {
+  confirmStyleOf,
+  spellUpFrontOf,
+  isHealthcareTier,
+  intakeTypeFor,
+  LEAD_LIKE,
+} from "../lib/capabilities/intakeSettings.js";
 import { END_READ_BACK } from "../lib/voice/intakePath.js";
 import {
   spelledNameReadBack,
@@ -99,9 +105,24 @@ function spelledReadBackNote(args, ctx) {
   const said = `${ctx.assistantSaidThisCall} ${typeof ctx.inTurnReplyText === "string" ? ctx.inTurnReplyText : ""}`;
   const items = [];
   const name = typeof args.caller_name === "string" ? args.caller_name.trim() : "";
-  const nameLetters = ctx.callerSpelled === true && name ? spelledNameReadBack(name) : null;
+  // Healthcare tier: the rule as it always was (name when the caller spelled, any email).
+  // Standard tier: by caller type and the business's settings. A lead or an existing
+  // client gets the end read-back even when they did not spell (the letters come from
+  // the saved name); other types only when they spelled and the business asked everyone.
+  let nameOn = ctx.callerSpelled === true;
+  let emailOn = true;
+  if (!isHealthcareTier(ctx?.config)) {
+    const lead = LEAD_LIKE.has(intakeTypeFor(args, ctx) ?? "new_enquiry");
+    const end = confirmStyleOf(ctx?.config) === "end";
+    const everyone = spellUpFrontOf(ctx?.config) === "everyone";
+    nameOn = lead ? ctx.callerSpelled === true || end : ctx.callerSpelled === true && everyone;
+    emailOn = (lead && end) || everyone;
+  }
+  const nameLetters = nameOn && name ? spelledNameReadBack(name) : null;
   if (nameLetters) items.push({ say: `their name, "${nameLetters}"`, voiced: nameVoicedIn(name, said) });
-  const emails = new Set((detailsFromArgs(args)?.answers || []).flatMap((a) => emailsInAnswer(a.answer)));
+  const emails = emailOn
+    ? new Set((detailsFromArgs(args)?.answers || []).flatMap((a) => emailsInAnswer(a.answer)))
+    : new Set();
   for (const email of emails) {
     items.push({ say: `their email, "${spelledEmailReadBack(email)}"`, voiced: emailVoicedIn(email, said) });
   }
