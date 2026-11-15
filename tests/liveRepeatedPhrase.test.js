@@ -164,6 +164,49 @@ describe("longestSharedRun", () => {
     expect(longestSharedRun("", "anything at all")).toBe(0);
     expect(longestSharedRun("anything at all", "")).toBe(0);
   });
+
+  describe("a spelled word counts as one word (2026-11-15 read-back)", () => {
+    it("a spelled surname and the same surname in an email is not a repeat", () => {
+      const run = longestSharedRun(
+        "So that's Priya Raman, R-A-M-A-N,",
+        "and your email is p dot Raman, R-A-M-A-N at gmail dot com"
+      );
+      expect(run).toBeLessThan(REPEAT_RUN_WORDS);
+    });
+
+    it("a six-letter surname spelled twice is not a repeat", () => {
+      const run = longestSharedRun(
+        "Kwame Mensah, M-E-N-S-A-H",
+        "K-W-A-M-E dot M-E-N-S-A-H at outlook dot com"
+      );
+      expect(run).toBeLessThan(REPEAT_RUN_WORDS);
+    });
+
+    it("spaced and dotted letters tokenise like the hyphenated form", () => {
+      expect(longestSharedRun("R A M A N", "R-A-M-A-N")).toBe(1);
+      expect(longestSharedRun("R. A. M. A. N.", "R-A-M-A-N")).toBe(1);
+      expect(longestSharedRun("R.A.M.A.N", "r a m a n")).toBe(1);
+    });
+
+    it("a spelled word is closed off before the next word, so an article after it does not join it", () => {
+      // "R-A-M-A-N, a good name" must read raman | a | good, not ramana | good.
+      expect(longestSharedRun("that was R-A-M-A-N, a good name here", "R-A-M-A-N and a good name here")).toBe(4);
+    });
+
+    it("a genuine repeat that contains a spelled name still counts in full", () => {
+      const s = "So that's Kwame Mensah, M-E-N-S-A-H, about your Facebook ads";
+      // so that s kwame mensah mensah(spelled) about your facebook ads
+      expect(longestSharedRun(s, s)).toBeGreaterThanOrEqual(REPEAT_RUN_WORDS);
+    });
+
+    it("leaves hyphenated words, contractions and digit runs as they were", () => {
+      // "follow-up" is two words, "that's a" is three, "2 1 4" is three.
+      expect(longestSharedRun("a follow-up call", "follow up call")).toBe(3);
+      expect(longestSharedRun("x-ray", "x ray")).toBe(2);
+      expect(longestSharedRun("so that's a plan", "so that s a plan")).toBe(5);
+      expect(longestSharedRun("call 2 1 4 now", "call 2 1 4 now")).toBe(5);
+    });
+  });
 });
 
 describe("LVX78 — a repeat is counted", () => {

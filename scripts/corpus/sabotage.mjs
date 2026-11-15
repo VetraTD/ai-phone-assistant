@@ -4238,6 +4238,14 @@ const SABOTAGES = [
     replace: "  const leadNumberLine = numberLineFor(true); // SABOTAGE",
     red: ["tests/intakePath.test.js"],
   },
+  {
+    name: "repeat-run-spelled-word-one-token",
+    why: "Hotfix 2026-11-15: longestSharedRun merges hyphen/dot-joined single letters into one token before punctuation is stripped. Without it a spelled surname closes into the next word ('R-A-M-A-N, a' reads 'ramana'), and the spelled surname plus the email carrying it is again read as a repeat. tests/liveRepeatedPhrase.test.js pins it.",
+    file: "lib/transcriptUtils.js",
+    find: "        .replace(SPELLED_PUNCTUATED_RE, (m) => m.replace(/[^a-z]/g, \"\"))",
+    replace: "        // SABOTAGE: spelled letters no longer merged before punctuation is stripped",
+    red: ["tests/liveRepeatedPhrase.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

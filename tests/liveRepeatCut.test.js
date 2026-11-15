@@ -328,6 +328,37 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     expect(s.cleared).toHaveLength(0);
   });
 
+  it("leaves a read-back that spells a surname and then reads an email carrying it alone", async () => {
+    // 2026-11-15, a live call: the closing read-back spelled the surname and then
+    // read the business's email, which carried the same letters. The one-letter
+    // words made a run past the threshold, and the read-back was cut three times
+    // although nothing was said twice. A spelled word is one word.
+    const s = await boot();
+    await s.say("Of course. What day were you thinking of?");
+    await s.caller("tomorrow at two works for me");
+    live_fragments(s, [
+      "So that's Priya Raman, R-A-M-A-N, from Aria Bakeries, ",
+      "with the email p dot Raman, R-A-M-A-N at gmail dot com, ",
+      "for a consultation tomorrow at two p m, is that right?",
+    ]);
+    await s.endTurn();
+
+    expect(c().live_repeat_cut).toBe(0);
+    expect(s.cleared).toHaveLength(0);
+  });
+
+  it("still cuts one spelled read-back sentence said twice, exactly once", async () => {
+    const s = await boot();
+    await s.say("Of course. What day were you thinking of?");
+    await s.caller("tomorrow at two works for me");
+    const sentence = "So that's Kwame Mensah, M-E-N-S-A-H, about your Facebook ads, is that right?";
+    live_fragments(s, [sentence, " " + sentence]);
+    await s.endTurn();
+
+    expect(c().live_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
+  });
+
   it("leaves a long turn that does not repeat itself alone", async () => {
     // The within-turn check compares a turn's tail against its own head, so a
     // long turn is where a false positive would show up first.
