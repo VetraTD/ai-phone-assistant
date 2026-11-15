@@ -3902,6 +3902,14 @@ const SABOTAGES = [
     replace: "function messageProtocol(cfg, config) { config = {}; // SABOTAGE",
     red: ["tests/intakeProtocol.test.js"],
   },
+  {
+    name: "reason-reask-cut",
+    why: "Caller-experience Task 5: the reason-reask condition is negated, so a reason the caller gave is asked again uncut and one they did not give is cut. tests/liveReasonReask.test.js pins both directions.",
+    file: "lib/voice/live/index.js",
+    find: "    if (state.reasonGiven !== true && pendingIntentArgs?.reason_given !== true) return false;",
+    replace: "    if (state.reasonGiven === true || pendingIntentArgs?.reason_given === true) return false; // SABOTAGE",
+    red: ["tests/liveReasonReask.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

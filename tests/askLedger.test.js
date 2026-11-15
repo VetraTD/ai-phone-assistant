@@ -20,6 +20,7 @@ import {
   callerDeclined,
   callerWantsRepeat,
   askKindLabel,
+  REASON_ASK_RE,
   readsContactBack,
   ASK_SIMILARITY,
   MAX_ASKS_PER_NEED,
@@ -462,9 +463,8 @@ describe("asksIn -- which needs a reply asks for", () => {
 
   it("only question sentences ask", () => {
     expect(asksIn("I'll pass your number to the team.")).toEqual([]);
-    expect(asksIn("We use the number you're calling from. What's the reason for the call?")).toEqual([
-      "q:reason call",
-    ]);
+    // The reason for the call is a fixed kind now (it used to fall to q:).
+    expect(asksIn("We use the number you're calling from. What's the reason for the call?")).toEqual(["reason"]);
   });
 
   it("a read-back summary or 'is that right?' is not a number ask", () => {
@@ -607,4 +607,64 @@ describe("readsContactBack", () => {
   ];
   it.each(POS)("reads back: %s", (s) => expect(readsContactBack(s)).toBe(true));
   it.each(NEG)("does not: %s", (s) => expect(readsContactBack(s)).toBe(false));
+});
+
+// ---------------------------------------------------------------------------
+// Caller-experience Task 5: the reason for the call is a fixed kind.
+// ---------------------------------------------------------------------------
+describe("the reason kind", () => {
+  const POSITIVE = [
+    "What is the call regarding?",
+    "What's this regarding?",
+    "What is your call regarding today?",
+    "What is the reason for your call?",
+    "What is the main reason for your call today?",
+    "What are you calling about?",
+    "What's it about?",
+    "Could you please let me know what you called about today so I can help you?",
+    "¿De qué se trata la llamada?",
+    "¿Cuál es el motivo de su llamada?",
+  ];
+  const NEGATIVE = [
+    "Is that about the boiler?",
+    "What time suits you?",
+    "What's the name of your business?",
+    "So that's about the boiler, right?",
+    "So that's about Saturday, right?",
+    "Is the number you're calling from the best one to reach you on?",
+    "What's the best number to reach you?",
+    "What are you called?",
+    "How can we help you with your ads today?",
+    "Is there anything else I can help you with?",
+    "¿Cuál es su nombre?",
+    "¿A qué hora le viene bien?",
+    "¿Quiere dejar un mensaje?",
+  ];
+  it.each(POSITIVE)("classifies as reason: %s", (s) => {
+    expect(REASON_ASK_RE.test(s)).toBe(true);
+    expect(asksIn(s)).toEqual(["reason"]);
+  });
+  it.each(NEGATIVE)("is not a reason: %s", (s) => {
+    expect(asksIn(s)).not.toContain("reason");
+  });
+  it("is found even when the sentence also says today (the scheduling skip does not hide it)", () => {
+    expect(asksIn("What is the reason for your call today?")).toEqual(["reason"]);
+  });
+  it("is a closed label in logs", () => {
+    expect(askKindLabel("reason")).toBe("reason");
+  });
+  it("a caller who declines it blocks it for the call, and offering it lifts the block", () => {
+    const l = createAskLedger();
+    l.recordReply("What is the call regarding?", { callerSpoke: true });
+    l.recordCallerTurn("I'd rather not say what it's about");
+    expect(l.isDeclined("reason")).toBe(true);
+    expect(l.repeatIn("What's it about?", { callerWords: "hmm" })).toBe("reason");
+    l.recordCallerTurn("Actually it's about a leaking tap");
+    expect(l.isDeclined("reason")).toBe(false);
+  });
+  it("is capped like any other need: a third answered ask is a repeat", () => {
+    const l = createAskLedger();
+    for (let i = 0; i < 2; i += 1) l.recordReply("What is the call regarding?", { callerSpoke: true });
+    expect(l.repeatIn("What is the call regarding?", { callerWords: "um" })).toBe("reason");
+  });
 });
