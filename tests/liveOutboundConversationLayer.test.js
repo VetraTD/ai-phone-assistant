@@ -108,8 +108,15 @@ async function bootOutbound() {
   return call;
 }
 
+// The control asks for spelling through the setting: on the standard tier a call
+// whose intent was never reported is nudged only when the business asks callers
+// to spell (fix wave I4). What is tested here is inbound versus outbound.
 function bootInbound() {
-  return bootLive({ config: CONFIG, callSid: "CA_inbound_s3_1" });
+  const config = {
+    ...CONFIG,
+    capabilities: { ...(CONFIG.capabilities || {}), messages: { ...(CONFIG.capabilities?.messages || {}), spellUpFront: "everyone" } },
+  };
+  return bootLive({ config, callSid: "CA_inbound_s3_1" });
 }
 
 beforeEach(() => {
