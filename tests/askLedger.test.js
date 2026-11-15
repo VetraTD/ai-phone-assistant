@@ -786,3 +786,19 @@ describe("a purpose clause after the ask is not a reason ask (P32 N1)", () => {
     expect(asksIn(s)).toEqual(["reason"]);
   });
 });
+
+// Row pin: ONLY the final-clause rule keeps these from being a reason ask (the whole
+// sentence matches REASON_ASK_RE through "the reason for your call").
+describe("the final-clause rule on its own (row pin)", () => {
+  const LEAD_INS = [
+    "To pass on the reason for your call, can I take your name?",
+    "So I can note the reason for your call, who am I speaking with?",
+    "Para anotar el motivo de su llamada, ¿me dice su nombre?",
+  ];
+  it.each(LEAD_INS)("is a name ask, not a reason ask: %s", (s) => {
+    expect(REASON_ASK_RE.test(s)).toBe(true);
+    const kinds = asksIn(s);
+    expect(kinds).toContain("name");
+    expect(kinds).not.toContain("reason");
+  });
+});
