@@ -346,3 +346,160 @@ describe("outbound is unchanged", () => {
     expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
   });
 });
+
+describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
+  it("reasonGiven true, then a purpose clause in front of a name ask: nothing cleared, nothing counted", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await x.s.callerSays("It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays("Happy to help. So Ilija knows what you're calling about, can I grab your name?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+    expect(summary.intake.reason_reasked).toBe(0);
+    expect(summary.intake.reason_reask_cut).toBe(0);
+  });
+
+  it("the assistant answering the caller's own question with a reason-shaped clause is not cut", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await x.s.callerSays("Why do you need my details? It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays(
+        "So he can see what it is about before he rings, which is why I ask. What is it about the invoice that is wrong?"
+      );
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+  });
+
+  it("a caller who asks to hear it again is not cut, as in the ledger", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await x.s.callerSays("It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays("Okay.");
+      await x.s.turnEnds();
+      await x.s.callerSays("Sorry, could you repeat that?");
+      await x.s.assistantSays("Of course. What is the call regarding?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+  });
+
+  it("the healthcare tier: counted, never cut (its protocol asks the reason as a step)", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await pastGreeting({ config: { ...CONFIG, complianceTier: "hipaa" } });
+      cleared = x.cleared;
+      await x.s.callerSays("It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays(ASK);
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+    expect(summary.intake.reason_reasked).toBe(1);
+    expect(summary.intake.reason_reask_cut).toBe(0);
+    expect(summary.intake.tier).toBe("hipaa");
+  });
+
+  it("the healthcare ledger keeps the pre-round q: class for a reason ask", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting({ config: { ...CONFIG, complianceTier: "hipaa" } });
+      cleared = x.cleared;
+      for (let i = 0; i < 3; i += 1) {
+        await x.s.assistantTurn("What is the reason for your call today?");
+        await x.s.callerSays("The invoice.");
+      }
+      await x.s.assistantSays("What is the reason for your call today?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    // The "today" phrasing was never an ask on the old path, so never a ledger repeat.
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
+  });
+
+  it("the standard tier reports tier and counts a reason asked after a save, never cutting it", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await pastGreeting({ database: storeDb() });
+      cleared = x.cleared;
+      await x.s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays("So that's Jon on 2 1 4, 5 5 5, 0 1 2 3 about the invoice, passing that on now.");
+      await x.s.callTool("record_customer_request", MESSAGE);
+      await x.s.turnEnds();
+      await x.s.callerSays("One more thing.");
+      await x.s.assistantSays(ASK);
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(summary.intake.tier).toBe("standard");
+    expect(summary.intake.reason_asked_after_save).toBe(1);
+    expect(summary.intake.reason_reasked).toBe(0);
+  });
+
+  it("outbound never counts a reason after a save", async () => {
+    const summary = await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      await x.s.callerSays("Hello.");
+      await x.s.assistantSays(ASK);
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(summary.intake.reason_asked_after_save).toBe(0);
+  });
+});
+
+describe("confirm_style each: a tagged confirmation is not an ask (fix wave I3b)", () => {
+  const EACH = { ...CONFIG, capabilities: { messages: { confirmStyle: "each" } } };
+  /** The name asked and answered twice: a third ask is at the ledger's cap. */
+  async function nameTwice(x) {
+    await x.s.assistantTurn("What is your name?");
+    await x.s.callerSays("It's Jon.");
+    await x.s.assistantTurn("And your name again?");
+    await x.s.callerSays("Jon, like I said.");
+  }
+  it("'So your surname is Daniel, right?' under each is not cut", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting({ config: EACH });
+      cleared = x.cleared;
+      await nameTwice(x);
+      await x.s.assistantSays("So your surname is Daniel, right?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+  });
+  it("the same sentence under end (the default) is the ledger's name ask, cut at the cap", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await nameTwice(x);
+      await x.s.assistantSays("So your surname is Daniel, right?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(1);
+  });
+});

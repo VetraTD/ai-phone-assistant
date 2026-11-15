@@ -685,7 +685,8 @@ export function buildCallTools(configOrTasks, { markerMode = false, extras } = {
                 },
                 reason_given: {
                   type: "boolean",
-                  description: "True once the caller has said what the call is about",
+                  description:
+                    "True once the caller has said what their message or request is about, not only that they want to leave a message or speak to someone",
                 },
               }),
         },

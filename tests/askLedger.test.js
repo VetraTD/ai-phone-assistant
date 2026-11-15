@@ -688,3 +688,75 @@ describe("outbound: the reason kind is off (P25), the ledger behaves as it did b
     expect(t.repeatIn("What is the reason for your call today?", { callerWords: "um" })).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix wave C1 / I3b: the reason kind is judged on the final clause only, and a
+// confirmation tag is not an ask. Every sentence is invented.
+// ---------------------------------------------------------------------------
+describe("the reason kind is a real reason ask only (fix wave C1)", () => {
+  // (a) a purpose clause in front of a different ask
+  const PURPOSE_CLAUSE = [
+    "Happy to help. So Ilija knows what you're calling about, can I grab your name?",
+    "Great, so I can let him know what you're calling about, who am I speaking with?",
+    "Sure. To make sure he has what you're calling about, could I take your name?",
+    "Para que Ilija sepa de qué se trata, ¿me dice su nombre?",
+  ];
+  // (b) a clarifying follow-up about what the caller said
+  const CLARIFYING = [
+    "What is it about the boiler that's not working?",
+    "What was it about our Meta ads offer that caught your eye?",
+    "¿De qué se trata el problema con la caldera?",
+  ];
+  // (c) confirmations
+  const CONFIRMATIONS = [
+    "So that's what you're calling about, right?",
+    "¿Y el motivo de la llamada es la factura, verdad?",
+    "So what you're calling about is the boiler, is that right?",
+  ];
+  it.each([...PURPOSE_CLAUSE, ...CLARIFYING, ...CONFIRMATIONS])("is not a reason ask: %s", (s) => {
+    expect(asksIn(s)).not.toContain("reason");
+  });
+  it("a purpose clause in front of a name ask still asks for the name", () => {
+    expect(asksIn(PURPOSE_CLAUSE[0])).toEqual(["name"]);
+    expect(asksIn(PURPOSE_CLAUSE[3])).toEqual(["name"]);
+  });
+  const STILL_ASKS = [
+    "Thanks. What is it about?",
+    "Okay, and what's this regarding today?",
+    "Got it, what is the call regarding?",
+    "¡Claro! ¿De qué se trata?",
+    "Thanks, what is the main reason for your call today?",
+  ];
+  it.each(STILL_ASKS)("a real ask after a lead-in still is one: %s", (s) => {
+    expect(asksIn(s)).toEqual(["reason"]);
+  });
+});
+
+describe("a confirmation tag under confirm_style each is not an ask (fix wave I3b)", () => {
+  it("any kind: the saved name, number, email or a q: need confirmed with a tag", () => {
+    const tagged = [
+      "So your surname is Daniel, right?",
+      "So the best number is on the screen, correct?",
+      "So your email is on file, is that right?",
+      "Entonces su nombre es Daniel, ¿verdad?",
+      "So your company is the one on Main Street, right?",
+    ];
+    for (const s of tagged) expect(asksIn(s, { confirmTags: true })).toEqual([]);
+  });
+  it("under end (the default) the same sentences classify as before", () => {
+    expect(asksIn("So your surname is Daniel, right?")).toEqual(["name"]);
+    expect(asksIn("So your surname is Daniel, right?", { confirmTags: false })).toEqual(["name"]);
+  });
+  it("a real ask is still an ask under each", () => {
+    expect(asksIn("What's your name, please?", { confirmTags: true })).toEqual(["name"]);
+  });
+  it("the ledger reads it per ask: a tagged confirmation at the cap is not a repeat under each", () => {
+    const each = createAskLedger({ confirmTags: () => true });
+    const end = createAskLedger({ confirmTags: () => false });
+    for (const l of [each, end]) {
+      for (let i = 0; i < 2; i += 1) l.recordReply("What's your name?", { callerSpoke: true });
+    }
+    expect(each.repeatIn("So your surname is Daniel, right?", { callerWords: "um" })).toBeNull();
+    expect(end.repeatIn("So your surname is Daniel, right?", { callerWords: "um" })).toBe("name");
+  });
+});

@@ -209,6 +209,7 @@ describe("state and the intake block", () => {
       first_words_to_save_ms: null,
       reason_reasked: 0,
       reason_reask_cut: 0,
+      reason_asked_after_save: 0,
       number_asked_with_caller_id: 0,
       spell_asks: 0,
       ended_before_save: false,
@@ -216,6 +217,7 @@ describe("state and the intake block", () => {
       goodbye_named_business: 0,
       readbacks: 0,
       readbacks_without_check: 0,
+      tier: "standard",
     });
   });
 
