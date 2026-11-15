@@ -150,3 +150,25 @@ describe("Live: one read-back at the end for a lead at a business with its own q
     expect(first.response.next).toContain('"Daniel, D-A-N-I-E-L"');
   });
 });
+
+describe("Live: only the first save is deferred (P32 N2)", () => {
+  it("a correction re-save without details, after the first save, hands the corrected letters", async () => {
+    const config = { ...CONFIG, capabilities: { messages: { notes: "Ask which company they are with." } } };
+    const database = {
+      ...fakeDb(config, "biz-1"),
+      createCustomerRequest: vi.fn(async () => "req-1"),
+      listCallCustomerRequests: vi.fn(async () => []),
+      updateCustomerRequest: vi.fn(async () => null),
+    };
+    const s = await bootLive({ config, database, callSid: "CA_n2_resave" });
+    const lead = { ...MESSAGE, caller_name: "Jonathan Daniel", caller_type: "new_enquiry" };
+    await s.callerSays("It's Jonathan Daniel, on 214 555 0123, I'd like a quote.");
+    const [first] = await s.callTool("record_customer_request", lead);
+    expect(first.response.next).toMatch(/after the last answer/i);
+    await s.assistantTurn("Which company are you with?");
+    await s.callerSays("No, it's Daniels with an S.");
+    const [second] = await s.callTool("record_customer_request", { ...lead, caller_name: "Jonathan Daniels" });
+    expect(second.response.next).toContain('"Daniels, D-A-N-I-E-L-S"');
+    expect(second.response.next).not.toMatch(/after the last answer/i);
+  });
+});

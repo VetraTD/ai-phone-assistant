@@ -3,7 +3,7 @@
 // set_call_intent reply that carries it (Live + inbound only).
 // ---------------------------------------------------------------------------
 import { describe, expect, it } from "vitest";
-import { intakePathNote } from "../lib/voice/intakePath.js";
+import { intakePathNote, END_READ_BACK } from "../lib/voice/intakePath.js";
 import { executeToolCall } from "../services/tools.js";
 
 const std = (messagesCfg = {}, extra = {}) => ({ capabilities: { messages: messagesCfg }, ...extra });
@@ -91,6 +91,20 @@ describe("intakePathNote", () => {
       expect(n, t).toContain("they will be called back on the number they are calling from");
       expect(n, t).toContain("they can give another");
     }
+  });
+
+  it("P32 m2: leads get the fact form, personal keeps 'tell them'", () => {
+    expect(note("personal")).toContain("tell them they will be called back");
+    for (const t of ["new_enquiry", "existing_customer"]) {
+      const n = note(t);
+      expect(n, t).not.toContain("tell them");
+      expect(n, t).toContain("they will be called back on the number they are calling from");
+    }
+  });
+
+  it("P32 m2: END_READ_BACK says it only when their own number came through", () => {
+    expect(END_READ_BACK).toContain("when their own number came through");
+    expect(END_READ_BACK).not.toContain("; say they will be called back");
   });
 
   describe("I3a: a business's own notes beat the note's absolute lines", () => {

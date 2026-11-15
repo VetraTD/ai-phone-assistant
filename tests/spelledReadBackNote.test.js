@@ -383,10 +383,39 @@ describe("one read-back at the end (fix wave I8)", () => {
     expect(res.next).not.toMatch(/after the last answer/i);
   });
 
-  it("a withheld number is still asked for, after the questions note", async () => {
+  it("a withheld number comes FIRST, before the questions note (P32 N3)", async () => {
     const res = replyOf(await run({ ...JD, callback_number: undefined }, { ...lead, callerPhone: "" }));
-    expect(res.next.startsWith("[not caller speech] If this business's notes list questions")).toBe(true);
-    expect(res.next.indexOf("did not come through")).toBeGreaterThan(res.next.indexOf("notes list questions"));
+    expect(res.next.startsWith("[not caller speech] Their message is saved, but there is no number")).toBe(true);
+    expect(res.next.indexOf("notes list questions")).toBeGreaterThan(res.next.indexOf("did not come through"));
+    // The deferral is scoped to the name, so it does not contradict the number note.
+    expect(res.next).toMatch(/Apart from their number, do not read anything back yet/);
+    expect(/"[^"]+\?"/.test(res.next)).toBe(false);
+  });
+
+  it("only the call's FIRST save is deferred: a correction re-save without details hands the letters (P32 N2)", async () => {
+    const first = await run(JD, { ...lead, callerSpelled: true });
+    expect(replyOf(first).next).not.toMatch(READ_BACK);
+    // The runner threads the effect's capabilityState back into ctx on the next call.
+    const state = first.stateEffects.capabilityState;
+    const second = replyOf(await run({ ...JD, caller_name: "Jonathan Daniels" }, { ...lead, callerSpelled: true, capabilityState: state }));
+    expect(second.next).toMatch(READ_BACK);
+    expect(second.next).toContain("D-A-N-I-E-L-S");
+    expect(second.next).not.toMatch(/after the last answer/i);
+  });
+
+  it("notes that are rules, not questions: the letters at the first save (P32 N2)", async () => {
+    for (const notes of ["Promise a same-day call back.", "Calls are returned by the owner."]) {
+      const config = { capabilities: { messages: { notes } } };
+      const res = replyOf(await run(JD, { ...lead, config }));
+      expect(res.next, notes).toMatch(READ_BACK);
+    }
+  });
+
+  it("notes with a question mark or the word ask still defer (P32 N2)", async () => {
+    for (const notes of ["What is your company?", "Always ask for the company."]) {
+      const config = { capabilities: { messages: { notes } } };
+      expect(replyOf(await run(JD, { ...lead, config })).next, notes).not.toMatch(READ_BACK);
+    }
   });
 
   it("the healthcare tier is byte-identical: its own note, its own read-back rule", async () => {

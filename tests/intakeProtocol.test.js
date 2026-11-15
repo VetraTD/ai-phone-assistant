@@ -96,7 +96,8 @@ describe("standard tier: a described goal, not a checklist", () => {
 
   it("M1: the end read-back says which number they are called back on and that they can give another", () => {
     const p = render({}).protocol;
-    expect(p).toContain("they will be called back on the number they are calling from");
+    // Only when their own number came through (P32 m2): a withheld caller has none to say.
+    expect(p).toContain("when their own number came through, say they will be called back on it");
     expect(p).toContain("they can give another");
   });
 

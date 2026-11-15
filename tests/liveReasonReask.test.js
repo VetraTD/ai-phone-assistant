@@ -503,3 +503,21 @@ describe("confirm_style each: a tagged confirmation is not an ask (fix wave I3b)
     expect(cleared).toHaveLength(1);
   });
 });
+
+describe("a purpose clause after the ask is not cut (P32 N1)", () => {
+  it("reasonGiven true, then a name ask with the purpose after it: nothing cleared", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await x.s.callerSays("It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays("Happy to help. Can I take your name so Ilija knows what you're calling about?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+    expect(summary.intake.reason_reasked).toBe(0);
+  });
+});

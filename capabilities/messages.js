@@ -70,7 +70,7 @@ const NEXT_QUESTIONS_NOTE_STANDARD =
  */
 const NEXT_QUESTIONS_NOTE_DEFERRED =
   NEXT_QUESTIONS_NOTE_STANDARD +
-  " Do not read anything back yet: make the one read-back after the last answer, then ask whether it is right. If they answer none of them, make it then.";
+  " Apart from their number, do not read anything back yet: make the one read-back after the last answer, then ask whether it is right. If they answer none of them, make it then.";
 
 function nextQuestionsNote(config) {
   return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : NEXT_QUESTIONS_NOTE_STANDARD;
@@ -508,15 +508,20 @@ export default {
     const readBack = spelledReadBackNote(args, ctx);
     // I8: a lead at a business with its own questions, saving before any answer is in:
     // questions first, the read-back after the last answer (standard tier only).
+    // Only the call's FIRST message save (P32 N2: a correction re-save hands its letters),
+    // and only when the notes look like questions (a "?" or the word "ask"): rules-only
+    // notes would defer the letters for good, since no later save comes.
     const deferReadBack =
       Boolean(readBack) &&
       hasNotes &&
+      /\?|\bask\b/i.test(notes) &&
+      ctx?.capabilityState?.messages?.firstSaveDone !== true &&
       !isHealthcareTier(ctx?.config) &&
       !(detailsFromArgs(args)?.answers?.length > 0) &&
       decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
     const next = (
       deferReadBack
-        ? [NEXT_QUESTIONS_NOTE_DEFERRED, needsNumber ? NO_NUMBER_NOTE : null]
+        ? [needsNumber ? NO_NUMBER_NOTE : null, NEXT_QUESTIONS_NOTE_DEFERRED]
         : [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? nextQuestionsNote(ctx?.config) : null]
     )
       .filter(Boolean)
@@ -534,6 +539,8 @@ export default {
         toolResult: { name: fc.name, success: true, message, callerSafe: true },
         toolCallEvent: { name: fc.name, args },
         capabilityEffects: [{ capability: "messages", type: "recorded", data: args }],
+        // The call's first message save is behind us (the I8 deferral is for that one only).
+        capabilityState: { messages: { firstSaveDone: true } },
       },
     };
   },

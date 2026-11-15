@@ -760,3 +760,29 @@ describe("a confirmation tag under confirm_style each is not an ask (fix wave I3
     expect(end.repeatIn("So your surname is Daniel, right?", { callerWords: "um" })).toBe("name");
   });
 });
+
+// Fix wave P32 / N1: a purpose clause AFTER the ask is not a reason ask either.
+describe("a purpose clause after the ask is not a reason ask (P32 N1)", () => {
+  const AFTER = [
+    "Can I take your name so Ilija knows what you're calling about?",
+    "Could I grab your name so I can tell him what you're calling about?",
+    "Can I get your name so I can let her know what you called about?",
+    "Could I take your name so I can pass on what you're calling about?",
+  ];
+  it.each(AFTER)("is not a reason: %s", (s) => {
+    expect(asksIn(s)).not.toContain("reason");
+  });
+  it("the name ask in front of the purpose clause is still a name ask", () => {
+    expect(asksIn(AFTER[0])).toEqual(["name"]);
+  });
+  const REAL = [
+    "What are you calling about?",
+    "And what are you calling about today?",
+    "Could you please let me know what you called about today so I can help you?",
+    "Can you tell me what you're calling about?",
+    "May I ask what you're calling about?",
+  ];
+  it.each(REAL)("a real ask still is one: %s", (s) => {
+    expect(asksIn(s)).toEqual(["reason"]);
+  });
+});
