@@ -44,6 +44,7 @@ const replyOf = (r) => r.functionResponse.response;
 
 const READ_BACK = /^\[not caller speech\] Before anything else, read back to the caller exactly what was saved, one letter at a time/;
 const NAME_LETTERS = "Priya, P-R-I-Y-A, Raman, R-A-M-A-N";
+const SURNAME_LETTERS = "Raman, R-A-M-A-N";
 const EMAIL_LETTERS = "P-R-I-Y-A dot R-A-M-A-N-2-3 at gmail dot com";
 
 describe("record_customer_request: the spelled read-back note", () => {
@@ -199,9 +200,11 @@ describe("record_customer_request: the spelled read-back note", () => {
   });
 
   it("with business notes too: read-back, then the number, then the extra questions", async () => {
+    // An existing client: a lead at a notes business has the read-back deferred to the
+    // last answer (fix wave I8, below).
     const r = await run(
       { ...BASE, callback_number: undefined },
-      { callerPhone: "", config: { capabilities: { messages: { notes: "Ask which department." } } } }
+      { callerType: "existing_customer", callerPhone: "", config: { capabilities: { messages: { notes: "Ask which department." } } } }
     );
     const next = replyOf(r).next;
     const a = next.indexOf(NAME_LETTERS);
@@ -225,10 +228,11 @@ describe("record_customer_request: the spelled read-back note", () => {
 describe("the read-back note follows the caller type and the settings (standard tier)", () => {
   const unspelled = { callerSpelled: false };
 
-  it("a new enquiry who did not spell: the note starts next and spells the saved name", async () => {
+  it("a new enquiry who did not spell: the note starts next and spells the saved surname (fix wave I7)", async () => {
     const res = replyOf(await run(BASE, { ...unspelled, callerType: "new_enquiry" }));
     expect(res.next).toMatch(READ_BACK);
-    expect(res.next).toContain(NAME_LETTERS);
+    expect(res.next).toContain(SURNAME_LETTERS);
+    expect(res.next).not.toContain("P-R-I-Y-A");
   });
 
   it("a personal call: no note", async () => {
@@ -245,7 +249,7 @@ describe("the read-back note follows the caller type and the settings (standard 
 
   it("a type never reported is read as a new enquiry: the note fires", async () => {
     const res = replyOf(await run(BASE, { ...unspelled, callerType: null }));
-    expect(res.next).toContain(NAME_LETTERS);
+    expect(res.next).toContain(SURNAME_LETTERS);
   });
 
   it('confirmStyle "each": no end note for an unspelled lead', async () => {
@@ -257,7 +261,7 @@ describe("the read-back note follows the caller type and the settings (standard 
     const first = replyOf(await run(BASE, { ...unspelled, callerType: "personal" }));
     expect(first.next).toBeUndefined();
     const second = replyOf(await run({ ...BASE, caller_type: "new_enquiry" }, { ...unspelled, callerType: "personal" }));
-    expect(second.next).toContain(NAME_LETTERS);
+    expect(second.next).toContain(SURNAME_LETTERS);
   });
 
   it("an email follows the type too: a lead's is read back, a personal caller's is not", async () => {
@@ -268,5 +272,137 @@ describe("the read-back note follows the caller type and the settings (standard 
   it("the healthcare tier keeps today's rule: no name letters unless the caller spelled", async () => {
     expect(replyOf(await run(BASE, { ...unspelled, callerType: "new_enquiry", config: HIPAA })).next).toBeUndefined();
     expect(replyOf(await run(BASE, { callerSpelled: true, callerType: "personal", config: HIPAA })).next).toContain(NAME_LETTERS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix wave I7 / P27: what the note spells, standard tier only.
+// ---------------------------------------------------------------------------
+describe("what the read-back note spells (fix wave I7)", () => {
+  const unspelled = { callerSpelled: false, callerType: "new_enquiry" };
+  const JD = { ...BASE, caller_name: "Jonathan Daniel" };
+  const onFile = { callerContext: { upcomingAppointments: [{ client_name: "Jonathan Daniel" }] } };
+
+  it("the caller did not spell: the surname only, not every word", async () => {
+    const res = replyOf(await run(JD, unspelled));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain('"Daniel, D-A-N-I-E-L"');
+    expect(res.next).not.toContain("J-O-N-A-T-H-A-N");
+    expect(res.next).toContain("their surname");
+  });
+
+  it("a one-word name is spelled whole", async () => {
+    const res = replyOf(await run({ ...BASE, caller_name: "Mike" }, unspelled));
+    expect(res.next).toContain('"Mike, M-I-K-E"');
+  });
+
+  it("the caller spelled: every word, as before", async () => {
+    const res = replyOf(await run(JD, { ...unspelled, callerSpelled: true }));
+    expect(res.next).toContain("Jonathan, J-O-N-A-T-H-A-N, Daniel, D-A-N-I-E-L");
+  });
+
+  it("a confirmed on-file name the caller did not spell: no name letters at all", async () => {
+    expect(replyOf(await run(JD, { ...unspelled, ...onFile })).next).toBeUndefined();
+    // An email is still read back; the name is not.
+    const withEmail = replyOf(await run({ ...JD, details: EMAIL_ARGS.details }, { ...unspelled, ...onFile }));
+    expect(withEmail.next).toContain(EMAIL_LETTERS);
+    expect(withEmail.next).not.toContain("D-A-N-I-E-L");
+  });
+
+  it("an on-file name the caller DID spell is read back, as before", async () => {
+    const res = replyOf(await run(JD, { ...unspelled, ...onFile, callerSpelled: true }));
+    expect(res.next).toContain("Jonathan, J-O-N-A-T-H-A-N, Daniel, D-A-N-I-E-L");
+  });
+
+  it("a surname already voiced stays quiet (the confirm audit accepts a surname-only voicing)", async () => {
+    const said = "So that's Jonathan Daniel, D-A-N-I-E-L, on 2 1 4, 5 5 5, 0 1 2 3 -- passing that on now.";
+    expect(replyOf(await run(JD, { ...unspelled, assistantSaidThisCall: said })).next).toBeUndefined();
+  });
+
+  it("the healthcare tier is byte-identical: nothing for an unspelled name, every word for a spelled one", async () => {
+    expect(replyOf(await run(JD, { ...unspelled, config: HIPAA })).next).toBeUndefined();
+    const res = replyOf(await run(JD, { callerSpelled: true, callerType: "new_enquiry", config: HIPAA }));
+    expect(res.next).toContain('"Jonathan, J-O-N-A-T-H-A-N, Daniel, D-A-N-I-E-L"');
+    expect(res.next).toContain("their name");
+    // On file and spelled: still every word on hipaa (the rule did not change there).
+    const onFileSpelled = replyOf(await run(JD, { callerSpelled: true, config: HIPAA, ...onFile }));
+    expect(onFileSpelled.next).toContain("Jonathan, J-O-N-A-T-H-A-N, Daniel, D-A-N-I-E-L");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix wave I8 / P28: one read-back, at the end, for a lead at a business that
+// has its own questions.
+// ---------------------------------------------------------------------------
+describe("one read-back at the end (fix wave I8)", () => {
+  const notesConfig = { capabilities: { messages: { notes: "Ask which company they are with." } } };
+  const lead = { callerSpelled: false, callerType: "new_enquiry", config: notesConfig };
+  const JD = { ...BASE, caller_name: "Jonathan Daniel" };
+  const ANSWERS = [{ label: "Company", answer: "Acme Plumbing" }];
+
+  it("a lead's first save at a notes business: the questions note first, no letters", async () => {
+    const res = replyOf(await run(JD, lead));
+    expect(res.success).toBe(true);
+    expect(res.next).toMatch(/^\[not caller speech\] If this business's notes list questions, ask them now/);
+    expect(res.next).not.toMatch(READ_BACK);
+    expect(res.next).not.toContain("D-A-N-I-E-L");
+    // The note says, in described words, that the one read-back comes after the last answer.
+    expect(res.next).toMatch(/read-back[^.]*after the last answer/i);
+    expect(/"[^"]+\?"/.test(res.next)).toBe(false);
+  });
+
+  it("the later save that carries the answers: the letters", async () => {
+    const res = replyOf(await run({ ...JD, details: ANSWERS }, lead));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain('"Daniel, D-A-N-I-E-L"');
+  });
+
+  it("the same lead with no notes: the letters at the first save", async () => {
+    const res = replyOf(await run(JD, { ...lead, config: {} }));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain('"Daniel, D-A-N-I-E-L"');
+  });
+
+  it("an existing client at a notes business: the letters at the first save", async () => {
+    const res = replyOf(await run(JD, { ...lead, callerType: "existing_customer" }));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain('"Daniel, D-A-N-I-E-L"');
+  });
+
+  it("a type never reported or unclear is a lead: deferred too", async () => {
+    for (const callerType of [null, "other"]) {
+      const res = replyOf(await run(JD, { ...lead, callerType }));
+      expect(res.next, String(callerType)).not.toMatch(READ_BACK);
+      expect(res.next, String(callerType)).toMatch(/after the last answer/i);
+    }
+  });
+
+  it("confirm_style each reads nothing at the end, so nothing is deferred", async () => {
+    const config = { capabilities: { messages: { notes: "Ask which company.", confirmStyle: "each" } } };
+    const res = replyOf(await run(JD, { ...lead, config }));
+    expect(res.next).not.toMatch(/after the last answer/i);
+  });
+
+  it("a withheld number is still asked for, after the questions note", async () => {
+    const res = replyOf(await run({ ...JD, callback_number: undefined }, { ...lead, callerPhone: "" }));
+    expect(res.next.startsWith("[not caller speech] If this business's notes list questions")).toBe(true);
+    expect(res.next.indexOf("did not come through")).toBeGreaterThan(res.next.indexOf("notes list questions"));
+  });
+
+  it("the healthcare tier is byte-identical: its own note, its own read-back rule", async () => {
+    const config = { complianceTier: "hipaa", capabilities: { messages: { notes: "Ask which company." } } };
+    const res = replyOf(await run(JD, { callerSpelled: true, callerType: "new_enquiry", config }));
+    expect(res.next).toMatch(READ_BACK);
+    expect(res.next).toContain(
+      "If this business's notes list more questions for this caller, ask them now, one at a time, before closing."
+    );
+    expect(res.next).not.toMatch(/after the last answer/i);
+  });
+
+  it("an on-file lead at a notes business: the questions note, and no letters either way", async () => {
+    const res = replyOf(
+      await run(JD, { ...lead, callerContext: { upcomingAppointments: [{ client_name: "Jonathan Daniel" }] } })
+    );
+    expect(res.next).not.toContain("D-A-N-I-E-L");
   });
 });

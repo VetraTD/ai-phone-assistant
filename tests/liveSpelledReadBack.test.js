@@ -104,3 +104,49 @@ describe("Live: a spelled name is read back from what was saved", () => {
     expect("next" in res.response).toBe(false);
   });
 });
+
+describe("Live: one read-back at the end for a lead at a business with its own questions (fix wave I8)", () => {
+  const NOTES = { ...CONFIG, capabilities: { messages: { notes: "Ask which company they are with." } } };
+  const LEAD = { ...MESSAGE, caller_name: "Jonathan Daniel", caller_type: "new_enquiry" };
+  const bootWith = (config, callSid) => {
+    const database = {
+      ...fakeDb(config, "biz-1"),
+      createCustomerRequest: vi.fn(async () => "req-1"),
+      listCallCustomerRequests: vi.fn(async () => []),
+      updateCustomerRequest: vi.fn(async () => null),
+    };
+    return bootLive({ config, database, callSid });
+  };
+
+  it("the first save: the questions note and no letters; the answers save: the surname's letters", async () => {
+    const s = await bootWith(NOTES, "CA_i8_lead");
+    await s.callerSays("It's Jonathan Daniel, on 214 555 0123, I'd like a quote.");
+    const [first] = await s.callTool("record_customer_request", LEAD);
+    expect(first.response.success).toBe(true);
+    expect(first.response.next).toMatch(/^\[not caller speech\] If this business's notes list questions/);
+    expect(first.response.next).not.toContain("D-A-N-I-E-L");
+    await s.assistantTurn("Which company are you with?");
+    await s.callerSays("Acme Plumbing.");
+    const [second] = await s.callTool("record_customer_request", {
+      ...LEAD,
+      details: [{ label: "Company", answer: "Acme Plumbing" }],
+    });
+    expect(second.response.success).toBe(true);
+    expect(second.response.next).toContain('"Daniel, D-A-N-I-E-L"');
+    expect(second.response.next).not.toContain("J-O-N-A-T-H-A-N");
+  });
+
+  it("the same lead at a business with no notes: the letters at the first save", async () => {
+    const s = await bootWith(CONFIG, "CA_i8_nonotes");
+    await s.callerSays("It's Jonathan Daniel, on 214 555 0123, I'd like a quote.");
+    const [first] = await s.callTool("record_customer_request", LEAD);
+    expect(first.response.next).toContain('"Daniel, D-A-N-I-E-L"');
+  });
+
+  it("an existing client at a notes business: the letters at the first save", async () => {
+    const s = await bootWith(NOTES, "CA_i8_client");
+    await s.callerSays("It's Jonathan Daniel, on 214 555 0123, about my job.");
+    const [first] = await s.callTool("record_customer_request", { ...LEAD, caller_type: "existing_customer" });
+    expect(first.response.next).toContain('"Daniel, D-A-N-I-E-L"');
+  });
+});

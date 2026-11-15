@@ -23,6 +23,7 @@ import {
 import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
+import { nameIsOnFile } from "../lib/nameQuality.js";
 import {
   confirmStyleOf,
   spellUpFrontOf,
@@ -59,6 +60,17 @@ const NEXT_QUESTIONS_NOTE =
  */
 const NEXT_QUESTIONS_NOTE_STANDARD =
   "[not caller speech] If this business's notes list questions, ask them now: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any this caller already answered. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.";
+
+/**
+ * Fix wave I8 (P28), model-only. A lead's FIRST save at a business that has its
+ * own questions: the questions come first and the spelled read-back waits until
+ * the last answer, so the caller hears one read-back at the end, not one now and
+ * another after the questions. Described, never a quoted question. The letters
+ * come with the later save that carries the answers.
+ */
+const NEXT_QUESTIONS_NOTE_DEFERRED =
+  NEXT_QUESTIONS_NOTE_STANDARD +
+  " Do not read anything back yet: make the one read-back after the last answer, then ask whether it is right. If they answer none of them, make it then.";
 
 function nextQuestionsNote(config) {
   return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : NEXT_QUESTIONS_NOTE_STANDARD;
@@ -113,15 +125,28 @@ function spelledReadBackNote(args, ctx) {
   // the saved name); other types only when they spelled and the business asked everyone.
   let nameOn = ctx.callerSpelled === true;
   let emailOn = true;
+  // What the name letters cover (fix wave I7, standard tier): a caller who spelled
+  // gets every word read back, as before; one who did not gets the surname only,
+  // and a name confirmed on file gets none (the spec: never spelled if on file).
+  let surnameOnly = false;
   if (!isHealthcareTier(ctx?.config)) {
     const lead = LEAD_LIKE.has(decisionTypeOf(intakeTypeFor(args, ctx)));
     const end = confirmStyleOf(ctx?.config) === "end";
     const everyone = spellUpFrontOf(ctx?.config) === "everyone";
     nameOn = lead ? ctx.callerSpelled === true || end : ctx.callerSpelled === true && everyone;
     emailOn = (lead && end) || everyone;
+    if (ctx.callerSpelled !== true) {
+      surnameOnly = true;
+      if (nameIsOnFile(name, ctx.callerContext)) nameOn = false;
+    }
   }
-  const nameLetters = nameOn && name ? spelledNameReadBack(name) : null;
-  if (nameLetters) items.push({ say: `their name, "${nameLetters}"`, voiced: nameVoicedIn(name, said) });
+  const nameWordsOf = name.split(/\s+/).filter(Boolean);
+  const spellWords = surnameOnly ? nameWordsOf.slice(-1) : nameWordsOf;
+  const nameLetters = nameOn && name ? spelledNameReadBack(spellWords.join(" ")) : null;
+  if (nameLetters) {
+    const what = surnameOnly && nameWordsOf.length > 1 ? "their surname" : "their name";
+    items.push({ say: `${what}, "${nameLetters}"`, voiced: nameVoicedIn(name, said) });
+  }
   const emails = emailOn
     ? new Set((detailsFromArgs(args)?.answers || []).flatMap((a) => emailsInAnswer(a.answer)))
     : new Set();
@@ -481,7 +506,19 @@ export default {
     const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);
     // S4-F3: the spelled read-back first, then the number, then the questions.
     const readBack = spelledReadBackNote(args, ctx);
-    const next = [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? nextQuestionsNote(ctx?.config) : null]
+    // I8: a lead at a business with its own questions, saving before any answer is in:
+    // questions first, the read-back after the last answer (standard tier only).
+    const deferReadBack =
+      Boolean(readBack) &&
+      hasNotes &&
+      !isHealthcareTier(ctx?.config) &&
+      !(detailsFromArgs(args)?.answers?.length > 0) &&
+      decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
+    const next = (
+      deferReadBack
+        ? [NEXT_QUESTIONS_NOTE_DEFERRED, needsNumber ? NO_NUMBER_NOTE : null]
+        : [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? nextQuestionsNote(ctx?.config) : null]
+    )
       .filter(Boolean)
       .join(" ");
     return {

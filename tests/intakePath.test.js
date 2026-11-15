@@ -113,7 +113,7 @@ describe("intakePathNote", () => {
     });
     it("the added text is described, never a quoted question", () => {
       for (const t of ["personal", "new_enquiry", "other"]) {
-        expect(/"[^"]+?"/.test(note(t, { config: notes }))).toBe(false);
+        expect(/"[^"]+\?"/.test(note(t, { config: notes }))).toBe(false);
       }
     });
   });

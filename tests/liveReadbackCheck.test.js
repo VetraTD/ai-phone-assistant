@@ -65,6 +65,21 @@ describe("READBACK_CHECK_RE", () => {
     "Is everything correct?",
   ])("EN checks: %s", (s) => expect(EN.readbackCheckRe.test(s)).toBe(true));
   it("ES checks", () => expect(ES.readbackCheckRe.test("¿Es correcto?")).toBe(true));
+  // Fix wave M9: the spelling checks the model actually says.
+  it.each([
+    "Did I spell that correctly?",
+    "Did I write that down right?",
+    "Have I spelled that properly?",
+    "Did I get the spelling correctly?",
+  ])("EN checks the spelling: %s", (s) => expect(EN.readbackCheckRe.test(s)).toBe(true));
+  it.each(["¿Lo he anotado bien?", "¿Lo he escrito bien?", "¿Lo tengo bien?"])("ES checks: %s", (s) =>
+    expect(ES.readbackCheckRe.test(s)).toBe(true)
+  );
+  it.each(["Did I spell that for you already?", "Could you spell that?", "I spelled that for you correctly, thanks."])(
+    "EN: a spelling ask or statement is not a check: %s",
+    (s) => expect(EN.readbackCheckRe.test(s)).toBe(false)
+  );
+  it("ES: a statement is not a check", () => expect(ES.readbackCheckRe.test("Lo he anotado en su ficha.")).toBe(false));
   it.each([
     "Is there anything else I can help you with?",
     "Is there anything else?",
