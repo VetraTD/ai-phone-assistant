@@ -4,7 +4,16 @@
  */
 import { describe, it, expect } from "vitest";
 
-const { confirmStyleOf, spellUpFrontOf, isHealthcareTier, INTAKE_CALLER_TYPES, LEAD_LIKE } = await import(
+const {
+  confirmStyleOf,
+  spellUpFrontOf,
+  isHealthcareTier,
+  INTAKE_CALLER_TYPES,
+  LEAD_LIKE,
+  decisionTypeOf,
+  mergeIntentArgs,
+  messagesSpellingRequired,
+} = await import(
   "../lib/capabilities/intakeSettings.js"
 );
 const { validateCapabilityConfig } = await import("../lib/capabilities/configSchema.js");
@@ -78,5 +87,35 @@ describe("loadConfig carries complianceTier", () => {
   });
   it("the no-business branch carries it too", () => {
     expect(loadConfig(null).complianceTier).toMatch(/^(standard|hipaa)$/);
+  });
+});
+
+describe("fix wave I1: an unclear type is read like a type never reported", () => {
+  it("decisionTypeOf", () => {
+    expect(decisionTypeOf(null)).toBe("new_enquiry");
+    expect(decisionTypeOf(undefined)).toBe("new_enquiry");
+    expect(decisionTypeOf("other")).toBe("new_enquiry");
+    expect(decisionTypeOf("personal")).toBe("personal");
+    expect(decisionTypeOf("existing_customer")).toBe("existing_customer");
+  });
+  it("the leads gate holds for null and other, not for a friend", () => {
+    const config = cfg({ spellUpFront: "leads" });
+    expect(messagesSpellingRequired({ config, callerType: null })).toBe(true);
+    expect(messagesSpellingRequired({ config, callerType: "other" })).toBe(true);
+    expect(messagesSpellingRequired({ config, callerType: "personal" })).toBe(false);
+  });
+  it("mergeIntentArgs: later wins, reason sticky, a missing or invalid type keeps the valid one", () => {
+    expect(mergeIntentArgs(null, { intent: "a" })).toEqual({ intent: "a" });
+    expect(mergeIntentArgs({ intent: "a" }, null)).toEqual({ intent: "a" });
+    expect(
+      mergeIntentArgs({ intent: "a", caller_type: "personal", reason_given: true }, { intent: "b" })
+    ).toEqual({ intent: "b", caller_type: "personal", reason_given: true });
+    expect(
+      mergeIntentArgs({ intent: "a", caller_type: "personal" }, { intent: "b", caller_type: "nonsense" }).caller_type
+    ).toBe("personal");
+    expect(
+      mergeIntentArgs({ intent: "a", caller_type: "personal" }, { intent: "b", caller_type: "supplier" }).caller_type
+    ).toBe("supplier");
+    expect(mergeIntentArgs({ reason_given: true }, { reason_given: false }).reason_given).toBe(true);
   });
 });

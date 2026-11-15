@@ -170,7 +170,6 @@ describe("state and the intake block", () => {
       await s.callTool("record_customer_request", MESSAGE);
       const last = seenCtx.filter((c) => c.name === "record_customer_request").pop();
       expect(last.ctx.callerType).toBe("personal");
-      expect(last.ctx.reasonGiven).toBe(true);
       expect(last.ctx.callerNumberReal).toBe(true);
       await s.hangUp();
     });
@@ -289,22 +288,21 @@ describe("the tool context carries the intake fields (both ends real)", () => {
     return execute.mock.calls[0][1];
   }
 
-  it("copies callerType, reasonGiven and callerNumberReal", async () => {
+  it("copies callerType and callerNumberReal", async () => {
     const ctx = await ctxFor(() => ({
       step: "gather_details",
       callerType: "personal",
-      reasonGiven: true,
       callerNumberReal: true,
     }));
     expect(ctx.callerType).toBe("personal");
-    expect(ctx.reasonGiven).toBe(true);
+    // Nothing reads a reasonGiven on the tool context (M5): it is not copied.
+    expect("reasonGiven" in ctx).toBe(false);
     expect(ctx.callerNumberReal).toBe(true);
   });
 
-  it("defaults: null, false, false", async () => {
+  it("defaults: null, false", async () => {
     const ctx = await ctxFor(() => ({ step: "gather_details" }));
     expect(ctx.callerType).toBeNull();
-    expect(ctx.reasonGiven).toBe(false);
     expect(ctx.callerNumberReal).toBe(false);
   });
 

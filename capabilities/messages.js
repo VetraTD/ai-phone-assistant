@@ -28,6 +28,7 @@ import {
   spellUpFrontOf,
   isHealthcareTier,
   intakeTypeFor,
+  decisionTypeOf,
   LEAD_LIKE,
 } from "../lib/capabilities/intakeSettings.js";
 import { END_READ_BACK } from "../lib/voice/intakePath.js";
@@ -112,7 +113,7 @@ function spelledReadBackNote(args, ctx) {
   let nameOn = ctx.callerSpelled === true;
   let emailOn = true;
   if (!isHealthcareTier(ctx?.config)) {
-    const lead = LEAD_LIKE.has(intakeTypeFor(args, ctx) ?? "new_enquiry");
+    const lead = LEAD_LIKE.has(decisionTypeOf(intakeTypeFor(args, ctx)));
     const end = confirmStyleOf(ctx?.config) === "end";
     const everyone = spellUpFrontOf(ctx?.config) === "everyone";
     nameOn = lead ? ctx.callerSpelled === true || end : ctx.callerSpelled === true && everyone;
