@@ -2025,7 +2025,12 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         // asks in one instruction, and the model duly delivered all three in a
         // single breath. Reported from a live call as the assistant still
         // stacking questions, and after-hours is a common path to land on.
-        afterHours += `Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`;
+        // Fix wave I6: the standard tier follows the message protocol (name and what it
+        // is about, a number only when theirs did not come through); the old ordered
+        // checklist stays for the healthcare tier.
+        afterHours += isHealthcareTier(config)
+          ? `Offer to record a callback request using record_customer_request with request_type "callback". Then collect what you need ONE question per turn: first their name, then the best number to reach them, then when they'd like the callback. Never ask for two of those in the same response.`
+          : `Offer to record a callback request using record_customer_request with request_type "callback", and follow the message protocol for what to ask: one question per turn, never two in the same response.`;
         break;
       case "book_later":
         // "Do NOT book appointments during closed hours" had two readings, and
@@ -2048,7 +2053,9 @@ export function buildDynamicTail(step, intent, config, extras = {}) {
         break;
       case "take_message":
       default:
-        afterHours += `Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
+        afterHours += !isHealthcareTier(config)
+          ? `Offer to take a message using record_customer_request with request_type "message", and follow the message protocol for what to ask.`
+          : `Offer to take a message using record_customer_request with request_type "message". Collect their name, number, and message.`;
         break;
     }
     sections.push(afterHours);

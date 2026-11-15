@@ -29,6 +29,7 @@ import {
   isHealthcareTier,
   intakeTypeFor,
   decisionTypeOf,
+  hasMessageNotes,
   LEAD_LIKE,
 } from "../lib/capabilities/intakeSettings.js";
 import { END_READ_BACK } from "../lib/voice/intakePath.js";
@@ -189,6 +190,17 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
 };
 
 /**
+ * The standard tier's description of the same tool (fix wave I5). Live reads a
+ * tool's description on every turn, so the old "after collecting the name,
+ * callback number and message" sentence kept driving a number ask the protocol
+ * says not to make. The healthcare tier and outbound keep the text above.
+ */
+const RECORD_CUSTOMER_REQUEST_STANDARD_DESCRIPTION =
+  "Record a message or callback request as soon as you have the caller's name and what it is about, " +
+  "with a number only if theirs did not come through (and a preferred callback time for callbacks). " +
+  "Call this when the caller wants to leave a message or have someone call them back.";
+
+/**
  * The message-taking protocol — its own prompt section, not a bullet, because
  * it is a procedure the model must follow in order rather than a rule it must
  * respect. The read-back in step 5 is what stops the receptionist recording a
@@ -284,8 +296,16 @@ function standardLines(cfg, config, { callback = false } = {}) {
   lines.push(
     `Save with record_customer_request as soon as you have the minimum: their name and what it is about` +
       (callback ? `, their preferred callback time,` : ``) +
-      ` plus a number if theirs did not come through. Set caller_type whenever you can tell.`,
-    `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`,
+      ` plus a number if theirs did not come through.`
+  );
+  // The business-questions line only means something when the notes list some
+  // (fix wave M8a); a business with none does not carry it on every turn.
+  if (hasMessageNotes(config)) {
+    lines.push(
+      `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`
+    );
+  }
+  lines.push(
     each
       ? `Confirming: confirm each answer briefly as it is given, spelling the surname back from what you heard and saying any number digit by digit; there is no closing recap.`
       : `Confirming: for new enquiries and existing clients, make one read-back at the end: ${END_READ_BACK}.`
@@ -418,7 +438,10 @@ export default {
 
   tools(config) {
     // Core: registered on every call regardless of configuration.
-    return [withRequirements(RECORD_CUSTOMER_REQUEST_DECLARATION, capabilityConfig(config, "messages"))];
+    const declaration = isHealthcareTier(config)
+      ? RECORD_CUSTOMER_REQUEST_DECLARATION
+      : { ...RECORD_CUSTOMER_REQUEST_DECLARATION, description: RECORD_CUSTOMER_REQUEST_STANDARD_DESCRIPTION };
+    return [withRequirements(declaration, capabilityConfig(config, "messages"))];
   },
 
   prompt(config) {

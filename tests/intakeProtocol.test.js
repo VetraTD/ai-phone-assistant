@@ -24,7 +24,8 @@ const bodyLines = (protocol) => protocol.split("\n").slice(2);
 const noQuotedQuestion = (text) => !/"[^"]+\?"/.test(text);
 
 describe("standard tier: a described goal, not a checklist", () => {
-  const { protocol, take, callback } = render({});
+  // The business-questions line renders only when the notes exist (M8a).
+  const { protocol, take, callback } = render({ notes: "Ask which department the message is for." });
 
   it("keeps the section header and drops the old checklist", () => {
     expect(protocol.startsWith("=== MESSAGE PROTOCOL ===\n")).toBe(true);
@@ -76,6 +77,29 @@ describe("standard tier: a described goal, not a checklist", () => {
     expect(take).not.toContain("preferred callback time");
   });
 
+  it("M8a: the business-questions line is absent with no notes and present with notes", () => {
+    for (const cfg of [{}, { notes: "   " }]) {
+      const r = render(cfg);
+      expect(r.protocol).not.toContain("this business's own questions");
+      expect(r.take).not.toContain("this business's own questions");
+      expect(r.protocol).not.toContain("short of time");
+    }
+    expect(protocol).toContain("this business's own questions");
+    expect(take).toContain("this business's own questions");
+  });
+
+  it("M8b: Set caller_type whenever you can tell is gone (the parameter says it)", () => {
+    expect(protocol).not.toContain("Set caller_type");
+    expect(take).not.toContain("Set caller_type");
+    expect(render({}).protocol).not.toContain("Set caller_type");
+  });
+
+  it("M1: the end read-back says which number they are called back on and that they can give another", () => {
+    const p = render({}).protocol;
+    expect(p).toContain("they will be called back on the number they are calling from");
+    expect(p).toContain("they can give another");
+  });
+
   it("the standing promise keeps its urgent/normal split; a callbackLine replaces it", () => {
     expect(protocol).toMatch(/as soon as possible[^.]*urgent[^.]*next business day|urgent[^.]*as soon as possible[^.]*next business day/);
     const withLine = render({ callbackLine: LINE });
@@ -86,7 +110,7 @@ describe("standard tier: a described goal, not a checklist", () => {
   });
 
   it("an empty config is the same as a standard tier one", () => {
-    expect(render({}, { complianceTier: "standard" }).protocol).toBe(protocol);
+    expect(render({}, { complianceTier: "standard" }).protocol).toBe(render({}).protocol);
   });
 });
 

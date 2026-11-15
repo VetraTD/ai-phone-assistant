@@ -50,7 +50,7 @@
   },
   {
     "name": "record_customer_request",
-    "description": "Record a message or callback request after collecting the caller's name, callback number, and message (and preferred callback time for callbacks). Call this when the caller wants to leave a message or have someone call them back.",
+    "description": "Record a message or callback request as soon as you have the caller's name and what it is about, with a number only if theirs did not come through (and a preferred callback time for callbacks). Call this when the caller wants to leave a message or have someone call them back.",
     "parameters": {
       "type": "object",
       "properties": {

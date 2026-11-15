@@ -78,8 +78,44 @@ describe("intakePathNote", () => {
     expect(note("sales_pitch", { config: std({ spellUpFront: "everyone" }) })).toContain("Ask them to spell their name");
   });
 
-  it("other: one open question about how you can help, before any detail question", () => {
-    expect(note("other")).toMatch(/one open question about how you can help, before any detail question/);
+  it("other: does not repeat the greeting's open question, asks what it concerns before any detail question (M6)", () => {
+    const n = note("other");
+    expect(n).toContain("do not ask that again");
+    expect(n).toContain("what it concerns in your own words, before any detail question");
+    expect(n).not.toContain("one open question about how you can help");
+  });
+
+  it("M1: with a real caller ID, says they will be called back on that number and can give another", () => {
+    for (const t of ["personal", "new_enquiry", "existing_customer"]) {
+      const n = note(t);
+      expect(n, t).toContain("they will be called back on the number they are calling from");
+      expect(n, t).toContain("they can give another");
+    }
+  });
+
+  describe("I3a: a business's own notes beat the note's absolute lines", () => {
+    const notes = std({ notes: "Always ask a friend for a number and their surname." });
+    it("personal: the first-name rule and the number rule defer to the notes", () => {
+      const n = note("personal", { config: notes });
+      expect(n).toContain("nothing more unless this business's notes ask for it");
+      expect(n).toContain("Do not ask for a number unless this business's notes ask for one");
+      expect(n).not.toContain("nothing more.");
+    });
+    it("every type: the number line defers when there are notes, and is absolute without", () => {
+      for (const t of ["personal", "new_enquiry", "existing_customer"]) {
+        expect(note(t, { config: notes }), t).toContain("unless this business's notes ask for one");
+        expect(note(t), t).not.toContain("unless this business's notes");
+      }
+      expect(note("personal")).toContain("nothing more.");
+    });
+    it("blank notes are no notes", () => {
+      expect(note("personal", { config: std({ notes: "   " }) })).not.toContain("unless this business's notes");
+    });
+    it("the added text is described, never a quoted question", () => {
+      for (const t of ["personal", "new_enquiry", "other"]) {
+        expect(/"[^"]+?"/.test(note(t, { config: notes }))).toBe(false);
+      }
+    });
   });
 
   it("healthcare, outbound, null, unknown and wrong_number get no note", () => {
