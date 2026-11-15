@@ -25,6 +25,7 @@ vi.mock("../services/notifications.js", () => ({
 
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { bootOutboundCall } from "./helpers/outboundBoot.js";
 import { getStrings, READBACK_CHECK_RE } from "../lib/voice/strings.js";
 import { readbackHasCheck } from "../lib/voice/askLedger.js";
 
@@ -273,6 +274,24 @@ describe("S4-B5: a spelled read-back in the same turn as the message save", () =
     });
     expect(summary.confirm.readback_spelled).toBe(0);
     expect(summary.confirm.readback_spelled_missing).toBe(1);
+    // The intake read-back counters are name-aware too: a business spelling its
+    // own name is not a read-back of the caller's details.
+    expect(summary.intake.readbacks).toBe(0);
+    expect(summary.intake.readbacks_without_check).toBe(0);
+  });
+
+  it("an acronym in the turn after the save is not a read-back either", async () => {
+    const summary = await record(async () => {
+      const s = await boot("CA_rb_acronym");
+      await s.assistantSays("Passing that on now.");
+      await save(s);
+      await s.turnEnds();
+      await s.callerSays("Thanks.");
+      await s.assistantTurn("We handle H V A C and P V C work. Is there anything else I can help you with?");
+      await s.hangUp();
+    });
+    expect(summary.intake.readbacks).toBe(0);
+    expect(summary.intake.readbacks_without_check).toBe(0);
   });
 
   it("a message read-back with no letters is still missing", async () => {
@@ -285,5 +304,29 @@ describe("S4-B5: a spelled read-back in the same turn as the message save", () =
     });
     expect(summary.confirm.readback_spelled).toBe(0);
     expect(summary.confirm.readback_spelled_missing).toBe(1);
+  });
+});
+
+describe("outbound is unchanged", () => {
+  it("the read-back counters stay at zero on an outbound call", async () => {
+    let saved;
+    const summary = await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      await x.s.callerSays("It's Jon Doe, J O N, D O E, 214 555 0123, it's about the invoice.");
+      await x.s.assistantSays(READ_BACK);
+      const [res] = await x.s.callTool("record_customer_request", MESSAGE);
+      saved = res?.response?.success;
+      await x.s.assistantSays(CLOSING);
+      await x.s.turnEnds();
+      await x.s.assistantTurn(READ_BACK + " " + CLOSING);
+      await x.s.hangUp();
+    });
+    // The write gate refuses a message save on an outbound call, so the save
+    // that opens the counters' scope cannot happen there and the guard is not
+    // reachable end to end. If outbound ever gains message saves this fails on
+    // purpose: replace it with a real "counters stay zero after a save".
+    expect(saved).not.toBe(true);
+    expect(summary.intake.readbacks).toBe(0);
+    expect(summary.intake.readbacks_without_check).toBe(0);
   });
 });

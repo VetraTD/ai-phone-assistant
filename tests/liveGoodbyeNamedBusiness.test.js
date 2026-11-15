@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bootLive } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
+import { bootOutboundCall } from "./helpers/outboundBoot.js";
 
 const CONFIG = {
   businessName: "Brightwork Plumbing",
@@ -90,5 +91,19 @@ describe("goodbye counters", () => {
     const { intake } = await goodbye(CONFIG, "Brightwork Plumbing is open until six today.");
     expect(intake.goodbye_turns).toBe(0);
     expect(intake.goodbye_named_business).toBe(0);
+  });
+});
+
+describe("outbound is unchanged", () => {
+  it("a goodbye that says the business name counts nothing and logs nothing", async () => {
+    const { intake, named } = await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      await x.s.callerSays("No, that's all thanks.");
+      await x.s.assistantTurn("Thanks for calling Brightwork Plumbing, have a great day!");
+      await x.s.hangUp();
+    });
+    expect(intake.goodbye_turns).toBe(0);
+    expect(intake.goodbye_named_business).toBe(0);
+    expect(named).toHaveLength(0);
   });
 });

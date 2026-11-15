@@ -17,6 +17,7 @@ vi.mock("../services/notifications.js", () => ({
 
 import { bootLive, fakeDb } from "./helpers/liveBoot.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
+import { bootOutboundCall } from "./helpers/outboundBoot.js";
 
 const CONFIG = {
   businessName: "Brightwork",
@@ -282,5 +283,66 @@ describe("the repeat ledger and a message save (P22 on the ledger path)", () => 
     expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
     expect(cuts() ?? 0).toBe(0);
     expect(summary.intake.reason_reasked).toBe(0);
+  });
+});
+
+describe("outbound is unchanged", () => {
+  it("a reported reason is never cut or counted, and a number ask is not counted", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      cleared = x.cleared;
+      await x.s.callerSays("It's about the invoice.");
+      await x.s.callTool("set_call_intent", { intent: "take_message", reason_given: true });
+      await x.s.assistantSays(ASK);
+      await x.s.turnEnds();
+      await x.s.callerSays("Sure.");
+      await x.s.assistantSays("And what's the best number to reach you on?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(cuts() ?? 0).toBe(0);
+    expect(summary.intake.reason_reasked).toBe(0);
+    expect(summary.intake.reason_reask_cut).toBe(0);
+    expect(summary.intake.number_asked_with_caller_id).toBe(0);
+  });
+
+  // What b96fe90 did, checked against its asksIn: "the reason for your call" is
+  // the q: key "q:reason call" (cut at the cap, as any q: need), and the
+  // "today" phrasing is skipped by the scheduling filter (never an ask).
+  it("a reason-style ask is cut at the ledger cap exactly as before (its q: key)", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      cleared = x.cleared;
+      for (let i = 0; i < 2; i += 1) {
+        await x.s.assistantTurn("What is the reason for your call?");
+        await x.s.callerSays("It's about the invoice.");
+      }
+      await x.s.assistantSays("What is the reason for your call?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(1);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_cut).toBe(1);
+    expect(cuts() ?? 0).toBe(0);
+  });
+
+  it("the 'today' phrasing is never cut, as before", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await bootOutboundCall(CONFIG);
+      cleared = x.cleared;
+      for (let i = 0; i < 3; i += 1) {
+        await x.s.assistantTurn("What is the reason for your call today?");
+        await x.s.callerSays("It's about the invoice.");
+      }
+      await x.s.assistantSays("What is the reason for your call today?");
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
   });
 });

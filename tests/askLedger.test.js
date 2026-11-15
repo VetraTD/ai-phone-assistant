@@ -668,3 +668,23 @@ describe("the reason kind", () => {
     expect(l.repeatIn("What is the call regarding?", { callerWords: "um" })).toBe("reason");
   });
 });
+
+describe("outbound: the reason kind is off (P25), the ledger behaves as it did before the kind existed", () => {
+  it("asksIn with reasonKind false keeps the old classes", () => {
+    expect(asksIn("What is the reason for your call?", { reasonKind: false })).toEqual(["q:reason call"]);
+    expect(asksIn("What is the call regarding?", { reasonKind: false })).toEqual(["q:call regarding"]);
+    // The scheduling skip still hides a "today" ask there, as it always did.
+    expect(asksIn("What is the reason for your call today?", { reasonKind: false })).toEqual([]);
+  });
+  it("a ledger built with reasonKind false repeats the q: key at the cap and never the fixed kind", () => {
+    const l = createAskLedger({ reasonKind: () => false });
+    for (let i = 0; i < 2; i += 1) l.recordReply("What is the reason for your call?", { callerSpoke: true });
+    expect(l.repeatIn("What is the reason for your call?", { callerWords: "um" })).toBe("q:reason call");
+    // A different phrasing is not the same need there.
+    expect(l.repeatIn("What are you calling about?", { callerWords: "um" })).toBeNull();
+    // The "today" phrasing was never an ask there, so it is never a repeat.
+    const t = createAskLedger({ reasonKind: () => false });
+    for (let i = 0; i < 3; i += 1) t.recordReply("What is the reason for your call today?", { callerSpoke: true });
+    expect(t.repeatIn("What is the reason for your call today?", { callerWords: "um" })).toBeNull();
+  });
+});

@@ -3911,6 +3911,22 @@ const SABOTAGES = [
     red: ["tests/liveReasonReask.test.js"],
   },
   {
+    name: "outbound-reason-kind-off",
+    why: "Caller-experience P25: the repeat ledger classifies a reason-style ask as the fixed reason kind on an outbound call too, so a phrasing with 'today' (never an ask before) is cut at the cap there. tests/liveReasonReask.test.js runs an outbound call that repeats it and expects no cut.",
+    file: "lib/voice/live/index.js",
+    find: "  const askLedger = createAskLedger({ reasonKind: () => !state.outboundCall });",
+    replace: "  const askLedger = createAskLedger(); // SABOTAGE",
+    red: ["tests/liveReasonReask.test.js"],
+  },
+  {
+    name: "readback-check-name-aware",
+    why: "Caller-experience fix round 1: the intake read-back counters count any run of capital letters again, so a business spelling its own name (or an acronym) in a scope turn reads as a read-back of the caller's details. tests/liveReadbackCheck.test.js asserts the intake counters stay 0 for both.",
+    file: "lib/voice/live/index.js",
+    find: "          (readsCallerContactBack(replyText, businessContacts) || nameVoicedIn(scope.name, replyText))",
+    replace: "          (readsCallerContactBack(replyText, businessContacts) || Boolean(S.spelledLettersRe?.test(replyText))) // SABOTAGE",
+    red: ["tests/liveReadbackCheck.test.js"],
+  },
+  {
     name: "reason-forgotten-after-save",
     why: "Caller-experience pre-review fix (P22 on the ledger path): the ledger keeps the reason need after a message is saved, so its cap cuts a reason ask about a new request. tests/liveReasonReask.test.js asks the reason twice, saves a message, and asks again.",
     file: "lib/voice/live/index.js",
