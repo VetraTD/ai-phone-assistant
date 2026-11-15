@@ -1,7 +1,7 @@
 [
   {
     "name": "set_call_intent",
-    "description": "Call this as soon as you understand why the caller is calling. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response.",
+    "description": "Call this as soon as you understand why the caller is calling. Do NOT wait — identify the intent and call this immediately, then continue helping in the same response. Also report what kind of caller this is and whether they have already said what the call is about, and call this again if either changes.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -14,6 +14,23 @@
             "transfer_human"
           ],
           "description": "The caller's primary intent"
+        },
+        "caller_type": {
+          "type": "string",
+          "enum": [
+            "new_enquiry",
+            "existing_customer",
+            "personal",
+            "supplier",
+            "sales_pitch",
+            "other",
+            "wrong_number"
+          ],
+          "description": "What kind of caller this is: a prospective customer, an existing customer, a personal call, a supplier, a sales pitch, a wrong number, or unclear"
+        },
+        "reason_given": {
+          "type": "boolean",
+          "description": "True once the caller has said what the call is about"
         }
       },
       "required": [
@@ -23,7 +40,7 @@
   },
   {
     "name": "end_call",
-    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up: you have asked whether there is anything else and they said no, or they said goodbye. Never say goodbye before that question has been answered. You MUST write your warm sign-off in the SAME response as this call — thank them for calling and wish them well. Nothing you say after this is heard.",
+    "description": "Signal that the conversation is naturally complete and the caller is ready to hang up: you have asked whether there is anything else and they said no, or they said goodbye. Never say goodbye before that question has been answered. You MUST write your warm sign-off in the SAME response as this call — thank them and wish them well, without saying the business's name unless this business's own instructions give their own sign-off. Nothing you say after this is heard.",
     "parameters": {
       "type": "object",
       "properties": {

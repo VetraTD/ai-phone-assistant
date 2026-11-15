@@ -91,13 +91,15 @@ describe("fakeDeps honours upcomingOnly", () => {
 // ---------------------------------------------------------------------------
 
 describe("hard names are spelled before they become a record", () => {
-  const config = () =>
+  // Task 4: a message's spelled name is a setting now (default "no"), so the
+  // refusal tests choose it explicitly.
+  const config = (messagesConfig = {}) =>
     loadConfig({
       id: "b-name",
       name: "Testwork Dental",
       timezone: "America/Chicago",
       allowed_tasks: ["take_message"],
-      business_capabilities: [{ capability_id: "messages", enabled: true, config: {} }],
+      business_capabilities: [{ capability_id: "messages", enabled: true, config: messagesConfig }],
     });
 
   const call = (caller_name) => ({
@@ -108,7 +110,7 @@ describe("hard names are spelled before they become a record", () => {
 
   it("refuses once and asks for the spelling", async () => {
     const res = await executeToolCall(call("Venkateshwaria Ayalavarapu"), {
-      config: config(),
+      config: config({ spellUpFront: "everyone" }),
       capabilityState: {},
       callerPhone: "+15551234567",
       spellingSettled: false,
@@ -128,7 +130,7 @@ describe("hard names are spelled before they become a record", () => {
     // business's record that ends up wrong. The owner chose: ask once for any
     // name not already on file. VOICE_SPELL_POLICY=hard restores this row.
     const res = await executeToolCall(call("Joe Smith"), {
-      config: config(),
+      config: config({ spellUpFront: "everyone" }),
       capabilityState: {},
       callerPhone: "+15551234567",
       spellingSettled: false,

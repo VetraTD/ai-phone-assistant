@@ -212,14 +212,18 @@ describe("Live: next reaches the model when the business has messages notes", ()
     expect(res.response.next).toContain("details");
   });
 
-  it("a business without notes: no next on the wire", async () => {
+  it("a business without notes: no business-questions note on the wire", async () => {
     for (const config of [CONFIG, withNotes("   ")]) {
       const s = await bootWith(config);
       await s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
       await s.assistantSays(SUMMARY);
       const [res] = await s.callTool("record_customer_request", MESSAGE);
       expect(res.response.success).toBe(true);
-      expect("next" in res.response).toBe(false);
+      // A lead can still get the spelled read-back note in `next` (Task 4);
+      // what must be absent is the note about the business's own questions.
+      const next = String(res.response.next ?? "");
+      expect(next).not.toMatch(/notes list/i);
+      expect(next).not.toMatch(/more questions|answers in details/i);
     }
   });
 

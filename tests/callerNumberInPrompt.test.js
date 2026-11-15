@@ -73,7 +73,12 @@ describe("the caller's own number", () => {
 
   it("the no-number block is in the dynamic tail, not the static prefix", async () => {
     const { buildStaticSystemPrefix } = await import("../services/gemini.js");
-    expect(buildStaticSystemPrefix(CONFIG, { integrations: [], callerPhone: null })).not.toContain("did not come through");
+    // The block's own heading, which only the dynamic tail emits. (The phrase
+    // "did not come through" also appears in the generic messages protocol, a
+    // rule rather than caller state, so it cannot be the marker.)
+    const prefix = buildStaticSystemPrefix(CONFIG, { integrations: [], callerPhone: null });
+    expect(prefix).not.toContain("=== THIS CALLER'S NUMBER ===");
+    expect(prefix).not.toContain("it is withheld or hidden");
   });
 
   it("is absent when the caller withheld their number, rather than invented", () => {
