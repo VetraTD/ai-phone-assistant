@@ -65,7 +65,7 @@ function fakeLive() {
   };
 }
 
-function fakeDb(callerContext = null) {
+function fakeDb(callerContext = null, messages = {}) {
   return {
     isEnabled: () => true,
     lookupBusinessByPhone: vi.fn(async () => ({ id: "biz-1", name: "Brightwork Family Dental" })),
@@ -73,7 +73,7 @@ function fakeDb(callerContext = null) {
       businessName: "Brightwork Family Dental",
       timezone: "America/Chicago",
       allowedTasks: ["general_question", "take_message", "book_appointment", "check_appointment"],
-      capabilities: { appointments: { enabled: true }, messages: { enabled: true } },
+      capabilities: { appointments: { enabled: true }, messages: { enabled: true, ...messages } },
       businessHours: {},
     }),
     withTenantSafe: async (_id, fn) => fn(),
@@ -89,7 +89,14 @@ let toolId = 0;
 /**
  * @param {"allow"|"refuse"} verdict - what the tool layer does with a write
  */
-async function boot(verdict = "refuse", { callerContext = null } = {}) {
+// These tests are about WHAT TRIGGERS the nudge, not whether the business asks callers
+// to spell: no intent is reported through the mocked executor, and on the standard
+// tier an unreported intent is nudged only under spellUpFront "everyone" (fix wave
+// I4), so the callers of those tests ask for it. The intent rules are in
+// tests/intakeSpelling.test.js.
+const SPELL_ALL = { spellUpFront: "everyone" };
+
+async function boot(verdict = "refuse", { callerContext = null, messages = {} } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   // The shape services/tools.js returns when the spelling gate holds a write
@@ -116,7 +123,7 @@ async function boot(verdict = "refuse", { callerContext = null } = {}) {
   await handleLiveSessionConnection(ws, {}, {
     now: () => 0,
     connect: live.connect,
-    database: fakeDb(callerContext),
+    database: fakeDb(callerContext, messages),
     env: {},
     execute,
   });
@@ -276,7 +283,7 @@ describe("a refused write answered with a callback promise", () => {
     // real call the model collected everything, said "that's all confirmed,
     // anything else?", heard "no", and only THEN asked. A prompt line is a
     // request; this is the counted nudge at the moment the name arrives.
-    const s = await boot("allow");
+    const s = await boot("allow", { messages: SPELL_ALL });
     s.hear("Hi, it's Jane Fitzgerald.");
     s.say("Lovely, thanks. What day suits you?");
     s.endTurn();
@@ -306,7 +313,7 @@ describe("a refused write answered with a callback promise", () => {
     // Three assistant turns, sixteen seconds, no caller speech between any of
     // them. The debug log calls that three turns; the caller hears one stream
     // repeating itself, and reported it as the worst thing about the call.
-    const s = await boot("allow");
+    const s = await boot("allow", { messages: SPELL_ALL });
     s.hear("Hi, it's Jane Fitzgerald.");
     s.say("Lovely, thanks. What day suits you?");
     s.endTurn();
@@ -337,7 +344,7 @@ describe("a refused write answered with a callback promise", () => {
   // A name in a tool argument cannot be phrased around.
   // -------------------------------------------------------------------------
   it("nudges off a name in a tool argument when neither regex can see one", async () => {
-    const s = await boot("allow");
+    const s = await boot("allow", { messages: SPELL_ALL });
     // The exact phrasing that defeated nameGivenRe on two real calls, and an
     // assistant reply that repeats no name at all — which is now the norm.
     s.hear("let's do uh Nathan Dodla");
@@ -353,7 +360,7 @@ describe("a refused write answered with a callback promise", () => {
     // Same two argument names as services/tools.js's callerNameFromArgs. A
     // nudge that watched a different set from the gate it is trying to get
     // ahead of would nudge for writes that were never going to be refused.
-    const s = await boot("allow");
+    const s = await boot("allow", { messages: SPELL_ALL });
     s.hear("it's for a callback");
     s.say("Sure, what day suits?");
     await s.callTool("record_customer_request", { caller_name: "Nathan Dodla" });
@@ -390,7 +397,7 @@ describe("a refused write answered with a callback promise", () => {
   it("still nudges when the record has no name on it", async () => {
     // The control. An empty record must not silence the nudge -- that is the
     // ordinary first-time caller, and the whole population this exists for.
-    const s = await boot("allow", { callerContext: { upcomingAppointments: [] } });
+    const s = await boot("allow", { callerContext: { upcomingAppointments: [] }, messages: SPELL_ALL });
     s.hear("let's do uh Nathan Dodla");
     s.say("What day were you thinking of?");
     await s.callTool("book_appointment", { client_name: "Nathan Dodla" });
@@ -448,7 +455,7 @@ describe("a refused write answered with a callback promise", () => {
   });
 
   it("spends the nudge at most once per call", async () => {
-    const s = await boot("allow");
+    const s = await boot("allow", { messages: SPELL_ALL });
     s.hear("It's Jane Fitzgerald.");
     s.say("Lovely.");
     s.endTurn();

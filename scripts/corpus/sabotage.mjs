@@ -4054,6 +4054,22 @@ const SABOTAGES = [
     replace: '      if ("intentArgs" in effects) intentArgs = effects.intentArgs; // SABOTAGE',
     red: ["tests/liveSaveCallerType.test.js"],
   },
+  {
+    name: "nudge-name-gated-intents",
+    why: "Fix wave I4: the Live spelling nudge stops treating a booking, lookup, cancel or quote as an intent whose gate holds a name, so with the default setting it stands down for them too and a booking caller is never nudged to spell. tests/intakeSpelling.test.js sends a booking, a quote, a lookup and a cancel.",
+    file: "lib/voice/live/index.js",
+    find: "      !NAME_GATED_INTENTS.has(turnIntent) &&",
+    replace: "      true && // SABOTAGE",
+    red: ["tests/intakeSpelling.test.js"],
+  },
+  {
+    name: "nudge-intent-agnostic",
+    why: "Fix wave I4: the nudge stands down only for take_message and callback_request again, so a transfer that fell back to a message, a plain question or a call with no intent reported is nudged to spell on a business that never asked. tests/intakeSpelling.test.js sends each.",
+    file: "lib/voice/live/index.js",
+    find: "      !NAME_GATED_INTENTS.has(turnIntent) &&",
+    replace: '      (turnIntent === "take_message" || turnIntent === "callback_request") && // SABOTAGE',
+    red: ["tests/intakeSpelling.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

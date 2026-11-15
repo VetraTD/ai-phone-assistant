@@ -170,6 +170,88 @@ describe("the Live spelling nudge follows the setting", () => {
   });
 });
 
+// Fix wave I4 / P30: on the standard tier the nudge fires only for an intent whose
+// gate still holds a name (a booking, a lookup, a quote) or when the setting asks.
+describe("the Live spelling nudge by intent (fix wave I4)", () => {
+  beforeEach(() => clearStats());
+
+  async function turnWith({ messages = {}, tier, intents = [], later } = {}) {
+    const config = { ...LIVE_CONFIG(messages), ...(tier ? { complianceTier: tier } : {}) };
+    const s = await bootLive({ config, callSid: "CA_spell_intent" });
+    let first = true;
+    for (const args of intents) {
+      if (first) await s.callerSays("Hi, it's Jane Fitzgerald.");
+      first = false;
+      await s.callTool("set_call_intent", args);
+    }
+    if (first) await s.callerSays("Hi, it's Jane Fitzgerald.");
+    if (later) {
+      await s.assistantTurn("Lovely, thanks.");
+      await s.callerSays(later);
+    }
+    await s.assistantTurn("Lovely, thanks. What is it about?");
+    await s.hangUp();
+  }
+
+  it("transfer_human falling back to a message: no nudge", async () => {
+    await turnWith({ intents: [{ intent: "transfer_human" }] });
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("general_question: no nudge", async () => {
+    await turnWith({ intents: [{ intent: "general_question" }] });
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("callback_request: no nudge", async () => {
+    await turnWith({ intents: [{ intent: "callback_request" }] });
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("no intent reported at all, spellUpFront no: no nudge", async () => {
+    await turnWith({});
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("leads: a lead is nudged, a personal caller is not", async () => {
+    await turnWith({ messages: { spellUpFront: "leads" }, intents: [{ intent: "take_message", caller_type: "new_enquiry" }] });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+    clearStats();
+    await turnWith({ messages: { spellUpFront: "leads" }, intents: [{ intent: "take_message", caller_type: "personal" }] });
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("leads: a call whose type was never reported is a lead and is nudged", async () => {
+    await turnWith({ messages: { spellUpFront: "leads" } });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+  it("an intent already in call state from an earlier turn decides: transfer_human stays quiet", async () => {
+    await turnWith({ intents: [{ intent: "transfer_human" }], later: "Sorry, it's Jane Fitzgerald." });
+    expect(stat("live_spelling_ask_nudged") ?? 0).toBe(0);
+  });
+  it("an intent already in call state from an earlier turn decides: a booking is still nudged", async () => {
+    clearStats();
+    const config = LIVE_CONFIG({});
+    const s = await bootLive({ config, callSid: "CA_spell_intent_b" });
+    await s.callerSays("I'd like to book a visit.");
+    await s.callTool("set_call_intent", { intent: "book_appointment" });
+    await s.assistantTurn("Happy to help. Who am I speaking with?");
+    await s.callerSays("Sorry, it's Jane Fitzgerald.");
+    await s.assistantTurn("Lovely, thanks.");
+    await s.hangUp();
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+  it("quote_request and check_appointment still nudge on the standard tier", async () => {
+    await turnWith({ intents: [{ intent: "quote_request" }] });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+    clearStats();
+    await turnWith({ intents: [{ intent: "check_appointment" }] });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+    clearStats();
+    await turnWith({ intents: [{ intent: "cancel_reschedule" }] });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+  it("the healthcare tier is unchanged: a general_question call is still nudged", async () => {
+    await turnWith({ tier: "hipaa", intents: [{ intent: "general_question" }] });
+    expect(stat("live_spelling_ask_nudged")).toBe(1);
+  });
+});
+
 describe("intake.spell_asks counts every spelling ask on an inbound call", () => {
   it("one ask in an assistant turn is one in the summary block", async () => {
     const lines = [];
