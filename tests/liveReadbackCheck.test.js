@@ -234,6 +234,47 @@ describe("S4-B5: a spelled read-back in the same turn as the message save", () =
     expect(summary.confirm.readback_spelled_missing).toBe(0);
   });
 
+  it("with a real caller ID there is no number in the read-back: the saved name's letters are enough", async () => {
+    const summary = await record(async () => {
+      const s = await boot("CA_rb_nonum");
+      await s.assistantSays(
+        "So that's Jon, J-O-N, Doe, D-O-E, about the invoice, and they'll call you back on the number you're calling from."
+      );
+      await save(s);
+      await s.assistantSays(CLOSING);
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.readback_spelled).toBe(1);
+    expect(summary.confirm.readback_spelled_missing).toBe(0);
+  });
+
+  it("letters spoken in an earlier turn since the last save count, tested against the saved name", async () => {
+    const summary = await record(async () => {
+      const s = await boot("CA_rb_earlier");
+      await s.assistantTurn("So that's Jon, J-O-N, Doe, D-O-E, about the invoice, is that right?");
+      await s.callerSays("Yes.");
+      await s.assistantSays("Passing that on now.");
+      await save(s);
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.readback_spelled).toBe(1);
+    expect(summary.confirm.readback_spelled_missing).toBe(0);
+  });
+
+  it("the business spelling its own name in the save turn does not count", async () => {
+    const summary = await record(async () => {
+      const s = await boot("CA_rb_own");
+      await s.assistantSays("We are Brightwork, B-R-I-G-H-T-W-O-R-K, by the way.");
+      await save(s);
+      await s.turnEnds();
+      await s.hangUp();
+    });
+    expect(summary.confirm.readback_spelled).toBe(0);
+    expect(summary.confirm.readback_spelled_missing).toBe(1);
+  });
+
   it("a message read-back with no letters is still missing", async () => {
     const summary = await record(async () => {
       const s = await boot("CA_rb_nospell");

@@ -3911,6 +3911,14 @@ const SABOTAGES = [
     red: ["tests/liveReasonReask.test.js"],
   },
   {
+    name: "reason-forgotten-after-save",
+    why: "Caller-experience pre-review fix (P22 on the ledger path): the ledger keeps the reason need after a message is saved, so its cap cuts a reason ask about a new request. tests/liveReasonReask.test.js asks the reason twice, saves a message, and asks again.",
+    file: "lib/voice/live/index.js",
+    find: '        askLedger.forget("reason");',
+    replace: "        // SABOTAGE",
+    red: ["tests/liveReasonReask.test.js"],
+  },
+  {
     name: "goodbye-named-counter",
     why: "Caller-experience Task 6: the business-name check on an armed goodbye is negated, so a goodbye that says the name is not counted and a plain one is. tests/liveGoodbyeNamedBusiness.test.js pins both.",
     file: "lib/voice/live/index.js",
@@ -3930,7 +3938,7 @@ const SABOTAGES = [
     name: "readback-spelled-same-turn",
     why: "S4-B5 (Caller-experience Task 6): spelled letters read back with the caller's details in the same turn as a message save stop counting as a spelled read-back, so readback_spelled_missing reads 1 again. tests/liveReadbackCheck.test.js reproduces the prod shape.",
     file: "lib/voice/live/index.js",
-    find: '      if (save.rule === "message" && spelledContactReadBack) save.spelled = true;',
+    find: '      if (save.rule === "message" && nameVoicedIn(save.name, replyText)) save.spelled = true;',
     replace: "      if (false) save.spelled = true; // SABOTAGE",
     red: ["tests/liveReadbackCheck.test.js"],
   },

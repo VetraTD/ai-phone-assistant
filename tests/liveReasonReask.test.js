@@ -237,3 +237,50 @@ describe("a number ask with a real caller ID", () => {
     expect(summary.intake.number_asked_with_caller_id).toBe(0);
   });
 });
+
+describe("the repeat ledger and a message save (P22 on the ledger path)", () => {
+  const ASK2 = "What is the call regarding?";
+  /** The reason asked and answered twice, so a third ask is at the ledger's cap. */
+  async function askedTwice(x) {
+    await x.s.assistantTurn(ASK2);
+    await x.s.callerSays("It's about the invoice.");
+    await x.s.assistantTurn(ASK2);
+    await x.s.callerSays("The invoice, like I said.");
+  }
+
+  it("before any save, a third ask is still cut by the ledger", async () => {
+    let cleared;
+    await record(async () => {
+      const x = await pastGreeting();
+      cleared = x.cleared;
+      await askedTwice(x);
+      await x.s.assistantSays(ASK2);
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(1);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_cut).toBe(1);
+  });
+
+  it("after a message save the same ask is not cut by the ledger, not counted", async () => {
+    let cleared;
+    const summary = await record(async () => {
+      const x = await pastGreeting({ database: storeDb() });
+      cleared = x.cleared;
+      await askedTwice(x);
+      await x.s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
+      await x.s.assistantSays("So that's Jon on 2 1 4, 5 5 5, 0 1 2 3 about the invoice, passing that on now.");
+      const [res] = await x.s.callTool("record_customer_request", MESSAGE);
+      expect(res?.response?.success).toBe(true);
+      await x.s.turnEnds();
+      await x.s.callerSays("One more thing.");
+      await x.s.assistantSays(ASK2);
+      await x.s.turnEnds();
+      await x.s.hangUp();
+    });
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
+    expect(cuts() ?? 0).toBe(0);
+    expect(summary.intake.reason_reasked).toBe(0);
+  });
+});
