@@ -125,3 +125,24 @@ times). From 2026-11-16 02:09 UTC prod runs 00132-cis: 1360644 with the question
 **Next batch (owner, 2026-11-16):** question and across-turn cuts become counters only. A message is never lost: the
 hang-up is blocked once when a message is owed and not saved, and after the call the same normal message email is
 written from the call if still nothing was saved. The existing-client read-back gets a check only.
+
+## Cuts and messages round results (2026-11-16, revision voice-uk-prod-00134-xaw @bb2175c)
+
+Built as planned except one change, approved by the owner before the build: the hang-up is NOT blocked. The
+receptionist gets no extra turn, so a doubled goodbye or a spoken "let me save that" cannot happen. Instead, every
+call that ends with a message owed and none saved gets one normal message email, written in code right after the
+call: the caller's own words, their number (or "withheld"), and "No full message was left on the call." The question
+and across-turn cuts are now counters only; `LIVE_ASK_CUT` is gone. Live since 06:17 UTC.
+
+Four scripted calls by the owner on the US line (06:24 to 06:47 UTC). All four emails arrived.
+
+| # | Call | Result | What happened |
+|---|---|---|---|
+| 1 | Seller (SEO) | **Pass** | The receptionist saved the message itself, 0.6 s after the first words (round 3: nothing saved). Plain goodbye. |
+| 2 | Withheld number, new lead; "What?" at the number question | **Pass** (Off: interruptions) | After "What?" the full question was asked again, no chop. Email arrived with the number. The kept within-turn cut fired twice, each right after a double save, and was heard as a slight gap. Saying "hmm" or "uh" while the receptionist spoke stopped it mid-sentence (6 interruptions), so it asked for a consultation time three times. The end read-back left out the number. |
+| 3 | Existing client (Facebook ads) | **Pass** (Off: no read-back) | Saved, one question. No end read-back again (existing clients 0 of 2; the name was right both times). The caller's words were heard as Spanish or Portuguese, so the receptionist asked them to repeat four times. The goodbye named the business. |
+| 4 | Lead who hangs up when asked a question | **Pass** | Nothing was saved before the hang-up; the after-call message was written 5 ms after the call ended and the normal email arrived. The receptionist recognised the number from earlier test calls and greeted the caller by name. |
+
+**For the next round (not fixed here):** short sounds like "hmm" while the receptionist talks should not interrupt it
+(a voice-model interruption setting, needs measuring); existing clients get no end read-back; callers misheard as
+another language; the goodbye naming the business once; a withheld caller's number missing from the end read-back.
