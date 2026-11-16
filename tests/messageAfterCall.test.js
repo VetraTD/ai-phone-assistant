@@ -83,6 +83,7 @@ async function boot({
   refuseFirst = false,
   failLastChance = false,
   env = {},
+  owedDelayMs = 0,
 } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
@@ -122,6 +123,9 @@ async function boot({
       };
     }
     if (fc.name === "record_customer_request") {
+      if (owedDelayMs && fc.id === "after_call_record_customer_request") {
+        await new Promise((r) => setTimeout(r, owedDelayMs));
+      }
       if (refuseFirst && ctx?.lastChance !== true) {
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "spell it first" } },
@@ -420,7 +424,8 @@ describe("the after-call message", () => {
   });
 
   it("verify reads the owed write as a recorded message", async () => {
-    const s = await boot({ env: { POSTCALL_VERIFY: "count" } });
+    // A slow write: verify must wait for it, not race past it.
+    const s = await boot({ env: { POSTCALL_VERIFY: "count" }, owedDelayMs: 150 });
     await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
     await s.callerTurn(WORDS_1);
     await s.hangUp();

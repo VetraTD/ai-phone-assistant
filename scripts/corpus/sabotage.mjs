@@ -4290,8 +4290,8 @@ const SABOTAGES = [
     name: "aftercall-not-twice",
     why: "Message-owed round: the owed write no longer re-checks that a message was saved, so a call that saved one also gets a second row. tests/messageAfterCall.test.js saves first, then hangs up.",
     file: "lib/voice/live/index.js",
-    find: "    if (!runner || messagesRecordedThisCall > 0) return;",
-    replace: "    if (!runner) return; // SABOTAGE",
+    find: "      messagesRecorded: messagesRecordedThisCall, // read now, after the last chance settled",
+    replace: "      messagesRecorded: 0, // SABOTAGE",
     red: ["tests/messageAfterCall.test.js"],
   },
   {
