@@ -4451,7 +4451,7 @@ const SABOTAGES = [
     why: "Fix wave M3: the owed write's effect texts the caller 'we got your message' when SMS is on. tests/customerRequestCorrection.test.js pins that the marked effect sends no caller text.",
     file: "capabilities/messages.js",
     find: "party.verified && effect.afterCall !== true",
-    replace: "party.verified // SABOTAGE",
+    replace: "party.verified /* SABOTAGE */",
     red: ["tests/customerRequestCorrection.test.js"],
   },
   {
