@@ -221,9 +221,9 @@ const SABOTAGES = [
     why:
       "puts `supersededHere` back into the write-order gate's refusal disjunction. This is the exact state that refused five booking attempts on CA03558d and four on CA919b69. RETARGETED (LVX179): the gate's condition is now `(a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed)`; the veto is OR-ed onto the whole decision.",
     file: "services/tools.js",
-    find: "if (hasTarget && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {",
+    find: "if (hasTarget && !closeTimeMessage && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {",
     replace:
-      "if (hasTarget && !consentLatched && ((a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) || agreementSuperseded(ctx)) && !spellFirst && !inAdditionFirst) { // SABOTAGE",
+      "if (hasTarget && !closeTimeMessage && !consentLatched && ((a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) || agreementSuperseded(ctx)) && !spellFirst && !inAdditionFirst) { // SABOTAGE",
     red: [REPLAY],
   },
   {
@@ -4324,6 +4324,30 @@ const SABOTAGES = [
     file: "lib/voice/live/index.js",
     find: "      Promise.all([whenTranscriptSettled(), lastChanceSettled])",
     replace: "      Promise.all([whenTranscriptSettled()]) // SABOTAGE",
+    red: ["tests/messageAfterCall.test.js"],
+  },
+  {
+    name: "lastchance-consent-exempt",
+    why: "Fix round 1 (B14): the close-time message write is refused by the older consent cascade whenever caller words are still in flight at the hang-up. tests/liveWriteConsent.test.js and tests/messageAfterCall.test.js (real gates) pin the exemption.",
+    file: "services/tools.js",
+    find: "            const closeTimeMessage = ctx?.lastChance === true && fc.name === \"record_customer_request\";",
+    replace: "            const closeTimeMessage = false; // SABOTAGE",
+    red: ["tests/liveWriteConsent.test.js", "tests/messageAfterCall.test.js"],
+  },
+  {
+    name: "lastchance-requirements-exempt",
+    why: "Fix round 1 (B15): the close-time message write is refused by required identity / fields / confirmBeforeWrite, which cannot be collected after the call. tests/requirements.test.js and tests/messageAfterCall.test.js (real gates) pin the exemption.",
+    file: "services/tools.js",
+    find: "            ctx?.lastChance === true && fc.name === \"record_customer_request\"",
+    replace: "            false // SABOTAGE",
+    red: ["tests/requirements.test.js", "tests/messageAfterCall.test.js"],
+  },
+  {
+    name: "aftercall-real-gate",
+    why: "Fix round 1: the owed write no longer goes out as the last chance, so the real gates (consent, requirements, spelling) judge it like an in-call save and refuse it. tests/messageAfterCall.test.js asserts lastChance on the write and runs the real gates.",
+    file: "lib/voice/live/index.js",
+    find: "      lastChanceWrite = true; // the owed write also writes as the last chance",
+    replace: "      lastChanceWrite = false; // SABOTAGE",
     red: ["tests/messageAfterCall.test.js"],
   },
 ];

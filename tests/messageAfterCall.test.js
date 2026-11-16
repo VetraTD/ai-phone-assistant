@@ -20,6 +20,7 @@ vi.mock("../services/notifications.js", () => ({
 import { handleLiveSessionConnection } from "../lib/voice/live/index.js";
 import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
 import messages from "../capabilities/messages.js";
+import { makeFakeDeps } from "../lib/harness/fakeDeps.js";
 
 class FakeSocket extends EventEmitter {
   constructor() {
@@ -84,6 +85,8 @@ async function boot({
   failLastChance = false,
   env = {},
   owedDelayMs = 0,
+  realTools = false,
+  refuseOwed = false,
 } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
@@ -126,6 +129,16 @@ async function boot({
       if (owedDelayMs && fc.id === "after_call_record_customer_request") {
         await new Promise((r) => setTimeout(r, owedDelayMs));
       }
+      if (refuseOwed && fc.id === "after_call_record_customer_request") {
+        return {
+          functionResponse: {
+            id: fc.id,
+            name: fc.name,
+            response: { success: false, gated: true, message: `held: ${fc.args?.message}` },
+          },
+          stateEffects: { writeGateRefusal: "consent" },
+        };
+      }
       if (refuseFirst && ctx?.lastChance !== true) {
         return {
           functionResponse: { id: fc.id, name: fc.name, response: { success: false, message: "spell it first" } },
@@ -150,7 +163,7 @@ async function boot({
       connect: live.connect,
       database,
       env,
-      execute,
+      ...(realTools ? { capabilityDeps: makeFakeDeps({}).deps } : { execute }),
       verify,
       recover: vi.fn(async () => ({ ran: false, booked: false })),
       judge: vi.fn(async () => ({ ran: true, agreedAction: "none" })),
@@ -431,6 +444,46 @@ describe("the after-call message", () => {
     await s.hangUp();
     await vi.waitFor(() => expect(s.verify).toHaveBeenCalled());
     expect(s.verify.mock.calls[0][0].messagesRecorded).toBe(1);
+  });
+
+  it("a refused owed write logs a closed reason and no caller words", async () => {
+    const s = await boot({ refuseOwed: true });
+    await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+    await s.callerTurn(WORDS_1);
+    await s.hangUp();
+    expect(c().message_after_call_failed).toBe(1);
+    const mine = lines.filter((l) => l.includes("live_message_after_call"));
+    expect(mine).toHaveLength(1);
+    expect(JSON.parse(mine[0])).toMatchObject({ ok: false, reason: "consent" });
+    for (const l of lines) expect(l).not.toContain("plumbing");
+  });
+
+  // The REAL services/tools.js gates, not a stub: caller words still in flight at the hang-up
+  // (lastCallerText non-empty) and a required name that was never given.
+  describe("through the real tool gates", () => {
+    const REQUIRED = { ...CONFIG, capabilities: { messages: { enabled: true, require: { identity: { builtin: ["name"] } } } } };
+
+    it("a mid-sentence hang-up with a required name still writes the message", async () => {
+      const s = await boot({ realTools: true, config: REQUIRED });
+      await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+      await s.callerTurn(WORDS_1);
+      await s.callerSays("and it also needs a booking page for");
+      await s.hangUp();
+      expect(c().message_saved_after_call).toBe(1);
+      expect(c().message_after_call_failed ?? 0).toBe(0);
+      expect(s.rows).toHaveLength(1);
+      expect(s.rows[0].message).toContain("booking page for");
+      expect(s.rows[0].ownerNoticePending).toBe(true);
+    });
+
+    it("a hang-up between turns with a required name still writes the message", async () => {
+      const s = await boot({ realTools: true, config: REQUIRED });
+      await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+      await s.callerTurn(WORDS_1);
+      await s.hangUp();
+      expect(c().message_saved_after_call).toBe(1);
+      expect(s.rows).toHaveLength(1);
+    });
   });
 
   it("logs the outcome only: no caller words in any line", async () => {

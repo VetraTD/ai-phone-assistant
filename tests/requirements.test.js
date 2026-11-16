@@ -401,3 +401,46 @@ describe("checkRequirements — names everything still outstanding", () => {
     expect(r.message).toMatch(/\[not caller speech\]/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// B15: the close-time message write (lastChance) skips the requirements. After
+// the call nothing can be collected, and a message with "not given" fields
+// beats no message. Every in-call save keeps the requirement exactly as before.
+// ---------------------------------------------------------------------------
+describe("lastChance record_customer_request skips checkRequirements (B15)", () => {
+  const CONFIGS = {
+    "identity.builtin name": { require: { identity: { builtin: ["name"] } } },
+    "identity.builtin callback_number": { require: { identity: { builtin: ["callback_number"] } } },
+    "identity.custom": { require: { identity: { custom: [DENTAL] } } },
+    "requiredFields caller_name": { require: { requiredFields: ["caller_name"] } },
+    confirmBeforeWrite: { require: { confirmBeforeWrite: true } },
+  };
+  const ctxFor = (cfg, over = {}) => ({
+    businessId: "biz-1",
+    callId: "call-1",
+    callerPhone: "withheld",
+    integrations: [],
+    capabilityState: {},
+    config: { capabilities: { messages: cfg } },
+    ...over,
+  });
+  const fc = { id: "m1", name: "record_customer_request", args: { request_type: "message", message: "wants a website" } };
+
+  for (const [label, cfg] of Object.entries(CONFIGS)) {
+    it(`${label}: refused in a call, written at the close`, async () => {
+      const inCall = await executeToolCall(fc, ctxFor(cfg));
+      expect(inCall.functionResponse.response.success).toBe(false);
+      const atClose = await executeToolCall(fc, ctxFor(cfg, { lastChance: true }));
+      expect(atClose.functionResponse.response.success).toBe(true);
+      expect(atClose.stateEffects.capabilityEffects[0].type).toBe("recorded");
+    });
+  }
+
+  it("lastChance does not exempt any other write tool", async () => {
+    const out = await executeToolCall(
+      { id: "q1", name: "record_quote_request", args: { service_description: "water heater" } },
+      ctxFor(CONFIGS["identity.custom"], { lastChance: true, config: { capabilities: { quotes: CFG_DENTAL } } })
+    );
+    expect(out.functionResponse.response.success).toBe(false);
+  });
+});

@@ -2369,7 +2369,12 @@ export async function executeToolCall(fc, ctx) {
               a1Save.awaitingAnswer !== true &&
               fc.name === "book_appointment" &&
               inAdditionWouldRefuse(fc.args || {}, ctx, ctx?.config || {});
-            if (hasTarget && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
+            // B14: the close-time message write (saveOutstandingMessage and the
+            // after-call message) is the "last_chance" verdict above, whatever
+            // the caller's words in flight were. lastChance is false on every
+            // in-call save, so nothing in a call changes.
+            const closeTimeMessage = ctx?.lastChance === true && fc.name === "record_customer_request";
+            if (hasTarget && !closeTimeMessage && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
               bumpCounter("write_order_would_refuse");
               // LVX156. A read-back that was made and answered unreadably
               // reaches the ceiling a turn earlier than a write nobody was
@@ -2889,7 +2894,12 @@ export async function executeToolCall(fc, ctx) {
           }
 
           const cfg = capabilityConfig(ctx?.config, pack.id);
-          const check = checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
+          // B15: after the call nothing can be collected, and a message with
+          // "not given" fields beats no message. Only the close-time message.
+          const check =
+            ctx?.lastChance === true && fc.name === "record_customer_request"
+              ? { ok: true }
+              : checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {
             // The refusal throws fc.args away — including a name the caller
             // already said out loud and the model already had. Keeping it is

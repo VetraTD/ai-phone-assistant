@@ -220,6 +220,28 @@ describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => 
     expect(functionResponse.response.success).toBe(true);
   });
 
+  it("B14: the close-time message write is exempt whatever the caller's last words were", async () => {
+    // A mid-sentence hang-up leaves words in flight: lastCallerText is non-empty
+    // on the close-time write, and the older consent cascade refused it.
+    const fc = { id: "lc2", name: "record_customer_request", args: { request_type: "message" } };
+    const words = { ...ctxWith("I wanted to ask about the website for"), callerSaidThisCall: "I wanted to ask about the website for" };
+    const closing = await executeToolCall(fc, { ...words, lastChance: true });
+    expect(closing.functionResponse.response.success).toBe(true);
+    // In a call (lastChance false) nothing changes: the A1 message rule saves it.
+    const inCall = await executeToolCall(fc, { ...words, lastChance: false });
+    expect(inCall.functionResponse.response.success).toBe(true);
+  });
+
+  it("B14: lastChance exempts only record_customer_request, not a booking with words in flight", async () => {
+    mockCreateAppointment.mockResolvedValue("appt-x");
+    const { functionResponse } = await book({
+      ...ctxWith("I wanted to book for"),
+      callerSaidThisCall: "I wanted to book for",
+      lastChance: true,
+    });
+    expect(functionResponse.response.success).toBe(false);
+  });
+
   it("A1: saves that same message write when it is NOT the sweep, too", async () => {
     // Until round A1 this asserted a REFUSAL: "the exemption is the flag, not
     // the tool". That encoded the old rule that a message waits for a yes like
