@@ -96,3 +96,32 @@ line (16:29-17:04 UTC). Read from the call logs; per-call detail is in the S4 le
 **Patterns:** the goodbye named the business on 4 of 5 calls that ended with a goodbye. A read-back never asked "is
 that right?". Answers the caller already gave were asked again. Too many questions for simple callers. Next: the
 intake round (fewer questions, use what was said, caller ID as the number, plain goodbye).
+
+## Intake round results (2026-11-15/16, revisions voice-uk-prod-00128-laf @b60069b, then 00130-pal @1360644)
+
+Six scripted calls by the owner on the US line. Calls 1-2 ran on 00128-laf (17:00 UTC), calls 3-6 on 00130-pal, the
+read-back hotfix (20:50 UTC 11-15 to 01:21 UTC 11-16). Read from the call logs with
+`.superpowers/sdd/2026-11-14-intake/call-report.sh`; per-call detail is in that round's ledger.
+
+| # | Call | Result | What happened |
+|---|---|---|---|
+| 1 | Friend: "ask him to ring me about Saturday" | **Pass** | No questions. Saved at once, "I'll let Ilija know you called", plain goodbye. |
+| 2 | New lead (bakery), name given when asked | **Off** (fixed) | Saved 7.5 s after the first words. The business's own questions, no reason re-ask, plain goodbye. The end read-back was cut three times by the repeat check: a surname spelled in the name and again in the email looked like a repeat. The caller could not hear it, so the email was saved with one wrong letter ("rahman" for "raman"). Fixed in 1360644: a spelled word counts as one word. |
+| 3 | Seller (SEO) | **Off** | No questions, plain goodbye, but "I'll make sure to pass your message on" and no save: no message, no email. No check noticed. |
+| 4 | Existing client (Facebook ads) | **Pass** (Off: no read-back) | Saved 14 s after the first words, one question (the name). No end read-back; the name was right. A first attempt was abandoned by the caller. |
+| 5 | Withheld number, new lead (dental), spelled email | **Pass** | The hotfix held: the full read-back (spelled surname, email, number, time) played with no cut. It caught a misheard first name (S for Z); the correction was saved again. Saved 38 s after the first words. The number was asked, as it should be. One question was cut mid-sentence (see below). |
+| 6 | "Can I speak to Ilija?", then a message | **Pass** | One question, saved 24 s after the first words, saved again when the caller added a detail. Turn 1 repeated the greeting's words. Name heard as "Eli Use" (no read-back for a non-lead, by design). |
+
+**Targets:** friend 0 questions (target 0-1). Saves 7.5-38 s (target ~45 s). The reason re-asked 0 times. The goodbye
+named the business 0 times (S4: 4 of 5). One read-back without "is that right?", the echo after a correction. The two
+business settings could not be tested: Ilija's config sets neither.
+
+**Cuts the owner heard:** a 30-day log count found 9 cuts in 56 calls. The cuts that stop a question being asked again
+(3) and a sentence repeated across turns (1) helped on none: they fire after the question is heard, chop the end off,
+and twice made the caller say "What?". One within-turn cut stopped a real runaway repeat (one sentence said three
+times). From 2026-11-16 02:09 UTC prod runs 00132-cis: 1360644 with the question cuts switched off
+(`LIVE_ASK_CUT=off`) until the next batch makes it permanent.
+
+**Next batch (owner, 2026-11-16):** question and across-turn cuts become counters only. A message is never lost: the
+hang-up is blocked once when a message is owed and not saved, and after the call the same normal message email is
+written from the call if still nothing was saved. The existing-client read-back gets a check only.
