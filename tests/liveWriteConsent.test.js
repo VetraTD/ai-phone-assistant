@@ -232,6 +232,26 @@ describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => 
     expect(inCall.functionResponse.response.success).toBe(true);
   });
 
+  it.each(["Um.", "Uh", "Hmm", "에레는"])(
+    "B17: %j in flight does not refuse the close-time write; in a call (lastChance false) it is as today",
+    async (words) => {
+      const fc = { id: "lc3", name: "record_customer_request", args: { request_type: "message" } };
+      const ctx = { ...ctxWith(words), callerSaidThisCall: words };
+      const closing = await executeToolCall(fc, { ...ctx, lastChance: true });
+      expect(closing.functionResponse.response.success).toBe(true);
+      // In a call a message is saved by the A1 message rule, which these gates sit behind.
+      const inCall = await executeToolCall(fc, { ...ctx, lastChance: false });
+      expect(inCall.functionResponse.response.success).toBe(true);
+    }
+  );
+
+  it("B23: a healthcare tier keeps every gate on its close-time write (hesitation in flight still refuses)", async () => {
+    const fc = { id: "lc4", name: "record_customer_request", args: { request_type: "message" } };
+    const ctx = { ...ctxWith("Um."), callerSaidThisCall: "Um.", config: { ...(ctxWith("").config || {}), complianceTier: "hipaa" } };
+    const closing = await executeToolCall(fc, { ...ctx, lastChance: true });
+    expect(closing.functionResponse.response.success).toBe(false);
+  });
+
   it("B14: lastChance exempts only record_customer_request, not a booking with words in flight", async () => {
     mockCreateAppointment.mockResolvedValue("appt-x");
     const { functionResponse } = await book({

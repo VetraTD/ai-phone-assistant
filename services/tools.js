@@ -19,7 +19,7 @@ import { executeIntegration } from "./integrations.js";
 import { packForTool } from "../capabilities/index.js";
 import { inAdditionWouldRefuse, afterSaveQuestion, onFileNameNote } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
-import { INTAKE_CALLER_TYPES, intakeTypeFor, messagesSpellingRequired } from "../lib/capabilities/intakeSettings.js";
+import { INTAKE_CALLER_TYPES, intakeTypeFor, messagesSpellingRequired, isHealthcareTier } from "../lib/capabilities/intakeSettings.js";
 import { intakePathNote } from "../lib/voice/intakePath.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
 import { checkRequirements, capabilityConfig, checkQualificationBookingGate } from "../lib/capabilities/requirements.js";
@@ -1753,13 +1753,23 @@ export async function executeToolCall(fc, ctx) {
           // go. Every refusal below spreads this into the pack's state.
           let orderReleasePatch = null;
 
+          // B14/B17/B23: the close-time message write (saveOutstandingMessage and
+          // the after-call message) is the "last_chance" verdict, whatever the
+          // caller's words in flight were: no consent refusal (hesitation, unusable
+          // text, the older cascade) and no write-order refusal can hold it, since
+          // there is no later turn to answer a question. lastChance is false on
+          // every in-call save, so nothing in a call changes. Standard tier only:
+          // a healthcare tenant keeps every gate it had.
+          const closeTimeMessage =
+            ctx?.lastChance === true && fc.name === "record_customer_request" && !isHealthcareTier(ctx?.config);
+
           if (lastCallerText.trim() !== "") {
             // Round A1: a message is not held for anything the caller said;
             // a booking with its read-back standing is not held for a turn that
             // did not transcribe (garble is not a no), but still is for a bare
             // "um" (not an answer yet). Cancels and strict tools: unchanged.
             const consentRefusal =
-              a1Save.applies && a1Save.rule === "message"
+              (a1Save.applies && a1Save.rule === "message") || closeTimeMessage
                 ? null
                 : isHesitationOnly(lastCallerText)
                 ? {
@@ -2369,11 +2379,7 @@ export async function executeToolCall(fc, ctx) {
               a1Save.awaitingAnswer !== true &&
               fc.name === "book_appointment" &&
               inAdditionWouldRefuse(fc.args || {}, ctx, ctx?.config || {});
-            // B14: the close-time message write (saveOutstandingMessage and the
-            // after-call message) is the "last_chance" verdict above, whatever
-            // the caller's words in flight were. lastChance is false on every
-            // in-call save, so nothing in a call changes.
-            const closeTimeMessage = ctx?.lastChance === true && fc.name === "record_customer_request";
+            // B14: see closeTimeMessage, declared before the consent refusal above.
             if (hasTarget && !closeTimeMessage && !consentLatched && (a1Decides ? !a1Save.agreed : !readBackMade || !callerAgreed) && !spellFirst && !inAdditionFirst) {
               bumpCounter("write_order_would_refuse");
               // LVX156. A read-back that was made and answered unreadably
@@ -2897,7 +2903,7 @@ export async function executeToolCall(fc, ctx) {
           // B15: after the call nothing can be collected, and a message with
           // "not given" fields beats no message. Only the close-time message.
           const check =
-            ctx?.lastChance === true && fc.name === "record_customer_request"
+            !isHealthcareTier(ctx?.config) && ctx?.lastChance === true && fc.name === "record_customer_request"
               ? { ok: true }
               : checkRequirements(cfg, fc.args || {}, { ...ctx, toolName: fc.name });
           if (!check.ok) {

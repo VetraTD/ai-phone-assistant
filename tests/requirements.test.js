@@ -436,6 +436,16 @@ describe("lastChance record_customer_request skips checkRequirements (B15)", () 
     });
   }
 
+  it("B23: a healthcare tier keeps its requirements on a lastChance write", async () => {
+    for (const cfg of Object.values(CONFIGS)) {
+      const out = await executeToolCall(
+        fc,
+        ctxFor(cfg, { lastChance: true, config: { complianceTier: "hipaa", capabilities: { messages: cfg } } })
+      );
+      expect(out.functionResponse.response.success).toBe(false);
+    }
+  });
+
   it("lastChance does not exempt any other write tool", async () => {
     const out = await executeToolCall(
       { id: "q1", name: "record_quote_request", args: { service_description: "water heater" } },
