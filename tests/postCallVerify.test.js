@@ -1402,3 +1402,39 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     expect(d.notifications.notifyUnconfirmedClaim.mock.calls[0][0].kind).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// C1 / B16. The after-call message is written for a call that never finished its
+// message. It says nothing about what the caller was told, so it must not explain
+// an unbacked completion claim away: the owner still gets "Follow-up needed".
+// ---------------------------------------------------------------------------
+describe("verifyCall - the after-call message does not explain a claim (C1)", () => {
+  beforeEach(() => clearStats());
+  const CLAIM = { turn: 5, kind: "claim", step: "gather_details", toolBacked: false };
+  const claimed = (over = {}) =>
+    input({
+      claims: [CLAIM, { ...CLAIM, turn: 6, toolBacked: true }],
+      judgeClaimedDone: true,
+      judgeAgreedAction: "none",
+      messagesRecorded: 1,
+      actionToolsAttempted: ["record_customer_request"],
+      bookingOwed: { agreed: false, pointVerified: 0, verified: 0 },
+      ...over,
+    });
+
+  it("an unbacked claim plus an owed write -> claim_without_row and the alert", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(claimed({ afterCallMessages: 1 }), deps);
+    expect(out.verdict).toBe("claim_without_row");
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    // the honest total still goes out
+    expect(deps.log.info).toHaveBeenCalledWith("postcall_verify", expect.objectContaining({ messages_recorded: 1 }));
+  });
+
+  it("the same claim after a model's own save -> ok, as today", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(claimed({ afterCallMessages: 0 }), deps);
+    expect(out.verdict).toBe("ok");
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+});
