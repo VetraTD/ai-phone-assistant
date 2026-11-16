@@ -429,6 +429,19 @@ describe("the after-call message", () => {
     expect(s.owedCalls()[0].args.caller_type).toBe("sales_pitch");
   });
 
+  it("a seller with take_message AND a promise, on a business with NO seller rule: nothing", async () => {
+    // Pins businessHandlesSellerCalls on its own: since B20 the promise is a second
+    // condition, so a seller with no promise cannot tell the two checks apart.
+    const s = await boot();
+    await s.tool("set_call_intent", { intent: "take_message", caller_type: "sales_pitch", reason_given: true });
+    await s.callerTurn("We offer discounted printer toner for offices.");
+    await s.assistantTurn("I'll make sure to pass your message on to the owner.");
+    await s.hangUp();
+    expect(s.owedCalls()).toHaveLength(0);
+    expect(s.writes()).toHaveLength(0);
+    expect(c().message_saved_after_call ?? 0).toBe(0);
+  });
+
   it("B20: the same seller declined per the business's own rule (no promise) -> nothing", async () => {
     const config = { ...CONFIG, customInstructions: "Decline sales calls politely and end the call." };
     const s = await boot({ config });
