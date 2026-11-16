@@ -642,7 +642,8 @@ export default {
         // Owner decision D-c: every TEXT-SENDING effect on an outbound call
         // requires party.verified. The caller's acknowledgement goes once, at
         // the first save.
-        if (!saved.corrected && party.verified) {
+        // M3: the after-call message is never acknowledged to the caller: nothing new is said to them.
+        if (!saved.corrected && party.verified && effect.afterCall !== true) {
           notifications
             .sendCallerSms(config, party.phone, "message_received", {
               name_part: args.caller_name ? ` ${args.caller_name}` : "",

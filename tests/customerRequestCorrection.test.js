@@ -673,3 +673,19 @@ describe("detailsFromArgs", () => {
     expect(pad.answers[0].label).toBe("a b");
   });
 });
+
+describe("M3: the after-call message is never acknowledged to the caller", () => {
+  it("a normal save texts the caller; the owed write's marked effect does not, but its row is still written", async () => {
+    const normal = makeEngine();
+    messages.onEffect(recorded(MESSAGE), normal.engine);
+    await settle();
+    expect(normal.calls.sms).toHaveBeenCalledTimes(1);
+
+    const owed = makeEngine();
+    messages.onEffect({ ...recorded(MESSAGE), afterCall: true }, owed.engine);
+    await settle();
+    expect(owed.calls.rows).toHaveLength(1);
+    expect(owed.calls.rows[0].owner_notice_pending).toBe(true);
+    expect(owed.calls.sms).not.toHaveBeenCalled();
+  });
+});
