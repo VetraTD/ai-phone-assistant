@@ -136,7 +136,7 @@ async function boot({
             name: fc.name,
             response: { success: false, gated: true, message: `held: ${fc.args?.message}` },
           },
-          stateEffects: { writeGateRefusal: "consent" },
+          stateEffects: { writeGateRefusal: typeof refuseOwed === "string" ? refuseOwed : "consent" },
         };
       }
       if (refuseFirst && ctx?.lastChance !== true) {
@@ -194,6 +194,14 @@ async function boot({
     /** One finished caller turn. */
     async callerTurn(text) {
       live.push({ serverContent: { inputTranscription: { text } } });
+      await settle();
+      live.push({ serverContent: { turnComplete: true } });
+      await settle();
+      await settle();
+    },
+    /** One finished assistant turn (what the receptionist said to the caller). */
+    async assistantTurn(text) {
+      live.push({ serverContent: { outputTranscription: { text } } });
       await settle();
       live.push({ serverContent: { turnComplete: true } });
       await settle();
@@ -414,9 +422,37 @@ describe("the after-call message", () => {
     const s = await boot({ config });
     await s.tool("set_call_intent", { intent: "take_message", caller_type: "sales_pitch", reason_given: true });
     await s.callerTurn("We offer discounted printer toner for offices.");
+    // B20: the receptionist promised to pass it on.
+    await s.assistantTurn("Thanks. I'll pass that on to the team.");
     await s.hangUp();
     expect(s.owedCalls()).toHaveLength(1);
     expect(s.owedCalls()[0].args.caller_type).toBe("sales_pitch");
+  });
+
+  it("B20: the same seller declined per the business's own rule (no promise) -> nothing", async () => {
+    const config = { ...CONFIG, customInstructions: "Decline sales calls politely and end the call." };
+    const s = await boot({ config });
+    await s.tool("set_call_intent", { intent: "take_message", caller_type: "sales_pitch", reason_given: true });
+    await s.callerTurn("Can I leave a message for the owner about printer toner?");
+    await s.assistantTurn("I'm sorry, I cannot take messages regarding sales offers, so I will end the call now.");
+    await s.hangUp();
+    expect(s.owedCalls()).toHaveLength(0);
+  });
+
+  it("M4/B23: a hipaa DEPLOYMENT with a standard-tier tenant -> nothing", async () => {
+    const s = await boot({ env: { DEPLOYMENT_MODE: "hipaa" } });
+    await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+    await s.callerTurn(WORDS_1);
+    await s.hangUp();
+    expect(s.owedCalls()).toHaveLength(0);
+  });
+
+  it("M8: 'Um' alone in flight is not the caller speaking, and never appears in the text", async () => {
+    const s = await boot();
+    await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+    await s.callerSays("Um");
+    await s.hangUp();
+    expect(s.owedCalls()).toHaveLength(0);
   });
 
   it("healthcare tier: nothing", async () => {
@@ -444,6 +480,7 @@ describe("the after-call message", () => {
     await s.hangUp();
     await vi.waitFor(() => expect(s.verify).toHaveBeenCalled());
     expect(s.verify.mock.calls[0][0].messagesRecorded).toBe(1);
+    expect(s.verify.mock.calls[0][0].afterCallMessages).toBe(1);
   });
 
   it("a refused owed write logs a closed reason and no caller words", async () => {
@@ -456,6 +493,15 @@ describe("the after-call message", () => {
     expect(mine).toHaveLength(1);
     expect(JSON.parse(mine[0])).toMatchObject({ ok: false, reason: "consent" });
     for (const l of lines) expect(l).not.toContain("plumbing");
+  });
+
+  it("M6: a hesitation refusal logs its own closed reason", async () => {
+    const s = await boot({ refuseOwed: "hesitation" });
+    await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+    await s.callerTurn(WORDS_1);
+    await s.hangUp();
+    const mine = lines.filter((l) => l.includes("live_message_after_call"));
+    expect(JSON.parse(mine[0])).toMatchObject({ ok: false, reason: "hesitation" });
   });
 
   // The REAL services/tools.js gates, not a stub: caller words still in flight at the hang-up
@@ -474,6 +520,17 @@ describe("the after-call message", () => {
       expect(s.rows).toHaveLength(1);
       expect(s.rows[0].message).toContain("booking page for");
       expect(s.rows[0].ownerNoticePending).toBe(true);
+    });
+
+    it.each(["Um", "Uh.", "Hmm", "에레는"])("I1/B17: %j in flight at the hang-up still writes the message", async (inFlight) => {
+      const s = await boot({ realTools: true, config: REQUIRED });
+      await s.tool("set_call_intent", INTENT({ caller_type: "new_enquiry", reason_given: true }));
+      await s.callerTurn(WORDS_1);
+      await s.callerSays(inFlight);
+      await s.hangUp();
+      expect(c().message_saved_after_call).toBe(1);
+      expect(c().message_after_call_failed ?? 0).toBe(0);
+      expect(s.rows).toHaveLength(1);
     });
 
     it("a hang-up between turns with a required name still writes the message", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageOwed, callerDeclined, afterCallMessageText } from "../lib/voice/messageOwed.js";
+import { messageOwed, callerDeclined, afterCallMessageText, assistantPromised } from "../lib/voice/messageOwed.js";
 
 const MUST_NOT_MATCH = [
   "No.",
@@ -59,6 +59,8 @@ const base = () => ({
   reasonGiven: true,
   takeIntent: false,
   sellerRule: false,
+  assistantPromised: false,
+  appointmentToolCalled: false,
 });
 const owed = (over) => messageOwed({ ...base(), ...over });
 
@@ -110,7 +112,7 @@ describe("messageOwed", () => {
     for (const callerType of ["supplier", "sales_pitch"]) {
       expect(owed({ callerType, takeIntent: true, sellerRule: false })).toBe(false);
       expect(owed({ callerType, takeIntent: false, sellerRule: true })).toBe(false);
-      expect(owed({ callerType, takeIntent: true, sellerRule: true })).toBe(true);
+      expect(owed({ callerType, takeIntent: true, sellerRule: true, assistantPromised: true })).toBe(true);
     }
   });
   it("type other needs a take_message report; a reason alone is nothing", () => {
@@ -122,7 +124,7 @@ describe("messageOwed", () => {
 describe("afterCallMessageText", () => {
   it("quotes the turns joined with a slash and says they left", () => {
     expect(afterCallMessageText({ utterances: [" Hello there ", "I need a quote"], numberReal: true })).toBe(
-      'In their words: "Hello there / I need a quote". They left before the message was finished.'
+      'In their words: "Hello there / I need a quote". No full message was left on the call.'
     );
   });
   it("drops turns with no word in them", () => {
@@ -138,7 +140,7 @@ describe("afterCallMessageText", () => {
   it("caps the words at 500 characters at a word boundary with an ellipsis", () => {
     const long = Array.from({ length: 200 }, () => "wordy").join(" ");
     const t = afterCallMessageText({ utterances: [long], numberReal: true });
-    const words = t.match(/In their words: "(.*)"\. They left/)[1];
+    const words = t.match(/In their words: "(.*)"\. No full message/)[1];
     expect(words.endsWith("…")).toBe(true);
     expect(words.length).toBeLessThanOrEqual(501);
     expect(words.slice(0, -1).split(" ").every((w) => w === "wordy")).toBe(true);
@@ -146,4 +148,55 @@ describe("afterCallMessageText", () => {
   it("never says 'the assistant'", () => {
     expect(afterCallMessageText({ utterances: ["Hello there"], numberReal: false })).not.toMatch(/assistant/i);
   });
+});
+
+describe("B20: a seller is owed only when the assistant promised to pass it on", () => {
+  it("needs the promise as well as the rule and the take_message report", () => {
+    const seller = { callerType: "sales_pitch", takeIntent: true, sellerRule: true };
+    expect(owed({ ...seller, assistantPromised: false })).toBe(false);
+    expect(owed({ ...seller, assistantPromised: true })).toBe(true);
+  });
+  it.each([
+    "Thanks for the information, Mateo. I'll make sure to pass your message regarding SEO services on to Ilija. Is there anything else you'd like to add?",
+    "I'll let Ilija know you called.",
+    "I'll pass that on to the team.",
+    "I've noted your details and he will get back to you.",
+    "I'll make sure he gets your message.",
+  ])("promise: %j", (t) => expect(assistantPromised(t)).toBe(true));
+  it.each([
+    "I'm sorry, I cannot take messages regarding sales offers, so I will need to end the call now.",
+    "We are not interested in sales services and do not accept messages for them, so I will end the call now.",
+    "I can't pass that on, sorry.",
+    "I'm not able to pass messages on for sales calls.",
+    "Please let me know if you would like me to take a message.",
+    "Just let me know what you need and I'll help.",
+    "Thank you for calling. Have a wonderful day.",
+  ])("not a promise: %j", (t) => expect(assistantPromised(t)).toBe(false));
+});
+
+describe("B19: the appointment flow's own call is not a message", () => {
+  it("a lookup or availability check with no take/callback report is not owed", () => {
+    expect(owed({ appointmentToolCalled: true })).toBe(false);
+  });
+  it("is owed once take_message was reported too", () => {
+    expect(owed({ appointmentToolCalled: true, takeIntent: true })).toBe(true);
+  });
+});
+
+describe("M8: filler alone is not the caller speaking", () => {
+  it("Um / Uh / Hmm / Ah alone do not count and do not appear", () => {
+    expect(owed({ utterances: ["Um", "Hmm.", "Ah!", "uh..."] })).toBe(false);
+    const t = afterCallMessageText({ utterances: ["Um", "I need a quote", "Hmm"], numberReal: true });
+    expect(t).toContain('"I need a quote"');
+    expect(t).not.toMatch(/Um|Hmm/);
+  });
+});
+
+describe("B24: a decline that still asks to be reached is not a decline", () => {
+  it.each([
+    "No need to leave a message, just have him call me back.",
+    "Can you get him to call me back? Otherwise I'll call again tomorrow.",
+    "If I don't hear back I'll call back later, okay? Bye.",
+    "Don't worry about the message, just tell him Sam called and to ring me.",
+  ])("%j", (t) => expect(callerDeclined(t)).toBe(false));
 });
