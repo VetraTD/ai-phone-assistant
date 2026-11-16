@@ -103,10 +103,10 @@ async function pastGreeting(opts = {}) {
   return { s, cleared };
 }
 
-const cuts = () => getLatencyStats().turnTaking.live_reason_reask_cut;
+const seen = () => getLatencyStats().turnTaking.live_reason_reask_seen;
 
-describe("a reason the caller gave is never asked again", () => {
-  it("reported, then asked in the SAME model turn: cut, counted once", async () => {
+describe("a reason the caller gave is SEEN when asked again, and never cleared", () => {
+  it("reported, then asked in the SAME model turn: seen once, nothing cleared", async () => {
     let cleared;
     const summary = await record(async () => {
       const x = await pastGreeting();
@@ -117,14 +117,13 @@ describe("a reason the caller gave is never asked again", () => {
       await x.s.turnEnds();
       await x.s.hangUp();
     });
-    expect(cleared).toHaveLength(1);
-    expect(cleared[0].fadeMs).toBeGreaterThan(0);
-    expect(cuts()).toBe(1);
+    expect(cleared).toHaveLength(0);
+    expect(seen()).toBe(1);
+    expect(summary.intake).not.toHaveProperty("reason_reask_cut");
     expect(summary.intake.reason_reasked).toBe(1);
-    expect(summary.intake.reason_reask_cut).toBe(1);
   });
 
-  it("reported in a wordless turn, asked in the NEXT turn: cut", async () => {
+  it("reported in a wordless turn, asked in the NEXT turn: seen, nothing cleared", async () => {
     let cleared;
     const summary = await record(async () => {
       const x = await pastGreeting();
@@ -137,9 +136,9 @@ describe("a reason the caller gave is never asked again", () => {
       await x.s.turnEnds();
       await x.s.hangUp();
     });
-    expect(cleared).toHaveLength(1);
+    expect(cleared).toHaveLength(0);
+    expect(seen()).toBe(1);
     expect(summary.intake.reason_reasked).toBe(1);
-    expect(summary.intake.reason_reask_cut).toBe(1);
   });
 
   it("an ask spoken BEFORE the report in the same turn is counted but cannot be cut", async () => {
@@ -155,7 +154,6 @@ describe("a reason the caller gave is never asked again", () => {
     });
     expect(cleared).toHaveLength(0);
     expect(summary.intake.reason_reasked).toBe(1);
-    expect(summary.intake.reason_reask_cut).toBe(0);
   });
 
   it("reason not given: the same ask is not cut and not counted", async () => {
@@ -170,7 +168,6 @@ describe("a reason the caller gave is never asked again", () => {
     });
     expect(cleared).toHaveLength(0);
     expect(summary.intake.reason_reasked).toBe(0);
-    expect(summary.intake.reason_reask_cut).toBe(0);
   });
 
   it("a per-answer confirmation of the reason is not a re-ask", async () => {
@@ -206,7 +203,6 @@ describe("a reason the caller gave is never asked again", () => {
     });
     expect(cleared).toHaveLength(0);
     expect(summary.intake.reason_reasked).toBe(0);
-    expect(summary.intake.reason_reask_cut).toBe(0);
   });
 });
 
@@ -249,7 +245,7 @@ describe("the repeat ledger and a message save (P22 on the ledger path)", () => 
     await x.s.callerSays("The invoice, like I said.");
   }
 
-  it("before any save, a third ask is still cut by the ledger", async () => {
+  it("before any save, a third ask is still seen by the ledger", async () => {
     let cleared;
     await record(async () => {
       const x = await pastGreeting();
@@ -259,8 +255,8 @@ describe("the repeat ledger and a message save (P22 on the ledger path)", () => 
       await x.s.turnEnds();
       await x.s.hangUp();
     });
-    expect(cleared).toHaveLength(1);
-    expect(getLatencyStats().turnTaking.live_ask_repeat_cut).toBe(1);
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen).toBe(1);
   });
 
   it("after a message save the same ask is not cut by the ledger, not counted", async () => {
@@ -280,8 +276,8 @@ describe("the repeat ledger and a message save (P22 on the ledger path)", () => 
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
     expect(summary.intake.reason_reasked).toBe(0);
   });
 });
@@ -302,16 +298,15 @@ describe("outbound is unchanged", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
     expect(summary.intake.reason_reasked).toBe(0);
-    expect(summary.intake.reason_reask_cut).toBe(0);
     expect(summary.intake.number_asked_with_caller_id).toBe(0);
   });
 
   // What b96fe90 did, checked against its asksIn: "the reason for your call" is
   // the q: key "q:reason call" (cut at the cap, as any q: need), and the
   // "today" phrasing is skipped by the scheduling filter (never an ask).
-  it("a reason-style ask is cut at the ledger cap exactly as before (its q: key)", async () => {
+  it("a reason-style ask is seen at the ledger cap exactly as before (its q: key)", async () => {
     let cleared;
     await record(async () => {
       const x = await bootOutboundCall(CONFIG);
@@ -324,9 +319,9 @@ describe("outbound is unchanged", () => {
       await x.s.turnEnds();
       await x.s.hangUp();
     });
-    expect(cleared).toHaveLength(1);
-    expect(getLatencyStats().turnTaking.live_ask_repeat_cut).toBe(1);
-    expect(cuts() ?? 0).toBe(0);
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen).toBe(1);
+    expect(seen() ?? 0).toBe(0);
   });
 
   it("the 'today' phrasing is never cut, as before", async () => {
@@ -343,7 +338,7 @@ describe("outbound is unchanged", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen ?? 0).toBe(0);
   });
 });
 
@@ -360,9 +355,8 @@ describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
     expect(summary.intake.reason_reasked).toBe(0);
-    expect(summary.intake.reason_reask_cut).toBe(0);
   });
 
   it("the assistant answering the caller's own question with a reason-shaped clause is not cut", async () => {
@@ -379,7 +373,7 @@ describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
   });
 
   it("a caller who asks to hear it again is not cut, as in the ledger", async () => {
@@ -397,10 +391,10 @@ describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
   });
 
-  it("the healthcare tier: counted, never cut (its protocol asks the reason as a step)", async () => {
+  it("the healthcare tier: counted as seen, never cut (its protocol asks the reason as a step)", async () => {
     let cleared;
     const summary = await record(async () => {
       const x = await pastGreeting({ config: { ...CONFIG, complianceTier: "hipaa" } });
@@ -412,9 +406,8 @@ describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen()).toBe(1);
     expect(summary.intake.reason_reasked).toBe(1);
-    expect(summary.intake.reason_reask_cut).toBe(0);
     expect(summary.intake.tier).toBe("hipaa");
   });
 
@@ -433,7 +426,7 @@ describe("the reason cut only fires on a real reason ask (fix wave C1)", () => {
     });
     // The "today" phrasing was never an ask on the old path, so never a ledger repeat.
     expect(cleared).toHaveLength(0);
-    expect(getLatencyStats().turnTaking.live_ask_repeat_cut ?? 0).toBe(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen ?? 0).toBe(0);
   });
 
   it("the standard tier reports tier and counts a reason asked after a save, never cutting it", async () => {
@@ -489,8 +482,9 @@ describe("confirm_style each: a tagged confirmation is not an ask (fix wave I3b)
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen ?? 0).toBe(0);
   });
-  it("the same sentence under end (the default) is the ledger's name ask, cut at the cap", async () => {
+  it("the same sentence under end (the default) is the ledger's name ask, seen at the cap", async () => {
     let cleared;
     await record(async () => {
       const x = await pastGreeting();
@@ -500,7 +494,8 @@ describe("confirm_style each: a tagged confirmation is not an ask (fix wave I3b)
       await x.s.turnEnds();
       await x.s.hangUp();
     });
-    expect(cleared).toHaveLength(1);
+    expect(cleared).toHaveLength(0);
+    expect(getLatencyStats().turnTaking.live_ask_repeat_seen).toBe(1);
   });
 });
 
@@ -517,7 +512,7 @@ describe("a purpose clause after the ask is not cut (P32 N1)", () => {
       await x.s.hangUp();
     });
     expect(cleared).toHaveLength(0);
-    expect(cuts() ?? 0).toBe(0);
+    expect(seen() ?? 0).toBe(0);
     expect(summary.intake.reason_reasked).toBe(0);
   });
 });

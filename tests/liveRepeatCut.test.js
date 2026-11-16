@@ -198,17 +198,16 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     currentConfig = CONFIG;
   });
 
-  it("cuts when the model restates itself with no caller speech in between", async () => {
+  it("COUNTS (never cuts) when the model restates itself with no caller speech in between", async () => {
+    // 2026-11-16: the transcript lags the audio, so an across-turns cut landed
+    // after the caller had heard the words and left silence. It is a counter now.
     const s = await boot();
     await s.say(SLOTS_A);
     await s.say(SLOTS_B);
 
-    expect(c().live_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
-    // Tapered, not the leak guard's hard stop. A leak must not be heard at all;
-    // a repeat is merely unwanted, and a hard clear on ordinary speech sounds
-    // like the line dropping.
-    expect(s.cleared[0].fadeMs).toBeGreaterThan(0);
+    expect(c().live_repeat_seen).toBe(1);
+    expect(c().live_repeat_cut ?? 0).toBe(0);
+    expect(s.cleared).toHaveLength(0);
   });
 
   it("does NOT cut when the caller asked to hear it again", async () => {
@@ -242,17 +241,50 @@ describe("LVX78 — cutting a repeat the caller has not asked for", () => {
     expect(c().live_repeat_cut_checked).toBeGreaterThan(0);
   });
 
-  it("stops after the per-call cap, however often the model repeats", async () => {
+  it("stops cutting after the per-call cap, however often the model doubles itself", async () => {
     // LVX21 is the standing record of what a hair trigger costs on this path. A
     // cutter that fires on every turn is worse than the thing it fixes, so it is
     // bounded and the bound is asserted rather than assumed.
     const s = await boot();
-    for (let i = 0; i < 8; i += 1) {
-      await s.say(SLOTS_A);
-      await s.say(SLOTS_B);
-    }
+    await s.say("Of course. Is there anything else?");
+    const bye = "You're very welcome. Thanks for calling Digile Media, have a great day.";
+    for (let i = 0; i < 6; i += 1) await s.say(bye + " " + bye);
 
-    expect(c().live_repeat_cut).toBeLessThanOrEqual(3);
+    expect(c().live_repeat_cut).toBe(3);
+    expect(s.cleared).toHaveLength(3);
+  });
+
+  it("keeps COUNTING across-turn repeats after the cut budget is spent", async () => {
+    // The budget guards the within-turn cut only: a count costs the caller nothing.
+    const s = await boot();
+    await s.say("Of course. Is there anything else?");
+    const bye = "You're very welcome. Thanks for calling Digile Media, have a great day.";
+    for (let i = 0; i < 3; i += 1) await s.say(bye + " " + bye);
+    expect(c().live_repeat_cut).toBe(3);
+    const before = c().live_repeat_seen ?? 0;
+    await s.say(SLOTS_A);
+    await s.say(SLOTS_B);
+
+    expect(c().live_repeat_seen).toBe(before + 1);
+    expect(c().live_repeat_cut).toBe(3);
+  });
+
+  it("an across-turn match followed by a within-turn runaway in the same turn is still CUT", async () => {
+    const s = await boot();
+    await s.say("Of course. Is there anything else?");
+    await s.say(SLOTS_A);
+    // Fragment 1 restates the previous turn (counted); the same turn then runs
+    // away into a doubled sentence (cut).
+    s.fragment(SLOTS_A);
+    const bye = " You're very welcome. Thanks for calling Digile Media, have a great day.";
+    s.fragment(bye);
+    s.fragment(bye);
+    s.fragment(bye);
+    await s.endTurn();
+
+    expect(c().live_repeat_seen).toBe(1);
+    expect(c().live_repeat_cut).toBe(1);
+    expect(s.cleared).toHaveLength(1);
   });
 
   it("cuts a turn that repeats ITSELF, which is what the owner heard", async () => {
@@ -529,7 +561,9 @@ describe("the opening greeting, re-spoken mid-call", () => {
     // population — LVX104's lesson about an allowance keyed to the wrong one.
     const s = await boot();
     await s.say(GREETING);
-    for (let i = 0; i < 4; i += 1) await s.say(SLOTS_A);
+    // Within-turn doubles spend the budget (across-turn matches only count now).
+    const bye = "You're very welcome. Thanks for calling Digile Media, have a great day.";
+    for (let i = 0; i < 4; i += 1) await s.say(bye + " " + bye);
     expect(c().live_repeat_cut).toBe(3);
 
     await s.caller("Sorry, go on.");
@@ -613,7 +647,7 @@ describe("the opening greeting, re-spoken mid-call", () => {
 // ---------------------------------------------------------------------------
 const NUMBER_ASK = "What's the best number to reach you on?";
 
-describe("LVX189 -- a repeated ask is cut", () => {
+describe("LVX189 -- a repeated ask is SEEN (counted, never cut)", () => {
   beforeEach(() => {
     clearStats();
     currentConfig = CONFIG;
@@ -622,7 +656,7 @@ describe("LVX189 -- a repeated ask is cut", () => {
     vi.restoreAllMocks();
   });
 
-  it("a repeated ask after a caller question is cut", async () => {
+  it("a repeated ask after a caller question is seen and never cleared", async () => {
     const s = await boot();
     await s.say(GREETING);
     await s.caller("Hi, I'd like to leave a message for the team.");
@@ -630,12 +664,10 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("Why do you need that?");
     await s.say(`It's so the team can call you back. ${NUMBER_ASK}`);
 
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
-    // LVX78's own cut: tapered, not the leak guard's hard stop.
-    expect(s.cleared[0].fadeMs).toBeGreaterThan(0);
-    // And it was this cutter, not LVX78's: the caller spoke in between.
-    expect(c().live_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen).toBe(1);
+    expect(s.cleared).toHaveLength(0);
+    expect(c().live_ask_repeat_cut ?? 0).toBe(0);
+    expect(c().live_repeat_cut ?? 0).toBe(0);
   });
 
   it("the greeting is never cut", async () => {
@@ -650,7 +682,7 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.endTurn();
 
     expect(s.cleared).toHaveLength(0);
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     // Not judged and let off: never judged at all.
     expect(c().live_ask_checked).toBe(0);
   });
@@ -664,11 +696,14 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("Why do you ask?");
     await s.say("It helps the team prepare. What industry are you in?");
 
-    expect(c().live_ask_repeat_cut).toBe(1);
-    const cutLog = spies[1].mock.calls.find(([event]) => event === "live_ask_repeat_cut");
+    expect(c().live_ask_repeat_seen).toBe(1);
+    expect(s.cleared).toHaveLength(0);
+    // Info, not error: a counted ask is not a fault.
+    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_seen");
     expect(cutLog).toBeTruthy();
     expect(cutLog[1].kind).toBe("question");
     expect(["number", "name", "spelling", "email", "question"]).toContain(cutLog[1].kind);
+    expect(cutLog[1]).not.toHaveProperty("cuts");
     // Not the question, not its key, anywhere in anything logged on this call.
     const everything = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
     expect(everything).not.toMatch(/industry/i);
@@ -683,7 +718,7 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.say(`Sure. ${NUMBER_ASK}`);
 
     expect(c().live_ask_checked).toBeGreaterThan(0);
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
   });
 
   it("a caller asking to hear it again is not cut", async () => {
@@ -694,7 +729,7 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("Sorry, could you say that again?");
     await s.say(`Of course. ${NUMBER_ASK}`);
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(s.cleared).toHaveLength(0);
   });
 
@@ -708,11 +743,11 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.say("Could I take a contact number for the team?");
     await s.say("And is there a contact number the team can use?");
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(s.cleared).toHaveLength(0);
   });
 
-  it("cuts at most three times a call", async () => {
+  it("counts every repeat however many there are, and clears none", async () => {
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
@@ -722,28 +757,29 @@ describe("LVX189 -- a repeated ask is cut", () => {
       await s.say(`Fair question ${i}, it is for the callback. ${NUMBER_ASK}`);
     }
 
-    expect(c().live_ask_repeat_cut).toBe(3);
-    expect(s.cleared).toHaveLength(3);
+    expect(c().live_ask_repeat_seen).toBe(6);
+    expect(s.cleared).toHaveLength(0);
   });
 
-  it("never cuts a fragment LVX78 has already cut", async () => {
+  it("an across-turns match and an ask repeat on one fragment are both counted, neither cleared", async () => {
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
     await s.say(`Sure. ${NUMBER_ASK}`); // ask 1
     await s.caller("Let me find it.");
-    await s.say(`No problem. ${NUMBER_ASK}`); // ask 2: allowed
+    await s.say(`No problem. ${NUMBER_ASK}`); // ask 2
     await s.caller("Okay.");
-    await s.say(`Thanks. ${NUMBER_ASK}`); // ask 3: over the cap, cut by the ledger
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
+    await s.say(`Thanks. ${NUMBER_ASK}`); // ask 3: the ledger sees a third
+    expect(c().live_ask_repeat_seen).toBe(1);
+    expect(s.cleared).toHaveLength(0);
 
     // The caller says nothing and the model says the same sentence again, so
-    // LVX78's across-turns cutter and the ask cap both match this one fragment.
+    // the across-turns count and the ask count both match this one fragment.
     await s.say(`Thanks. ${NUMBER_ASK}`);
-    expect(c().live_repeat_cut).toBe(1);
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(2);
+    expect(c().live_repeat_seen).toBe(1);
+    expect(c().live_repeat_cut ?? 0).toBe(0);
+    expect(c().live_ask_repeat_seen).toBe(2);
+    expect(s.cleared).toHaveLength(0);
   });
 
   it("an ask already spoken is not cut when the caller's words land after it", async () => {
@@ -764,30 +800,30 @@ describe("LVX189 -- a repeated ask is cut", () => {
     s.fragment(" It's only for the callback.");
     await s.endTurn();
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(c().live_repeat_cut).toBe(0);
     expect(s.cleared).toHaveLength(0);
   });
 
-  it("a cut ask is not a heard ask: the next ask after a plain answer is allowed", async () => {
-    // Review fix round 1, I1. The cut re-ask stays in the turn's transcript,
-    // so counting it as asked again put the need over its cap: the caller had
-    // heard the ask once, and the next legitimate ask was cut as a third.
+  it("a seen ask WAS heard: it counts as asked, so the next ask after a plain answer is seen too", async () => {
+    // Was review fix round 1, I1, when the cut ask was not heard and so not
+    // counted. Nothing is cut now, so the caller heard the re-ask and the ledger
+    // counts it: the next ask is a third.
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
     await s.say(`Sure. ${NUMBER_ASK}`);
     await s.caller("Why do you need that?");
-    await s.say(`So the team can call back. ${NUMBER_ASK}`); // cut 1
+    await s.say(`So the team can call back. ${NUMBER_ASK}`); // seen 1
     await s.caller("Okay.");
-    await s.say(`Thanks. ${NUMBER_ASK}`);
+    await s.say(`Thanks. ${NUMBER_ASK}`); // seen 2
 
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
+    expect(c().live_ask_repeat_seen).toBe(2);
+    expect(s.cleared).toHaveLength(0);
   });
 
-  it("a decline holds past an unrelated exchange: the same ask later is cut", async () => {
-    const spies = [vi.spyOn(log, "error")];
+  it("a decline holds past an unrelated exchange: the same ask later is seen", async () => {
+    const spies = [vi.spyOn(log, "info")];
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
@@ -799,9 +835,9 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("Okay, thanks.");
     await s.say(`Right. ${NUMBER_ASK}`);
 
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
-    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_cut");
+    expect(c().live_ask_repeat_seen).toBe(1);
+    expect(s.cleared).toHaveLength(0);
+    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_seen");
     expect(cutLog[1].declined_earlier).toBe(true);
     expect(cutLog[1].caller_declined).toBe(false);
   });
@@ -818,12 +854,12 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("Actually, you can take my number.");
     await s.say(`Thank you. ${NUMBER_ASK}`);
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(s.cleared).toHaveLength(0);
   });
 
   it("a declined name spelling does not cut the email spelling later (final review I-2)", async () => {
-    const spies = [vi.spyOn(log, "error")];
+    const spies = [vi.spyOn(log, "info")];
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
@@ -833,16 +869,16 @@ describe("LVX189 -- a repeated ask is cut", () => {
     await s.caller("anita at rowe dot com");
     await s.say("Thanks, could you spell the email for me?");
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(s.cleared).toHaveLength(0);
 
     // The name spelling the caller declined is still blocked, and logged by
     // its closed kind.
     await s.caller("a n i t a at rowe dot com");
     await s.say("Thank you. And could you spell your surname?");
-    expect(c().live_ask_repeat_cut).toBe(1);
-    expect(s.cleared).toHaveLength(1);
-    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_cut");
+    expect(c().live_ask_repeat_seen).toBe(1);
+    expect(s.cleared).toHaveLength(0);
+    const cutLog = spies[0].mock.calls.find(([event]) => event === "live_ask_repeat_seen");
     expect(cutLog[1].kind).toBe("spelling");
     expect(cutLog[1].declined_earlier).toBe(true);
   });
@@ -864,33 +900,21 @@ describe("LVX189 -- a repeated ask is cut", () => {
     s.fragment(" Thank you.");
     await s.endTurn();
 
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen ?? 0).toBe(0);
     expect(s.cleared).toHaveLength(0);
   });
 
-  it("a cut ask still counts as the ask the caller is answering: a second deflection is cut", async () => {
+  it("a seen ask still counts as the ask the caller is answering: a second deflection is seen too", async () => {
     const s = await boot();
     await s.say(GREETING);
     await s.caller("I'd like to leave a message.");
     await s.say(`Sure. ${NUMBER_ASK}`);
     await s.caller("Why do you need that?");
-    await s.say(`So the team can call back. ${NUMBER_ASK}`); // cut 1
+    await s.say(`So the team can call back. ${NUMBER_ASK}`); // seen 1
     await s.caller("And who are you exactly?");
-    await s.say(`I'm the AI receptionist. ${NUMBER_ASK}`); // cut 2
+    await s.say(`I'm the AI receptionist. ${NUMBER_ASK}`); // seen 2
 
-    expect(c().live_ask_repeat_cut).toBe(2);
-    expect(s.cleared).toHaveLength(2);
-  });
-
-  it("can be switched off without a deploy", async () => {
-    const s = await boot({ LIVE_ASK_CUT: "off" });
-    await s.say(GREETING);
-    await s.caller("Hi, I'd like to leave a message for the team.");
-    await s.say(`Of course. ${NUMBER_ASK}`);
-    await s.caller("Why do you need that?");
-    await s.say(`It's so the team can call you back. ${NUMBER_ASK}`);
-
-    expect(c().live_ask_repeat_cut).toBe(0);
+    expect(c().live_ask_repeat_seen).toBe(2);
     expect(s.cleared).toHaveLength(0);
   });
 });

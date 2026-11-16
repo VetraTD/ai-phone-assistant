@@ -207,7 +207,6 @@ describe("state and the intake block", () => {
       questions_asked: 0,
       first_words_to_save_ms: null,
       reason_reasked: 0,
-      reason_reask_cut: 0,
       reason_asked_after_save: 0,
       number_asked_with_caller_id: 0,
       spell_asks: 0,
