@@ -11,12 +11,14 @@ import "./VetraLogo.css";
  *                                site, which is a different codebase on a
  *                                different host, and <Link> would try to route
  *                                to it inside this SPA.
+ * @param {string}  [props.name]  wordmark text; the marketing Landing passes
+ *                                "VetraTD", everything else keeps "Vetra".
  */
-export default function VetraLogo({ to = "/", href = null, size = 28, className = "" }) {
+export default function VetraLogo({ to = "/", href = null, size = 28, className = "", name = "Vetra" }) {
   const inner = (
     <>
       <VetraMark size={size} className="vetra-logo-mark" />
-      <span className="vetra-logo-word">Vetra</span>
+      <span className="vetra-logo-word">{name}</span>
     </>
   );
 
