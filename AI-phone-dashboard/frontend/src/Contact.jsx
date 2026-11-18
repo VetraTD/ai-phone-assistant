@@ -1,8 +1,15 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import VetraLogo from "./components/VetraLogo";
+// The landing page's nav, button and footer styles, reused as-is so this page
+// matches it exactly. Everything in it is scoped to .lp / .lp-*.
+import "./Landing.css";
 import "./Contact.css";
-import { MARKETING_URL } from "./siteUrl";
+import { MARKETING_URL, APP_URL } from "./siteUrl";
+
+const DEMO_NUMBER = "+1 (817) 601-1171";
+const DEMO_TEL = `tel:${DEMO_NUMBER.replace(/[^\d+]/g, "")}`;
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
@@ -32,26 +39,42 @@ export default function Contact() {
   };
 
   return (
-    <div className="contact-page">
-      <header className="contact-header">
-        <div className="contact-header-inner">
-          <VetraLogo href={MARKETING_URL} />
-          <a href={MARKETING_URL} className="contact-back">← Back to vetratd.com</a>
+    <div className="lp lp-dark contact-page">
+      {/* Same nav as the landing page. Links are absolute because this page
+          is also served on app.vetratd.com, where "/" is the dashboard. */}
+      <header className="lp-header lp-dark">
+        <div className="lp-header-inner">
+          <VetraLogo href={MARKETING_URL} name="VetraTD" className="lp-logo" />
+          <nav className="lp-nav" aria-label="Main">
+            <a href={`${MARKETING_URL}/#how-it-works`}>How it works</a>
+            <a href={`${MARKETING_URL}/#features`}>Features</a>
+            <a href={`${MARKETING_URL}/#tailored`}>Your setup</a>
+            <a href={`${MARKETING_URL}/#pricing`}>Pricing</a>
+            <a href={`${MARKETING_URL}/#faq`}>FAQ</a>
+          </nav>
+          <div className="lp-header-actions">
+            <a href={`${APP_URL}/login`} className="lp-header-login">
+              Log in
+            </a>
+          </div>
         </div>
       </header>
 
       <main className="contact-main">
-        <div className="contact-inner">
-          <h1 className="contact-title">We&apos;d love to hear from you</h1>
-          <p className="contact-intro">
-            Questions about Vetra, need help getting set up, or want to see if we&apos;re a good fit?
-            Send us a message and we&apos;ll get back to you as soon as we can. You can also email us at{" "}
-            <a href="mailto:vetratd@gmail.com" className="contact-link">
-              vetratd@gmail.com
-            </a>
-            .
-          </p>
+        <div className="lp-container contact-grid">
+          <div className="contact-intro-col">
+            <h1 className="contact-title">We&apos;d love to hear from you</h1>
+            <p className="contact-intro">
+              Questions about Vetra, need help getting set up, or want to see if we&apos;re a good fit?
+              Send us a message and we&apos;ll get back to you as soon as we can. You can also email us at{" "}
+              <a href="mailto:josh.tite@vetratd.com" className="contact-link">
+                josh.tite@vetratd.com
+              </a>
+              .
+            </p>
+          </div>
 
+          <div className="contact-card-col">
           {sent ? (
             <div className="contact-success">
               <p><strong>Thanks for reaching out.</strong> We&apos;ve received your message and will reply to the email you provided.</p>
@@ -100,8 +123,24 @@ export default function Contact() {
               </button>
             </form>
           )}
+          </div>
         </div>
       </main>
+
+      {/* Same footer as the landing page. */}
+      <footer className="lp-footer lp-dark">
+        <div className="lp-footer-inner">
+          <VetraLogo href={MARKETING_URL} name="VetraTD" className="lp-logo vetra-logo-footer" />
+          <nav className="lp-footer-links" aria-label="Footer">
+            <a href={`${APP_URL}/login`}>Log in</a>
+            <Link to="/contact">Contact</Link>
+            <Link to="/legal">Privacy Policy</Link>
+            <Link to="/legal">Terms</Link>
+            <a href={DEMO_TEL}>{DEMO_NUMBER}</a>
+          </nav>
+          <span className="lp-footer-copy">© {new Date().getFullYear()} VetraTD</span>
+        </div>
+      </footer>
     </div>
   );
 }

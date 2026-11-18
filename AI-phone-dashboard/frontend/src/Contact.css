@@ -1,71 +1,75 @@
-/* Contact page — Vetra light brand */
-.contact-page {
-  min-height: 100vh;
-  background: var(--vetra-bg);
-  color: var(--vetra-text);
-}
-
-.contact-header {
-  border-bottom: 1px solid var(--vetra-border);
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(14px);
-}
-
-.contact-header-inner {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 14px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.contact-back {
-  color: var(--vetra-muted);
-  font-size: 14px;
-  font-weight: 500;
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-
-.contact-back:hover {
-  color: var(--vetra-accent);
-}
+/* Contact page, in the landing page's look.
+   The root also carries .lp .lp-dark, so the colour tokens (--lp-*), the nav
+   (.lp-header) and the footer (.lp-footer) all come from Landing.css. This
+   file only lays out the page and styles the form card. */
 
 .contact-main {
-  padding: 48px 20px 64px;
+  padding: clamp(56px, 8vw, 112px) 0 clamp(72px, 9vw, 128px);
 }
 
-.contact-inner {
-  max-width: 560px;
-  margin: 0 auto;
+.contact-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 480px);
+  align-items: start;
+  gap: clamp(40px, 6vw, 96px);
 }
 
 .contact-title {
-  margin: 0 0 12px;
-  font-size: clamp(28px, 4vw, 36px);
-  font-weight: 800;
+  margin: 0;
+  max-width: 12ch;
+  font-family: var(--font-display);
+  font-size: clamp(44px, 6.4vw, 80px);
+  font-weight: 700;
+  line-height: 0.98;
   letter-spacing: -0.03em;
-  color: var(--vetra-text);
+  font-variation-settings: "opsz" 144;
+  text-wrap: balance;
+  color: #ffffff;
 }
 
 .contact-intro {
-  margin: 0 0 32px;
-  font-size: 16px;
-  line-height: 1.65;
-  color: var(--vetra-muted);
+  margin: 28px 0 0;
+  max-width: 30em;
+  font-size: clamp(17px, 1.8vw, 19px);
+  line-height: 1.6;
+  color: var(--lp-on-navy-muted);
+}
+
+/* On navy: cyan, the logo's highlight colour. */
+.contact-link {
+  color: var(--lp-cyan);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: rgba(0, 234, 254, 0.4);
+  border-radius: 4px;
+}
+
+.contact-link:hover {
+  text-decoration-color: var(--lp-cyan);
+}
+
+/* ── The form card: white and sharp on navy, like the landing page's
+   "Answered by Vetra" card. Secondary text inside it: 6.8:1 on white. ── */
+.contact-form,
+.contact-success {
+  --lp-muted: #4f5b78;
+  padding: clamp(26px, 3.4vw, 40px);
+  border-radius: 24px;
+  background: #ffffff;
+  color: var(--lp-navy);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.45);
 }
 
 .contact-form {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 28px;
-  border-radius: 20px;
-  border: 1px solid var(--vetra-border);
-  background: var(--vetra-card);
-  box-shadow: 0 12px 32px var(--vetra-shadow);
+}
+
+.contact-form *:focus-visible,
+.contact-success *:focus-visible {
+  outline-color: var(--lp-blue-ink);
 }
 
 .contact-field {
@@ -77,118 +81,140 @@
 .contact-field label {
   font-size: 14px;
   font-weight: 600;
-  color: var(--vetra-text);
+  color: var(--lp-navy);
 }
 
 .contact-field input,
 .contact-field textarea {
   width: 100%;
   padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--vetra-border-strong);
-  background: var(--vetra-bg);
-  color: var(--vetra-text);
-  font-size: 15px;
+  border-radius: 14px;
+  border: 1px solid rgba(1, 11, 41, 0.12);
+  background: #f5f7fc;
+  color: var(--lp-navy);
+  font-size: 16px;
   font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .contact-field input::placeholder,
 .contact-field textarea::placeholder {
-  color: var(--vetra-muted-soft);
+  color: #6b7590;
 }
 
 .contact-field input:focus,
 .contact-field textarea:focus {
   outline: none;
-  border-color: var(--vetra-blue);
-  box-shadow: 0 0 0 3px rgba(58, 143, 242, 0.15);
+  border-color: var(--lp-blue-ink);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 56, 253, 0.14);
 }
 
 .contact-field textarea {
   resize: vertical;
-  min-height: 120px;
+  min-height: 140px;
 }
 
 .contact-error {
   margin: 0;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(220, 80, 80, 0.35);
-  background: rgba(220, 80, 80, 0.08);
+  border: 1px solid rgba(185, 28, 28, 0.3);
+  background: #fdf0f0;
   color: #b91c1c;
   font-size: 14px;
 }
 
+/* Same as the landing page's primary button. */
 .contact-submit {
-  padding: 16px 24px;
-  border-radius: 14px;
+  min-height: 52px;
+  padding: 0 28px;
   border: none;
-  background: var(--vetra-gradient);
-  color: #fff;
+  border-radius: 999px;
+  background: var(--lp-blue-ink);
+  color: #ffffff;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 12px 28px rgba(58, 143, 242, 0.3);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
 }
 
 .contact-submit:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 34px rgba(53, 215, 210, 0.35);
+  background: var(--lp-blue-ink-hover);
+}
+
+.contact-submit:active:not(:disabled) {
+  transform: scale(0.99);
 }
 
 .contact-submit:disabled {
-  opacity: 0.7;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-.contact-success {
-  padding: 28px;
-  border-radius: 20px;
-  border: 1px solid rgba(53, 215, 210, 0.35);
-  background: rgba(53, 215, 210, 0.08);
-  margin-bottom: 24px;
-}
-
+/* Sent: a green tick line on the white card. Green on white: 5.4:1. */
 .contact-success p {
-  margin: 0 0 16px;
-  font-size: 15px;
+  margin: 0 0 20px;
+  padding-left: 16px;
+  border-left: 3px solid #1c6b37;
+  font-size: 16px;
   line-height: 1.6;
-  color: var(--vetra-muted);
+  color: var(--lp-muted);
 }
 
+.contact-success strong {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--lp-navy);
+}
+
+/* Same as the landing page's outline button, in its light version. */
 .contact-cta {
-  display: inline-block;
-  padding: 12px 20px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid rgba(53, 215, 210, 0.55);
-  color: var(--vetra-accent);
-  font-size: 14px;
+  min-height: 46px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(1, 11, 41, 0.2);
+  background: transparent;
+  color: var(--lp-navy);
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: border-color 0.2s ease;
 }
 
 .contact-cta:hover {
-  background: rgba(53, 215, 210, 0.08);
-  border-color: rgba(53, 215, 210, 0.8);
+  border-color: var(--lp-navy);
 }
 
-.contact-fallback {
-  margin: 24px 0 0;
-  font-size: 14px;
-  color: var(--vetra-muted-soft);
+@media (prefers-reduced-motion: reduce) {
+  .contact-submit,
+  .contact-cta,
+  .contact-field input,
+  .contact-field textarea {
+    transition: none;
+  }
 }
 
-.contact-link {
-  color: var(--vetra-accent);
-  font-weight: 600;
-  text-decoration: none;
+@media (max-width: 900px) {
+  .contact-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contact-title {
+    max-width: 14ch;
+  }
 }
 
-.contact-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+@media (max-width: 560px) {
+  .contact-submit {
+    width: 100%;
+  }
+
+  .contact-form,
+  .contact-success {
+    border-radius: 20px;
+  }
 }
