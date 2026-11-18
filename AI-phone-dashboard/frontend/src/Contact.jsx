@@ -40,6 +40,7 @@ export default function Contact() {
 
   return (
     <div className="lp lp-dark contact-page">
+      <title>Contact | VetraTD</title>
       {/* Same nav as the landing page. Links are absolute because this page
           is also served on app.vetratd.com, where "/" is the dashboard. */}
       <header className="lp-header lp-dark">
