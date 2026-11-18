@@ -2,11 +2,11 @@ import { Link } from "react-router-dom";
 import VetraMark from "./VetraMark";
 import "./VetraLogo.css";
 
-export default function VetraLogo({ to = "/", size = 28, className = "" }) {
+export default function VetraLogo({ to = "/", size = 28, className = "", name = "Vetra" }) {
   const inner = (
     <>
       <VetraMark size={size} className="vetra-logo-mark" />
-      <span className="vetra-logo-word">Vetra</span>
+      <span className="vetra-logo-word">{name}</span>
     </>
   );
 

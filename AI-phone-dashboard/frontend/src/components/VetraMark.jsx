@@ -1,7 +1,7 @@
 export default function VetraMark({ size = 32, className = "" }) {
   return (
     <img
-      src="/vetra-logo.png"
+      src="/vetra-mark.png"
       alt=""
       aria-hidden
       className={className}
