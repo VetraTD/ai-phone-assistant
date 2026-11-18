@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 // symptom was a button stuck on "Signing in...".
 import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
+import VetraLogo from "./components/VetraLogo";
 import "./Login.css";
 import { MARKETING_URL } from "./siteUrl";
 
@@ -70,6 +71,8 @@ export default function Login() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
+          {/* Brand only, not a link: to={null} renders a plain span. */}
+          <VetraLogo to={null} name="VetraTD" className="login-logo" />
           {/* External. This origin is the app now; its root is the dashboard. */}
           <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
