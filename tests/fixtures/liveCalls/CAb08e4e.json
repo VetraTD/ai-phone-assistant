@@ -1,0 +1,102 @@
+{
+  "callSid": "CAb08e4e",
+  "model": "gemini-3.8-live",
+  "note": "3.8. A 47-second cancellation, and the clearest example of end_call being called in the same turn as the action -- before the step machine reaches `confirm` and tells the model to ask whether anything else is needed.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 4,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": {
+    "claimed": 2,
+    "note_sent": 0,
+    "suppressed_existing_report": 1,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 4,
+    "turns_reply_empty": 0,
+    "unbacked_action": 1,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 0,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 0
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T06:17:53.154Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T06:18:06.367Z",
+      "step": "identify_intent",
+      "caller": "Aha, I just wanted to see if I had any appointments.",
+      "assistant": "You have a strategy call scheduled for Friday, September eighteen at four thirty PM."
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T06:18:18.538Z",
+      "step": "gather_details",
+      "caller": "cancelar",
+      "assistant": "Just to confirm, would you like me to cancel your strategy call on Friday, September eighteen at four thirty PM?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T06:18:30.628Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Your appointment on Friday, September eighteen at four thirty PM is cancelled. Thanks for calling Digile Media, and have a wonderful day."
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T06:18:22.331Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "read back as a cancellation, agreed on the turn, cancelled.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "Just to confirm, would you like me to cancel your strategy call on Friday, September eighteen at four thirty PM?",
+      "agreed_read_back": "Just to confirm, would you like me to cancel your strategy call on Friday, September eighteen at four thirty PM?",
+      "target": "2026-09-18T16:30:00",
+      "target_candidates": [
+        "2026-09-18T16:30:00"
+      ],
+      "target_from": "Just to confirm, would you like me to cancel your strategy call on Friday, September eighteen at four thirty PM?",
+      "target_derived": true,
+      "caller_text": "Yes.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "at": "2026-09-02T03:42:19.302Z",
+  "project": "vetra-uk-edc8ca",
+  "grid": {
+    "vertex:europe-west2:gemini-live-2.5-flash-native-audio": {
+      "ok": false,
+      "err": "timeout 12s"
+    },
+    "vertex:europe-west2:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash-native-audio": {
+      "ok": true
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-2.5-flash-preview-nat"
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-2.5-flash` was not fo"
+    },
+    "vertex:europe-west1:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-2.0-flash-live-001` was no"
+    },
+    "vertex:europe-west1:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-3.1-flash-live-preview` wa"
+    },
+    "vertex:europe-west1:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-3.1-flash-native-audi"
+    },
+    "vertex:us-central1:gemini-live-2.5-flash-native-audio": {
+      "ok": true
+    },
+    "vertex:us-central1:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-2.5-flash-preview-nati"
+    },
+    "vertex:us-central1:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-2.5-flash` was not fou"
+    },
+    "vertex:us-central1:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-2.0-flash-live-001` was not"
+    },
+    "vertex:us-central1:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-3.1-flash-live-preview` was"
+    },
+    "vertex:us-central1:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-3.1-flash-native-audio"
+    },
+    "aistudio::gemini-live-2.5-flash-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash-native-audio is not found for API version v1beta, or is not supported for bidiGenerateContent."
+    },
+    "aistudio::gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash-preview-native-audio is not found for API version v1beta, or is not supported for bidiGenerate"
+    },
+    "aistudio::gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash is not found for API version v1beta, or is not supported for bidiGenerateContent. Call ModelSe"
+    },
+    "aistudio::gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: models/gemini-2.0-flash-live-001 is not found for API version v1beta, or is not supported for bidiGenerateContent. Call Mod"
+    },
+    "aistudio::gemini-3.1-flash-live-preview": {
+      "ok": true
+    },
+    "aistudio::gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-3.1-flash-native-audio is not found for API version v1beta, or is not supported for bidiGenerateContent."
+    }
+  }
+}

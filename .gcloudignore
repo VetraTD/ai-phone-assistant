@@ -1,0 +1,40 @@
+# What `gcloud builds submit` uploads as the build context.
+#
+# Without this, gcloud falls back to .gitignore, which is written for a
+# different purpose and let a 278 MiB / 705-file tarball through on the first
+# submit. The Docker build discards almost all of it (see .dockerignore), so the
+# upload was pure wall-clock and egress.
+#
+# Keep this in step with .dockerignore. They are not the same list — this one
+# governs what leaves the workstation, that one governs what the daemon sees —
+# but anything excluded there and not here is uploaded for no reason.
+.git
+.gitignore
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+
+# Test suites, harnesses and their fixtures. The image ships none of them.
+tests
+eval
+sim
+AI-phone-dashboard
+
+# Generated artefacts and local records.
+latency-runs
+test-audio
+voice-previews
+coverage
+*.log
+.playwright-mcp
+
+# Documentation and planning. Large, and none of it reaches an image.
+docs
+.superpowers
+.claude
+.cursor
+
+# Infrastructure. Terraform is applied from a workstation, not from a build.
+infra

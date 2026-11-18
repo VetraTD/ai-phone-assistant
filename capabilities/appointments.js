@@ -1,0 +1,3086 @@
+/**
+ * Appointments capability pack.
+ *
+ * Booking, checking, cancelling and rescheduling. The most complex pack and the
+ * one the whole abstraction was extracted from: stateful, identity-strict, and
+ * backed by an external system.
+ *
+ * This pack now owns the capability end to end: tool declarations, prompt
+ * fragments, execution, the identity checks, the per-call scratchpad, and the
+ * side effects of a completed booking or change. Nothing about appointments
+ * lives in services/gemini.js, services/tools.js or lib/voice/session.js any
+ * more.
+ *
+ * All of it was moved VERBATIM — every description and instruction string is
+ * byte-identical, because tests/promptSnapshot.test.js asserts neither the
+ * merged tool list nor the prompt changed by a single character.
+ *
+ * Still to come (Step B): the hand-rolled identity check below becomes the
+ * generic `identity` requirement kind, and the athena-shaped EHR tools become
+ * adapter-shaped so a clinic can move to another system without the prompt
+ * changing.
+ */
+
+import { resolveDayHours, formatClockTime, resolveBusinessHoursForPrompt } from "../lib/businessHours.js";
+import {
+  DEFAULT_TIMEZONE,
+  HAS_OFFSET_RE,
+  NAIVE_DATE_RE,
+  formatLocalDateTime,
+  getTzOffsetMs,
+  parseNaiveDate,
+  parseNaiveDateTime,
+  speakableDateTime,
+  toLocalNaiveDateTime,
+  zonedComponentsToUtcMs,
+  zonedWeekdayAndMinutes,
+} from "../lib/capabilities/datetime.js";
+import { noBusinessResult, unknownToolResult } from "../lib/capabilities/results.js";
+import {
+  withRequirements,
+  requirementPromptLines,
+  notesPromptLines,
+  capabilityConfig,
+  isClosedNow,
+} from "../lib/capabilities/requirements.js";
+import { nameSpokenIn } from "../lib/nameQuality.js";
+import { resolveSchedulingAdapter } from "../adapters/scheduling/index.js";
+import { resolveProfile } from "../lib/voice/voiceLocale.js";
+import { declineGuardrail } from "../lib/capabilities/decline.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
+
+/**
+ * Booking. Registered only when the business opted into the book_appointment
+ * module (services/gemini.js:109 previously).
+ */
+const BOOK_APPOINTMENT_DECLARATION = {
+  name: "book_appointment",
+  description:
+    "Book an appointment after the caller has confirmed the details " +
+    "(name, date/time, service type). Call this only after confirmation.",
+  parameters: {
+    type: "object",
+    properties: {
+      client_name: {
+        type: "string",
+        // "Full name of the client" was the whole description, and it never
+        // said whose name, or where it comes from. LVX77, 2026-09-05: the model
+        // called this with "Jane Doe" on a call where the caller had said no
+        // such thing and the appointments table was empty, so it could not have
+        // been read off a record either. The spelling gate refused that booking
+        // correctly; the code-level retry then replayed the refused arguments
+        // and made the invented name permanent.
+        //
+        // The guard that says "do not guess it" only fires when this field is
+        // EMPTY (see booking_refused_no_name below), which is precisely why an
+        // invented name sails past it. Said here instead, where the value is
+        // actually being chosen.
+        description:
+          "The caller's full name, exactly as THEY gave it on this call. Never invent one, never " +
+          "use a placeholder such as 'Jane Doe' or 'John Smith', and never take a name from an " +
+          "earlier record the caller has not confirmed. If they have not told you their name yet, " +
+          "ask them for it and wait for the answer before calling this.",
+      },
+      scheduled_at: {
+        type: "string",
+        description:
+          "ISO 8601 datetime for the appointment (e.g. 2025-03-15T10:00:00)",
+      },
+      service_type: {
+        type: "string",
+        description: "Type of service or consultation requested",
+      },
+      notes: {
+        type: "string",
+        description: "Any additional notes about the appointment or client needs",
+      },
+    },
+    // LVX40. `client_name` was optional here and the model took the offer: the
+    // first deployed booking wrote a row with a phone number, "tooth pain", and
+    // nobody attached to it. The clinic receives an appointment with no patient.
+    //
+    // Marked required HERE as well as enforced in the handler, because the two
+    // do different jobs. The schema is what makes the model ASK before calling;
+    // the handler is what makes it true. A schema alone is a request.
+    //
+    // Every EHR write tool in this pack has always required `caller_name`. The
+    // internal booking tool was the outlier, not the precedent.
+    required: ["scheduled_at", "client_name"],
+  },
+};
+
+/**
+ * Add the confirm-a-second-appointment parameter to a booking declaration.
+ *
+ * Applied ONLY under the "confirm" policy, because a declaration must describe
+ * what the handler actually does: under "allow" nothing blocks so the flag has
+ * no effect, and under "block" nothing can unblock so honouring it would turn
+ * an opt-in parameter into a bypass. Advertising it in either case is the same
+ * mistake that had the model reporting caller_phone/caller_name searches it
+ * never ran — see get_caller_appointments_from_db's description.
+ *
+ * Deliberately NOT added to `required`: forcing the model to emit a boolean on
+ * every booking, including for callers who have no appointment at all, is how
+ * it ends up defaulting to true and silently disabling the guard.
+ */
+function withAdditionalFlag(declaration) {
+  return {
+    ...declaration,
+    parameters: {
+      ...declaration.parameters,
+      properties: {
+        ...declaration.parameters.properties,
+        in_addition_to_existing: {
+          type: "boolean",
+          description:
+            "Set true ONLY after you have told the caller they already have an upcoming " +
+            "appointment and they confirmed they want this new one AS WELL AS that one. " +
+            "Never set it pre-emptively — booking is refused without it when the caller " +
+            "already has an appointment.",
+        },
+      },
+    },
+  };
+}
+
+/**
+ * EHR-backed appointment tools. Present when the business has an enabled
+ * athenahealth integration.
+ *
+ * TRANSITIONAL: these are athena-shaped rather than adapter-shaped. Step B
+ * introduces the `scheduling` adapter interface (findSlots / book / cancel /
+ * reschedule / lookupByCaller) and these declarations become adapter-neutral,
+ * which is what lets a clinic move to Cerner without touching the prompt.
+ */
+const EHR_APPOINTMENT_DECLARATIONS = [
+  {
+    name: "get_caller_appointments",
+    description: "Look up the caller's upcoming appointments in the EHR.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+      },
+      required: ["caller_name"],
+    },
+  },
+  {
+    name: "get_available_slots",
+    description: "Get available appointment slots for a given date and optional service type.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Date to check (YYYY-MM-DD)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "book_appointment_in_ehr",
+    description: "Book an appointment in the EHR for the caller.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_phone: { type: "string", description: "Caller's phone number" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        scheduled_at: { type: "string", description: "Appointment date and time (ISO 8601)" },
+        service_type: { type: "string", description: "Type of appointment" },
+        notes: { type: "string", description: "Optional notes" },
+      },
+      required: ["caller_name", "caller_dob", "scheduled_at"],
+    },
+  },
+  {
+    name: "cancel_appointment",
+    description: "Cancel an existing appointment for the caller. Requires their name and date of birth to verify identity, plus the date of the appointment to cancel.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        appointment_date: { type: "string", description: "Date of the appointment to cancel (YYYY-MM-DD)" },
+        appointment_time: { type: "string", description: "Time of the appointment to cancel (HH:MM, optional)" },
+        reason: { type: "string", description: "Reason for cancellation (optional)" },
+      },
+      required: ["caller_name", "caller_dob"],
+    },
+  },
+  {
+    name: "reschedule_appointment",
+    description: "Reschedule an existing appointment to a new date and time. Requires the caller's name and date of birth, the current appointment date, and the desired new date.",
+    parameters: {
+      type: "object",
+      properties: {
+        caller_name: { type: "string", description: "Caller's full name" },
+        caller_dob: { type: "string", description: "Date of birth (YYYY-MM-DD)" },
+        caller_phone: { type: "string", description: "Caller's phone number (for disambiguation)" },
+        current_appointment_date: { type: "string", description: "Date of the existing appointment (YYYY-MM-DD)" },
+        current_appointment_time: { type: "string", description: "Time of the existing appointment (HH:MM, optional)" },
+        new_date: { type: "string", description: "Desired new date (YYYY-MM-DD)" },
+        new_time: { type: "string", description: "Desired new time (HH:MM, optional)" },
+        service_type: { type: "string", description: "Type of appointment (optional)" },
+      },
+      required: ["caller_name", "caller_dob", "new_date"],
+    },
+  },
+];
+
+/** EHR tools that WRITE — these take configured requirements and are gated. */
+const EHR_WRITE_TOOLS = new Set([
+  "book_appointment_in_ehr",
+  "cancel_appointment",
+  "reschedule_appointment",
+]);
+
+/**
+ * Internal-database appointment tools — the no-EHR path.
+ *
+ * The phone_last4 second factor in cancel/reschedule is a hand-rolled instance
+ * of what becomes the generic `identity` requirement kind in Step B.
+ */
+const DB_APPOINTMENT_DECLARATIONS = [
+  {
+    name: "get_caller_appointments_from_db",
+    // The declaration used to say "by their phone or name" and offer
+    // caller_phone and caller_name parameters. Both were fictional: the handler
+    // has always looked up strictly by ctx.callerPhone, taken from call
+    // metadata, and ignored every argument it was passed.
+    //
+    // That lie had a cost. Told it could search by name, the model searched by
+    // name — on a live call it looked for a caller's WIFE, and then reported
+    // "I wasn't able to find an appointment for Sarah Chen", which is a
+    // disclosure about a third party AND a description of a search that never
+    // happened. An eval scenario reproduced it on the first run.
+    //
+    // Describing what the tool actually does removes the invitation. The
+    // parameters are gone for the same reason, plus one more: a caller's name
+    // in tool arguments is PII that ends up in logs.
+    description:
+      "Look up the appointments belonging to the person on this call. Takes no arguments — it always uses the number the caller is calling from. It cannot search for anyone else, by name or otherwise. Use when the business does not have an EHR integration.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "cancel_appointment_db",
+    description:
+      "Cancel an appointment in our database. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment (we use the one we looked up).",
+    parameters: {
+      type: "object",
+      properties: {
+        appointment_id: { type: "string", description: "UUID of the appointment to cancel (optional if caller has one appointment)" },
+        client_name: {
+          type: "string",
+          description:
+            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the cancellation will be refused.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "reschedule_appointment_db",
+    description:
+      "Reschedule an appointment in our database to a new date/time. Use appointment_id from get_caller_appointments_from_db, or omit if the caller has only one appointment.",
+    parameters: {
+      type: "object",
+      properties: {
+        appointment_id: { type: "string", description: "UUID of the appointment (optional if caller has one appointment)" },
+        new_scheduled_at: {
+          type: "string",
+          description: "New date and time in ISO 8601 format (e.g. 2026-04-15T10:00:00)",
+        },
+        client_name: {
+          type: "string",
+          description:
+            "The name the appointment is booked under, if the caller gave one. Only used together with phone_last4 to verify the appointment belongs to them when they're calling from a different number — a name on its own is never enough.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under, as stated by the caller. REQUIRED whenever the caller is not calling from that number and you are identifying them by name — without it the reschedule will be refused.",
+        },
+      },
+      required: ["new_scheduled_at"],
+    },
+  },
+  {
+    name: "correct_appointment_name",
+    description:
+      "Correct the name on an appointment that is already booked, when the caller tells you it was " +
+      "taken down wrong. Use this whenever they correct their name AFTER a booking exists - do not " +
+      "just say you have updated it, because nothing changes unless this runs. It updates the " +
+      "existing appointment; it does not create a new one.",
+    parameters: {
+      type: "object",
+      properties: {
+        client_name: {
+          type: "string",
+          description: "The corrected full name, exactly as the caller has now given it.",
+        },
+        appointment_id: {
+          type: "string",
+          description:
+            "Which appointment to correct. Omit it for the one booked or discussed earlier in this call.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under. Only needed when " +
+            "the caller is not calling from that number.",
+        },
+      },
+      required: ["client_name"],
+    },
+  },
+  {
+    name: "add_appointment_note",
+    description:
+      "Add a note to an appointment that is already booked - something the caller wants the " +
+      "business to know before they come in. Use this whenever they ask you to note, add, record " +
+      "or pass on a detail about an existing appointment. It ADDS to any note already there; it " +
+      "does not replace it, and it does not change the date, the time or the name. Do not tell " +
+      "the caller a note has been added unless this has run and returned success.",
+    parameters: {
+      type: "object",
+      properties: {
+        note: {
+          type: "string",
+          description:
+            "What to record, in the caller's own words, kept short. Do not include payment card " +
+            "details, passwords or security codes even if the caller offers them.",
+        },
+        appointment_id: {
+          type: "string",
+          description:
+            "Which appointment to note. Omit it for the one booked or discussed earlier in this call.",
+        },
+        phone_last4: {
+          type: "string",
+          description:
+            "The last 4 digits of the phone number the appointment is booked under. Only needed " +
+            "when the caller is not calling from that number.",
+        },
+      },
+      required: ["note"],
+    },
+  },
+];
+
+/**
+ * Which backend owns this business's appointment book.
+ *
+ * Config decides; an enabled EHR integration is honoured as the legacy routing
+ * for a business not yet configured. This replaced two hardcoded
+ * `provider === "athenahealth"` comparisons — adding a second EHR used to mean
+ * editing the engine in three places.
+ *
+ * @param {object} config - normalised business config
+ * @param {Array} integrations
+ */
+function schedulingAdapter(config, integrations) {
+  return resolveSchedulingAdapter(capabilityConfig(config, "appointments"), integrations);
+}
+
+/**
+ * Does an external system own the appointment book?
+ *
+ * When one does, the internal-DB tools are suppressed: two systems of record
+ * for one appointment is a data-integrity bug, not a preference, and the model
+ * must not be able to write to both.
+ */
+function hasExternalBook(config, integrations) {
+  return schedulingAdapter(config, integrations).id !== "internal";
+}
+
+// ---------------------------------------------------------------------------
+// Prompt fragments
+//
+// This is the part the whole refactor exists for. The booking flow below used
+// to be a hardcoded `if (intent === "book_appointment")` branch inside
+// services/gemini.js, which meant every business on the platform booked
+// appointments the same way and changing that for one of them meant editing
+// the engine.
+//
+// It is still hardcoded here — Step A only moves it. What changes is that it
+// now has ONE owner, so Step B can layer per-business config on top: an
+// enforced `require` block for the things that must be guaranteed, and a prose
+// `notes` field for the endless small variations ("ask morning or afternoon
+// first", "never offer Friday afternoon"). Neither is wired up yet; adding
+// unreachable config plumbing before the data exists would be untested code.
+// ---------------------------------------------------------------------------
+
+/** The module tasks this capability owns — presence of any means "enabled". */
+const APPOINTMENT_MODULE_TASKS = ["book_appointment", "check_appointment", "cancel_reschedule"];
+
+/**
+ * Read the availability settings, defaulting at read-time so a business that
+ * never touched them still books into 30-minute, single-capacity slots.
+ * WHETHER availability is checked is not a per-business flag — it is inherent to
+ * the built-in calendar (any adapter exposing `checkAvailability`). These are
+ * only the numbers that define a slot.
+ * @param {object} cfg - appointments capability config
+ * @returns {{length: number, capacity: number}}
+ */
+export function availabilitySettings(cfg) {
+  const a = cfg?.availability || {};
+  return {
+    length: Number.isInteger(a.length) ? a.length : 30,
+    capacity: Number.isInteger(a.capacity) ? a.capacity : 1,
+  };
+}
+
+/**
+ * What to do when the caller already has an upcoming appointment.
+ *
+ * Defaulted at read time (like availabilitySettings) so a business that never
+ * touched the setting gets "confirm" — the safe answer, because the failure it
+ * prevents is invisible: the assistant forgets, books a second appointment, and
+ * nobody learns about it until the caller turns up twice.
+ *
+ * @param {object} cfg - appointments capability config
+ * @returns {"confirm"|"allow"|"block"}
+ */
+function existingAppointmentPolicy(cfg) {
+  const v = cfg?.existingAppointment;
+  return v === "allow" || v === "block" ? v : "confirm";
+}
+
+/**
+ * The caller's OTHER upcoming appointments, from the call-start snapshot.
+ *
+ * Read from ctx.callerContext, never re-queried. The snapshot is resolved before
+ * turn 1 (session.js ensureContext awaits it), so this costs nothing on a turn
+ * the caller is already waiting through; a Supabase round trip inside a tool
+ * round would be latency they hear. Same-call staleness is closed by onEffect
+ * below, which updates the snapshot after every successful book/cancel/change.
+ *
+ * Re-filtered against NOW because the snapshot was taken minutes ago and an
+ * appointment can pass during a long call.
+ *
+ * Fails OPEN by design: no context (prefetch failed, DB disabled, withheld
+ * number) means no guard. Blocking on missing data would refuse a legitimate
+ * booking, which is a worse failure than the one being prevented.
+ *
+ * @param {object} ctx - tool context
+ * @returns {Array<{scheduled_at: string, client_name?: string}>}
+ */
+/**
+ * Keep the call-start caller snapshot honest after this call changes something.
+ *
+ * The snapshot is fetched once, before turn 1. Left alone it goes stale the
+ * moment the caller books, cancels or moves anything — CALLER CONTEXT would go
+ * on reciting an appointment that no longer exists, and the booking guard would
+ * refuse a second booking on the strength of one this very call just cancelled.
+ *
+ * The pack computes the next value; the engine owns the state. `setCallerContext`
+ * is optional on purpose: the text harness (lib/harness/) does not
+ * provide it and is deliberately not at parity, so it keeps the call-start
+ * snapshot and simply does not refresh.
+ *
+ * The new row's id is left null — upcomingForCaller reads only scheduled_at, and
+ * an appointment id is something the model must never be handed.
+ */
+function applyToCallerSnapshot(effect, engine) {
+  if (typeof engine?.setCallerContext !== "function") return;
+  const current = engine.call?.callerContext;
+  const base = current || { callCount: 0, lastCallSummary: null, upcomingAppointments: [] };
+  const list = Array.isArray(base.upcomingAppointments) ? base.upcomingAppointments : [];
+  const data = effect.data || {};
+
+  let next;
+  if (effect.type === "booked") {
+    next = [...list, { id: null, client_name: data.client_name || null, scheduled_at: data.scheduled_at }];
+  } else if (data.newClientName && data.appointmentId) {
+    // BEFORE the appointmentId branch below, which removes the row.
+    //
+    // That branch is the cancel path, and it keys on "a changed effect carrying
+    // an id and no new time" -- which is exactly the shape a rename would have
+    // had. Left to fall through, correcting a name would have silently deleted
+    // the appointment from the caller snapshot, and the caller would then have
+    // been told they had none. Same family as LVX33 and not worth repeating.
+    next = list.map((a) =>
+      a?.id && a.id === data.appointmentId ? { ...a, client_name: data.newClientName } : a
+    );
+  } else if (data.newScheduledAt) {
+    next = list.map((a) =>
+      a?.id && a.id === data.appointmentId ? { ...a, scheduled_at: data.newScheduledAt } : a
+    );
+  } else if (data.appointmentId) {
+    next = list.filter((a) => a?.id !== data.appointmentId);
+  } else {
+    return; // a "changed" effect carrying no id — nothing can be said about which row moved
+  }
+
+  next.sort((a, b) => Date.parse(a?.scheduled_at || 0) - Date.parse(b?.scheduled_at || 0));
+  engine.setCallerContext({ ...base, upcomingAppointments: next });
+}
+
+function upcomingForCaller(ctx) {
+  const list = ctx?.callerContext?.upcomingAppointments;
+  if (!Array.isArray(list)) return [];
+  const now = Date.now();
+  return list.filter((a) => {
+    const t = Date.parse(a?.scheduled_at);
+    return Number.isFinite(t) && t > now;
+  });
+}
+
+/** The what-you-can-do clauses for the CAPABILITIES line. */
+function capabilityClauses(allowed) {
+  const hasAll =
+    allowed.includes("book_appointment") &&
+    allowed.includes("check_appointment") &&
+    allowed.includes("cancel_reschedule");
+
+  if (hasAll) {
+    return [
+      "book, check, cancel, and reschedule appointments (using scheduling tools when available, or take details for follow-up)",
+    ];
+  }
+
+  const clauses = [];
+  if (allowed.includes("book_appointment")) clauses.push("book appointments");
+  if (allowed.includes("check_appointment")) {
+    clauses.push(
+      "help with appointment inquiries (you cannot access the schedule directly — take details for follow-up)"
+    );
+  }
+  if (allowed.includes("cancel_reschedule")) {
+    clauses.push(
+      "help with cancelling or rescheduling appointments (using scheduling tools when available, or by taking detailed information for follow-up)"
+    );
+  }
+  return clauses;
+}
+
+/**
+ * The booking flow. Renders today's hours inline so the model suggests times
+ * the business is actually open for, which is why this is DYNAMIC guidance and
+ * must never be cached into the static prefix.
+ */
+/**
+ * Steer the model to decline booking/changes while the office is closed, when
+ * the business set businessHoursOnly. This is the up-front counterpart to the
+ * checkRequirements refusal, so the caller is never walked through a flow that
+ * cannot complete.
+ */
+const CLOSED_BOOKING_DECLINE =
+  "The office is closed right now, and this business only books, cancels, or reschedules " +
+  "appointments during opening hours. Do NOT check availability, suggest times, or collect any " +
+  "details. Tell the caller you can't book or change an appointment while the office is closed, " +
+  "and offer to take a message so the team can call them back when they reopen.";
+
+/**
+ * The rule that makes the receptionist check before it offers.
+ *
+ * Lives in the CALLER CONTEXT block, NOT in the booking step guidance, and that
+ * placement is the whole fix. Step guidance is keyed on intent; intent is what
+ * the model decided the call is about. On production call 0db83104 the model was
+ * still in general_question when it offered a strategy call to a caller who
+ * already had one — the booking guidance had not been rendered, so nothing had
+ * told it to look. A rule conditioned on "the call is about booking" cannot
+ * govern the moment the model itself brings booking up.
+ *
+ * "Stay quiet unless relevant" is preserved by a different mechanism: the block
+ * only renders when the caller HAS an upcoming appointment, and the rule governs
+ * OFFERING rather than announcing. A caller asking about opening hours is still
+ * not told about their appointment.
+ *
+ * `allow` contributes nothing — that policy is the opt-out.
+ *
+ * @param {"confirm"|"allow"|"block"} policy
+ * @returns {string[]}
+ */
+function existingAppointmentContextRules(policy) {
+  if (policy === "allow") return [];
+
+  if (policy === "block") {
+    return [
+      "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
+        "another one — this applies just as much when YOU are the one raising it as when they ask. " +
+        "Mention the appointment they already have and offer to move it instead.",
+    ];
+  }
+
+  return [
+    "This caller already has an upcoming appointment. Do NOT offer to book, schedule, or arrange " +
+      "another one — this applies just as much when YOU are the one raising it as when they ask. " +
+      "If a new appointment would otherwise be the natural next step, mention the one they already " +
+      "have and ask whether anything should be added to it. Book a second appointment only if they " +
+      "explicitly ask for one as well, after you have told them about the existing one.",
+  ];
+}
+
+function bookingGuidance(config, now, canCheck) {
+  const resolvedHours = resolveBusinessHoursForPrompt(config, now);
+  let businessHoursStr = "business hours";
+  if (resolvedHours) {
+    if (resolvedHours.weekly) {
+      businessHoursStr = resolvedHours.closedToday
+        ? `closed today (${resolvedHours.todayLabel})`
+        : resolvedHours.rangeText
+        ? `today's hours, ${resolvedHours.rangeText}`
+        : "business hours";
+    } else if (resolvedHours.rangeText) {
+      businessHoursStr = resolvedHours.rangeText;
+    }
+  }
+
+  // Built-in calendar: check the calendar BEFORE collecting anything, so a full
+  // slot never costs the caller the whole flow. (An EHR uses its own get_available_slots.)
+  if (canCheck) {
+    return (
+      `Your task: Help the caller book, checking the calendar before you collect any details. ` +
+      `Ask ONE thing per turn — never put two questions in the same response:\n` +
+      `1. If the caller has named a specific TIME, call check_appointment_availability with that date and time.\n` +
+      `2. If the caller has named a DAY but no time, call check_appointment_availability with just the date (no hour). It returns the open times for that day: offer them and ask which one suits. NEVER pick an hour the caller did not say, and never read a time you chose back to them as though they had chosen it.\n` +
+      `3. Only if they have named neither a day nor a time, ask whether they prefer mornings or afternoons (business hours: ${businessHoursStr}), and — as a SEPARATE question — whether any days don't work for them.\n` +
+      `4. If a check comes back available=false, offer the alternatives it returned and repeat — do NOT collect the caller's details for a time that isn't open.\n` +
+      `5. Only once a free time is agreed, ask for the caller's name. When they give it, repeat it back naturally in your next sentence ("Thanks, Marcus — ...") so that if you misheard it, they can correct you straight away. That time is now settled: do NOT call check_appointment_availability again for it while you collect details. You already have the answer, and re-asking makes the caller wait while you check something you have just checked.\n` +
+      `6. If there is anything else you are REQUIRED to collect, ask for it one item per turn. If nothing else is required, go straight to the read-back — do not invent extra questions such as asking for a phone number you were not told to collect.\n` +
+      `7. Read all details back and ask a clear yes/no like "Shall I go ahead and book that?"\n` +
+      `8. Do NOT call book_appointment until the caller clearly confirms. Go straight to book_appointment — do NOT check availability one last time first; the system re-checks at booking time on its own. Only if booking reports the slot is full do you call check_appointment_availability again, and then to offer another time.`
+    );
+  }
+
+  return (
+    `Your task: Help the caller find a good appointment time and collect their details. ` +
+    `Act like a real receptionist — don't just ask "what time works for you?" Instead, one question at a time:\n` +
+    `1. Ask whether they prefer mornings or afternoons.\n` +
+    `2. Ask if any specific days of the week don't work for them.\n` +
+    `3. Based on their preference and business hours (${businessHoursStr}), suggest 2-3 specific times. Example: "We have availability Tuesday at 10 AM or Thursday at 2 PM — do either of those work?"\n` +
+    `4. Once they pick a time, confirm name and service. When the caller gives their name, repeat it back naturally in your next sentence ("Thanks, Marcus — ..."). Then repeat all details back (name, date, time, service) and explicitly ask "Does that sound right?" or "Shall I go ahead and book that?"\n` +
+    `5. Do NOT call book_appointment until the caller clearly confirms.\n` +
+    `If a time slot is unavailable after a booking attempt, immediately suggest the next nearest alternative rather than asking the caller to come up with a new time.`
+  );
+}
+
+/**
+ * Cancel/reschedule. Forks on which backend owns the appointment book, because
+ * the identity proof available differs: an EHR can match on name plus date of
+ * birth, whereas the internal DB can only match on the phone number the
+ * appointment was booked under.
+ *
+ * The non-EHR branch's IDENTITY CHECK paragraph exists because the model kept
+ * re-verifying callers it had already verified, sending the conversation in
+ * circles. Step B replaces it with the generic `identity` requirement kind,
+ * enforced in code rather than requested in prose.
+ */
+function cancelRescheduleGuidance(hasEhr) {
+  if (hasEhr) {
+    return "Reschedule flow, one question at a time: (1) Ask for their name. (2) Ask for their date of birth. (3) Call get_caller_appointments; if one appointment, say 'I see you have an appointment on [DATE] at [TIME] with [PROVIDER].' (4) Ask when they'd like to move it. (5) Ask whether morning or afternoon works better. (6) Call get_available_slots; offer 2–3 options. (7) Call reschedule_appointment with name, DOB, current date/time, new date/time. (8) Confirm new details and ask if anything else.";
+  }
+  return (
+    `The caller wants to cancel or reschedule an appointment. ` +
+    `If you have tools to look up their appointments by phone or name (get_caller_appointments_from_db), use those, then cancel_appointment_db or reschedule_appointment_db. ` +
+    `IDENTITY CHECK: if get_caller_appointments_from_db found their appointment using the number they are calling from, they are ALREADY verified — do NOT ask for the last four digits, do NOT ask them to confirm their number, and do NOT re-confirm ownership; just confirm which appointment and proceed with the change. ` +
+    `Only when that lookup finds nothing and you are going by a name the caller gave must you also ask for the last 4 digits of the phone number the appointment is booked under, passed as phone_last4. ` +
+    `Ask for it naturally — e.g. "Just to confirm it's you, what are the last four digits of the number the appointment is under?" — ask at most once, and never guess or invent those digits. ` +
+    `Do not claim the change is done until the tool reports success. ` +
+    `If no tools can find the appointment, collect their name, phone, and the appointment date/time they want to change and use record_customer_request so staff can follow up.`
+  );
+}
+
+/**
+ * Prompt-level confirmation gate. Belongs to this pack because it names
+ * book_appointment; Step B promotes it to the `confirmBeforeWrite` requirement
+ * kind so it is enforced at the tool layer instead of merely requested.
+ */
+// ---------------------------------------------------------------------------
+// Identity
+//
+// Hand-rolled here for one capability. Step B lifts this into the generic
+// `identity` requirement kind so every capability inherits it, and so a clinic
+// can add its own proof ("dental number") as configuration rather than code.
+// ---------------------------------------------------------------------------
+
+const IDENTITY_MISMATCH_MESSAGE =
+  "I can only make changes to appointments booked under your number. Let me take a message instead.";
+
+/**
+ * The refusal a change tool gives when it cannot tell WHICH appointment.
+ *
+ * It used to be the two words "Which appointment?", and on a real call that
+ * cost the caller the change they rang up for. The model read `success: false`
+ * as "this cannot be done": it offered a callback, then invented "since you're
+ * calling from a different number, could I have the last four digits" — the
+ * caller ID matched the row exactly, and `existingAppointmentContextRules`
+ * tells it in as many words not to ask that — and then fell back to taking a
+ * message. See LVX71.
+ *
+ * Written to LVX34's pattern, which is the one that works on this model: say it
+ * is NOT a failure, say what is missing, say what to do about it, say to call
+ * again. A bare refusal gets read as an impossibility and take-a-message is the
+ * fallback the prompt offers everywhere else.
+ *
+ * THE DATES ARE INCLUDED and the names are not. The model cannot see which
+ * appointments exist from the refusal alone, so "ask which one" without giving
+ * it anything to ask WITH is the same loop one level up. Dates disambiguate;
+ * a name read out of a record to be confirmed is what non-negotiable rule 4
+ * forbids, so no name goes in here.
+ *
+ * @param {object} ctx - tool context, for callerContext and timezone
+ * @param {string} toolName - the tool to tell the model to call again
+ * @returns {string} model-facing refusal text
+ */
+function whichAppointmentMessage(ctx, toolName) {
+  // upcomingForCaller, not the raw array. The two disagreed: this read the
+  // snapshot unfiltered while resolveAppointmentId filters to the future, so a
+  // caller whose only appointment was in the PAST got resolveAppointmentId
+  // returning null and then this message asserting they have "exactly one
+  // upcoming appointment" and naming a date that has been and gone.
+  const upcoming = upcomingForCaller(ctx);
+  const timezone = ctx?.config?.timezone || DEFAULT_TIMEZONE;
+  const profile = resolveProfile(ctx?.config);
+
+  if (upcoming.length === 0) {
+    // Materially different situation: there is nothing to ask the caller to
+    // choose between, so telling the model to ask which one is its own loop.
+    return (
+      "[not caller speech] NOT A FAILURE — but this caller has no upcoming appointments " +
+      "on record under this number, so there is nothing to change. Tell them you cannot " +
+      "find anything under their number and ask whether it might be booked under a " +
+      "different one. Do not take a message unless they ask you to."
+    );
+  }
+
+  if (upcoming.length === 1) {
+    // BACKSTOP as of 2026-09-04, not the primary path. resolveAppointmentId now
+    // fills a missing id from this same snapshot before any of the three change
+    // tools reaches a refusal, so the caller is not refused at all and does not
+    // wait through a round-trip. This branch survives because the layers should
+    // each be correct on their own: if the resolver is ever narrowed, being
+    // asked "which appointment?" when you have one must not come back with it.
+    //
+    // The declaration promises appointment_id is "optional if caller has one
+    // appointment", and the code only delivers that when a previous lookup has
+    // left an id in the pack scratchpad. So a caller with exactly one gets
+    // refused too, and asking them WHICH is nonsense when there is only one.
+    //
+    // The control flow is left alone deliberately -- resolving the id here
+    // would move an ownership decision into a message builder. Instead the
+    // model is handed the id it is missing, which it already receives from
+    // get_caller_appointments_from_db anyway.
+    const only = upcoming[0];
+    const when = only?.scheduled_at ? speakableDateTime(only.scheduled_at, timezone, profile) : "their appointment";
+    return (
+      `[not caller speech] NOT A FAILURE — the change is still going ahead, it just needs ` +
+      `the appointment_id. This caller has exactly one upcoming appointment, ${when}. Call ` +
+      `${toolName} again with appointment_id set to "${only.id}". Do not ask the caller which ` +
+      `appointment, do not tell them anything went wrong, and do not take a message instead.`
+    );
+  }
+
+  const options = upcoming
+    .map((a) => (a?.scheduled_at ? speakableDateTime(a.scheduled_at, timezone, profile) : null))
+    .filter(Boolean)
+    .join("; ");
+
+  return (
+    `[not caller speech] NOT A FAILURE — the change is still going ahead, it just needs ` +
+    `one more thing first. This caller has more than one appointment, so ${toolName} needs ` +
+    `an appointment_id to know which. Ask the caller which one they mean — these are the ` +
+    `ones on record: ${options} — then call ${toolName} again with appointment_id set to ` +
+    `that appointment. Do not tell the caller anything went wrong, do not offer a callback, ` +
+    `do not take a message instead, and do not ask them to confirm their phone number: they ` +
+    `are already verified by the number they are calling from.`
+  );
+}
+
+/** What the caller hears while the model sorts out which appointment. */
+const WHICH_APPOINTMENT_CALLER_LINE = "Just to make sure I change the right one — which appointment did you mean?";
+
+/**
+ * Does the given appointment row belong to the current caller?
+ *
+ * Two accepted proofs:
+ *  1. PHONE — the caller's verified number (last 10 digits, from
+ *     ctx.callerPhone: trusted Twilio call metadata, never model-supplied)
+ *     matches the appointment's client_phone. Sufficient on its own.
+ *  2. NAME + LAST-4 — the client_name on file matches the name the caller
+ *     gave AND the caller also states the last 4 digits of the phone number
+ *     the appointment is booked under. Both are model-supplied (i.e. relayed
+ *     from caller speech), so neither is sufficient alone: a name is public
+ *     information, and knowing it must not be enough to cancel a stranger's
+ *     appointment. The last-4 is the second factor.
+ *
+ * @param {{client_phone?: string|null, client_name?: string|null}|null} appointment
+ * @param {{callerPhone?: string|null}} ctx
+ * @param {string|undefined} argsClientName
+ * @param {string|undefined} argsPhoneLast4 - last 4 digits as spoken by the
+ *   caller; non-digits are stripped so "0-0-0-0" / "0 0 0 0" work.
+ * @returns {boolean}
+ */
+function appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) {
+  if (!appointment) return false;
+
+  const callerDigits = String(ctx?.callerPhone || "").replace(/\D/g, "");
+  const apptDigits = String(appointment.client_phone || "").replace(/\D/g, "");
+  const phoneMatches =
+    callerDigits.length >= 10 && apptDigits.length >= 10 && callerDigits.slice(-10) === apptDigits.slice(-10);
+  if (phoneMatches) return true;
+
+  const nameArg = String(argsClientName || "").trim().toLowerCase();
+  const apptName = String(appointment.client_name || "").trim().toLowerCase();
+  const nameMatches = nameArg.length > 0 && apptName.length > 0 && nameArg === apptName;
+  if (!nameMatches) return false;
+
+  // Second factor. Fails closed when the appointment on file has no usable
+  // phone number to check against — there is then nothing the caller could
+  // prove, so the name path is simply unavailable for that row.
+  const last4Arg = String(argsPhoneLast4 || "").replace(/\D/g, "");
+  if (last4Arg.length !== 4 || apptDigits.length < 4) return false;
+  return last4Arg === apptDigits.slice(-4);
+}
+
+/**
+ * Fetch the target appointment and verify it belongs to the caller before
+ * cancel/reschedule mutate it. Fails closed: a missing appointmentId, a row
+ * that can't be found (wrong business, bad id), or no phone / name+last-4
+ * match all return false.
+ * @returns {Promise<boolean>}
+ */
+async function verifyAppointmentIdentity(appointmentId, ctx, argsClientName, argsPhoneLast4) {
+  if (!appointmentId || !ctx?.businessId) return "not_found";
+  // Identity already proven for this appointment earlier in the call (e.g. a
+  // cancel verified it, then the caller asks to reschedule the same one) —
+  // don't make the caller prove themselves again.
+  if (scratch(ctx).identityVerifiedApptId === appointmentId) return "ok";
+  const appointment = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
+  // NOT FOUND and NOT YOURS are different facts, and collapsing them into one
+  // `false` cost a real caller their change. LVX74: they asked to rename their
+  // own appointment, booked under their own number, from that number, and were
+  // told "I'm not able to make changes to appointments that are not booked
+  // under your number" -- spoken verbatim, because that message is callerSafe.
+  //
+  // The row was simply not there. The model had guessed an appointment_id,
+  // because CALLER CONTEXT renders dates and names and NO ids, so the only
+  // source of a real one is get_caller_appointments_from_db and none had run.
+  //
+  // Still fails closed either way. Only the reason changes.
+  if (!appointment) return "not_found";
+  return appointmentBelongsToCaller(appointment, ctx, argsClientName, argsPhoneLast4) ? "ok" : "not_owner";
+}
+
+/**
+ * This capability's slice of the per-call scratchpad.
+ *
+ * Holds what earlier turns (and earlier tools in this turn) established:
+ * which appointment is being discussed, whose identity has already been
+ * proven, and what was booked — the cross-turn idempotency anchor.
+ */
+/**
+ * The tools that act on an appointment that must ALREADY EXIST.
+ *
+ * `book_appointment` is deliberately absent: it creates the row, so it always
+ * has something to act on. See hasWriteTarget on the pack.
+ */
+const CHANGE_TOOL_NAMES = [
+  "cancel_appointment_db",
+  "reschedule_appointment_db",
+  "correct_appointment_name",
+  "add_appointment_note",
+];
+
+function scratch(ctx) {
+  return ctx?.capabilityState?.appointments || {};
+}
+
+// ---------------------------------------------------------------------------
+// Booking-time validation + timezone anchoring
+//
+// The model sends scheduled_at as a naive "YYYY-MM-DDTHH:MM[:SS]" string with
+// no timezone information at all. Historically that string went straight to the
+// database: no future/past check, no business-hours check, and no timezone
+// anchoring — a "10:00" booking for an America/Chicago business was stored as
+// if it were 10:00 UTC, six hours off from what the caller agreed to.
+//
+// The business-hours half of this becomes the generic `businessHoursOnly`
+// requirement kind in Step B.
+// ---------------------------------------------------------------------------
+
+const INVALID_DATETIME_MESSAGE =
+  "I didn't catch a valid date and time — could you say the day and time again?";
+const PAST_DATETIME_MESSAGE = "That time has already passed — what day and time works for you?";
+const CLOSED_DAY_MESSAGE = "We're closed that day — would another time work?";
+
+// Small grace window so a booking for "right now" (model latency, clock
+// skew) isn't rejected as already in the past.
+const BOOKING_PAST_GRACE_MS = 60_000;
+
+/**
+ * Validate and timezone-anchor a `book_appointment` scheduled_at value.
+ * @param {unknown} rawScheduledAt
+ * @param {{timezone?: string, businessHours?: object|null}} config
+ * @param {{log?: {warn: function}}} [deps] - optional; only used to report an
+ *   offset that disagrees with the business zone. Kept optional so the
+ *   validator stays a pure function tests can call with two arguments.
+ * @returns {{ok: true, scheduledAt: string, offsetDisagreesWithZone?: boolean} | {ok: false, message: string}}
+ */
+function validateBookingTime(rawScheduledAt, config, deps) {
+  if (typeof rawScheduledAt !== "string" || !rawScheduledAt.trim()) {
+    return { ok: false, message: INVALID_DATETIME_MESSAGE };
+  }
+  const trimmed = rawScheduledAt.trim();
+  const timezone = config?.timezone || DEFAULT_TIMEZONE;
+  let offsetDisagreesWithZone = false;
+
+  let targetMs;
+  let storedValue;
+
+  if (HAS_OFFSET_RE.test(trimmed)) {
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+
+    // Already unambiguous as an INSTANT — validate and store verbatim, no
+    // reformatting.
+    //
+    // DETECTED BUT DELIBERATELY NOT "CORRECTED". There is a second way a wrong
+    // hour can reach the database here: the model writes the caller's local
+    // wall clock and appends "Z", so "1:05pm at a London clinic" is persisted
+    // as 13:05Z — which reads back as 2:05pm during BST.
+    //
+    // Re-anchoring the wall-clock digits to the business zone would fix that
+    // case and BREAK the opposite one, where the model correctly converted
+    // (10:00 America/Chicago -> 15:00Z) and re-anchoring would shove the
+    // booking five hours. The two are indistinguishable from the value alone,
+    // and guessing wrong is worse than the bug: a 5-6 hour shift on a US
+    // booking beats a 1 hour shift on a UK one.
+    //
+    // So: measure, don't guess. The naive path was the proven cause of the
+    // reported defect and is now anchored correctly; this branch gets a log
+    // line so we learn whether the model ever actually sends an offset that
+    // disagrees with the business zone. If the counter stays at zero, the
+    // question is closed. If it does not, the fix is to reject the value and
+    // make the model re-send a naive one — deterministic, and safe both ways.
+    const declared = parseNaiveDateTime(trimmed.replace(HAS_OFFSET_RE, "").replace(/\.\d+$/, ""));
+    const anchoredMs = declared ? zonedComponentsToUtcMs(declared, timezone) : NaN;
+    if (Number.isFinite(anchoredMs) && anchoredMs !== d.getTime()) {
+      offsetDisagreesWithZone = true;
+      // log exposes debug/info/error only; a warning is log.error carrying
+      // severity:"warn" (the convention used throughout lib/ and services/).
+      deps?.log?.error?.("booking_offset_disagrees_with_business_zone", {
+        supplied: trimmed,
+        timezone,
+        wouldShiftByMinutes: Math.round((anchoredMs - d.getTime()) / 60_000),
+        severity: "warn",
+      });
+    }
+
+    targetMs = d.getTime();
+    storedValue = trimmed;
+  } else {
+    const parsed = parseNaiveDateTime(trimmed);
+    if (!parsed) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    targetMs = zonedComponentsToUtcMs(parsed, timezone);
+    if (!Number.isFinite(targetMs)) return { ok: false, message: INVALID_DATETIME_MESSAGE };
+    storedValue = new Date(targetMs).toISOString();
+  }
+
+  if (targetMs < Date.now() - BOOKING_PAST_GRACE_MS) {
+    return { ok: false, message: PAST_DATETIME_MESSAGE };
+  }
+
+  // Business-hours check — read the resolved instant's wall-clock weekday and
+  // time-of-day in the business's timezone, and reuse resolveDayHours'
+  // weekly/legacy/null shape handling rather than reinventing it.
+  const { shortWeekday, minutesOfDay } = zonedWeekdayAndMinutes(targetMs, timezone);
+
+  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
+  if (day.closed) {
+    return { ok: false, message: CLOSED_DAY_MESSAGE };
+  }
+  if (day.open && day.close) {
+    const [openH, openM] = day.open.split(":").map(Number);
+    const [closeH, closeM] = day.close.split(":").map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+    if (minutesOfDay < openMinutes || minutesOfDay >= closeMinutes) {
+      const openLabel = formatClockTime(day.open) || day.open;
+      const closeLabel = formatClockTime(day.close) || day.close;
+      return {
+        ok: false,
+        message: `We're not open then — our hours that day are ${openLabel} to ${closeLabel}. Would another time work?`,
+      };
+    }
+  }
+
+  return { ok: true, scheduledAt: storedValue, offsetDisagreesWithZone };
+}
+
+// The read-back-and-confirm requirement itself lives in NON-NEGOTIABLE RULE 3
+// (services/gemini.js), so this pack bullet keeps only the full-name read-back
+// detail specific to booking.
+//
+// THE SPELLING SENTENCES WERE REMOVED 2026-08-29. They were one of three
+// independent prompt sites that each asked for a spelling — this one, the
+// message protocol in capabilities/messages.js (which is `core: true`, so it
+// renders on booking calls TOO), and the no-availability booking guidance
+// below. Each carried its own "at most once" caveat, none of them knew about
+// the others, and none of them could count. A caller was asked to spell their
+// name three times in one call.
+//
+// The ask now has exactly one source: the code gate in services/tools.js, which
+// fires before a write, consults the caller's records, and is capped by a
+// counter in lib/voice/replyState.js. A rule about what the model did EARLIER
+// is something it has to remember; a refusal it reads this turn is a fact.
+// REVERSED 2026-09-09, and the sentence it replaces is quoted here because the
+// reasoning behind it was sound when it was written.
+//
+//   "repeat their FULL name back once in your very next sentence — 'Thanks,
+//    Marcus Bell — ...' — first name and surname, not just the first. A surname
+//    you never say aloud is one the caller cannot correct, and it is the part
+//    that ends up in the business's records."
+//
+// That rationale is now obsolete, and this repository is what obsoleted it: a
+// SPOKEN read-back cannot convey spelling. A live call stored "Venkateshwaria
+// Ayalavarapu" as "Venkateshwaria Ayalla Varpu" AFTER the assistant said the
+// surname back, because the two sound nearly identical. Only letters catch a
+// letter error, and the spelling gate in services/tools.js now demands them
+// before any name-bearing write, with the write-order gate forcing a read-back
+// of the corrected value on top of that.
+//
+// So the instruction was a weaker version of a job two code gates already do —
+// and it was actively producing the defect it existed to prevent. Asked for a
+// full name before it has one, the model INVENTS the missing half:
+//
+//   2026-09-05  caller said "Nithin Dodla"  ->  "Thanks, Nitin Dadlani."
+//   2026-09-09  caller said "Nithin Dodla"  ->  "Thanks, Nitin Gadkari."
+//
+// Both times the first name survived and the surname was replaced by something
+// the model knows — a public figure, in the second case. That is not a
+// transcription error, it is pattern-completion filling a gap the prompt opened.
+//
+// SUBTRACTIVE ON PURPOSE. This codebase's record with prompt CAPS is bad and
+// well documented; removing a demand is a different bet from adding one,
+// because a rule that is not there cannot be half-followed. The deterministic
+// half of this fix is the two gates that were already shipped.
+const BOOKING_CONFIRMATION_GUARDRAIL =
+  `- Do not say the caller's name aloud until they have spelled it for you. A name you have only heard is one you may have misheard, and saying it back invites them to accept your version of it — "Thanks — what day were you thinking of?" is all you need. Once they HAVE spelled it, use their FIRST name in conversation — "Thanks, Nithin — I have that down." — and say the full name only when you read the details back to confirm them. If their name is already on their record from an earlier visit, you have it right already: use it, and do not ask them to spell it again. Do not ask them to spell anything unless you are told to.\n`;
+
+/**
+ * Availability check — a READ (like get_available_slots), registered only when a
+ * business turns on the built-in calendar's availability check. The model calls
+ * it the moment a time is named, before collecting details, so a full slot never
+ * costs the caller a whole booking flow.
+ */
+const CHECK_AVAILABILITY_DECLARATION = {
+  name: "check_appointment_availability",
+  description:
+    "Check the calendar BEFORE collecting the caller's details. Call this as soon as the caller " +
+    "names a time OR a day. Given a date and time it answers whether that slot is open, and if " +
+    "available is false you offer the returned alternatives instead of collecting details. Given " +
+    "just a date it returns the times open that day: offer open_times first, and if the caller " +
+    "wants something else that day, offer from all_open_times. Never tell a caller nothing else is " +
+    "available while all_open_times still has times in it. Let them choose — never choose for them.",
+  parameters: {
+    type: "object",
+    properties: {
+      requested_at: {
+        type: "string",
+        description:
+          "What the caller asked for. If they named a time, the full date and time as ISO 8601 " +
+          "(e.g. 2026-03-15T10:00:00). If they named only a day, the date alone " +
+          "(e.g. 2026-03-15) — never invent an hour they did not say.",
+      },
+    },
+    required: ["requested_at"],
+  },
+};
+
+/** @type {import("./_contract.js").CapabilityPack} */
+export default {
+  id: "appointments",
+  label: "Appointments",
+  description: "Book, check, cancel and reschedule appointments.",
+  core: false,
+  adapterKind: "scheduling",
+
+  /**
+   * What an operator may configure. Also what a dashboard renders to draw this
+   * capability's settings card, so a new capability's screen appears without
+   * anyone hand-writing a component.
+   */
+  configSchema: {
+    adapter: {
+      type: "choice",
+      label: "Where do appointments live?",
+      // All three stay VALID in the engine's config loader — a clinic
+      // configured to athenahealth directly must keep working. Which of them
+      // the dashboard offers as a self-serve choice is decided separately, by
+      // each adapter's `selfServe` flag (adapters/scheduling/*), not by pruning
+      // this list. athenahealth (owner-managed) and webhook (a non-functional
+      // stub whose book() is null) are marked selfServe:false, so the picker
+      // shows only the built-in calendar. Google Calendar is reached via the
+      // built-in calendar plus Calendar sync.
+      options: ["internal", "athenahealth", "webhook"],
+      default: "internal",
+    },
+    // What to do when the caller already has an upcoming appointment. The
+    // failure this exists to stop is a SILENT second booking: the assistant
+    // forgets, offers to book, runs the whole flow, and nobody finds out until
+    // the caller shows up twice. "confirm" is the default because that failure
+    // is never what any business wanted, while a genuine second appointment
+    // (two services, a shared family phone) is common enough that refusing
+    // outright would be wrong for most.
+    existingAppointment: {
+      type: "choice",
+      label: "If the caller already has an upcoming appointment",
+      options: ["confirm", "allow", "block"],
+      optionLabels: {
+        confirm: "Check with them first — only book a second one if they say yes",
+        allow: "Just book it",
+        block: "Don't book a second one — offer to move the existing one",
+      },
+      default: "confirm",
+    },
+    require: {
+      identity: {
+        type: "identityFields",
+        label: "What must the caller provide before we look up or change an appointment?",
+        builtinOptions: ["name", "dob", "phone_on_file"],
+        allowCustom: true,
+      },
+      confirmBeforeWrite: {
+        type: "toggle",
+        label: "Read details back and require a clear yes before booking",
+        default: false,
+      },
+      businessHoursOnly: {
+        type: "toggle",
+        label: "Only allow booking changes during opening hours",
+        default: false,
+      },
+    },
+    // The built-in calendar ALWAYS checks availability before booking — a
+    // receptionist does not double-book. These two numbers define what "free"
+    // means; an external backend (athena) owns its own free/busy and ignores
+    // them. Defaults: 30-minute slots, one appointment at a time.
+    availability: {
+      length: {
+        type: "number",
+        label: "Appointment length (minutes)",
+        default: 30,
+        min: 5,
+        max: 480,
+        step: 5,
+      },
+      capacity: {
+        type: "number",
+        label: "How many appointments can share one time slot",
+        default: 1,
+        min: 1,
+        max: 100,
+        step: 1,
+      },
+    },
+    notes: {
+      type: "longtext",
+      label: "Anything specific about how you book?",
+      placeholder: "e.g. Ask if they're a new or existing patient first",
+    },
+  },
+
+  /** Every tool this pack can own, for registry dispatch. */
+  toolNames: [
+    BOOK_APPOINTMENT_DECLARATION.name,
+    CHECK_AVAILABILITY_DECLARATION.name,
+    ...EHR_APPOINTMENT_DECLARATIONS.map((d) => d.name),
+    ...DB_APPOINTMENT_DECLARATIONS.map((d) => d.name),
+  ],
+
+  /**
+   * Does this tool have anything to act ON?
+   *
+   * Only ever FALSE for a tool that changes an EXISTING appointment when no
+   * appointment can be found to change. `book_appointment` creates one, so it
+   * always has a target and never reaches here.
+   *
+   * ---------------------------------------------------------------------------
+   * Why the engine asks, instead of finding out when the tool runs
+   * ---------------------------------------------------------------------------
+   *
+   * Call CA0c8ce7, 2026-09-10. The assistant claimed "I have you down for 9 AM
+   * tomorrow" before anything was booked; having told itself the appointment
+   * existed, it then reached for `correct_appointment_name` when the name came
+   * out wrong -- twice, on a row that did not exist.
+   *
+   * The write-order gate in services/tools.js refused both, because that gate
+   * runs first and asks a different question: has the caller agreed? Its
+   * refusal tells the model to read the details back and ask for a go-ahead --
+   * advice for a write that COULD happen. So the model asked again, was refused
+   * again, and finally told the caller "I'm not sure why it's not updating" and
+   * offered a callback.
+   *
+   * `whichAppointmentMessage` has had the right words for this the whole time.
+   * It simply never got to say them. This lets the engine skip a consent
+   * question that cannot be answered usefully and go straight to the tool that
+   * knows the operation is impossible.
+   *
+   * Deliberately NOT a resolver: it must not bump `write_appointment_id_resolved`,
+   * which counts real resolutions, and it must stay cheap enough to call on
+   * every action-tool invocation.
+   */
+  hasWriteTarget(fc, ctx) {
+    if (!CHANGE_TOOL_NAMES.includes(fc?.name)) return true;
+    if (fc?.args?.appointment_id) return true;
+    const held = scratch(ctx);
+    if (held.selectedAppointmentId || held.lastBookedAppointmentId) return true;
+    return upcomingForCaller(ctx).length > 0;
+  },
+
+  /**
+   * Tools whose success is caller-visible, unlocking same-turn end_call.
+   * Previously the hardcoded ACTION_TOOL_NAMES array in services/gemini.js:14.
+   */
+  actionTools: [
+    "book_appointment",
+    "cancel_appointment_db",
+    "reschedule_appointment_db",
+    "correct_appointment_name",
+    // A note is a WRITE to somebody's record, and being a small one changes
+    // nothing about that. Listed here so executeToolCall runs the same
+    // requirement checks (identity, confirm-before-write, business-hours) every
+    // other change tool gets, and so a saved note unlocks end_call in the same
+    // turn rather than leaving the model unable to close the call.
+    "add_appointment_note",
+    // EHR write tools — listed here so executeToolCall runs checkRequirements
+    // (identity / confirmBeforeWrite / businessHoursOnly) on athena clinics too.
+    "book_appointment_in_ehr",
+    "cancel_appointment",
+    "reschedule_appointment",
+  ],
+
+  /**
+   * Tools that answer "what does this caller have booked?" — the one question
+   * the call-start snapshot (ctx.callerContext.upcomingAppointments) may
+   * already hold the answer to.
+   *
+   * Declared on the pack rather than listed in the engine so services/tools.js
+   * can count warm-vs-cold without knowing any tool's name. Availability tools
+   * are deliberately NOT here: they ask about the business's calendar, not the
+   * caller's, and no snapshot covers them.
+   */
+  callerLookupTools: ["get_caller_appointments", "get_caller_appointments_from_db"],
+
+  tools(config) {
+    const allowed = config?.allowedTasks || [];
+    if (!allowed.includes("book_appointment")) return [];
+    const cfg = capabilityConfig(config, "appointments");
+    // The confirm flag is declared only where the handler honours it — see
+    // withAdditionalFlag.
+    const base =
+      existingAppointmentPolicy(cfg) === "confirm"
+        ? withAdditionalFlag(BOOK_APPOINTMENT_DECLARATION)
+        : BOOK_APPOINTMENT_DECLARATION;
+    // Configured requirements become real tool parameters, which is what turns
+    // a config entry into something the model is actually asked for.
+    return [withRequirements(base, cfg)];
+  },
+
+  adapterTools(config, ctx = {}) {
+    const integrations = Array.isArray(ctx.integrations) ? ctx.integrations : [];
+    const allowed = config?.allowedTasks || [];
+
+    if (hasExternalBook(config, integrations)) return []; // an EHR owns the book
+
+    const cfg = capabilityConfig(config, "appointments");
+    const out = [];
+
+    // Availability check whenever the backend can do one (the built-in calendar
+    // always can; an EHR is handled above). No per-business flag — a
+    // receptionist always checks before booking.
+    if (allowed.includes("book_appointment")) {
+      const adapter = schedulingAdapter(config, integrations);
+      if (typeof adapter.checkAvailability === "function") out.push(CHECK_AVAILABILITY_DECLARATION);
+    }
+
+    // "appointments" is a legacy bundle name — normalizeAllowedTasks always
+    // expands it to the three appointment MODULE_TASKS before config reaches
+    // here, so gating is purely module-name-based.
+    const wantsLookupOrChange =
+      allowed.includes("cancel_reschedule") || allowed.includes("check_appointment");
+    if (wantsLookupOrChange) {
+      // Only the two CHANGE tools take requirements; the lookup is a read and
+      // gating it would stop the receptionist finding the appointment it needs
+      // in order to ask about it.
+      out.push(
+        ...DB_APPOINTMENT_DECLARATIONS.map((d) =>
+          d.name === "get_caller_appointments_from_db" ? d : withRequirements(d, cfg)
+        )
+      );
+    }
+    return out;
+  },
+
+  /**
+   * EHR tool declarations, surfaced separately because services/gemini.js's
+   * `buildIntegrationTools` has a directly-tested public contract that emits
+   * them (tests/gemini-integrations.test.js). Step B dissolves this once
+   * adapters own backend selection.
+   * @param {Array} integrations
+   */
+  ehrTools(integrations, config = null) {
+    // Adapter selection decides WHICH backend; the capability's enabled state
+    // decides WHETHER the tools exist at all. Without the config gate, disabling
+    // appointments left the EHR booking tools registered (they keyed only off the
+    // integration list), so an athena clinic's "off" toggle did nothing on calls.
+    const adapter = resolveSchedulingAdapter(null, integrations);
+    if (adapter.id !== "athenahealth") return [];
+    // config is optional so older/tested callers that pass only integrations keep
+    // today's behavior; the live path always passes it, which is what closes the
+    // bypass.
+    if (config) {
+      const allowed = config.allowedTasks || [];
+      if (!allowed.some((t) => APPOINTMENT_MODULE_TASKS.includes(t))) return [];
+    }
+    // Wrap the WRITE tools with the configured requirements so identity /
+    // confirmBeforeWrite become real parameters (builtin name/dob reuse the
+    // existing caller_name/caller_dob — no duplication). The read tools
+    // (get_caller_appointments, get_available_slots) are left untouched. When no
+    // requirements are configured, withRequirements returns the same object, so
+    // an unconfigured clinic is byte-identical.
+    const cfg = config ? capabilityConfig(config, "appointments") : {};
+    return EHR_APPOINTMENT_DECLARATIONS.map((d) =>
+      EHR_WRITE_TOOLS.has(d.name) ? withRequirements(d, cfg) : d
+    );
+  },
+
+  prompt(config, ctx = {}) {
+    const allowed = config?.allowedTasks || [];
+    const hasEhr = hasExternalBook(config, ctx.integrations);
+    const now = ctx.now instanceof Date ? ctx.now : new Date();
+    // The built-in calendar can check availability; an EHR uses its own slots.
+    // Also require that this business actually books, so a non-appointment
+    // business's (dead) booking guidance stays unchanged.
+    const canCheckAvail =
+      allowed.includes("book_appointment") &&
+      typeof schedulingAdapter(config, ctx.integrations).checkAvailability === "function";
+
+    // businessHoursOnly is enforced at the tool (checkRequirements), but that
+    // only refuses at the END — the model would still run the whole booking flow
+    // while closed. When it's on AND the office is closed right now, steer the
+    // model to decline up front so it never collects details or checks slots.
+    const bhBlocked =
+      capabilityConfig(config, "appointments").require?.businessHoursOnly === true &&
+      isClosedNow(config, now.getTime());
+
+    // Enabled = the business opted into any appointment module. capabilityClauses
+    // already gates the CAPABILITIES line on this; the guardrails now gate on it
+    // too, instead of leaking booking instructions into a business that cannot
+    // book. When OFF, the model is told to decline booking cleanly rather than
+    // advertise a tool it was never given.
+    const enabled = allowed.some((t) => APPOINTMENT_MODULE_TASKS.includes(t));
+
+    return {
+      static: {
+        // The CAPABILITIES line IS module-gated — it always was.
+        capabilities: capabilityClauses(allowed),
+
+        guardrails: enabled
+          ? [
+              BOOKING_CONFIRMATION_GUARDRAIL,
+              ...requirementPromptLines(capabilityConfig(config, "appointments")).map((l) => `${l}
+`),
+            ]
+          : [declineGuardrail("book, check, cancel, or reschedule appointments")],
+        capabilityNotes: enabled
+          ? notesPromptLines(capabilityConfig(config, "appointments"))
+          : [],
+      },
+      dynamic: {
+        // Also ungated, matching buildStepGuidance's original behavior: it
+        // switched purely on the intent the model reported, never on whether
+        // the business had the module enabled.
+        stepGuidance: {
+          book_appointment: bhBlocked ? CLOSED_BOOKING_DECLINE : bookingGuidance(config, now, canCheckAvail),
+          cancel_reschedule: bhBlocked ? CLOSED_BOOKING_DECLINE : cancelRescheduleGuidance(hasEhr),
+        },
+        // Rendered by the CALLER CONTEXT block, and only when this caller
+        // actually has an upcoming appointment — so it reaches the model
+        // whatever step the call is in, and costs nothing when there is
+        // nothing to say. See existingAppointmentContextRules.
+        callerContextRules: existingAppointmentContextRules(
+          existingAppointmentPolicy(capabilityConfig(config, "appointments"))
+        ),
+      },
+    };
+  },
+
+  /**
+   * @param {{id?: string, name: string, args?: object}} fc
+   * @param {object} ctx - turn context; ctx.deps carries the injected data
+   *   surface (see services/tools.js). Packs take no service imports of their
+   *   own: services/db.js imports the registry for its reserved-name
+   *   list, so a pack importing it back would be a load-order-dependent cycle.
+   *   Injection also means these paths can be tested without module mocks.
+   */
+  async execute(fc, ctx = {}) {
+    switch (fc.name) {
+      case "book_appointment":
+        return bookAppointment(fc, ctx);
+      case "check_appointment_availability":
+        return checkAvailabilityTool(fc, ctx);
+      case "get_caller_appointments_from_db":
+        return lookupCallerAppointments(fc, ctx);
+      case "cancel_appointment_db":
+        return cancelAppointment(fc, ctx);
+      case "reschedule_appointment_db":
+        return rescheduleAppointment(fc, ctx);
+      case "correct_appointment_name":
+        return correctAppointmentName(fc, ctx);
+      case "add_appointment_note":
+        return addAppointmentNote(fc, ctx);
+      default:
+        // The EHR tools. They are declared by this pack but executed by the
+        // integration layer, which owns the athenahealth client.
+        return executeViaEhr(fc, ctx);
+    }
+  },
+
+  /**
+   * Apply what a completed appointment action means for the call.
+   *
+   * Runs from applyReply on a normal turn, or from the barge-in salvage path
+   * when the caller talks over the confirmation — exactly once either way, and
+   * that matters here more than anywhere else in the system: firing twice means
+   * the owner gets two booking alerts and the caller gets two confirmation
+   * texts for one appointment.
+   */
+  onEffect(effect, engine) {
+    if (effect.type === "changed" || effect.type === "booked") {
+      applyToCallerSnapshot(effect, engine);
+    }
+
+    if (effect.type === "changed") {
+      // A completed cancel or reschedule. Leaving the step at gather_details
+      // would re-inject the cancel-flow identity guidance every turn, which is
+      // what previously sent the model in circles re-verifying a caller it had
+      // already verified.
+      engine.setStep(engine.STEPS.CONFIRM, effect.data?.tool || "appointment_changed");
+      engine.addHistoryNote(`${effect.data?.tool} succeeded`);
+      return;
+    }
+
+    if (effect.type !== "booked") return;
+
+    const data = effect.data || {};
+    const { callSid, businessId, callerNumber, twilioNumber, config } = engine.call;
+    if (!businessId) return;
+
+    engine.setStep(engine.STEPS.CONFIRM, "book_appointment");
+
+    // The model does not see tool results on later turns, only text — without
+    // this note it can re-book or deny a booking it just made.
+    const who = data.client_name ? ` for client ${data.client_name}` : "";
+    // Local wall-clock time, not the stored UTC ISO: the model reads history
+    // notes as context and could otherwise speak the raw UTC instant back to the
+    // caller (a 10:00 AM Chicago booking recited as "3 PM").
+    const whenLocal = bookedFactValue(data.scheduled_at, null, config?.timezone);
+    engine.addHistoryNote(
+      `book_appointment succeeded${who} at ${whenLocal}. Do not book it again`
+    );
+
+    const { notifications, log } = engine.deps;
+    const notes = [data.service_type, data.notes].filter(Boolean).join(" — ") || null;
+
+    notifications
+      .notifyAppointmentBooked({
+        businessId,
+        appointment: {
+          scheduled_at: data.scheduled_at,
+          client_name: data.client_name || null,
+          client_phone: callerNumber || null,
+          notes,
+        },
+        call: { callerNumber, twilioNumber },
+      })
+      .catch((err) => log.error("notify_appointment_failed", { callSid, reason: err?.message }));
+
+    notifications
+      .sendCallerSms(config, callerNumber, "appointment_confirmation", {
+        name: data.client_name || "there",
+        business: config?.businessName,
+        // Business timezone, not the server's — `toLocaleString()` with no zone
+        // rendered the confirmation SMS in whatever timezone the process ran in.
+        datetime: data.scheduled_at
+          ? speakableDateTime(data.scheduled_at, config?.timezone, resolveProfile(config))
+          : "your requested time",
+      })
+      .catch((err) =>
+        log.error("sms_followup_failed", {
+          callSid,
+          kind: "appointment_confirmation",
+          reason: err?.message,
+        })
+      );
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+/**
+ * Human-readable "Booked this call" fact value: the appointment's local
+ * wall-clock time in the business timezone, with the service appended when the
+ * caller named one — e.g. "Tue, Jul 21, 10:00 AM (consultation)". This is a
+ * caller FACT the model reads verbatim in the dynamic tail, so it must be plain
+ * English, not the stored UTC ISO string.
+ * @param {string} scheduledAtISO - the anchored UTC ISO instant that was booked
+ * @param {unknown} serviceType
+ * @param {string|undefined} timezone
+ * @returns {string}
+ */
+// formatLocalDateTime / speakableDateTime used to be defined here. They now
+// live in lib/capabilities/datetime.js so services/gemini.js's CALLER CONTEXT
+// block can share the SAME implementation and the same timezone fallback —
+// that block previously hand-rolled its own toLocaleString with no fallback at
+// all, so one unset business timezone made the two paths disagree about what
+// time an appointment was. Re-exported below for the tests that exercise the
+// fallback behavior directly.
+export { formatLocalDateTime, speakableDateTime };
+
+export function bookedFactValue(scheduledAtISO, serviceType, timezone) {
+  const when = formatLocalDateTime(scheduledAtISO, timezone, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const svc = typeof serviceType === "string" && serviceType.trim() ? ` (${serviceType.trim()})` : "";
+  return `${when}${svc}`;
+}
+
+/** Reserved callerFacts label for the "a booking exists this call" fact. */
+const BOOKED_FACT_LABEL = "Booked this call";
+
+/**
+ * The current callerFacts map with the booked-appointment fact removed (when
+ * `bookedValue` is null/undefined, e.g. a successful cancel) or replaced with
+ * a new value (e.g. a successful reschedule), other facts (Name, etc.) intact.
+ *
+ * Per-capability merge (lib/capabilities/effects.js mergeCapabilityState) is
+ * shallow AT THE CAPABILITY LEVEL: writing `callerFacts` in a patch replaces
+ * the whole map rather than deep-merging into it. So the only way to drop or
+ * update just the booked-fact key while keeping siblings is to read the
+ * CURRENT map off ctx and write back a full replacement — a partial patch
+ * like `{ callerFacts: { [BOOKED_FACT_LABEL]: null } }` would not remove
+ * anything; it would just merge a null-valued key into the existing object on
+ * the next read (collectCallerFacts already skips non-string values, but the
+ * stale string would still be there until overwritten).
+ *
+ * @param {object} ctx
+ * @param {string|null|undefined} bookedValue
+ * @returns {Record<string,string>}
+ */
+function nextCallerFacts(ctx, bookedValue) {
+  const current = scratch(ctx).callerFacts || {};
+  const { [BOOKED_FACT_LABEL]: _drop, ...rest } = current;
+  return bookedValue ? { ...rest, [BOOKED_FACT_LABEL]: bookedValue } : rest;
+}
+
+/**
+ * `n` free slots SPREAD across whatever is open, as ISO strings.
+ *
+ * Not the first n. A 9-5 day at 30 minutes is sixteen slots, and the first
+ * three are all before 10:30 — offering those to someone who said "Tuesday"
+ * makes a full afternoon sound like a full day. Picks evenly spaced indices so
+ * the caller hears a morning, a middle and an afternoon option.
+ */
+function spreadSlots(free, n) {
+  const starts = (free || [])
+    .map((s) => s.start)
+    .filter((s) => Number.isFinite(Date.parse(s)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  if (n <= 1) return starts.slice(0, Math.max(0, n));
+  if (starts.length <= n) return starts;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    // Evenly spaced across the whole list, first and last included.
+    out.push(starts[Math.round((i * (starts.length - 1)) / (n - 1))]);
+  }
+  return [...new Set(out)];
+}
+
+/** The `n` free slots nearest a requested instant, as ISO strings. */
+function nearestSlots(free, requestedISO, n) {
+  const target = Date.parse(requestedISO);
+  return (free || [])
+    .map((s) => s.start)
+    .filter((s) => Number.isFinite(Date.parse(s)))
+    .sort((a, b) => Math.abs(Date.parse(a) - target) - Math.abs(Date.parse(b) - target))
+    .slice(0, n);
+}
+
+/**
+ * Open times on one calendar day, for a caller who named a day and no time.
+ *
+ * Reuses `adapter.findSlots` — which already enumerates every free start on the
+ * day, already skips slots in the past, and is already exercised by the
+ * alternatives path — so there is no new query and no second notion of what
+ * "free" means. The day-level guards (past, closed) reuse the same wording the
+ * point check uses, so a caller hears one voice whichever way they asked.
+ *
+ * @returns {object} the tool response body
+ */
+async function openTimesForDay(dateStr, config, adapter, avail, ctx) {
+  const timezone = config?.timezone || DEFAULT_TIMEZONE;
+  const parts = parseNaiveDate(dateStr);
+  if (!parts) return { success: true, open_times: [], message: INVALID_DATETIME_MESSAGE };
+
+  // Anchor to the START of the business day rather than midnight: midnight is
+  // out of hours everywhere, and comparing it against "now" would call today
+  // "past" the moment the clock ticks over.
+  const { shortWeekday } = zonedWeekdayAndMinutes(
+    zonedComponentsToUtcMs({ ...parts, hour: 12 }, timezone),
+    timezone
+  );
+  const day = resolveDayHours(config?.businessHours ?? null, shortWeekday);
+  if (day.closed) return { success: true, open_times: [], message: CLOSED_DAY_MESSAGE };
+
+  const [openH, openM] = (day.open || "09:00").split(":").map(Number);
+  const [closeH, closeM] = (day.close || "17:00").split(":").map(Number);
+  const dayEndMs = zonedComponentsToUtcMs(
+    { ...parts, hour: closeH, minute: closeM },
+    timezone
+  );
+  if (dayEndMs < Date.now()) {
+    return { success: true, open_times: [], message: PAST_DATETIME_MESSAGE };
+  }
+
+  const anchorMs = zonedComponentsToUtcMs({ ...parts, hour: openH, minute: openM }, timezone);
+  let free = [];
+  if (typeof adapter.findSlots === "function") {
+    try {
+      free = await adapter.findSlots(ctx, {
+        dateISO: new Date(anchorMs).toISOString(),
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+        businessHours: config.businessHours ?? null,
+        timezone,
+      });
+    } catch (err) {
+      ctx.deps.captureException(err); // fail-open, same as the point check
+    }
+  }
+
+  const timezoneLocal = (a) => toLocalNaiveDateTime(a, timezone);
+  const allLocal = (free || [])
+    .map((s2) => s2.start)
+    .filter((s2) => Number.isFinite(Date.parse(s2)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
+    .map(timezoneLocal)
+    .filter(Boolean);
+
+  const picked = spreadSlots(free, 3);
+  if (!picked.length) {
+    return {
+      success: true,
+      open_times: [],
+      all_open_times: [],
+      total_open: 0,
+      message: "There is nothing open that day. Ask the caller about another day.",
+    };
+  }
+
+  // Naive LOCAL for the model to hand straight back as book_appointment's
+  // scheduled_at, spoken form for what it says out loud. Same round-trip
+  // contract the alternatives path documents below.
+  const profile = resolveProfile(config);
+  const spoken = picked.map((a) => speakableDateTime(a, timezone, profile)).join(", ");
+  const more = allLocal.length - picked.length;
+  return {
+    success: true,
+    // The three to SAY OUT LOUD. Reading sixteen times down a phone is not an
+    // offer, it is a recital.
+    open_times: picked.map(timezoneLocal).filter(Boolean),
+    // ...and every one that is actually free, so a follow-up question is
+    // answered from what the model already has rather than from the false
+    // impression that three offers means three slots. A live call on
+    // 2026-08-30 was told "nothing else is available" with eleven still open.
+    all_open_times: allLocal,
+    total_open: allLocal.length,
+    message:
+      `${allLocal.length} time${allLocal.length === 1 ? " is" : "s are"} open that day. ` +
+      `Offer these three first: ${spoken}. Ask which one suits them and do not pick one for them. ` +
+      (more > 0
+        ? `${more} other time${more === 1 ? " is" : "s are"} also open — they are listed in all_open_times. ` +
+          `If the caller asks for anything else that day, offer from that list. Never tell them nothing ` +
+          `else is available while it still has times in it.`
+        : `Those are the only times open that day.`),
+  };
+}
+
+/**
+ * check_appointment_availability — a READ the model calls before collecting
+ * details. Reuses validateBookingTime so a past/closed/out-of-hours request is
+ * rejected with the same wording as booking, then asks the adapter whether the
+ * slot is open and, if not, offers the nearest free times that day.
+ *
+ * Two input shapes: a full datetime is a point check ("is this open?"); a bare
+ * YYYY-MM-DD is a day query ("what is open then?") — see openTimesForDay.
+ */
+async function checkAvailabilityTool(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+  const config = ctx.config || {};
+  const avail = availabilitySettings(capabilityConfig(config, "appointments"));
+  const adapter = schedulingAdapter(config, ctx.integrations);
+
+  const respond = (response, { silent = false, capabilityState = null } = {}) => ({
+    functionResponse: { id: fc.id, name: fc.name, response },
+    stateEffects: {
+      toolResult: { name: fc.name, success: true, message: response.message },
+      // `silent` means this answer cost no backend work, so the voice session
+      // must not put a hold line in front of it — "One sec, checking the
+      // calendar" ahead of a verdict we already had is a claim about work that
+      // is not happening. See lib/voice/session.js's toolCall branch.
+      toolCallEvent: { name: fc.name, args: fc.args || {}, ...(silent ? { silent: true } : {}) },
+      ...(capabilityState ? { capabilityState } : {}),
+    },
+  });
+
+  // DATE ONLY — the caller named a day and no time.
+  //
+  // Handled BEFORE validateBookingTime, which rejects a bare date outright
+  // (NAIVE_DATETIME_RE demands a time) and would send back "I didn't catch a
+  // valid date and time". That refusal is why a caller who said "next Tuesday"
+  // got a time invented for them instead of being offered one: there was
+  // nothing else the model could call, so it guessed an hour and carried on.
+  //
+  // This is a different question from the point check below — "what is open
+  // that day?", not "is this open?" — so it answers with `open_times` and no
+  // `available` field at all, rather than overloading a yes/no.
+  const rawRequested = typeof fc.args?.requested_at === "string" ? fc.args.requested_at.trim() : "";
+  if (NAIVE_DATE_RE.test(rawRequested)) {
+    return respond(await openTimesForDay(rawRequested, config, adapter, avail, ctx));
+  }
+
+  const validated = validateBookingTime(fc.args?.requested_at, config, ctx.deps);
+  if (!validated.ok) {
+    return respond({ success: true, available: false, message: validated.message });
+  }
+  const startISO = validated.scheduledAt;
+
+  // The caller's OWN appointment is not "unavailability".
+  //
+  // Slot capacity counts their row exactly like anyone else's, so on production
+  // call 0db83104 the assistant told a caller their 2 PM was "already taken" and
+  // offered them 1:30, 2:30 and 1 PM — alternatives to their own booking. Two
+  // turns later the caller had to ask "but don't I already have a call?".
+  //
+  // Checked BEFORE the adapter, because the answer does not depend on capacity:
+  // if this is their appointment, that is the fact, whatever the calendar says.
+  // Ungated by existingAppointment — reporting a caller's own booking as someone
+  // else's is wrong under "allow" too. This is a truth fix, not a policy.
+  const own = upcomingForCaller(ctx);
+  const spokenOwn = (list) =>
+    list.map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config))).join("; ");
+
+  const startMs = Date.parse(startISO);
+  const lengthMs = avail.length * 60_000;
+  const collides = own.filter((a) => {
+    const t = Date.parse(a.scheduled_at);
+    if (!Number.isFinite(t) || !Number.isFinite(startMs)) return false;
+    return startMs < t + lengthMs && t < startMs + lengthMs;
+  });
+
+  if (collides.length > 0) {
+    return respond({
+      success: true,
+      available: false,
+      own_appointment: true,
+      message:
+        `That is the caller's OWN appointment — they are already booked at ${spokenOwn(collides)}. ` +
+        `Do NOT describe the time as taken and do NOT offer alternative slots as though someone else ` +
+        `had it. Tell them they are already booked then, and ask whether they want to keep it, move it, ` +
+        `or arrange a separate appointment.`,
+    });
+  }
+
+  // Factual, no instruction: the model must not be reasoning about times while
+  // blind to what this caller already has. Policy-neutral on purpose — what to
+  // DO about it is decided by book_appointment's guard and the CALLER CONTEXT
+  // rules, not here.
+  const otherNote = own.length > 0 ? ` This caller already has an upcoming appointment: ${spokenOwn(own)}.` : "";
+
+  // ALREADY ANSWERED, this call, for this exact slot.
+  //
+  // A caller reported hearing "Checking the calendar now." on the turn after
+  // they gave their name — the model was re-checking a slot it had already
+  // agreed with them. The prompt now says not to (see the booking guidance
+  // above), but a prompt rule is a request, not a guarantee: the same lesson
+  // the spelling caps taught. This is the half that holds.
+  //
+  // Narrow on purpose — the SAME point check, same call, and only a verdict of
+  // "available". A day query is a different question with a different answer
+  // shape, and a "taken" verdict is the one that genuinely can change while the
+  // caller is still on the line, so neither is cached.
+  //
+  // Not a correctness risk: book_appointment re-checks with the adapter
+  // immediately before the write, and createAppointmentIfAvailable is atomic on
+  // top of that. This removes a redundant question, not a guard.
+  const priorVerdict = scratch(ctx).availableSlot;
+  if (priorVerdict?.slot === startISO && priorVerdict.message) {
+    return respond({ success: true, available: true, message: priorVerdict.message }, { silent: true });
+  }
+
+  let available = true;
+  if (typeof adapter.checkAvailability === "function") {
+    try {
+      const res = await adapter.checkAvailability(ctx, {
+        startISO,
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+      });
+      available = !!res.available;
+    } catch (err) {
+      ctx.deps.captureException(err); // fail-open
+    }
+  }
+
+  if (available) {
+    const message = `That time is available.${otherNote}`;
+    return respond(
+      { success: true, available: true, message },
+      { capabilityState: { appointments: { availableSlot: { slot: startISO, message } } } },
+    );
+  }
+
+  let alternatives = [];
+  if (typeof adapter.findSlots === "function") {
+    try {
+      const free = await adapter.findSlots(ctx, {
+        dateISO: startISO,
+        lengthMinutes: avail.length,
+        capacity: avail.capacity,
+        businessHours: config.businessHours ?? null,
+        timezone: config.timezone,
+      });
+      alternatives = nearestSlots(free, startISO, 3);
+    } catch (err) {
+      ctx.deps.captureException(err);
+    }
+  }
+
+  // `alternatives` used to stay raw UTC ISO, called "machine-readable". But the
+  // model picks one of these and passes it back as book_appointment's
+  // scheduled_at, where the declaration asks for a naive LOCAL wall clock — so
+  // the one field could arrive in either frame with no way to tell them apart.
+  // Emitting naive local makes the round-trip single-valued.
+  const spokenAlternatives = alternatives.map((a) => speakableDateTime(a, config.timezone, resolveProfile(config)));
+  const localAlternatives = alternatives
+    .map((a) => toLocalNaiveDateTime(a, config.timezone))
+    .filter(Boolean);
+
+  return respond({
+    success: true,
+    available: false,
+    alternatives: localAlternatives,
+    message:
+      (alternatives.length
+        ? `That time is taken. Offer these open times instead: ${spokenAlternatives.join(", ")}.`
+        : "That time is taken and nothing else is open that day. Ask the caller about another day.") +
+      otherNote,
+  });
+}
+
+async function bookAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const args = fc.args ?? {};
+  const config = ctx.config || {};
+  const avail = availabilitySettings(capabilityConfig(config, "appointments"));
+  let bookSuccess = false;
+  let bookMessage =
+    "I'm sorry, I wasn't able to book that appointment. Let me take your details so someone can follow up.";
+  // ------------------------------------------------------------------------
+  // THE ONE STRING THAT MAY REACH THE CALLER, kept apart from bookMessage.
+  //
+  // bookMessage instructs the MODEL. Handing it to the caller unchanged is how
+  // "That time is fully booked. Offer the caller a different time — call
+  // check_appointment_availability to find open slots." ends up as the basis
+  // for whatever the assistant improvises next.
+  //
+  // Left null until an outcome is known, and that is the guarantee: a sentence
+  // that confirms a booking is written at the same moment the row is, from the
+  // row's own values. It cannot exist for a booking that did not happen, which
+  // is what four of six real calls announced anyway.
+  // ------------------------------------------------------------------------
+  let bookCallerLine = null;
+  let anchoredScheduledAt = null;
+  let alreadyBooked = false;
+  // The row id the adapter hands back. It was being discarded: `booked` is
+  // built from the model's ARGUMENTS, so nothing downstream ever knew which row
+  // had just been written. correct_appointment_name needs it -- a caller
+  // correcting a misheard name seconds later has no lookup to reach it by.
+  let bookedRowId = null;
+
+  // ---- Is there anybody to attach this appointment to? --------------------
+  //
+  // LVX40. The first booking on the deployment wrote client_name: null, with a
+  // phone number from the caller ID and "tooth pain" in the notes. The owner
+  // had to ask whether it was confirmed before the assistant collected a name
+  // at all -- after the row already existed.
+  //
+  // A floor rather than a per-business requirement. `require.identity.builtin:
+  // ["name"]` already expresses "this business insists on a name" and is
+  // correctly opt-in, because enforcement must never lock a tenant out of its
+  // own capability. But a nameless appointment is not a business preference:
+  // there is no scheduling backend, and no receptionist, for whom a slot with
+  // nobody in it is a valid record. lib/capabilities/requirements.js sets the
+  // test as "if the AI ignores this, does someone get hurt, sued, or angry?",
+  // and a clinic holding a chair for nobody answers yes.
+  //
+  // ABOVE validateBookingTime, unlike the existing-appointment invariant below:
+  // a name is the cheapest thing to ask for and the caller has already said it
+  // out loud, so critiquing the time first spends a turn on the wrong question.
+  //
+  // It also re-arms the spelling gate. services/tools.js reads the pending name
+  // off the tool ARGUMENTS, so a booking with no name meant `pendingName` was
+  // null, `shouldConfirmSpelling` was never consulted, and LVX28's protection
+  // was silently absent -- a hole underneath it rather than a recurrence of it.
+  const clientName = typeof args.client_name === "string" ? args.client_name.trim() : "";
+  if (!clientName) {
+    bumpCounter("booking_refused_no_name");
+    const message =
+      `[not caller speech] This booking has no name on it. Ask the caller for their full name, ` +
+      `wait for their answer, and then call this again with client_name set. Do not guess it and ` +
+      `do not book without it.`;
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        // Silent, like the other pre-execution refusals: "Getting that booked
+        // now." a moment before asking who the caller is describes work that
+        // was declined.
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "Before I book that in, can I take your full name?",
+          callerSafe: true,
+        },
+        toolCallEvent: { name: fc.name, args, silent: true },
+      },
+    };
+  }
+
+  if (args.scheduled_at) {
+    const validated = validateBookingTime(args.scheduled_at, config, ctx.deps);
+    if (!validated.ok) {
+      bookMessage = validated.message;
+    } else {
+      anchoredScheduledAt = validated.scheduledAt;
+      // Idempotency guard: the model sometimes re-issues book_appointment for a
+      // slot this very call already booked (a second FC round, or a later
+      // turn). Re-inserting would hit the unique index and turn a successful
+      // booking into a spurious "slot taken" error — so treat it as the success
+      // it already is, without a second insert or a second confirmation SMS.
+      //
+      // Instant comparison, not string equality: the anchor may be a verbatim
+      // offset-bearing ISO while this round's value is a normalized UTC string
+      // (or vice versa) for the same moment.
+      const lastBookedMs = Date.parse(scratch(ctx).lastBooked?.scheduled_at ?? "");
+      if (Number.isFinite(lastBookedMs) && lastBookedMs === Date.parse(anchoredScheduledAt)) {
+        alreadyBooked = true;
+        bookSuccess = true;
+        bookMessage =
+          "That appointment is already booked from earlier in this call. Do not book it again — just confirm it to the caller.";
+      } else {
+        // ---- Does this caller already have an upcoming appointment? --------
+        //
+        // Placement is load-bearing, and all three neighbours matter:
+        //   * BELOW the anchor, or a model re-issuing book_appointment for the
+        //     slot it just booked would be blocked by its own appointment.
+        //   * BELOW validateBookingTime, so a past or out-of-hours time still
+        //     gets its specific, actionable error rather than this one.
+        //   * ABOVE the availability pre-check and the write, so a blocked
+        //     booking touches the database not at all.
+        //
+        // Internal calendar only: callerContext is read from OUR appointments
+        // table, so this says nothing about an EHR's book. book_appointment_in_ehr
+        // goes through executeViaEhr and never reaches here.
+        const policy = existingAppointmentPolicy(capabilityConfig(config, "appointments"));
+        const allUpcoming = upcomingForCaller(ctx);
+        const existing = policy === "allow" ? [] : allUpcoming;
+
+        if (existing.length > 0) {
+          // What the model may say. Times only — no id, no phone, no stored
+          // name, matching lookupCallerAppointments' projection discipline. The
+          // lookup tool stays the single source of appointment ids and the only
+          // route to a change.
+          const spoken = existing
+            .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
+            .join("; ");
+
+          // `block` ignores the flag entirely — it is never advertised under
+          // this policy (see tools()), and honouring it would make an opt-in
+          // parameter a bypass for the business's own rule.
+          const blocked = policy === "block" || args.in_addition_to_existing !== true;
+
+          if (blocked) {
+            const modelMessage =
+              policy === "block"
+                ? `This caller already has an upcoming appointment: ${spoken}. This business does not ` +
+                  `book a second one. Do NOT book. Tell them what they already have and offer to move ` +
+                  `it instead — use get_caller_appointments_from_db then reschedule_appointment_db. ` +
+                  `If they want to keep it as-is and add nothing, say so and move on.`
+                : `This caller already has an upcoming appointment: ${spoken}. Do NOT book anything yet. ` +
+                  `Tell them what they already have and ask whether they want this new time IN ADDITION ` +
+                  `to it, or whether they meant to move it. If they confirm they want both, call ` +
+                  `book_appointment again with in_addition_to_existing set to true. If they want to ` +
+                  `move it, use get_caller_appointments_from_db then reschedule_appointment_db instead.`;
+
+            return {
+              functionResponse: {
+                id: fc.id,
+                name: fc.name,
+                response: { success: false, message: modelMessage },
+              },
+              stateEffects: {
+                // The split matters: `message` above instructs the MODEL, this
+                // one is the only string that may reach the caller. Without a
+                // callerSafe line a text-free turn falls through to the generic
+                // can't-complete apology, which would be a lie — nothing failed.
+                toolResult: {
+                  name: fc.name,
+                  success: false,
+                  message:
+                    policy === "block"
+                      ? "It looks like you already have an upcoming appointment with us. I can move that one to a new time if you'd like."
+                      : "It looks like you already have an appointment with us — did you want this as a second one, or should I move the existing one?",
+                  callerSafe: true,
+                },
+                toolCallEvent: { name: fc.name, args },
+              },
+            };
+          }
+        }
+
+        const notes = [args.service_type, args.notes].filter(Boolean).join(" — ") || null;
+        const adapter = schedulingAdapter(ctx.config, ctx.integrations);
+        const canCheck = typeof adapter.checkAvailability === "function";
+
+        // Pre-check on any backend that can: refuse a full slot before the write
+        // so the model gets "offer another time", not a raw error. Fail-open on a
+        // check error — the atomic book() below is the real guard.
+        let slotFull = false;
+        if (canCheck) {
+          try {
+            const { available } = await adapter.checkAvailability(ctx, {
+              startISO: anchoredScheduledAt,
+              lengthMinutes: avail.length,
+              capacity: avail.capacity,
+            });
+            slotFull = !available;
+          } catch (err) {
+            ctx.deps.captureException(err);
+          }
+        }
+
+        const fullMessage = canCheck
+          ? "That time is fully booked. Offer the caller a different time — call " +
+            "check_appointment_availability to find open slots."
+          : "That time slot is no longer available. Please ask the caller to pick a different time.";
+        // NOT A DEAD END. A taken slot is the most recoverable failure there is,
+        // and telling the caller "the team will confirm with you" throws away a
+        // booking that was still winnable. Says what happened and asks the one
+        // question that moves it forward.
+        const fullCallerLine =
+          "Sorry — that time has just been taken. Would another time work for you?";
+
+        if (slotFull) {
+          bookMessage = fullMessage;
+          bookCallerLine = fullCallerLine;
+        } else {
+          try {
+            const { id: dbId, full } = await adapter.book(ctx, {
+              clientName: args.client_name || null,
+              clientPhone: ctx.callerPhone || null,
+              scheduledAt: anchoredScheduledAt,
+              notes,
+              lengthMinutes: avail.length,
+              capacity: avail.capacity,
+            });
+            if (full) {
+              bookMessage = fullMessage;
+              bookCallerLine = fullCallerLine;
+            } else if (dbId) {
+              bookedRowId = dbId;
+              bookSuccess = true;
+              // THE FACTS, NOT JUST THE VERDICT.
+              //
+              // `toolResult.callerSafe` is read by services/gemini.js and ONLY
+              // when the model produced no text of its own. On the Live path
+              // lib/voice/live/index.js never reads toolResults at all, so a
+              // caller-safe line there is collected and dropped. The model's
+              // own audio is what the caller hears, and THIS string is the only
+              // thing that reaches the model.
+              //
+              // So the time and name go here as well. It does not force the
+              // wording -- nothing on this path can -- but it means the sentence
+              // the model improvises is built from the row that was written
+              // rather than from what it remembers asking for. On CA163f2fe4 it
+              // announced "all set" seven seconds before the write; it cannot
+              // have these values before there is a row to take them from.
+              bookMessage =
+                "Booked. Tell the caller, in one short sentence, that it is booked for " +
+                speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config)) +
+                (args.client_name ? " under " + args.client_name : "") +
+                ". Do not add anything you were not told here.";
+              // BUILT HERE, one line below the insert, from the value that was
+              // written. Not from what the model asked for and not from what it
+              // believes happened -- `anchoredScheduledAt` is what went into the
+              // adapter, and this line does not exist unless that call returned
+              // a row id.
+              bookCallerLine =
+                "That's booked — " +
+                speakableDateTime(anchoredScheduledAt, config.timezone, resolveProfile(config)) +
+                (args.client_name ? ", under " + args.client_name : "") +
+                ".";
+              // `allow` never blocks, but the model should still know — a
+              // receptionist who has just booked a second appointment for
+              // someone would mention the first if it were relevant. Costs
+              // nothing on the overwhelming majority of bookings, where the
+              // caller has none.
+              if (policy === "allow" && allUpcoming.length > 0) {
+                const alsoHas = allUpcoming
+                  .map((a) => speakableDateTime(a.scheduled_at, config.timezone, resolveProfile(config)))
+                  .join("; ");
+                bookMessage += ` This caller also has an existing upcoming appointment on ${alsoHas} — that one still stands.`;
+              }
+            }
+          } catch (err) {
+            const isSlotTaken = err?.message?.includes("unique") || err?.code === "23505";
+            bookMessage = isSlotTaken
+              ? "That time slot is no longer available. Please ask the caller to pick a different time."
+              : "There was an error booking the appointment. Please take the caller's details for follow-up.";
+            ctx.deps.captureException(err);
+          }
+        }
+      }
+    }
+  }
+
+  // Only a FRESH booking carries downstream effects (step transition, owner
+  // notification, confirmation SMS, history note). The already-booked
+  // short-circuit must not re-fire any of them — that is the entire point of
+  // the anchor.
+  const booked =
+    bookSuccess && !alreadyBooked
+      ? { ...args, id: bookedRowId, scheduled_at: anchoredScheduledAt }
+      : null;
+  // THE ROW ID, and it was missing. Restored from 68f0585, which found it on a
+  // real call and was reverted with everything else the next day.
+  //
+  // This effect's `data` is the tool ARGUMENTS, not the row -- right for
+  // everything that reads it, since the confirmation text wants the name and the
+  // time, and wrong for anything that needs to know WHICH ROW was written.
+  // lib/voice/live/index.js records this id into the write ledger so the post-call
+  // sender can tell which appointments were already confirmed at booking time.
+  // With it undefined that suppression silently did nothing and the caller was
+  // lined up for two messages about one appointment -- a ledger field that is
+  // always null reads exactly like "nothing to report".
+
+  // Caller facts for the dynamic tail (plan step 2.2): the model re-reads these
+  // every turn, so it confirms this booking from memory instead of re-asking or
+  // re-booking. Name is omitted when the caller gave none rather than shown as
+  // "null". Merged (not clobbering lastBooked) by the per-capability shallow
+  // merge in lib/capabilities/effects.js.
+  // LVX77. Did the caller ever actually SAY the name now going into the row?
+  //
+  // COUNTED, NOT ENFORCED, and the distinction is the whole design. Refusing on
+  // this signal was built and reverted on 2026-09-05: judged against the
+  // caller's own transcript, nameSpokenIn cannot separate a FABRICATED name from
+  // an ASR-MANGLED one, and mangled is the common case here -- the vendor has
+  // rendered one caller as "Nitin Danda", and a spelled name arrives as loose
+  // letters matching no whole word. Over the observed cases it refuses four in
+  // five, two of them legitimate. Enforcing it would trade a rare wrong name for
+  // a commoner missing booking, which is the defect LVX72 exists to prevent and
+  // which is on the do-not-regress list.
+  //
+  // So this OVER-COUNTS by construction and is a screen rather than a verdict.
+  // A non-zero reading means "look at the row", not "the model fabricated". Its
+  // value is that LVX77 was invisible to every instrument on the call that
+  // produced it: postcall_verify returned `ok`.
+  if (booked) {
+    const writtenName = typeof booked.client_name === "string" ? booked.client_name.trim() : "";
+    const heard = typeof ctx?.callerSaidThisCall === "string" ? ctx.callerSaidThisCall.trim() : "";
+    // Both halves required. No transcript means the instrument is absent, and
+    // an absent instrument must never be read as evidence -- the same
+    // construction the on-file spelling bypass uses to stay unchanged for the
+    // cascade, which threads no transcript at all.
+    if (writtenName && heard) {
+      bumpCounter("booking_name_provenance_checked");
+      if (!nameSpokenIn(writtenName, heard)) {
+        bumpCounter("booking_name_never_spoken");
+      }
+    }
+  }
+
+  const callerFacts = booked
+    ? {
+        ...(booked.client_name ? { Name: booked.client_name } : {}),
+        [BOOKED_FACT_LABEL]: bookedFactValue(booked.scheduled_at, booked.service_type, config.timezone),
+      }
+    : null;
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: bookSuccess, message: bookMessage },
+    },
+    stateEffects: {
+      // callerSafe ONLY when a line was built for the caller. Without the flag
+      // the session falls through to whatever the model decides to say, which
+      // is the behaviour this replaces.
+      toolResult: {
+        name: fc.name,
+        success: bookSuccess,
+        message: bookCallerLine ?? bookMessage,
+        ...(bookCallerLine ? { callerSafe: true } : {}),
+      },
+      toolCallEvent: { name: fc.name, args },
+      ...(booked
+        ? {
+            capabilityEffects: [{ capability: "appointments", type: "booked", data: booked }],
+            // Cross-turn anchor, written immediately so it survives a barge-in:
+            // the insert already happened, and a re-book on a later turn must
+            // short-circuit rather than hit the unique index.
+            capabilityState: {
+              appointments: {
+                lastBooked: {
+                  // The id is here for correct_appointment_name, which is
+                  // otherwise left guessing which row the caller means when
+                  // they correct a name seconds after giving it. The other two
+                  // change tools reach their appointment through a lookup that
+                  // sets selectedAppointmentId; a booking sets nothing.
+                  id: bookedRowId,
+                  scheduled_at: booked.scheduled_at,
+                  client_name: booked.client_name || null,
+                },
+                callerFacts,
+              },
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+async function lookupCallerAppointments(fc, ctx) {
+  // Uses ONLY the verified caller phone from call metadata (ctx.callerPhone),
+  // never a model-supplied number, so a caller cannot fish for someone else's
+  // appointments by asking about a different number.
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const callerPhone = ctx.callerPhone || null;
+  let appointments = [];
+  let selectedAppointmentId;
+
+  if (callerPhone) {
+    appointments = await schedulingAdapter(ctx.config, ctx.integrations).lookupByCaller(ctx);
+    if (appointments.length === 1) selectedAppointmentId = appointments[0].id;
+  }
+
+  // Project to a model-safe view before handing anything back.
+  //
+  // This array used to be the raw Supabase rows, justified as "machine-readable
+  // UTC". Two problems with that. First, the model SPEAKS these times, and a
+  // stored UTC ISO read aloud turns a 2:00 PM America/Chicago appointment into
+  // "7 PM". Second — and worse — it gave the model a UTC-shaped datetime it
+  // could echo straight back into a booking argument, while every tool
+  // DECLARATION asks for a naive LOCAL one. That is two spellings of a time in
+  // one field, and it is precisely the ambiguity that lets an hour go missing.
+  //
+  // scheduled_at is now the naive wall clock in the business zone: the same
+  // frame the model is asked to produce, so a round-trip cannot drift.
+  //
+  // client_phone is dropped outright. Identity is verified server-side from
+  // call metadata (see verifyAppointmentIdentity); the model never needs the
+  // stored number, and not sending it keeps another caller's digits out of the
+  // prompt entirely.
+  const tz = ctx.config?.timezone;
+  const modelSafeAppointments = appointments.map((a) => ({
+    id: a.id,
+    ...(a.client_name ? { client_name: a.client_name } : {}),
+    ...(a.scheduled_at ? { scheduled_at: toLocalNaiveDateTime(a.scheduled_at, tz) } : {}),
+    ...(a.status ? { status: a.status } : {}),
+  }));
+
+  // Phrased as a note to the model, in the same "[...]" shape as the system
+  // notes the prompt already teaches it never to read aloud. The old wording
+  // opened with a bare imperative — "Read these back in local time: Monday,
+  // August 10 at 1:05 PM" — which on a turn where the model emitted no text
+  // was spoken to the caller verbatim, instruction and all.
+  const spokenListing = appointments.length
+    ? "[not caller speech — these times are already in the business's local timezone; say them as-is] " +
+      appointments
+        .map((a) => {
+          const who = a.client_name ? `${a.client_name}, ` : "";
+          const when = a.scheduled_at
+            ? speakableDateTime(a.scheduled_at, ctx.config?.timezone, resolveProfile(ctx.config))
+            : "an unspecified time";
+          return `${who}${when}`;
+        })
+        .join("; ") +
+      "."
+    : "No upcoming appointments found for this caller.";
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: true, appointments: modelSafeAppointments, message: spokenListing },
+    },
+    stateEffects: {
+      ...(selectedAppointmentId !== undefined
+        ? { capabilityState: { appointments: { selectedAppointmentId } } }
+        : {}),
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: `Found ${appointments.length} appointments.`,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+/**
+ * Shared refusal for a change tool that cannot act on the id it was given.
+ *
+ * TWO reasons, and telling them apart is the whole of LVX74. "not_owner" is a
+ * real ownership refusal and keeps the caller-facing wording it always had.
+ * "not_found" is a row that is not there — usually because the model guessed an
+ * appointment_id, which it is pushed into doing because no id appears anywhere
+ * in the prompt. Saying "not booked under your number" to that is false, and
+ * alarming, and it ends the call: the message's own next sentence offers to
+ * take a message instead, and on a real call that is exactly what happened.
+ *
+ * @param {object} fc
+ * @param {"not_owner"|"not_found"} reason
+ */
+function identityMismatchResult(fc, reason = "not_owner") {
+  if (reason === "not_found") {
+    bumpCounter("write_refused_appointment_not_found");
+    const message =
+      "[not caller speech] NOT A FAILURE — that appointment_id could not be found, so " +
+      "nothing was changed. Do NOT tell the caller anything is wrong with their booking " +
+      "and do NOT say it is not under their number: you do not know that, and it is " +
+      "usually not true. Call get_caller_appointments_from_db to get their real " +
+      `appointments, then call ${fc.name} again with the appointment_id it returns.`;
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        // Silent event, same reason the spelling gate's is: nothing ran, so the
+        // session must not narrate work that was declined.
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "One moment — let me pull that up properly.",
+          callerSafe: true,
+        },
+        toolCallEvent: { name: fc.name, args: fc.args, silent: true },
+      },
+    };
+  }
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: false, message: IDENTITY_MISMATCH_MESSAGE },
+    },
+    stateEffects: {
+      toolResult: { name: fc.name, success: false, message: IDENTITY_MISMATCH_MESSAGE, callerSafe: true },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}
+
+async function cancelAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const appointmentId = resolveAppointmentId(ctx, fc.args?.appointment_id);
+  if (!appointmentId) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: { success: false, message: whichAppointmentMessage(ctx, fc.name) },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: WHICH_APPOINTMENT_CALLER_LINE,
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    fc.args?.client_name,
+    fc.args?.phone_last4
+  );
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
+
+  // WHICH appointment, read BEFORE the cancel while the row is still findable.
+  //
+  // CA327945c3 is why the confirmation has to name a time at all: the assistant
+  // said "I've gone ahead and cancelled your appointment on Tuesday, September
+  // 15th at 4 30 PM" and cancel_appointment_db was never called. The row was
+  // still there on the next call. A caller told "Cancelled." has no way to tell
+  // which of their appointments went, and no way to catch it when none did.
+  //
+  // Falls back to the unqualified line when the snapshot has no time for this
+  // id -- honest and still caller-safe, rather than inventing one.
+  const cancelledWhen =
+    upcomingForCaller(ctx).find((a) => String(a?.id) === String(appointmentId))?.scheduled_at ?? null;
+
+  const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
+    appointmentId,
+  });
+
+  // Built only on `ok`, from the row's own time. No cancel, no sentence.
+  const cancelCallerLine = !ok
+    ? "I couldn't cancel that one just now — the team will sort it out and confirm with you."
+    : cancelledWhen
+      ? "That's cancelled — your appointment on " +
+        speakableDateTime(cancelledWhen, ctx.config?.timezone, resolveProfile(ctx.config)) +
+        "."
+      : "That's cancelled.";
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: ok
+        ? {
+            success: true,
+            // Names the row that was actually changed, for the same reason the
+            // booking message does: on CA327945c3 the assistant announced a
+            // cancellation for a specific time and the tool was never called.
+            message: cancelledWhen
+              ? "Cancelled. Tell the caller, in one short sentence, that their appointment on " +
+                speakableDateTime(cancelledWhen, ctx.config?.timezone, resolveProfile(ctx.config)) +
+                " is cancelled."
+              : "That appointment has been cancelled.",
+          }
+        : { success: false, message: "I couldn't cancel that appointment." },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: ok,
+        message: cancelCallerLine,
+        callerSafe: true,
+        appointmentId,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityState: {
+        appointments: {
+          // Identity passed above regardless of the write outcome — remember it
+          // so a retry (or a follow-up reschedule) doesn't re-challenge.
+          identityVerifiedApptId: appointmentId,
+          // A cancelled appointment is no longer the one under discussion, and
+          // the booking anchor must die with it: "cancel that, actually put me
+          // back in at the same time" has to perform a real insert. The
+          // "Booked this call" caller fact must die with it too, or the tail
+          // keeps telling the model a cancelled booking still stands — other
+          // facts (e.g. Name) survive via nextCallerFacts.
+          ...(ok
+            ? {
+                selectedAppointmentId: null,
+                lastBooked: null,
+                callerFacts: nextCallerFacts(ctx, null),
+              }
+            : {}),
+        },
+      },
+      ...(ok
+        ? {
+            capabilityEffects: [
+              // appointmentId is carried so onEffect can drop this row from the
+              // caller snapshot. Without it the CALLER CONTEXT block keeps
+              // asserting an appointment the caller just cancelled, and the
+              // booking guard keeps refusing on the strength of it.
+              { capability: "appointments", type: "changed", data: { tool: fc.name, appointmentId } },
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * Correct the name on an appointment that already exists.
+ *
+ * WHY THIS TOOL EXISTS, because its absence is the defect it fixes.
+ *
+ * On a real call on 2026-09-03 the caller's name was misheard, they corrected
+ * it over five turns, and the assistant finally said "I've updated your name in
+ * our records and your appointment is confirmed". Nothing had been updated. The
+ * row still read the wrong name, `changed_rows` was 0, and
+ * `live_claim_without_action` fired.
+ *
+ * The model did not invent an action out of nowhere -- it had no action to
+ * take. book, cancel, reschedule and lookup were the whole of its vocabulary,
+ * and none of them corrects a name. `updateAppointment` had been sitting in
+ * CAPABILITY_DEPS the entire time with no tool ever calling it.
+ *
+ * Correcting a misheard name is an ordinary thing a receptionist does, the more
+ * so on this front-end where the model IS the transcriber: the same call had
+ * the caller's spelled-out "D" arrive as "V".
+ *
+ * Ownership is checked exactly as cancel and reschedule check it, and the
+ * common case passes on the caller's own number -- appointmentBelongsToCaller
+ * matches the phone FIRST, so the name being wrong is not an obstacle to
+ * proving the appointment is theirs. That ordering matters here more than
+ * anywhere: the name is the thing under dispute.
+ */
+/**
+ * The appointment_id a change tool should act on.
+ *
+ * LVX74. The model has no legitimate route to an appointment_id: CALLER CONTEXT
+ * renders dates and names and NO ids (services/gemini.js buildCallerContextSection),
+ * so the only source of a real one is get_caller_appointments_from_db, and
+ * nothing enforces that it ran. On the call that found this, none had, the model
+ * supplied something anyway, the row was not found, and the caller was told
+ * their own appointment was not booked under their number.
+ *
+ * The design was PUSHING it into guessing, and LVX71's refusal -- which now
+ * tells it to call again WITH an appointment_id -- made that pressure stronger.
+ *
+ * The fix is to remove the pressure rather than to answer it. The ids are
+ * already loaded: services/db.js fetchCallerContext projects `id` onto every
+ * upcomingAppointments element at call start, and this file already reads that
+ * array in upcomingForCaller() and whichAppointmentMessage(). When the caller
+ * has exactly one upcoming appointment, a change tool called with no id is
+ * unambiguous, and answering it in code removes a whole round-trip the caller
+ * would otherwise wait through -- whichAppointmentMessage currently hands the
+ * id back and asks the model to call again with it.
+ *
+ * TWO THINGS THIS DELIBERATELY DOES NOT DO.
+ *
+ * It does not touch a SUPPLIED id. Substituting one would mean overriding an
+ * explicit instruction on a guess, and the case where the model invents an id
+ * is already handled correctly by the not_found refusal, which tells it to look
+ * the appointments up. Only a MISSING id is filled in.
+ *
+ * It does not widen ownership. The snapshot is keyed on the caller's own phone
+ * number and can only contain that number's rows, and verifyAppointmentIdentity
+ * still runs on whatever comes back and still fails closed.
+ *
+ * Ids are not put in the prompt. That was the other candidate and it is worse:
+ * it enlarges a prompt frozen at connect (LVX46), and the only defence against
+ * the model reading a UUID aloud would be a prompt rule -- the class of thing
+ * this codebase keeps finding does not hold.
+ *
+ * @param {object} ctx - tool context, for the caller snapshot and scratchpad
+ * @param {string|undefined} suppliedId - fc.args.appointment_id, if any
+ * @param {string|null} [extraFallback] - a tool-specific scratchpad id, checked
+ *   after selectedAppointmentId to preserve each site's existing precedence
+ * @returns {string|null}
+ */
+function resolveAppointmentId(ctx, suppliedId, extraFallback = null) {
+  if (suppliedId) return suppliedId;
+
+  const scratched = scratch(ctx).selectedAppointmentId || extraFallback || null;
+  if (scratched) return scratched;
+
+  const upcoming = upcomingForCaller(ctx);
+  if (upcoming.length === 1 && upcoming[0]?.id) {
+    // The positive counter for this family. write_refused_appointment_not_found
+    // is the fault half; without this one, a call where the model always
+    // supplied a good id and a call where this resolver never ran read the same.
+    bumpCounter("write_appointment_id_resolved");
+    return upcoming[0].id;
+  }
+  return null;
+}
+
+async function correctAppointmentName(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const clientName = typeof fc.args?.client_name === "string" ? fc.args.client_name.trim() : "";
+  const appointmentId = resolveAppointmentId(
+    ctx,
+    fc.args?.appointment_id,
+    scratch(ctx).lastBooked?.id || null
+  );
+
+  if (!clientName || !appointmentId) {
+    const message = !clientName
+      ? "[not caller speech] No corrected name was given. Ask the caller what the name should be."
+      : whichAppointmentMessage(ctx, fc.name);
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: clientName ? WHICH_APPOINTMENT_CALLER_LINE : "Sorry, what name should that be under?",
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    // Deliberately NOT passing the corrected name as the identity factor: it is
+    // the value being changed, so it cannot also be the proof. The phone match
+    // is what carries this, and the name path stays available only via
+    // phone_last4 for a caller ringing from elsewhere.
+    null,
+    fc.args?.phone_last4
+  );
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
+
+  const ok = await ctx.deps.updateAppointment(appointmentId, { client_name: clientName }, ctx.businessId);
+  if (!ok) {
+    const message = "I wasn't able to update that name just now.";
+    return {
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false, message } },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message, callerSafe: true },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: { success: true, message: `The appointment is now under "${clientName}".` },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: `I've corrected that to ${clientName}.`,
+        callerSafe: true,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      // newClientName is what keeps applyToCallerSnapshot from reading this as
+      // a cancellation -- see the branch it added.
+      capabilityEffects: [
+        {
+          capability: "appointments",
+          type: "changed",
+          data: { tool: fc.name, appointmentId, newClientName: clientName },
+        },
+      ],
+      capabilityState: {
+        appointments: {
+          identityVerifiedApptId: appointmentId,
+          callerFacts: { ...(scratch(ctx).callerFacts || {}), Name: clientName },
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Add a note to an existing appointment. LVX48, in the place it recurred.
+ *
+ * A caller asked for a detail to be recorded against their booking and was told
+ * "I've added that note for you." No tool had run, because none existed that
+ * could: the pack declared book, check, cancel, reschedule and a name
+ * correction, and nothing that touched `notes`. The row kept the note it had.
+ *
+ * Neither guard caught it. The claim detector was looking for a claim with no
+ * write, and a write HAD happened -- just not the one described. That is the
+ * LVX59 class, and it is why this is a tool and not another prompt rule: no
+ * wording makes a model reliably refuse a reasonable request, and "I cannot do
+ * that" is only honest for as long as it stays true.
+ *
+ * APPENDS, NEVER REPLACES. The row on the call that found this read "cleaning"
+ * -- the reason for the appointment. Overwriting it to record a detail ABOUT
+ * that appointment would destroy the booking's own subject, silently, to
+ * satisfy a smaller request.
+ */
+async function addAppointmentNote(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const note = typeof fc.args?.note === "string" ? fc.args.note.trim() : "";
+  const appointmentId = resolveAppointmentId(
+    ctx,
+    fc.args?.appointment_id,
+    scratch(ctx).lastBooked?.id || null
+  );
+
+  if (!note) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] NOT A FAILURE - no note text was given, so there is nothing to " +
+            "record yet. Ask the caller what they would like noted, then call this again.",
+        },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: "Sorry - what would you like me to note down?",
+          callerSafe: true,
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  if (!appointmentId) {
+    // TWO different situations, and collapsing them is LVX74's mistake.
+    //
+    // More than one appointment: whichAppointmentMessage already says exactly
+    // the right thing, so it is reused rather than reworded.
+    //
+    // NONE at all: reused text would be wrong here. Its zero case ends "do not
+    // take a message unless they ask you to", which is correct for a CHANGE --
+    // there is nothing to change and a message is a consolation prize. A note
+    // is different: the caller is trying to tell the business something, and
+    // record_customer_request does precisely that. Refusing without naming it
+    // leaves the model to invent a way out, which is how LVX34 turned a bare
+    // refusal into "someone will call you back".
+    const upcoming = upcomingForCaller(ctx);
+    if (upcoming.length > 0) {
+      return {
+        functionResponse: {
+          id: fc.id,
+          name: fc.name,
+          response: { success: false, message: whichAppointmentMessage(ctx, fc.name) },
+        },
+        stateEffects: {
+          toolResult: {
+            name: fc.name,
+            success: false,
+            message: WHICH_APPOINTMENT_CALLER_LINE,
+            callerSafe: true,
+          },
+          toolCallEvent: null,
+        },
+      };
+    }
+
+    bumpCounter("appointment_note_refused_no_row");
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] NOT A FAILURE - there is simply no appointment on record under " +
+            "this number to attach a note to, so nothing has been saved and nothing is broken. " +
+            "Tell the caller plainly that you cannot find a booking under their number, so there " +
+            "is nothing to add the note to. Then offer to take a message instead and call " +
+            "record_customer_request with what they said. Do NOT say the note has been added, " +
+            "and do NOT promise anyone will call them back.",
+        },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message:
+            "I can't find a booking under this number to add that to - shall I pass it on as a message instead?",
+          callerSafe: true,
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    // No name is passed as an identity factor, for the same reason
+    // correct_appointment_name passes none: the phone match is what carries
+    // this, and a name the caller offers is not proof of anything.
+    null,
+    fc.args?.phone_last4
+  );
+  if (identityOk !== "ok") {
+    if (identityOk === "not_found") {
+      bumpCounter("appointment_note_refused_no_row");
+    }
+    return identityMismatchResult(fc, identityOk);
+  }
+
+  // Read before write. The existing note is not knowable any other way, and
+  // this is the entire difference between adding a note and destroying one.
+  const existing = await ctx.deps.getAppointmentById(appointmentId, ctx.businessId);
+  const previous = typeof existing?.notes === "string" ? existing.notes.trim() : "";
+  // Em dash, matching the separator onEffect already uses to join
+  // service_type and notes for the owner notification. One convention for
+  // "two facts about one appointment", not two.
+  const merged = previous ? previous + " — " + note : note;
+
+  const ok = await ctx.deps.updateAppointment(appointmentId, { notes: merged }, ctx.businessId);
+  if (!ok) {
+    // The defect one layer down. A write that did not happen must not be
+    // reported as one -- that is the whole item.
+    const message = "I wasn't able to add that note just now.";
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message:
+            "[not caller speech] The note was NOT saved. Tell the caller it did not go through " +
+            "and offer to pass it on as a message instead. Do not say it has been added.",
+        },
+      },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message, callerSafe: true },
+        toolCallEvent: { name: fc.name, args: fc.args },
+      },
+    };
+  }
+
+  // The positive twin of appointment_note_refused_no_row. Without it a call
+  // where every note saved and a call where the tool was never reached are the
+  // same all-zeros reading -- which is exactly what made LVX45's broken wire
+  // look like a guard that had simply never needed to fire.
+  bumpCounter("appointment_note_added");
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      // The merged note is echoed back so the model can read it to the caller
+      // without re-inventing it, and so it cannot claim the old note was
+      // removed.
+      response: { success: true, message: 'Saved. The appointment note now reads "' + merged + '".' },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: true,
+        message: "I've added that to your appointment.",
+        callerSafe: true,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityEffects: [
+        {
+          capability: "appointments",
+          type: "changed",
+          // appointmentNote rather than newClientName: applyToCallerSnapshot
+          // branches on what changed, and a note is not a rename, not a
+          // reschedule and emphatically not a cancellation.
+          data: { tool: fc.name, appointmentId, appointmentNote: merged },
+        },
+      ],
+      capabilityState: {
+        appointments: { identityVerifiedApptId: appointmentId },
+      },
+    },
+  };
+}
+
+async function rescheduleAppointment(fc, ctx) {
+  if (!ctx?.businessId) return noBusinessResult(fc);
+
+  const appointmentId = resolveAppointmentId(ctx, fc.args?.appointment_id);
+  const newScheduledAt = fc.args?.new_scheduled_at;
+
+  if (!appointmentId || !newScheduledAt) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: {
+          success: false,
+          message: !appointmentId
+            ? whichAppointmentMessage(ctx, fc.name)
+            : "[not caller speech] NOT A FAILURE — no new date and time was given. Ask the caller when they would like to move it to, then call this again with new_scheduled_at.",
+        },
+      },
+      stateEffects: {
+        toolResult: {
+          name: fc.name,
+          success: false,
+          message: !appointmentId ? WHICH_APPOINTMENT_CALLER_LINE : "What time would you like to move it to?",
+        },
+        toolCallEvent: null,
+      },
+    };
+  }
+
+  const identityOk = await verifyAppointmentIdentity(
+    appointmentId,
+    ctx,
+    fc.args?.client_name,
+    fc.args?.phone_last4
+  );
+  if (identityOk !== "ok") return identityMismatchResult(fc, identityOk);
+
+  // Anchor the model's datetime to the business timezone before it reaches the
+  // database. THIS IS THE FIX FOR THE +1h READ-BACK BUG.
+  //
+  // The tool declaration asks the model for a naive wall-clock string
+  // ("2026-04-15T10:00:00"), and appointments.scheduled_at is timestamptz, so
+  // handing that string straight to PostgREST let the DB coerce it in ITS
+  // session zone (UTC on Supabase). A caller rescheduling to 1:05pm UK was
+  // stored as 13:05Z — which is 2:05pm in Europe/London during BST, and is
+  // exactly what the assistant then read back.
+  //
+  // book_appointment always went through this gate; reschedule was the one
+  // mutation that skipped it. Routing it here also restores the past-date and
+  // business-hours checks, which it had likewise been bypassing — a reschedule
+  // could previously move an appointment into the past or to 3am.
+  const validated = validateBookingTime(newScheduledAt, ctx.config, ctx.deps);
+  if (!validated.ok) {
+    return {
+      functionResponse: {
+        id: fc.id,
+        name: fc.name,
+        response: { success: false, message: validated.message },
+      },
+      stateEffects: {
+        toolResult: { name: fc.name, success: false, message: validated.message, callerSafe: true },
+        toolCallEvent: { name: fc.name, args: fc.args },
+        // Same shape as the adapter-failure path below. Identity WAS proven —
+        // only the time was rejected — so the verification stands and the
+        // caller is not made to prove who they are again just to pick another
+        // slot. Omitting capabilityState here would also change the result
+        // shape between two failure modes of the same tool.
+        capabilityState: { appointments: { identityVerifiedApptId: appointmentId } },
+      },
+    };
+  }
+  const anchoredScheduledAt = validated.scheduledAt;
+
+  // Booking has wrapped its own write since it was written; reschedule never
+  // did, so a throw here propagated out of the whole turn instead of becoming
+  // a failed tool result the model could talk about. Same asymmetry as the
+  // availability check and the identity read — this is the one that costs the
+  // caller an outcome.
+  let ok = false;
+  try {
+    ({ ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
+      appointmentId,
+      newScheduledAt: anchoredScheduledAt,
+    }));
+  } catch (err) {
+    log.error("reschedule_failed", { reason: err?.message, severity: "warn" });
+    ok = false;
+  }
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: ok
+        ? { success: true, message: "Rescheduled." }
+        : { success: false, message: "Couldn't reschedule." },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success: ok,
+        message: ok ? "Rescheduled." : "Couldn't reschedule.",
+        appointmentId,
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+      capabilityState: {
+        appointments: {
+          identityVerifiedApptId: appointmentId,
+          // A successful reschedule moved the appointment to a new time — the
+          // "Booked this call" fact must reflect that new time, or the tail
+          // keeps asserting the OLD one every turn. Other facts (e.g. Name)
+          // survive via nextCallerFacts.
+          // The ANCHORED value, not the model's raw string. bookedFactValue
+          // runs Date.parse(), which resolves a naive string in the SERVER's
+          // local zone — so the caller-facts line was previously rendered
+          // against whatever zone the box happened to run in.
+          ...(ok
+            ? {
+                callerFacts: nextCallerFacts(
+                  ctx,
+                  bookedFactValue(anchoredScheduledAt, fc.args?.service_type, (ctx.config || {}).timezone)
+                ),
+              }
+            : {}),
+        },
+      },
+      ...(ok
+        ? {
+            capabilityEffects: [
+              // The id and the NEW time, so onEffect can re-time this row in the
+              // caller snapshot rather than leaving CALLER CONTEXT reciting the
+              // slot the caller just moved away from.
+              {
+                capability: "appointments",
+                type: "changed",
+                data: { tool: fc.name, appointmentId, newScheduledAt: anchoredScheduledAt },
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+/**
+ * Route an EHR-shaped tool to the integration that backs it. Falls through to
+ * "unknown function" when the business has no enabled EHR — which is the
+ * pre-existing behavior for a model that calls a tool it was never offered.
+ */
+async function executeViaEhr(fc, ctx) {
+  const integrations = ctx?.integrations || [];
+  const adapter = schedulingAdapter(ctx?.config, integrations);
+  const integration = adapter.integrationFor?.(integrations) || null;
+
+  // No external book configured: the model called a tool it was never offered.
+  if (!integration) return unknownToolResult(fc);
+
+  const execResult = await ctx.deps.executeIntegration(integration, {
+    tool: fc.name,
+    arguments: fc.args || {},
+    business_id: ctx.businessId || null,
+    call_id: ctx.callId || null,
+    caller_phone: ctx.callerPhone || null,
+  });
+  const success = execResult.success === true;
+
+  return {
+    functionResponse: {
+      id: fc.id,
+      name: fc.name,
+      response: success
+        ? { success: true, message: execResult.message }
+        : { success: false, error: execResult.error },
+    },
+    stateEffects: {
+      toolResult: {
+        name: fc.name,
+        success,
+        message: success ? execResult.message : execResult.error || "Something went wrong.",
+      },
+      toolCallEvent: { name: fc.name, args: fc.args },
+    },
+  };
+}

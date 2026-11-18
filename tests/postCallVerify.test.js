@@ -1,0 +1,1018 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { getLatencyStats, clearStats } from "../lib/voice/metrics.js";
+import { postCallMode, verifyCall } from "../lib/postCallVerify.js";
+
+// ---------------------------------------------------------------------------
+// LVX29. The model is the voice, so nothing can stop it saying a sentence.
+// What CAN be stopped is the sentence outliving the call: the confirmation is
+// built from the appointment ROW, and a call that wrote no row sends nothing.
+//
+// The assertions that matter here are the negative ones. A module that texted
+// on every call would pass most of this file; the tests that separate it from
+// one that actually reads the database are `claim_without_row` sending
+// nothing, and the reschedule case where the ROW time and the CLAIMED time
+// disagree and the row wins.
+// ---------------------------------------------------------------------------
+
+const BUSINESS_ID = "11111111-2222-3333-4444-555555555555";
+const CALL_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+const CONFIG = {
+  businessId: BUSINESS_ID,
+  businessName: "Digile Media",
+  timezone: "Europe/London",
+  locale: "en-GB",
+  smsFollowupEnabled: true,
+};
+
+const row = (over = {}) => ({
+  id: "row-1",
+  client_name: "Marcus Bell",
+  client_phone: "+447700900123",
+  scheduled_at: "2026-09-07T09:00:00.000Z",
+  status: "scheduled",
+  notes: null,
+  ...over,
+});
+
+function fakeDeps({
+  booked = [],
+  byId = {},
+  throws = false,
+  readFails = false,
+  requestId = "req-1",
+} = {}) {
+  const notifications = {
+    // Returns TRUE: since LVX122 this reports whether the message was handed
+    // to Twilio, and lib/postCallVerify.js counts `sent` off that return rather
+    // than off the attempt. A double returning undefined means "nothing was
+    // sent", which is a valid outcome and not the one these tests are about.
+    sendCallerSms: vi.fn(async () => true),
+    notifyUnconfirmedClaim: vi.fn(async () => {}),
+  };
+  const db = {
+    isEnabled: () => true,
+    // LVX97's reconciliation. `requestId: null` is the RLS failure mode made
+    // reachable: the service runs as vetra_app NOBYPASSRLS, so an unscoped
+    // insert matches no policy, writes nothing and reports success.
+    createCustomerRequest: vi.fn(async () => requestId),
+    // Mirrors the real withTenantSafe, which CATCHES and returns the fallback
+    // (services/db.js:2239). A fake that rethrows would hide the exact bug this
+    // module has to survive.
+    withTenantSafe: async (_businessId, fn, { fallback = null } = {}) => {
+      try {
+        return await fn();
+      } catch {
+        return fallback;
+      }
+    },
+    listAppointmentsByCallId: vi.fn(async () => {
+      if (throws) throw new Error("db down");
+      return readFails ? null : booked;
+    }),
+    getAppointmentById: vi.fn(async (id) => byId[id] || null),
+  };
+  const log = { info: vi.fn(), error: vi.fn() };
+  return { db, notifications, log };
+}
+
+const input = (over = {}) => ({
+  businessId: BUSINESS_ID,
+  callId: CALL_ID,
+  config: CONFIG,
+  callerNumber: "+447700900123",
+  writes: [],
+  claims: [],
+  mode: "send",
+  ...over,
+});
+
+// ---------------------------------------------------------------------------
+// THE CLOCK IS FROZEN. See tests/whichAppointment.test.js for what happens
+// otherwise: its fixture held an appointment at 15:00Z on 5 September 2026, and
+// at 15:00Z on 5 September 2026 that row stopped being "upcoming". Ten tests
+// went red mid-session on a change that touched nothing they import.
+//
+// Every file carrying a hard-coded date near today has the same shape, so they
+// all get the same guard rather than waiting to find out one at a time. Friday
+// 4 September 2026 sits before every fixture date in this repository.
+// ---------------------------------------------------------------------------
+const FROZEN_NOW = new Date("2026-09-04T12:00:00Z");
+
+beforeAll(() => {
+  // shouldAdvanceTime, NOT a bare useFakeTimers(). Several of these files settle
+  // async work with a real setTimeout, and a frozen timer queue never fires it:
+  // the run hangs rather than failing, which is the worst way for a test to be
+  // wrong. This pins the DATE while leaving timers working.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
+
+
+describe("postCallMode", () => {
+  it("is off unless explicitly asked for", () => {
+    expect(postCallMode({})).toBe("off");
+    expect(postCallMode({ POSTCALL_VERIFY: "" })).toBe("off");
+    expect(postCallMode({ POSTCALL_VERIFY: "yes" })).toBe("off");
+  });
+
+  it("reads the two live modes", () => {
+    expect(postCallMode({ POSTCALL_VERIFY: "count" })).toBe("count");
+    expect(postCallMode({ POSTCALL_VERIFY: "SEND" })).toBe("send");
+  });
+});
+
+describe("verifyCall - a note is a change, but not one to text anybody about", () => {
+  // A REGRESSION INTRODUCED BY add_appointment_note, 2026-09-05, caught by
+  // reading the first real call rather than by a test.
+  //
+  // The note tool emits {type:"changed"}, because the row genuinely did change.
+  // That is correct for counting. It is wrong for CONFIRMING: changedRows feeds
+  // `confirmable`, so a caller who merely annotated an existing appointment
+  // became eligible for an "appointment_confirmation" text about a booking that
+  // did not move.
+  //
+  // Latent rather than observed: the verification call ran POSTCALL_VERIFY=count
+  // so nothing was sent, and the note happened to land on the row booked in the
+  // same call, where the id collision hid it anyway. Neither of those is a
+  // property of the design.
+  beforeEach(() => clearStats());
+
+  it("does not text a caller who only added a note to an existing appointment", async () => {
+    const existing = row({ id: "row-old", notes: "Strategy Call \u2014 in renewables" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": existing } });
+
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "changed", tool: "add_appointment_note", appointmentId: "row-old" }],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(out.sent).toHaveLength(0);
+    // Still COUNTED as a changed row: the row did change, and a counter that
+    // lied about that would be the opposite mistake.
+    expect(getLatencyStats().turnTaking.postcall_changed_rows).toBe(1);
+  });
+
+  it("still texts when the appointment really moved and was also noted", async () => {
+    // The note must not SUPPRESS a confirmation either. A reschedule plus a note
+    // on the same row is a real change the caller should hear about.
+    const moved = row({ id: "row-old", scheduled_at: "2026-09-08T09:00:00.000Z" });
+    const deps = fakeDeps({ booked: [], byId: { "row-old": moved } });
+
+    await verifyCall(
+      input({
+        writes: [
+          { type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-old" },
+          { type: "changed", tool: "add_appointment_note", appointmentId: "row-old" },
+        ],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("verifyCall - the fabrication case", () => {
+  beforeEach(() => clearStats());
+
+  it("sends NOTHING when the assistant claimed a booking and no row exists", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(out.verdict).toBe("claim_without_row");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_claim_without_row).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // LVX97. THE FABRICATION REACHES A HUMAN, WITHOUT THE MODEL'S COOPERATION.
+  //
+  // The claim note works by asking, and asking is not reliable: on 2026-09-09
+  // the same tenant, same config and same tools produced a retracted claim and
+  // a real booking on one call, and a fabricated consultation denied to the
+  // caller's face on another. This path does not consult the model at all --
+  // it compares what the call said against what the database holds and writes
+  // the disagreement down.
+  // -------------------------------------------------------------------------
+  it("writes a row and notifies the business when a claim has no record behind it", async () => {
+    const deps = fakeDeps({ booked: [] });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    const written = deps.db.createCustomerRequest.mock.calls[0][0];
+    expect(written.requestType).toBe("unconfirmed_claim");
+    expect(written.callId).toBe(CALL_ID);
+    // No caller speech in the row. LVX24 was a sanitizer logging the text it
+    // caught, and the sentence that triggered this carries the caller's name
+    // and their appointment time.
+    expect(written.message).toBeUndefined();
+    expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
+  });
+
+  it("reconciles regardless of mode, because this one goes to the business", async () => {
+    // `send` governs messages to the CALLER. Telling a caller their booking may
+    // have been imagined is not something to do automatically; telling the
+    // business is the entire point.
+    const deps = fakeDeps({ booked: [] });
+
+    await verifyCall(input({ mode: "verify", claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
+  });
+
+  it("counts an insert that wrote nothing as a FAILURE, not as nothing to report", async () => {
+    // The RLS failure mode: a tenantless write matches zero rows and returns
+    // success. A reconciliation that silently did not happen must not read the
+    // same as a call with nothing to reconcile.
+    const deps = fakeDeps({ booked: [], requestId: null });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(getLatencyStats().turnTaking.postcall_claim_reconcile_failed).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBeFalsy();
+    expect(deps.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("does not reconcile a clean call", async () => {
+    // The control. A reconciliation that fired on every call would pass every
+    // assertion above and tell the business nothing worth reading.
+    const deps = fakeDeps({ booked: [row()] });
+
+    await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(deps.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBeFalsy();
+  });
+
+  it("counts a booked effect whose row is not in the database", async () => {
+    const deps = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      input({ writes: [{ type: "booked" }], claims: [{ turn: 4, kind: "claim" }] }),
+      deps
+    );
+
+    expect(out.verdict).toBe("row_mismatch");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_row_mismatch).toBe(1);
+  });
+});
+
+describe("verifyCall - confirming from the row", () => {
+  beforeEach(() => clearStats());
+
+  it("texts the caller using the ROW, and marks it transactional", async () => {
+    const deps = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(input({ writes: [{ type: "booked" }] }), deps);
+
+    expect(out.verdict).toBe("row_without_claim");
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    const [cfg, to, kind, vars, opts] = deps.notifications.sendCallerSms.mock.calls[0];
+    expect(cfg).toBe(CONFIG);
+    expect(to).toBe("+447700900123");
+    expect(kind).toBe("appointment_confirmation");
+    expect(vars.name).toBe("Marcus Bell");
+    expect(vars.business).toBe("Digile Media");
+    expect(vars.datetime).toMatch(/September/);
+    expect(opts).toEqual({ transactional: true });
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBe(1);
+  });
+
+  it("reads the row's number, not the number the caller rang from", async () => {
+    const deps = fakeDeps({ booked: [row({ client_phone: "+447426704500" })] });
+    await verifyCall(input({ callerNumber: "+15551234567" }), deps);
+
+    expect(deps.notifications.sendCallerSms.mock.calls[0][1]).toBe("+447426704500");
+  });
+
+  it("does not fall back to caller ID when the row has no usable number", async () => {
+    const deps = fakeDeps({ booked: [row({ client_phone: null })] });
+    const out = await verifyCall(input(), deps);
+
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(out.skipped).toHaveLength(1);
+    expect(out.skipped[0].reason).toBe("no_phone");
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_no_phone).toBe(1);
+  });
+
+  it("confirms a cancellation from the row's status", async () => {
+    const deps = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    await verifyCall(
+      input({ writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }] }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms.mock.calls[0][2]).toBe("appointment_cancelled");
+  });
+
+  it("confirms a reschedule at the ROW's time, not the time that was claimed", async () => {
+    const deps = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", scheduled_at: "2026-09-08T14:00:00.000Z" }) },
+    });
+    await verifyCall(
+      input({
+        writes: [{ type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-9" }],
+        claims: [{ turn: 6, kind: "claim" }],
+      }),
+      deps
+    );
+
+    const [, , kind, vars] = deps.notifications.sendCallerSms.mock.calls[0];
+    expect(kind).toBe("appointment_confirmation");
+    expect(vars.datetime).toMatch(/8/);
+  });
+
+  it("sends one message when a call books and then reschedules the same row", async () => {
+    const moved = row({ scheduled_at: "2026-09-08T14:00:00.000Z" });
+    const deps = fakeDeps({ booked: [row()], byId: { "row-1": moved } });
+    await verifyCall(
+      input({
+        writes: [
+          { type: "booked" },
+          { type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-1" },
+        ],
+      }),
+      deps
+    );
+
+    expect(deps.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(deps.notifications.sendCallerSms.mock.calls[0][3].datetime).toMatch(/8/);
+  });
+});
+
+describe("verifyCall - the count ladder", () => {
+  beforeEach(() => clearStats());
+
+  it("reconciles but texts nobody in count mode", async () => {
+    const deps = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(input({ mode: "count", claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(out.verdict).toBe("ok");
+    expect(deps.db.listAppointmentsByCallId).toHaveBeenCalled();
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_verify_runs).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBe(0);
+  });
+
+  it("does nothing at all when off", async () => {
+    const deps = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(input({ mode: "off" }), deps);
+
+    expect(out.verdict).toBe("skipped");
+    expect(deps.db.listAppointmentsByCallId).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_verify_runs).toBe(0);
+  });
+});
+
+describe("verifyCall - never throws into a teardown", () => {
+  beforeEach(() => clearStats());
+
+  it("survives a database failure", async () => {
+    const deps = fakeDeps({ throws: true });
+    const out = await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(out.verdict).toBe("error");
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(deps.log.error).toHaveBeenCalled();
+  });
+
+  // ------------------------------------------------------------------
+  // The failure mode this module could most easily have shipped with.
+  //
+  // withTenantSafe CATCHES and returns its fallback, and most of
+  // services/db.js returns [] for both "found nothing" and "query failed".
+  // Collapsed together, a database outage would report that the assistant
+  // fabricated a booking -- accusing the model of lying every time the
+  // database hiccups, and suppressing a confirmation the caller should have
+  // had. listAppointmentsByCallId returns null on failure precisely so the two
+  // stay distinguishable.
+  // ------------------------------------------------------------------
+  it("does not read a failed lookup as a fabrication", async () => {
+    const deps = fakeDeps({ readFails: true });
+    const out = await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(out.verdict).toBe("error");
+    expect(getLatencyStats().turnTaking.postcall_claim_without_row).toBe(0);
+    expect(deps.notifications.sendCallerSms).not.toHaveBeenCalled();
+  });
+
+  it("does not read a swallowed throw as a fabrication either", async () => {
+    // The real withTenantSafe turns this into the fallback rather than letting
+    // it propagate, so the module never sees the exception at all.
+    const deps = fakeDeps({ throws: true });
+    const out = await verifyCall(input({ claims: [{ turn: 4, kind: "claim" }] }), deps);
+
+    expect(out.verdict).toBe("error");
+    expect(getLatencyStats().turnTaking.postcall_claim_without_row).toBe(0);
+  });
+
+  it("does not accuse a call whose changed row cannot be read back", async () => {
+    const deps = fakeDeps({ byId: {} });
+    const out = await verifyCall(
+      input({
+        writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+        claims: [{ turn: 6, kind: "claim" }],
+      }),
+      deps
+    );
+
+    // A tool ran and reported success. That is a different failure from a
+    // model that called nothing, and it gets a different name.
+    expect(out.verdict).toBe("row_mismatch");
+    expect(getLatencyStats().turnTaking.postcall_claim_without_row).toBe(0);
+  });
+
+  it("refuses an unscoped read", async () => {
+    const deps = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(input({ businessId: null }), deps);
+
+    expect(out.verdict).toBe("skipped");
+    expect(deps.db.listAppointmentsByCallId).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CALL CA422f58, REPRODUCED. The call this whole effort exists to catch.
+//
+// From its own production log line:
+//
+//   postcall_verify  verdict=ok  booked_rows=0  changed_rows=1  claims=2  mode=count
+//
+// The caller was read back "I'm booking a 30 minute strategy call for you on
+// Monday, September 14th at 4 00 PM. Does that sound right?", said "Yes.", and
+// book_appointment was never called once. The assistant then invented a
+// technical glitch. No row exists, and the safety net reported the call CLEAN --
+// because `claims` was 2 and `wroteAnything` was true thanks to the CANCELLATION
+// that also happened, so `claimed && !wroteAnything` was false and every branch
+// fell through to ok.
+//
+// Nobody was told. That is the defect: not the fabrication, which cannot be
+// prevented on this front-end, but the silence afterwards.
+//
+// reconcile() cannot be made to see it without per-capability claim vocabulary,
+// because the claim ledger records one generic kind. These tests assert the
+// structural route instead, and the first one is the regression test for the
+// verdict staying `ok` -- it must, because that is what reconcile honestly
+// reports; what must change is that a human now hears about it anyway.
+// ---------------------------------------------------------------------------
+describe("a booking owed with no row reaches a human, whatever the verdict says", () => {
+  beforeEach(() => clearStats());
+
+  const ca422f58 = {
+    businessId: BUSINESS_ID,
+    callId: CALL_ID,
+    config: CONFIG,
+    callerNumber: "+447700900123",
+    // The cancellation that actually happened on that call.
+    writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+    claims: [
+      { turn: 3, kind: "claim", step: "gather_details" },
+      { turn: 7, kind: "claim", step: "confirm" },
+    ],
+    abandoned: [],
+    // A point availability check came back OPEN, and the caller affirmed a
+    // read-back. Both are tool traffic and caller audio; neither is prose.
+    bookingOwed: { agreed: true, pointVerified: 1 },
+    mode: "count",
+    callSid: "CA422f58",
+  };
+
+  it("still reports verdict ok, and escalates anyway", async () => {
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall(ca422f58, d);
+
+    // Unchanged, and deliberately so: this is what reconcile honestly concludes
+    // from a claim ledger that cannot tell a booking claim from a cancellation.
+    expect(out.verdict).toBe("ok");
+
+    // The fact, computed beside the verdict rather than competing with it.
+    expect(out.bookingOwedNoRow).toBe(true);
+    expect(getLatencyStats().turnTaking.postcall_booking_owed_no_row).toBe(1);
+
+    // THE ASSERTION THIS FILE EXISTS FOR. Before this, zero of these fired on
+    // that call.
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    // And the human is told what actually happened, not the fabrication story.
+    expect(d.db.createCustomerRequest.mock.calls[0][0].notes).toMatch(/caller agreed to an appointment/i);
+  });
+
+  it("says nothing when the booking it owed actually exists", async () => {
+    // The same call with the row present. This is the test that separates the
+    // check from one that simply escalates whenever a caller agreed to anything.
+    const d = fakeDeps({ booked: [row()] });
+    const out = await verifyCall(ca422f58, d);
+
+    expect(out.bookingOwed).toBe(true);
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+    expect(d.notifications.notifyUnconfirmedClaim).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when no time the caller was asked about was ever confirmed", async () => {
+    // Browsing. A caller shown a list of times and agreeing to something, with no
+    // point check behind it, is not a booking that was owed -- it is a
+    // conversation. pointVerified is the discriminator, and it is why the
+    // availability verdict had to be recorded before this could be written.
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: { agreed: true, pointVerified: 0 } }, d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the caller never agreed to anything", async () => {
+    const d = fakeDeps({
+      byId: { "row-9": row({ id: "row-9", status: "cancelled" }) },
+    });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: { agreed: false, pointVerified: 2 } }, d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("accuses nobody when the database read failed", async () => {
+    // A read that failed and a read that found nothing are opposite conclusions:
+    // an outage versus a missing booking. listAppointmentsByCallId returns null
+    // rather than [] for exactly this, and an outage must not wake a human with
+    // an accusation.
+    const d = fakeDeps({ readFails: true });
+    const out = await verifyCall(ca422f58, d);
+
+    expect(out.verdict).toBe("error");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("is inert for every caller that passes no structural facts", async () => {
+    // The cascade will never pass bookingOwed. Absent means absent, not false
+    // positives for every existing call site.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall({ ...ca422f58, bookingOwed: undefined }, d);
+
+    expect(out.bookingOwed).toBe(false);
+    expect(out.bookingOwedNoRow).toBe(false);
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TWO MESSAGES ABOUT ONE APPOINTMENT. Restored from 68f0585, reverted the next
+// day, and the thing that made POSTCALL_VERIFY=send unsafe to turn on:
+// capabilities/appointments.js already texts a confirmation at booking time, so
+// without this every successful booking is lined up for a second one.
+//
+// The negatives are the load-bearing half. A suppression that fired on everything
+// would pass the first test here and silence the messages the other three protect.
+// ---------------------------------------------------------------------------
+describe("the post-call confirmation does not duplicate the booking-time one", () => {
+  beforeEach(() => clearStats());
+
+  const CALLER = "+447700900123";
+
+  it("says nothing when the caller was already told at booking time", async () => {
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "row-1" }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(0);
+    expect(out.skipped.map((x) => x.reason)).toContain("already_confirmed");
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_already_confirmed).toBe(1);
+  });
+
+  it("still texts the client when the caller booked for somebody else", async () => {
+    // The booking-time sender uses the number that RANG US; this one uses the
+    // number on the row. When they differ, the caller has been told and the client
+    // has not -- so suppressing here would silence the only message that was ever
+    // going to reach them.
+    const d = fakeDeps({ booked: [row({ client_phone: "+447700900999" })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: "row-1" }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(1);
+    expect(d.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+  });
+
+  it("texts nothing at all when a verdict impugns the row", async () => {
+    // write_abandoned is LVX72's shape: the booking exists, the name-correction
+    // tool was refused and never retried, so the row carries a name the caller did
+    // not give. A confirmation is a promise that the row is RIGHT.
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({ callerNumber: CALLER, writes: [], abandoned: ["correct_appointment_name"] }),
+      d
+    );
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(out.sent).toHaveLength(0);
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+    expect(getLatencyStats().turnTaking.postcall_confirm_skipped_verdict).toBe(1);
+  });
+
+  it("cannot suppress anything when the booked write carries no row id", async () => {
+    // Documents the dependency rather than hiding it. This is exactly the state
+    // the code was in before the id was restored: the set is empty, nothing
+    // matches, and the caller gets both messages. A test that only covered the
+    // working case would have called that fixed.
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(
+      input({
+        callerNumber: CALLER,
+        writes: [{ type: "booked", tool: "book_appointment", appointmentId: null }],
+        claims: [{ turn: 1, kind: "claim" }],
+      }),
+      d
+    );
+
+    expect(out.sent).toHaveLength(1);
+    expect(out.skipped.map((x) => x.reason)).not.toContain("already_confirmed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE NEUTRAL MESSAGE, and the rule it is an exception to.
+//
+// This module records an owner decision that callerNumber is "never used as a
+// fallback destination: a booking with no number on the row is reported to the
+// business, not texted to whoever happened to ring." A booking the call OWED has
+// no row at all, so it cannot satisfy that rule, and the owner took a narrow
+// exception for this one case. These tests are the fence around "narrow".
+// ---------------------------------------------------------------------------
+describe("a booking that was owed and never written", () => {
+  beforeEach(() => clearStats());
+
+  const CALLER = "+447700900123";
+  const owed = (over = {}) =>
+    input({
+      callerNumber: CALLER,
+      writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+      claims: [{ turn: 1, kind: "claim" }],
+      bookingOwed: { agreed: true, pointVerified: 1 },
+      mode: "send",
+      ...over,
+    });
+
+  it("texts the caller that it is NOT confirmed", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.bookingOwedNoRow).toBe(true);
+
+    // TWO messages here, and both are true: the cancellation on this call really
+    // happened and the caller should be told, and the booking they then agreed to
+    // does not exist. This is CA422f58's exact shape. Asserting a count of one
+    // would have been asserting that one of those two is wrong.
+    const pending = d.notifications.sendCallerSms.mock.calls.find(
+      (cll) => cll[2] === "appointment_request_pending"
+    );
+    expect(pending).toBeDefined();
+    const [, to, kind, vars] = pending;
+    expect(to).toBe(CALLER);
+    expect(kind).toBe("appointment_request_pending");
+    expect(out.sent.map((x) => x.kind)).toContain("appointment_request_pending");
+    expect(getLatencyStats().turnTaking.postcall_pending_sent).toBe(1);
+
+    // {business} AND NOTHING ELSE. No time, because there is no confirmed row and
+    // a time here would assert the booking this message exists to deny. No name,
+    // because a name is the field most likely to be the thing that went wrong --
+    // 20 ms of caller audio produced a confident misspelled read-back on a real
+    // call.
+    expect(Object.keys(vars)).toEqual(["business"]);
+  });
+
+  it("sends nothing when the booking actually exists", async () => {
+    const d = fakeDeps({ booked: [row({ client_phone: CALLER })] });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.bookingOwedNoRow).toBe(false);
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).not.toContain("appointment_request_pending");
+  });
+
+  it("sends nothing on count mode", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    await verifyCall(owed({ mode: "count" }), d);
+
+    expect(d.notifications.sendCallerSms).not.toHaveBeenCalled();
+  });
+
+  it("reports when there is no number to text, rather than guessing at one", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed({ callerNumber: null }), d);
+
+    // The cancellation confirmation still goes out -- it reads its number off the
+    // ROW, which is the rule this case is an exception to, and it is unaffected.
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).not.toContain("appointment_request_pending");
+    expect(out.skipped.map((x) => x.reason)).toContain("pending_no_number");
+    expect(getLatencyStats().turnTaking.postcall_pending_skipped_no_number).toBe(1);
+  });
+
+  it("still sends when a verdict impugns the row", async () => {
+    // SUPPRESSES_CONFIRMATION withholds a message that PROMISES A ROW IS RIGHT.
+    // This one promises the opposite, and write_abandoned is a call that owed a
+    // write and abandoned it -- exactly when the caller most needs telling.
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(owed({ abandoned: ["book_appointment"] }), d);
+
+    expect(out.verdict).toBe("write_abandoned");
+    const kinds = d.notifications.sendCallerSms.mock.calls.map((cll) => cll[2]);
+    expect(kinds).toContain("appointment_request_pending");
+  });
+
+  it("survives the send failing", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    // Only the pending send fails. mockRejectedValueOnce would have hit the
+    // cancellation confirmation instead, and the test would have passed on
+    // `send_failed` from an entirely different message.
+    d.notifications.sendCallerSms.mockImplementation(async (_cfg, _to, k) => {
+      if (k === "appointment_request_pending") throw new Error("twilio down");
+    });
+    const out = await verifyCall(owed(), d);
+
+    expect(out.skipped.map((x) => x.reason)).toContain("pending_send_failed");
+    expect(getLatencyStats().turnTaking.postcall_pending_failed).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CA03558d, 2026-09-17. The worst call the corpus holds, and nobody was told.
+//
+//   six book_appointment attempts, every one refused
+//   zero booked rows
+//   "Yes, I have confirmed that your appointment is booked."
+//
+//   postcall_verify  verdict=write_abandoned  booked_rows=0
+//                    booking_owed=false  claims=2  sent=0  skipped=[]
+//
+// Two separate reasons it escalated nothing. reconcile() returns ONE ordered
+// verdict and tests `write_abandoned` BEFORE `claim_without_row`, so the
+// fabrication branch never ran; and `bookingWasOwed` requires a POINT check,
+// and that call had fifteen listed slots and no point check.
+//
+// The comment on bookingWasOwed already records this trap once, in 259de15's
+// words: "whether something was owed is a FACT about the call rather than a
+// headline competing for one slot". This is the same fix applied to the other
+// half.
+// ---------------------------------------------------------------------------
+describe("a call that tried to write and could not", () => {
+  beforeEach(() => clearStats());
+
+  const ca03558d = {
+    businessId: BUSINESS_ID,
+    callId: CALL_ID,
+    config: CONFIG,
+    callerNumber: "+447700900123",
+    // The cancellation succeeded; every booking attempt was refused.
+    writes: [{ type: "changed", tool: "cancel_appointment_db", appointmentId: "row-9" }],
+    claims: [{ turn: 11, kind: "claim", step: "confirm" }],
+    abandoned: ["book_appointment"],
+    // Fifteen LISTED slots, none point-checked. This is what made
+    // booking_owed read false on the real call.
+    bookingOwed: { agreed: true, pointVerified: 0, verified: 15 },
+    mode: "send",
+    callSid: "CA03558d",
+  };
+
+  it("escalates an abandoned write with no row, whatever the verdict says", async () => {
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    const out = await verifyCall(ca03558d, d);
+
+    // The verdict is unchanged. It was never the problem -- what it was is the
+    // only thing anything downstream looked at.
+    expect(out.verdict).toBe("write_abandoned");
+    expect(out.bookingOwedNoRow).toBe(false);
+
+    expect(d.db.createCustomerRequest).toHaveBeenCalledTimes(1);
+    expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    expect(getLatencyStats().turnTaking.postcall_abandoned_no_row).toBe(1);
+
+    // The note has to say WHICH of the three shapes this is, because a person
+    // triaging it needs to know the caller is expecting an appointment.
+    const [{ requestType, notes }] = d.db.createCustomerRequest.mock.calls[0];
+    expect(requestType).toBe("unconfirmed_claim");
+    // Reworded when the gate widened on 2026-09-18 -- see the block below for
+    // why "nothing was recorded" stopped being true of this shape.
+    expect(notes).toMatch(/the attempt was refused/);
+  });
+
+  it("counts the listed-only shape without acting on it", async () => {
+    // A candidate, not a decision. The rule that excludes it says browsing
+    // looks identical, and one call does not overturn that -- so the rate gets
+    // measured and the gate does not move.
+    const d = fakeDeps({ byId: { "row-9": row({ id: "row-9", status: "cancelled" }) } });
+    await verifyCall(ca03558d, d);
+
+    expect(getLatencyStats().turnTaking.postcall_booking_owed_listed_only).toBe(1);
+    expect(getLatencyStats().turnTaking.postcall_booking_owed).toBeFalsy();
+  });
+
+  // -------------------------------------------------------------------------
+  // THIS CASE ASSERTED THE OPPOSITE UNTIL 2026-09-18, and it was wrong for a
+  // reason worth keeping rather than deleting.
+  //
+  // It read "a call that abandoned one attempt and then succeeded has nothing
+  // outstanding, and a net that fires on it teaches people to ignore it." The
+  // premise is true and the test does not test it: `abandoned` is built as
+  // refusedToolsThisCall MINUS completedToolsThisCall, by tool NAME, so an
+  // attempt that later succeeded never reaches this module at all. What the
+  // row conjunct actually tested was whether SOME OTHER tool succeeded.
+  //
+  // CAd978554, production, 2026-09-18: reschedule_appointment_db abandoned, the
+  // caller told it was done, the fiction then took their consent to cancel an
+  // appointment that did not exist -- and an unrelated book_appointment four
+  // minutes later put a row in `bookedRows` and suppressed the escalation.
+  // Nobody was told. reconcile() names that exact trap at the bottom of
+  // lib/postCallVerify.js: an unrelated success must not vouch for an abandoned
+  // write.
+  // -------------------------------------------------------------------------
+  it("STILL escalates when a DIFFERENT write succeeded on the same call", async () => {
+    const d = fakeDeps({ booked: [row()] });
+    const out = await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
+
+    expect(out.verdict).toBe("write_abandoned");
+    expect(d.db.createCustomerRequest).toHaveBeenCalled();
+    // The narrow counter stays narrow: it is the measurement of what the old
+    // gate would have caught, and the gap between the two is the widening.
+    expect(getLatencyStats().turnTaking.postcall_abandoned_no_row).toBeFalsy();
+    expect(getLatencyStats().turnTaking.postcall_abandoned_outstanding).toBe(1);
+  });
+
+  it("says in the note that other parts of the call may have gone through", async () => {
+    // The old sentence said "every attempt was refused, so nothing was
+    // recorded". True of CA03558d, false of CAd978554, and a triage note that
+    // overstates is one the next person learns to distrust.
+    const d = fakeDeps({ booked: [row()] });
+    await verifyCall({ ...ca03558d, writes: [], claims: [] }, d);
+
+    const notes = d.db.createCustomerRequest.mock.calls[0][0].notes;
+    expect(notes).toMatch(/was refused, so that change was never recorded/);
+    expect(notes).toMatch(/Other parts of the call may have gone through/);
+    expect(notes).not.toMatch(/nothing was recorded/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX122. `sent` counted ATTEMPTS.
+//
+// On CA6b773e2a the caller was asked "can I send you a text confirmation?",
+// declined, and the line still read sent=2. sendCallerSms returned undefined
+// whether it delivered or took one of its five early returns, and this module
+// pushed onto `sent` immediately after awaiting it. Reading it honestly needed
+// three separate log events correlated by hand.
+// ---------------------------------------------------------------------------
+describe("what `sent` counts", () => {
+  beforeEach(() => clearStats());
+
+  // A RESCHEDULE, not a booking. A booked write carrying an appointment id is
+  // suppressed here on purpose -- capabilities/appointments.js already texted
+  // at booking time -- so it would prove nothing about counting.
+  const moved = () => row({ id: "row-old", scheduled_at: "2026-09-08T09:00:00.000Z" });
+  const movedInput = () =>
+    input({ writes: [{ type: "changed", tool: "reschedule_appointment_db", appointmentId: "row-old" }] });
+
+  it("does not count a send the consent gate blocked", async () => {
+    const d = fakeDeps({ booked: [], byId: { "row-old": moved() } });
+    // What a blocked send looks like from here: no throw, and false.
+    d.notifications.sendCallerSms = vi.fn(async () => false);
+
+    const out = await verifyCall(movedInput(), d);
+
+    expect(d.notifications.sendCallerSms).toHaveBeenCalledTimes(1);
+    expect(out.sent).toHaveLength(0);
+    expect(out.skipped.map((x) => x.reason)).toContain("not_sent");
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBeFalsy();
+    expect(getLatencyStats().turnTaking.postcall_confirm_not_sent).toBe(1);
+  });
+
+  it("still counts one that left the building", async () => {
+    const d = fakeDeps({ booked: [], byId: { "row-old": moved() } });
+    const out = await verifyCall(movedInput(), d);
+
+    expect(out.sent).toHaveLength(1);
+    expect(getLatencyStats().turnTaking.postcall_confirm_sent).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX147 — THE SECOND READER GETS A VOTE.
+//
+// Every call is read twice after it ends. A pattern matcher looks for sentences
+// that mean "I did the thing", and an LLM reads the transcript and answers the
+// same question. The second one has been running on every call since 5bf13e0,
+// writing its answer to the log and having it thrown away -- that is what
+// `shadow` means.
+//
+// THE MATCHER HAS LOST THREE TIMES IN A ROW, on three consecutive production
+// calls, and the judge was right on all three:
+//
+//   CA239c7c  "has been SUCCESSFULLY rescheduled"        missed / caught
+//   CA7ec8af  "I have THAT CALL booked for you"          missed / caught
+//   CA299f23  "THAT IS all booked."                      missed / caught
+//
+// The matcher is not broken; it is a list, and the model keeps saying things
+// that are not on it. It has been widened twice this week and missed again on
+// the next call. LVX143's own note measured why: the WIDE variant, which exists
+// precisely to catch phrasings the narrow one misses, fires on the same 26 of
+// 207 corpus turns and has never caught anything extra.
+//
+// A UNION, NEVER A REPLACEMENT. The judge can add a claim and can never remove
+// one, so a judge that is down, slow, or wrong in the quiet direction leaves
+// exactly today's behaviour. That property is what makes this safe to ship on
+// an LLM's answer, and it is asserted below rather than described.
+//
+// What it is NOT: this is an after-the-fact net. The caller still hears the
+// sentence. It changes whether anybody finds out afterwards.
+// ---------------------------------------------------------------------------
+describe("LVX147 — the judge can add a claim the matcher missed", () => {
+  beforeEach(() => clearStats());
+
+  it("calls it a fabrication when the judge saw a claim and no row exists", async () => {
+    // CA299f23's shape with the refusal removed: the assistant announced a
+    // booking, no tool ever ran, so nothing is abandoned and nothing was
+    // written. Today that is `ok` and the call disappears.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: true },
+      d
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+    expect(d.db.createCustomerRequest).toHaveBeenCalled();
+  });
+
+  it("leaves it alone when the judge saw no claim either", async () => {
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: false },
+      d
+    );
+
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("behaves exactly as before when the judge did not answer", async () => {
+    // The degradation property, and the reason a union is safe. undefined is
+    // what a judge that failed, timed out or never ran produces.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall({ ...input(), writes: [], claims: [] }, d);
+
+    expect(out.verdict).toBe("ok");
+    expect(d.db.createCustomerRequest).not.toHaveBeenCalled();
+  });
+
+  it("cannot REMOVE a claim the matcher found", async () => {
+    // The half that makes this one-directional. If the judge's "no" could
+    // overrule the matcher's "yes", an LLM shrug would switch the oldest guard
+    // on this path off.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [{ turn: 1, kind: "claim" }], judgeClaimedDone: false },
+      d
+    );
+
+    expect(out.verdict).toBe("claim_without_row");
+  });
+
+  it("reports both readers on the line, so a disagreement is visible", async () => {
+    // The mistake made with write_consent_restated_slot, not repeated: a rule
+    // that decides something and leaves no trace of WHY cannot be audited. The
+    // pair is what carries the meaning -- matcher false and judge true is the
+    // population this change added.
+    const d = fakeDeps({ booked: [] });
+    const out = await verifyCall(
+      { ...input(), writes: [], claims: [], judgeClaimedDone: true },
+      d
+    );
+
+    expect(out.claimedByMatcher).toBe(false);
+    expect(out.claimedByJudge).toBe(true);
+  });
+});

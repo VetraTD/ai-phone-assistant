@@ -4,25 +4,45 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { captureException } from "./lib/sentry.js"; // init Sentry early (reads SENTRY_DSN)
 import express from "express";
-import * as twilio from "twilio";
-import crypto from "crypto";
+import { verifyTwilioSignature, verifyTwilioSignatureAny } from "./lib/twilioSignature.js";
+import { fileDegradedVoicemail } from "./lib/degradedVoicemail.js";
 
 import * as geminiService from "./services/gemini.js";
-import * as db from "./services/supabase.js";
-import * as googleTts from "./services/googleTts.js";
+import * as db from "./services/db.js";
 import { listIntegrationDefinitions } from "./config/integrationDefinitions.js";
 import * as notifications from "./services/notifications.js";
 import * as twilioNumbers from "./services/twilioNumbers.js";
-import {
-  buildGatherAndRedirect,
-  buildSayGatherRedirect,
-  buildSayAndHangup,
-  buildSayAndDial,
-  buildHoldAndRedirect,
-} from "./lib/twiml.js";
+import * as twilioRecordings from "./services/twilioRecordings.js";
+import { WebSocketServer } from "ws";
+import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
+import { normalizePhoneNumber } from "./lib/phone.js";
+import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
-import { log, createRequestId, recordTurnLatency } from "./lib/logger.js";
+import { log } from "./lib/logger.js";
+import { assertBootConfig } from "./lib/bootChecks.js";
+import {
+  mintMediaStreamToken,
+  verifyMediaStreamToken,
+  tokenFromPath,
+  mediaStreamTokenRequired,
+  mediaStreamTokenAvailable,
+} from "./lib/mediaStreamToken.js";
+import { sttProviderFor } from "./lib/voice/sttStream.js";
+import { assertSttEncryption } from "./lib/voice/sttGoogle.js";
+import { callerAllowlist, callerAllowed, buildRefusedTwiml } from "./lib/callerAllowlist.js";
+import { requireBusinessAccess } from "./middleware/requireBusinessAccess.js";
+import { getLatencyStats, getCallStats, clearStats, bumpCounter } from "./lib/voice/metrics.js";
+import { createHash, timingSafeEqual } from "node:crypto";
+import * as voiceHealth from "./lib/voice/health.js";
+import {
+  buildDegradedVoicemailTwiml,
+  buildUnroutedTransferTwiml,
+  buildUnroutedVoicemailTwiml,
+  escapeXml,
+} from "./lib/twiml.js";
+import { countryFromE164 } from "./lib/phone.js";
+import { getProfile } from "./lib/voice/localeProfiles.js";
 import {
   isValidUUID,
   isValidE164,
@@ -33,6 +53,10 @@ import {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Identifies this process. Reported on /api/debug/latency so a measurement run
+// can prove the server did not restart (i.e. redeploy) underneath it.
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 // Trust Railway's proxy so express-rate-limit can read the real client IP
 // from X-Forwarded-For instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
@@ -47,8 +71,25 @@ const BASE_URL = process.env.BASE_URL?.replace(/\/$/, "");
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_VALIDATE_SIGNATURE = process.env.TWILIO_VALIDATE_SIGNATURE !== "false";
 
-if (!GEMINI_API_KEY) {
-  console.error("Missing required env: GEMINI_API_KEY");
+// Required only when Vertex is NOT the backend, and this used to be
+// unconditional — which was wrong in a way that mattered.
+//
+// A8 established that the API-key path is the Gemini Developer API (AI Studio),
+// which the Google Cloud BAA does not cover, and lib/compliance.js REFUSES it in
+// `hipaa` mode at client construction. So an unconditional requirement meant a
+// HIPAA deployment could not start without carrying a credential it is
+// forbidden to use — the boot check and the compliance guard demanding opposite
+// things, with the operator in between.
+//
+// services/gemini.js already refuses to fall back from Vertex to the API key,
+// so nothing here is a fallback: if VERTEX_ENABLED is set, that path is the one
+// that runs and this key is not merely unnecessary but unwanted.
+const VERTEX_ENABLED = process.env.VERTEX_ENABLED === "true" || process.env.VERTEX_ENABLED === "1";
+if (!GEMINI_API_KEY && !VERTEX_ENABLED) {
+  console.error(
+    "Missing required env: GEMINI_API_KEY. Set it, or set VERTEX_ENABLED=true with " +
+      "GOOGLE_CLOUD_PROJECT and VERTEX_LOCATION to use Vertex — which is the BAA-covered path."
+  );
   process.exit(1);
 }
 if (!BASE_URL) {
@@ -62,50 +103,68 @@ if (BASE_URL.includes("example.ngrok") || BASE_URL === "https://example.ngrok.io
   );
   process.exit(1);
 }
+// DEEPGRAM_API_KEY is deliberately NOT required here any more.
+//
+// It used to be, unconditionally, with the comment "there is no fallback mode"
+// — and that made a covered deployment impossible to start. lib/bootChecks.js
+// `checkCoveredVendors` refuses to boot when a Deepgram credential is present
+// in a `hipaa` process, because no BAA covers it, so this preflight and that
+// check demanded opposite things and no configuration satisfied both. The US
+// production stack could not answer a call in either direction.
+//
+// There IS now a second provider. The requirement moved to
+// `checkSttConfig`, which asks the mode-shaped question — does this deployment
+// have an STT it is ALLOWED to use — and is still fatal when the answer is no.
+
+// Resolved once. An allowlist re-parsed per call is an allowlist that can
+// change under a running process, which makes "who was allowed in" unanswerable
+// after the fact.
+const CALLER_ALLOWLIST = callerAllowlist();
+if (CALLER_ALLOWLIST.active) {
+  console.log(
+    `[boot] CALLER_ALLOWLIST active: ${CALLER_ALLOWLIST.numbers.size} number(s) may call. ` +
+      "Everyone else is refused. This is expected on staging and NOT expected in production."
+  );
+  if (CALLER_ALLOWLIST.malformed.length) {
+    // Fatal, and it is the announce-loudly principle at its sharpest: a
+    // malformed entry never matches, so the operator sees a configured
+    // allowlist that admits nobody — including the tester it was written for.
+    console.error(
+      `[boot] FATAL CALLER_ALLOWLIST has ${CALLER_ALLOWLIST.malformed.length} entr(ies) that are not E.164 ` +
+        "(+ and 1-15 digits). Twilio delivers `From` in E.164, so these can never match."
+    );
+    process.exit(1);
+  }
+}
 
 const VOICE_URL = `${BASE_URL}/twilio/voice`;
 const STATUS_URL = `${BASE_URL}/twilio/status`;
-const IDEMPOTENCY_WINDOW_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Env — optional: transfer & time limit
 // ---------------------------------------------------------------------------
 
 const TRANSFER_NUMBER = process.env.TRANSFER_NUMBER || "";
-const CALL_MAX_DURATION_MS =
-  (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
-const TYPING_SOUND_URL = process.env.TYPING_SOUND_URL || "";
-
-// ---------------------------------------------------------------------------
-// Escape-trigger detection (case-insensitive, word-boundary)
-// ---------------------------------------------------------------------------
-
-const TRANSFER_TRIGGERS =
-  /\b(representative|human|operator|real person|speak to someone|talk to someone|talk to a person|manager|supervisor)\b/i;
-
-function isTransferRequest(speech) {
-  return TRANSFER_TRIGGERS.test(speech);
-}
-
-// ---------------------------------------------------------------------------
-// Transfer policy resolver
-// ---------------------------------------------------------------------------
 
 /**
- * Determine if transfer is currently allowed based on config.transferPolicy
- * and business hours.
- * @param {object} config - normalised business config
- * @returns {boolean}
+ * Where to send a caller whose dialed number matches no business.
+ *
+ * Deliberately NOT TRANSFER_NUMBER: that is the per-business forwarding
+ * fallback, and sending a stranger's misrouted call to some other business's
+ * back office is its own kind of wrong. Unset (the default) means take a
+ * message instead.
+ *
+ * Read at call time, not module load, so it can be changed without a restart
+ * and flipped per-case in tests.
+ *
+ * @returns {string} E.164 number, or "" when unset/invalid
  */
-function resolveTransferAllowed(config) {
-  if (config.transferPolicy === "never") return false;
-  if (config.transferPolicy === "always") return true;
-  // "business_hours_only" — need to check if currently open
-  if (config.transferPolicy === "business_hours_only") {
-    return geminiService.isBusinessOpen(config);
-  }
-  return true; // default allow
+function unroutedTransferNumber() {
+  return normalizePhoneNumber(process.env.UNROUTED_TRANSFER_NUMBER) || "";
 }
+
+const CALL_MAX_DURATION_MS =
+  (parseInt(process.env.CALL_MAX_DURATION_MINUTES, 10) || 30) * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Middleware
@@ -113,20 +172,62 @@ function resolveTransferAllowed(config) {
 
 app.use(helmet());
 app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
 
-// Match dashboard backend: prod domains + localhost. Override/extend with CORS_ORIGIN (comma-separated).
-const defaultCorsOrigins = [
-  "http://localhost:5173",
-  "http://localhost:4173",
-  "https://vetratd.com",
-  "https://www.vetratd.com",
-  "https://ai-phone-dashboard-lemon.vercel.app",
+// Default JSON body parsing, at express's 100kb default — deliberately left
+// tight. The one route that needs more (the probe caller-audio upload, a few
+// hundred kb of mu-law) declares its own larger parser inline, so the raised
+// limit applies to exactly that path and nothing else.
+const defaultJsonParser = express.json();
+app.use((req, res, next) => {
+  if (req.path === "/api/debug/probe-script") return next();
+  return defaultJsonParser(req, res, next);
+});
+
+// CORS allow-list.
+//
+// Both this server and the dashboard backend already allow-listed rather than
+// reflecting the Origin header, so the shape was right. A9 fixes what was
+// wrong inside it.
+//
+// 1. THE VERCEL PREVIEW DOMAIN IS GONE. `ai-phone-dashboard-lemon.vercel.app`
+//    was allow-listed permanently, and D7 cancels the Vercel account. A
+//    released Vercel subdomain can be claimed by anyone, so leaving it here
+//    would hand a stranger a cross-origin foothold against an authenticated
+//    dashboard session, at a moment nobody would connect to a hosting change.
+//    It stays reachable through CORS_ORIGINS for as long as it is genuinely in
+//    use, which is the difference between a deliberate entry and a permanent
+//    one.
+//
+// 2. LOCALHOST IS DEV-ONLY. A production deployment allow-listing
+//    http://localhost:5173 is not catastrophic, but it is an origin the
+//    production server has no reason to trust, and it costs nothing to drop.
+//
+// 3. ONE ENVIRONMENT VARIABLE NAME. This server read CORS_ORIGIN and the
+//    dashboard read CORS_ORIGINS — same concept, two spellings, and setting
+//    the wrong one fails silently by allowing nothing extra. Both now read
+//    CORS_ORIGINS, with the old singular still honoured so an existing
+//    deployment does not break, and announced at boot when it is what is
+//    actually in use. Exactly the class of drift D1 exists to reconcile.
+const isProduction = process.env.NODE_ENV === "production";
+
+const devCorsOrigins = ["http://localhost:5173", "http://localhost:4173"];
+const prodCorsOrigins = ["https://vetratd.com", "https://www.vetratd.com"];
+
+const envCorsOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (!process.env.CORS_ORIGINS && process.env.CORS_ORIGIN) {
+  log.error("cors_origin_deprecated", {
+    reason: "CORS_ORIGIN is the old name; the dashboard backend reads CORS_ORIGINS. Set CORS_ORIGINS.",
+    severity: "warn",
+  });
+}
+
+const allowedCorsOrigins = [
+  ...new Set([...(isProduction ? [] : devCorsOrigins), ...prodCorsOrigins, ...envCorsOrigins]),
 ];
-const envCorsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
-  : [];
-const allowedCorsOrigins = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])];
 
 app.use(
   cors({
@@ -141,6 +242,33 @@ app.use(
 );
 
 // --- Rate limiting (skip in test to avoid flakiness) ---
+// Top-level await is available in ESM, and this file is "type": "module".
+// Wrapped so a rejection during startup exits non-zero with a reason rather
+// than surfacing as an unhandled rejection warning on a process that keeps
+// running without a database.
+// ---------------------------------------------------------------------------
+// Warm the speech-to-speech front-end at boot.
+//
+// Its cold start is dead air, not latency: the model IS the voice on that path,
+// so nothing can be said to the caller until the session is up. Measured on a
+// real pair of calls -- 2,302 ms to session open cold against 53 ms warm, plus
+// ~680 ms to first audio -- the caller heard silence for three seconds and hung
+// up (backlog LVX17).
+//
+// The dynamic import is the point: it loads lib/voice/live/** and @google/genai
+// into the module cache now, so the lazy import in the upgrade handler below is
+// a cache hit rather than a module graph. Deliberately NOT awaited -- warming
+// must not delay the port opening, and the cascade must boot regardless.
+//
+// Cloud Run needs `--min-instances=1` alongside this, or scale-to-zero runs the
+// cold path again after every idle period.
+// ---------------------------------------------------------------------------
+if (process.env.NODE_ENV !== "test") {
+  import("./lib/voice/live/index.js")
+    .then((m) => m.warmLiveFrontEnd())
+    .catch((err) => log.error("live_warm_import_failed", { reason: err?.message, severity: "warn" }));
+}
+
 if (process.env.NODE_ENV !== "test") {
   app.use(
     "/twilio",
@@ -163,521 +291,684 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 // --- Root: confirm server is running ---
+// Which build is this?
+//
+// Added after a staging deploy sat two rounds of fixes behind for twenty
+// minutes without anyone being able to tell. Railway redeploys the CURRENT
+// commit whenever an environment variable changes, so the dashboard read
+// "deployed 19 minutes ago" while serving week-old code — and a test call was
+// spent against it before the mismatch was spotted.
+//
+// The commit is not a secret (the repo is public, and a deploy's SHA leaks
+// through behaviour anyway), and it turns "is my fix live?" into one curl
+// instead of an inference from feature fingerprints. Falls back gracefully off
+// Railway, where the variable simply does not exist.
+const BUILD_SHA = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || null;
+const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH || null;
+
 app.get("/", (req, res) => {
   res.type("text/plain");
+  const build = BUILD_SHA
+    ? `\nBuild: ${BUILD_SHA.slice(0, 7)}${BUILD_BRANCH ? ` (${BUILD_BRANCH})` : ""}`
+    : `\nBuild: unknown`;
   res.send(
-    `AI phone assistant is running.\nVoice webhook: ${VOICE_URL}\nStatus callback: ${STATUS_URL}`
+    `AI phone assistant is running.\nVoice webhook: ${VOICE_URL}\nStatus callback: ${STATUS_URL}${build}`
   );
-});
-
-// --- Google TTS audio — one-time serve for Twilio <Play> ---
-// UUID-keyed, deleted immediately after first fetch. Not behind Twilio validation
-// because Twilio fetches <Play> URLs with a plain GET (no X-Twilio-Signature).
-app.get("/audio/:id", (req, res) => {
-  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(400).end();
-  const buffer = googleTts.consumeAudio(req.params.id);
-  if (!buffer) return res.status(404).end();
-  res.set("Content-Type", "audio/mpeg");
-  res.set("Cache-Control", "no-store");
-  res.send(buffer);
 });
 
 // --- Twilio signature validation ---
 function twilioValidation(req, res, next) {
   if (!TWILIO_VALIDATE_SIGNATURE) return next();
   if (!TWILIO_AUTH_TOKEN) {
-    console.warn("TWILIO_VALIDATE_SIGNATURE is enabled but TWILIO_AUTH_TOKEN is missing");
+    log.error("twilio_signature_validation_disabled", { reason: "no_auth_token", severity: "warn" });
     return res.status(403).send("Forbidden");
   }
   const signature = req.headers["x-twilio-signature"];
-  if (!signature) return res.status(403).send("Forbidden");
+  if (!signature) {
+    log.error("twilio_signature_missing", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
   const url = BASE_URL + (req.originalUrl || req.url);
-  const valid = twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
-  if (!valid) return res.status(403).send("Forbidden");
+
+  // The verification lives in lib/twilioSignature.js, and moving it there was
+  // the fix for a bug that rejected EVERY request for the life of this
+  // deployment.
+  //
+  // This file did `import * as twilio from "twilio"`. The package is CommonJS,
+  // so Node's ESM interop puts only `default` on the namespace — making
+  // `twilio.validateRequest` undefined. Calling it threw a TypeError, and the
+  // try/catch that was added to turn a malformed signature into a clean 403
+  // swallowed that TypeError into `valid = false`. Genuine Twilio requests got
+  // the same 403 as forged ones.
+  //
+  // It survived because the middleware could not be imported by a test — it
+  // lived in the file that boots the server — so it was "tested" by scanning
+  // this source for the presence of a try/catch. Those scans passed. Three
+  // negative tests passed. Nothing ever asserted that a GOOD signature is
+  // ACCEPTED, and that is the only assertion that could tell "correctly
+  // refuses bad input" apart from "refuses everything".
+  const valid = verifyTwilioSignature({
+    authToken: TWILIO_AUTH_TOKEN,
+    signature,
+    url,
+    params: req.body,
+  });
+
+  if (!valid) {
+    log.error("twilio_signature_invalid", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
   next();
 }
 
 // ---------------------------------------------------------------------------
-// Helper: log a transcript pair (fire-and-forget)
-// ---------------------------------------------------------------------------
-
-function logTranscript(state, callerText, aiText) {
-  if (!state.dbCallId) return;
-  const seq = state.sequenceCounter;
-  state.sequenceCounter += 2;
-  db.addTranscriptEntry(state.dbCallId, "caller", callerText, seq).catch(() => {});
-  db.addTranscriptEntry(state.dbCallId, "ai", aiText, seq + 1).catch(() => {});
-}
-
-// ---------------------------------------------------------------------------
-// resolveVoiceOpts — build voiceOpts, optionally pre-synthesizing with Google TTS
+// Speech-to-speech front-end (docs/speech-to-speech-handoff.md §7 step 2)
+//
+// Its OWN routes. The cascade answers on /twilio/voice and
+// /twilio/media-stream and is not touched by anything below -- it is the
+// mature path and it is tier 3, the last thing standing when both S2S
+// vendors are down. A defect in tier 1 must not be able to reach it.
 // ---------------------------------------------------------------------------
 
 /**
- * Build voiceOpts for a TwiML builder. When googleTtsVoice is configured and
- * Google TTS credentials are present, synthesizes the text to MP3, stores it
- * in the ephemeral audio store, and returns an audioUrl for Twilio <Play>.
- * Falls back silently to Twilio <Say> on any error or when not configured.
+ * Signature validation accepting EITHER Twilio account.
  *
- * @param {string} text - Text to synthesize
- * @param {object} config - Normalised business config
- * @returns {Promise<object>} voiceOpts (with optional audioUrl)
+ * There are two accounts and GCP holds one token. A single-token check makes a
+ * number on the other account unvalidatable, which is the corner the spike was
+ * backed into -- it gave up on signatures and gated on a secret URL path
+ * instead (backlog LVX3). That was defensible for a bare audio bridge living
+ * one day; it is not defensible for a front-end with appointment writes behind
+ * it.
+ *
+ * RENAMED from `twilioValidationLive` on 2026-09-08, because the name had
+ * started to mislead. It is not "the Live front-end's validator" -- it is "the
+ * check that does not care which of our accounts owns the number", and
+ * /twilio/status now needs exactly that while belonging to neither front-end.
+ *
+ * Still deliberately separate from `twilioValidation`. The two CALL-ANSWERING
+ * routes stay as they are: /twilio/voice is the mature cascade and widening
+ * what it accepts is a change to tier 3 for the benefit of a path that does
+ * not use it.
+ *
+ * WHY /twilio/status MOVED HERE, and why that is not the same widening.
+ *
+ * It is not a front-end route. It is the call LIFECYCLE callback, and it has
+ * to work for every number the platform serves whoever owns it -- it is what
+ * sets a call's status, its duration, and what triggers the summary.
+ *
+ * LVX14 accepted that account B's callbacks 403 here, with a stated reason: "a
+ * Live call never reaches /twilio/status in a useful way anyway (LVX30)."
+ * LVX30 was fixed on 2026-09-08, so that sentence stopped being true, and the
+ * justification for the 403 expired with it. Measured the same evening: a real
+ * call on +18176011171 wrote 21 transcript rows and then stuck at in-progress
+ * with no duration and no summary, because this callback was refused.
  */
-async function resolveVoiceOpts(text, config) {
-  const base = {
-    voice: config.ttsVoice || "Polly.Joanna",
-    language: config.languagesSpoken,
-    bargeIn: config.bargeIn,
-  };
+function twilioValidationAnyAccount(req, res, next) {
+  if (!TWILIO_VALIDATE_SIGNATURE) return next();
 
-  if (!config.googleTtsVoice || !googleTts.isConfigured()) {
-    return base;
+  const authTokens = [process.env.TWILIO_AUTH_TOKEN, process.env.TWILIO_AUTH_TOKEN_ALT];
+  if (!authTokens.some((t) => (t || "").trim())) {
+    log.error("live_signature_validation_disabled", { reason: "no_auth_token", severity: "warn" });
+    return res.status(403).send("Forbidden");
   }
+
+  const valid = verifyTwilioSignatureAny({
+    authTokens,
+    signature: req.headers["x-twilio-signature"],
+    url: BASE_URL + (req.originalUrl || req.url),
+    params: req.body,
+  });
+  if (!valid) {
+    log.error("live_signature_invalid", { url: req.url, ip: req.ip });
+    return res.status(403).send("Forbidden");
+  }
+  next();
+}
+
+/**
+ * The <Connect><Stream> handoff, shared by both front-ends.
+ *
+ * Extracted because the connect-time fallback turns on the two TwiML strings
+ * being interchangeable, and until now that was true only by inspection: they
+ * were byte-identical except for the websocket path, maintained in two places
+ * a hundred lines apart. A fallback that silently drifted from the thing it
+ * falls back to is worse than none.
+ *
+ * The token is deliberately NOT minted in here. mintMediaStreamToken is called
+ * on each route because that is the one place that has already proved the
+ * request came from Twilio -- and because tests/liveRouteParity.test.js scans
+ * the handler body for it, which is the correct control: a route that stopped
+ * minting would be a route that stopped authenticating its own socket.
+ *
+ * escapeXml on both parameters: every other TwiML site in this codebase escapes
+ * its interpolations, and an unescaped attribute value is an XML-injection hole
+ * even when the only writer is Twilio.
+ *
+ * @param {string} streamPath - "/twilio/live-stream" or "/twilio/media-stream"
+ * @param {string|null} streamToken - from mintMediaStreamToken, null when unsigned
+ */
+function buildStreamTwiml(streamPath, streamToken, businessPhone, callerPhone) {
+  const wsUrl =
+    BASE_URL.replace(/^http/, "ws") +
+    streamPath +
+    (streamToken ? `/${encodeURIComponent(streamToken)}` : "");
+  return (
+    `<Response><Connect><Stream url="${wsUrl}">` +
+    `<Parameter name="businessPhone" value="${escapeXml(businessPhone)}" />` +
+    `<Parameter name="callerPhone" value="${escapeXml(callerPhone)}" />` +
+    `</Stream></Connect></Response>`
+  );
+}
+
+/**
+ * Answer a call on the speech-to-speech front-end.
+ *
+ * Mirrors /twilio/voice's <Connect><Stream> handoff, including minting the
+ * per-call token HERE, which is the one place that has already proved the
+ * request came from Twilio. The token rides in the PATH: Twilio does not carry
+ * a `<Stream url="...">` query string through to the websocket handshake, and
+ * a `?token=` form arrives empty.
+ *
+ * CONNECT-TIME FALLBACK, 2026-09-04. Until now a failure anywhere in here was
+ * SILENCE, which is the worst outcome available on a prospect's call: worse
+ * than voicemail, worse than a wrong answer, and the first thing a business
+ * judging call quality would conclude is that the software is broken.
+ *
+ * Two failure shapes, and only one of them is a throw:
+ *
+ *   a throw            -- res.type("text/xml") has already run, so Express's
+ *                         centralized handler sends a JSON body under an XML
+ *                         content type with a 500. Twilio reports 11200 and
+ *                         the caller hears its generic error message.
+ *   a null token       -- NOT a throw. mintMediaStreamToken returns null when
+ *                         it has no signing key, the TwiML then carries a
+ *                         tokenless wss:// URL, and the upgrade is refused with
+ *                         a bare 403 further down this file. The call connects,
+ *                         says nothing, and ends. That is the silence.
+ *
+ * Both now hand back the CASCADE's own <Connect><Stream>. The caller lands on
+ * the mature front-end and never knows. The mid-call half -- an `action` URL on
+ * <Connect> for a socket that drops after the handoff -- is deliberately NOT
+ * built: nobody has tried it here, and this half removes the worst outcome.
+ */
+app.post("/twilio/live-voice", twilioValidationAnyAccount, async (req, res) => {
+  res.type("text/xml");
+  const callSid = req.body.CallSid;
+  const businessPhone = req.body.To || "";
+  const callerPhone = req.body.From || "";
 
   try {
-    const audioId = await googleTts.synthesizeAndStore(text, config.googleTtsVoice);
-    return { ...base, audioUrl: `${BASE_URL}/audio/${audioId}` };
+
+    // The staging caller allowlist, checked BEFORE anything looks up a business
+    // or opens a socket -- the same rule /twilio/voice applies, and it was
+    // missing here. Without it, dialling the Live number instead of the cascade
+    // number walked straight past the control: a call row created for a caller
+    // who did not mean to reach this environment, and their utterances sent to
+    // AI Studio. Inert in production, where CALLER_ALLOWLIST is unset.
+    //
+    // A refusal is a DECISION, not a failure, so it returns from inside the try
+    // and never reaches the cascade fallback below. Falling back here would
+    // route exactly the caller this control exists to turn away.
+    if (!callerAllowed(callerPhone, CALLER_ALLOWLIST)) {
+      log.error("caller_not_on_allowlist", {
+        callSid,
+        severity: "warn",
+        route: "live",
+        allowlistSize: CALLER_ALLOWLIST.numbers.size,
+        reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
+      });
+      return res.send(buildRefusedTwiml());
+    }
+
+    // An unroutable number must never reach the assistant. The cascade refuses
+    // here rather than in the socket, and this path did not refuse at all: the
+    // socket let lookupBusinessByPhone return null and carried on with
+    // loadConfig(null), so an unrouted number was answered by a generic "our
+    // office" assistant. That is precisely the shape of the phone-number routing
+    // bug this codebase has already paid for once.
+    //
+    // A lookup that THREW is not a lookup that found nothing: only a clean miss
+    // refuses, so a database blip does not turn a real business into voicemail.
+    if (db.isEnabled() && businessPhone) {
+      let business = null;
+      let lookupFailed = false;
+      try {
+        business = await db.lookupBusinessByPhone(businessPhone);
+      } catch (err) {
+        log.error("live_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+        lookupFailed = true;
+      }
+      if (!business && !lookupFailed && !process.env.LIVE_BUSINESS_PHONE) {
+        log.error("live_no_business_for_number", { callSid, businessPhone, severity: "warn" });
+        // getProfile is keyed by LOCALE id ("en-GB"), not by country code
+        // ("GB"), and returns the US default for anything it does not recognise
+        // -- so passing a country code gave a UK caller on a UK line an American
+        // voice. The cascade's own unrouted path does this mapping correctly and
+        // its comment records that the bug was already paid for once.
+        const profile = getProfile(
+          countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+        );
+        // Also a DECISION. This number routes nowhere on either front-end, so
+        // handing it to the cascade would answer it with the same generic
+        // assistant the check exists to prevent.
+        return res.send(buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, profile.twimlSayVoice));
+      }
+    }
+
+    const streamToken = mintMediaStreamToken(callSid);
+    // The silent failure, promoted to a throw so the fallback below can see it.
+    // A null token with signing REQUIRED means the socket upgrade will be
+    // refused with a bare 403: Twilio connects, no audio is ever exchanged, and
+    // the caller hears nothing at all. Unsigned-by-configuration is a different
+    // thing and still allowed -- that is what a local rig runs on.
+    if (streamToken === null && mediaStreamTokenRequired()) {
+      throw new Error("live stream token required and not minted");
+    }
+
+    log.info("live_stream_initiated", { callSid, authenticated: streamToken !== null });
+    // The positive twin. Without it, a demo call that connected cleanly and a
+    // demo call that never reached this route at all both read as all zeros.
+    bumpCounter("live_connect_ok");
+
+    return res.send(buildStreamTwiml("/twilio/live-stream", streamToken, businessPhone, callerPhone));
   } catch (err) {
-    console.error("Google TTS failed, falling back to Twilio Say:", err.message);
-    captureException(err, { context: "googleTts.synthesizeAndStore" });
-    return base;
+    // Hand the caller to the cascade. They never know.
+    bumpCounter("live_connect_fallback");
+    log.error("live_connect_fallback_cascade", {
+      callSid,
+      reason: err?.message,
+      severity: "warn",
+    });
+    try {
+      const cascadeToken = mintMediaStreamToken(callSid);
+      if (cascadeToken === null && mediaStreamTokenRequired()) {
+        throw new Error("cascade stream token required and not minted");
+      }
+      return res.send(buildStreamTwiml("/twilio/media-stream", cascadeToken, businessPhone, callerPhone));
+    } catch (fallbackErr) {
+      // Both front-ends are unreachable -- an unusable CallSid fails to mint on
+      // either path. Voicemail is the floor, and it is still not silence.
+      log.error("live_connect_fallback_failed", {
+        callSid,
+        reason: fallbackErr?.message,
+        severity: "error",
+      });
+      return res.send(
+        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, getProfile("en-US").twimlSayVoice)
+      );
+    }
   }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Voice webhook
+//
+// The only remaining responsibility here is handing the call off to the
+// Media Streams pipeline (lib/voice/session.js by default; lib/mediaStream.js
+// only when PIPELINE_V2=false — see selectPipelineHandler below). The legacy TwiML
+// <Gather> conversation loop has been removed — an STT provider the
+// deployment is allowed to use is required at boot (checkSttConfig), so Media
+// Streams is always available.
+//
+// Degraded mode: if lib/voice/health.js reports the pipeline's STT/TTS
+// dependencies are down, skip Media Streams entirely and fall back to a
+// voicemail-only TwiML response (see /twilio/voicemail below).
 // ---------------------------------------------------------------------------
 
 app.post("/twilio/voice", twilioValidation, async (req, res) => {
   res.type("text/xml");
+
   const callSid = req.body.CallSid;
-  const requestId = createRequestId();
-  const speechResult =
-    typeof req.body.SpeechResult === "string" ? req.body.SpeechResult.trim() : "";
 
-  // ---- 1. Get or create state ----
-  const state = callState.getState(callSid);
+  if (voiceHealth.isDegraded()) {
+    log.error("degraded_mode_voicemail_fallback", {
+      callSid,
+      reason: voiceHealth.getDegradedReason(),
+      severity: "warn",
+    });
+    return res.send(buildDegradedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`));
+  }
 
-  // ---- 2. Load config, knowledge & create call row on first hit ----
-  if (!state.config) {
+  // The staging caller allowlist, checked BEFORE anything looks up a business
+  // or touches the database. A refused caller should leave no trace beyond the
+  // refusal itself — the whole point is that this environment never holds data
+  // about someone who did not mean to reach it.
+  //
+  // Inert in production, where CALLER_ALLOWLIST is unset.
+  if (!callerAllowed(req.body.From, CALLER_ALLOWLIST)) {
+    log.error("caller_not_on_allowlist", {
+      callSid,
+      severity: "warn",
+      // The number itself is a PHI-typed field and does not go in a log line;
+      // the allowlist size is what makes this actionable.
+      allowlistSize: CALLER_ALLOWLIST.numbers.size,
+      reason: "CALLER_ALLOWLIST is active and this caller is not on it. Expected on staging.",
+    });
+    return res.send(buildRefusedTwiml());
+  }
+
+  const existingState = callState.getState(callSid);
+  // Only connect the stream on the very first webhook hit (greeting step).
+  if (existingState.step === STEPS.GREETING && !existingState.mediaStream) {
+    const businessPhone = req.body.To || "";
+    const callerPhone = req.body.From || "";
+
+    // Resolve the tenant HERE rather than inside the media-stream socket. Two
+    // reasons: an unroutable number must never reach the assistant at all (see
+    // below), and the socket can reuse this row instead of paying a second
+    // Supabase round trip on the latency-critical pickup path.
     let business = null;
-    if (db.isEnabled()) {
-      const twilioNumber = req.body.To || "";
-      const callerNumber = req.body.From || "";
-      business = await db.lookupBusinessByPhone(twilioNumber);
-      if (business) {
-        const dbId = await db.createCall(business.id, callSid, callerNumber, twilioNumber);
-        if (dbId) {
-          state.dbCallId = dbId;
-          state.businessId = business.id;
-          state.callerNumber = callerNumber;
-        }
-        // Load business knowledge, integrations, and caller context in parallel
-        const [knowledge, integrations, callerContext] = await Promise.all([
-          db.fetchBusinessKnowledge(business.id),
-          db.listIntegrationsForBusiness(business.id, { enabledOnly: true }),
-          callerNumber ? db.fetchCallerContext(business.id, callerNumber) : Promise.resolve(null),
-        ]);
-        state.knowledge = knowledge;
-        state.integrations = integrations;
-        state.callerContext = callerContext;
-      } else {
-        console.warn(
-          `No business found for Twilio number ${twilioNumber} — skipping DB persistence`
+    // A lookup that THREW is not the same as a lookup that found nothing.
+    // "No such business" means the caller must not reach the assistant; a
+    // Supabase blip must not turn a legitimate business's calls into voicemail.
+    // Only a clean miss triggers the unrouted path — an error falls through to
+    // the stream, where the socket retries the lookup.
+    let lookupFailed = false;
+    if (db.isEnabled() && businessPhone) {
+      try {
+        business = await db.lookupBusinessByPhone(businessPhone);
+      } catch (err) {
+        log.error("voice_business_lookup_failed", { callSid, message: err?.message, severity: "warn" });
+        captureException(err, { callSid });
+        lookupFailed = true;
+        business = null;
+      }
+    }
+    // Left null on failure so the socket re-queries rather than trusting a miss.
+    existingState.business = business;
+
+    if (db.isEnabled() && businessPhone && !business && !lookupFailed) {
+      // The assistant cannot say who it is answering for, cannot persist a
+      // message, and cannot book anything. Hand the caller to a human, or take
+      // a message honestly — never impersonate a generic office.
+      const unroutedTo = unroutedTransferNumber();
+      log.error("no_business_found", {
+        callSid,
+        businessPhone,
+        stage: "voice_webhook",
+        action: unroutedTo ? "transfer" : "voicemail",
+        severity: "warn",
+      });
+      // There is no business config here by definition — the dialled number
+      // matched nothing — so the locale comes off the numbers themselves.
+      // Without this a UK caller on a UK line heard a US ringback and an
+      // American voice, because both defaulted to "us".
+      const unroutedProfile = getProfile(
+        countryFromE164(businessPhone) === "GB" || countryFromE164(callerPhone) === "GB" ? "en-GB" : "en-US"
+      );
+      if (unroutedTo) {
+        return res.send(
+          buildUnroutedTransferTwiml(unroutedTo, callerPhone, unroutedProfile.ringTone, unroutedProfile.twimlSayVoice)
         );
       }
-    }
-    state.config = db.loadConfig(business);
-    if (!state.knowledge) state.knowledge = [];
-    if (!state.integrations) state.integrations = [];
-  }
-
-  const config = state.config;
-  const voiceOpts = {
-    voice: config.ttsVoice || "Polly.Joanna",
-    language: config.languagesSpoken,
-    bargeIn: config.bargeIn,
-  };
-
-  // ---- 3. Hard time-limit check ----
-  if (Date.now() - state.startedAt > CALL_MAX_DURATION_MS) {
-    const msg =
-      "I'm sorry, but we've reached the maximum call time. Please call back if you need further assistance. Goodbye!";
-    logTranscript(state, speechResult || "(time limit)", msg);
-    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 4. If a previous turn already set step to ENDING, hang up ----
-  if (state.step === STEPS.ENDING) {
-    const msg = "Thank you for calling. Goodbye!";
-    return res.send(buildSayAndHangup(msg, await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 5. No speech: greeting, pending reply, or silence handling ----
-
-  // ---- 5a. Pending Gemini reply (returning from hold redirect) ----
-  if (speechResult === "" && state.pendingReply) {
-    const pendingReply = state.pendingReply;
-    const pendingSpeech = state.pendingSpeech;
-    const geminiStart = state.pendingGeminiStart;
-    const pendingRequestId = state.pendingRequestId || requestId;
-    // Clear pending state immediately to avoid re-processing on subsequent redirects
-    state.pendingReply = null;
-    state.pendingSpeech = null;
-    state.pendingGeminiStart = null;
-    state.pendingRequestId = null;
-
-    return processGeminiReply(
-      pendingReply, pendingSpeech, geminiStart, pendingRequestId,
-      state, config, callSid, req, res
-    );
-  }
-
-  if (speechResult === "") {
-    if (state.step === STEPS.GREETING) {
-      state.step = STEPS.IDENTIFY_INTENT;
-      log("call_started", { callSid, requestId });
-
-      // Build greeting with optional recording disclosure and time-of-day warmth
-      let greetingText = "";
-      if (config.recordingDisclosureEnabled) {
-        greetingText =
-          (config.recordingDisclosureText ||
-            "This call may be recorded for quality and training purposes.") + " ";
-      }
-
-      // Prepend time-of-day greeting unless the business set a custom greeting
-      const isDefaultGreeting = !config._hasCustomGreeting;
-      if (isDefaultGreeting) {
-        const tz = config.timezone || "America/Chicago";
-        const hour = parseInt(
-          new Date().toLocaleTimeString("en-GB", { timeZone: tz, hour12: false }).split(":")[0],
-          10
-        );
-        const tod = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-        greetingText += `${tod}! ${config.greeting}`;
-      } else {
-        greetingText += config.greeting;
-      }
-
-      return res.send(buildGatherAndRedirect(VOICE_URL, greetingText, undefined, await resolveVoiceOpts(greetingText, config)));
-    }
-
-    // Progressive silence: re-listen → prompt → goodbye
-    const SILENCE_GATHER_TIMEOUT = 6;
-    state.silenceCount++;
-
-    if (state.silenceCount === 1) {
-      return res.send(buildGatherAndRedirect(VOICE_URL, "", SILENCE_GATHER_TIMEOUT, voiceOpts));
-    }
-    if (state.silenceCount === 2) {
-      const msg = "Are you still there?";
       return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, SILENCE_GATHER_TIMEOUT, "", await resolveVoiceOpts(msg, config))
+        buildUnroutedVoicemailTwiml(`${BASE_URL}/twilio/voicemail`, unroutedProfile.twimlSayVoice)
       );
     }
-    // 3rd silence — hang up
-    const byeMsg = "It seems like you may have stepped away. Goodbye!";
-    return res.send(buildSayAndHangup(byeMsg, await resolveVoiceOpts(byeMsg, config)));
+
+    // P10: the socket now carries a per-call credential.
+    //
+    // In the PATH, not a query string — Twilio does not carry a
+    // `<Stream url="...">` query string through to the websocket handshake, and
+    // a `?token=` form arrives empty (see probeUpgradeAllowed, which was bitten
+    // by exactly this). The token is minted here because this is the one place
+    // that has already proved the request came from Twilio: `twilioValidation`
+    // ran on this route.
+    const streamToken = mintMediaStreamToken(callSid);
+    log.info("media_stream_initiated", { callSid, authenticated: streamToken !== null });
+    return res.send(buildStreamTwiml("/twilio/media-stream", streamToken, businessPhone, callerPhone));
   }
-
-  // ---- 6. Speech present — reset silence counter ----
-  state.silenceCount = 0;
-
-  // ---- 7. Escape-trigger check (before Gemini) ----
-  if (isTransferRequest(speechResult)) {
-    const transferNumber = config.transferPhoneNumber || TRANSFER_NUMBER;
-    const canTransfer = !!transferNumber && resolveTransferAllowed(config);
-    log("transfer_requested", { callSid, requestId, transferred: canTransfer, transferPolicy: config.transferPolicy });
-
-    if (canTransfer) {
-      const msg = "Transferring you now. Please hold.";
-      logTranscript(state, speechResult, msg);
-      state.step = STEPS.ENDING;
-      return res.send(buildSayAndDial(msg, transferNumber, await resolveVoiceOpts(msg, config)));
-    }
-    // Transfer not possible — use escalation message or default
-    const msg = config.escalationMessage ||
-      "I'm sorry, I'm unable to transfer you at this time. Let me try to help you directly.";
-    logTranscript(state, speechResult, msg);
-    return res.send(buildSayGatherRedirect(VOICE_URL, msg, undefined, "", await resolveVoiceOpts(msg, config)));
-  }
-
-  // ---- 8. Idempotency check ----
-  const speechHash = crypto.createHash("sha256").update(speechResult).digest("hex");
-  const now = Date.now();
-  if (
-    state.lastProcessed &&
-    state.lastProcessed.speechHash === speechHash &&
-    now - state.lastProcessed.timestamp < IDEMPOTENCY_WINDOW_MS &&
-    state.lastProcessed.cachedTwiml
-  ) {
-    return res.send(state.lastProcessed.cachedTwiml);
-  }
-
-  // ---- 9. Fire Gemini in background and return hold audio ----
-  // Start the Gemini request immediately, store the promise in state,
-  // and return brief hold audio + redirect. The caller hears "One moment"
-  // (or a typing sound) while Gemini processes in parallel. When Twilio
-  // redirects back (step 5a above), we await the result.
-  const geminiStart = Date.now();
-  state.pendingReply = geminiService.getReply(
-    state.history, speechResult, state.step, state.intent, config, {
-      knowledge: state.knowledge || [],
-      transferAllowed: resolveTransferAllowed(config),
-      integrations: state.integrations || [],
-      businessId: state.businessId || null,
-      callerPhone: state.callerNumber || null,
-      callId: state.dbCallId || null,
-      selectedAppointmentId: state.selectedAppointmentId || null,
-      callerContext: state.callerContext || null,
-    }
-  );
-  state.pendingReply.catch(() => {}); // prevent unhandled rejection if redirect processes the error
-
-  // Pipeline: chain TTS synthesis onto Gemini promise so synthesis runs during
-  // hold-audio playback rather than after the redirect arrives.
-  if (config.googleTtsVoice && googleTts.isConfigured()) {
-    state.pendingTts = state.pendingReply
-      .then((reply) =>
-        googleTts.synthesizeAndStore(reply.text, config.googleTtsVoice)
-          .then((id) => `${BASE_URL}/audio/${id}`)
-      )
-      .catch(() => null); // silent fallback — resolveVoiceOpts used instead
-  } else {
-    state.pendingTts = null;
-  }
-
-  state.pendingSpeech = speechResult;
-  state.pendingSpeechHash = speechHash;
-  state.pendingGeminiStart = geminiStart;
-  state.pendingRequestId = requestId;
-
-  return res.send(buildHoldAndRedirect(VOICE_URL, TYPING_SOUND_URL, voiceOpts));
+  // Unexpected re-hit after the stream is already connected — there is no
+  // legacy TwiML fallback anymore. Nothing useful to do; hang up gracefully.
+  log.error("twilio_voice_unexpected_rehit", { callSid, severity: "warn" });
+  return res.send("<Response><Hangup/></Response>");
 });
 
 // ---------------------------------------------------------------------------
-// processGeminiReply — awaits a pending Gemini promise and handles the result
+// Degraded-mode voicemail recording callback
+//
+// Twilio POSTs here (recordingStatusCallback) once the Record verb from
+// buildDegradedVoicemailTwiml finishes. We can't rely on callState/DB call
+// rows here — degraded mode skips that setup entirely — so the business is
+// looked up fresh from the dialed (To) number.
 // ---------------------------------------------------------------------------
 
-async function processGeminiReply(
-  replyPromise, speechResult, geminiStart, requestId,
-  state, config, callSid, req, res
-) {
+app.post("/twilio/voicemail", twilioValidation, async (req, res) => {
+  const callSid = req.body.CallSid;
+  const callerNumber = req.body.From || null;
+  const twilioNumber = req.body.To || "";
+  const recordingUrl = req.body.RecordingUrl || "";
+
+  log.info("degraded_voicemail_received", { callSid });
+
   try {
-    const reply = await replyPromise;
-    let {
-      text: replyText,
-      appointmentArgs,
-      intentArgs,
-      endCallArgs,
-      customerRequestArgs,
-      toolResults,
-      selectedAppointmentId,
-    } = reply;
-    const turnLatencyMs = Date.now() - geminiStart;
+    const business = db.isEnabled() && twilioNumber
+      ? await db.lookupBusinessByPhone(twilioNumber)
+      : null;
 
-    // -- Update conversation history --
-    state.history.push({ role: "user", parts: [{ text: speechResult }] });
-    state.history.push({ role: "model", parts: [{ text: replyText }] });
-
-    // -- Log tool call results --
-    if (toolResults && toolResults.length > 0) {
-      for (const tr of toolResults) {
-        log("tool_called", { callSid, requestId, tool: tr.name, success: tr.success });
-      }
+    if (business) {
+      // Extracted to lib/degradedVoicemail.js (ledger O32). It was inline, and
+      // that is how it stayed the LAST unscoped PHI write in the system after
+      // every other one had been wrapped: `createCustomerRequest` ran with no
+      // tenant scope, which on Cloud SQL means the INSERT is refused outright
+      // and in `hipaa` mode means a PHI write with nowhere to record itself.
+      // Behind a plain function it can be run by a test as the unprivileged
+      // role, under the row-level security that is the point.
+      await fileDegradedVoicemail({
+        deps: { db, notifications, log, captureException },
+        business,
+        callerNumber,
+        recordingUrl,
+        callSid,
+      });
+    } else {
+      // No business row, so there is nowhere to file this. The recording URL
+      // goes in the log line so a real caller's message is recoverable by hand
+      // rather than lost outright — this is the unrouted-number path as well as
+      // the degraded one. A proper ops mailbox for these does not exist yet.
+      //
+      // A1.7 removed `callerNumber` and kept `recordingUrl`, which is an
+      // uncomfortable pair to defend and is defensible: the recording is the
+      // message, and dropping the pointer to it loses a real person's request
+      // outright. The number is recoverable from Twilio using callSid. This
+      // stays a known exception rather than a quiet one — the log is still the
+      // only place an unrouted voicemail exists, and that is the actual defect.
+      log.error("degraded_voicemail_no_business", {
+        callSid,
+        twilioNumber,
+        recordingUrl,
+        severity: "warn",
+      });
     }
-
-    // -- Update selected appointment when lookup returned exactly one --
-    if (selectedAppointmentId != null) {
-      state.selectedAppointmentId = selectedAppointmentId;
-    }
-    // Clear when cancel succeeded so we don't reuse a cancelled id
-    if (toolResults?.some((tr) => tr.name === "cancel_appointment_db" && tr.success)) {
-      state.selectedAppointmentId = null;
-    }
-
-    // -- Step transitions based on function calls --
-    if (intentArgs) {
-      const prevStep = state.step;
-      state.intent = intentArgs.intent;
-      if (state.step === STEPS.IDENTIFY_INTENT || state.step === STEPS.CONFIRM) {
-        state.step = STEPS.GATHER_DETAILS;
-      }
-      log("intent_set", { callSid, requestId, intent: intentArgs.intent, prevStep, newStep: state.step });
-    }
-
-    // Booking DB write now happens inside getReply (gemini.js) so the model
-    // gets real success/failure. Here we just handle notifications and step transition.
-    if (appointmentArgs && state.businessId) {
-      state.step = STEPS.CONFIRM;
-      const notes =
-        [appointmentArgs.service_type, appointmentArgs.notes]
-          .filter(Boolean)
-          .join(" — ") || null;
-      const twilioNumber = req.body.To || "";
-      notifications
-        .notifyAppointmentBooked({
-          businessId: state.businessId,
-          appointment: {
-            scheduled_at: appointmentArgs.scheduled_at,
-            client_name: appointmentArgs.client_name || null,
-            client_phone: state.callerNumber || null,
-            notes,
-          },
-          call: { callerNumber: state.callerNumber, twilioNumber },
-        })
-        .catch(() => {});
-    }
-
-    if (endCallArgs) {
-      state.step = STEPS.ENDING;
-      log("step_transition", { callSid, requestId, newStep: STEPS.ENDING, reason: endCallArgs.reason });
-    }
-
-    if (customerRequestArgs && state.businessId) {
-      db.createCustomerRequest({
-        businessId: state.businessId,
-        callId: state.dbCallId || null,
-        requestType: customerRequestArgs.request_type || "message",
-        callerName: customerRequestArgs.caller_name || null,
-        callbackNumber: customerRequestArgs.callback_number || null,
-        message: customerRequestArgs.message || null,
-        preferredTime: customerRequestArgs.preferred_time || null,
-      })
-        .then((id) => {
-          if (id) {
-            notifications
-              .notifyCustomerRequest({
-                businessId: state.businessId,
-                customerRequest: {
-                  request_type: customerRequestArgs.request_type || "message",
-                  caller_name: customerRequestArgs.caller_name || null,
-                  callback_number: customerRequestArgs.callback_number || null,
-                  message: customerRequestArgs.message || null,
-                  preferred_time: customerRequestArgs.preferred_time || null,
-                },
-                call: { callerNumber: state.callerNumber },
-              })
-              .catch(() => {});
-          }
-        })
-        .catch((err) => {
-          log("error", {
-            callSid,
-            requestId,
-            message: "createCustomerRequest failed",
-            code: "db_customer_request",
-          });
-          captureException(err, { callSid, requestId });
-        });
-    }
-
-    // -- Persist transcript --
-    logTranscript(state, speechResult, replyText);
-
-    // -- Structured log: turn completed --
-    log("turn_completed", {
-      callSid,
-      requestId,
-      step: state.step,
-      intent: state.intent,
-      turn_latency_ms: turnLatencyMs,
-    });
-    recordTurnLatency(state.businessId, turnLatencyMs);
-
-    // -- Build TwiML response --
-    // Use pre-synthesized audio if TTS ran during hold-audio (pipeline optimization).
-    // Falls back to resolveVoiceOpts (on-demand) when pendingTts is null or errored.
-    const prebuiltAudioUrl = state.pendingTts ? await state.pendingTts : null;
-    state.pendingTts = null;
-    const baseVoiceOpts = {
-      voice: config.ttsVoice || "Polly.Joanna",
-      language: config.languagesSpoken,
-      bargeIn: config.bargeIn,
-    };
-
-    if (state.step === STEPS.ENDING) {
-      const opts = prebuiltAudioUrl
-        ? { ...baseVoiceOpts, audioUrl: prebuiltAudioUrl }
-        : await resolveVoiceOpts(replyText, config);
-      return res.send(buildSayAndHangup(replyText, opts));
-    }
-
-    const replyVoiceOpts = prebuiltAudioUrl
-      ? { ...baseVoiceOpts, audioUrl: prebuiltAudioUrl }
-      : await resolveVoiceOpts(replyText, config);
-    const twiml = buildSayGatherRedirect(VOICE_URL, replyText, undefined, "", replyVoiceOpts);
-    const speechHash = state.pendingSpeechHash || crypto.createHash("sha256").update(speechResult).digest("hex");
-    state.pendingSpeechHash = null;
-    // Don't cache TwiML when Google TTS is active — <Play> URLs are one-time-use
-    const googleTtsActive = !!(config.googleTtsVoice && googleTts.isConfigured());
-    state.lastProcessed = { speechHash, timestamp: Date.now(), cachedTwiml: googleTtsActive ? null : twiml };
-    res.send(twiml);
   } catch (err) {
-    const turnLatencyMs = Date.now() - geminiStart;
-    const isTimeout = err?.message === "TURN_TIMEOUT";
-
-    log("error", {
-      callSid,
-      requestId,
-      message: isTimeout ? "Gemini turn timeout" : err?.message,
-      code: isTimeout ? "gemini_timeout" : "gemini_error",
-      turn_latency_ms: turnLatencyMs,
-    });
-    captureException(err, { callSid, requestId });
-
-    if (isTimeout) {
-      const msg = "Sorry, I'm taking a bit longer. Please try again.";
-      return res.send(
-        buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL, await resolveVoiceOpts(msg, config))
-      );
-    }
-    const msg = "Sorry, I'm having a technical issue. Please try again in a moment.";
-    res.send(
-      buildSayGatherRedirect(VOICE_URL, msg, undefined, TYPING_SOUND_URL, await resolveVoiceOpts(msg, config))
-    );
+    log.error("degraded_voicemail_failed", { callSid, message: err?.message });
+    captureException(err, { callSid });
   }
-}
+
+  res.status(200).end();
+});
 
 // ---------------------------------------------------------------------------
 // Status callback — update call record on terminal status
 // ---------------------------------------------------------------------------
 
-app.post("/twilio/status", twilioValidation, async (req, res) => {
+app.post("/twilio/status", twilioValidationAnyAccount, async (req, res) => {
   const callSid = req.body.CallSid;
   const status = (req.body.CallStatus || "").toLowerCase();
   if (["completed", "failed", "busy", "no-answer"].includes(status) && callSid) {
-    const state = callState.getState(callSid);
-    const dbCallId = state.dbCallId;
-    const businessId = state.businessId;
+    // Read from the SHARED store, not local memory.
+    //
+    // This handler is an ordinary HTTP POST. On Cloud Run the load balancer
+    // sends it to whichever instance is free, which is usually not the one
+    // that held the WebSocket — so `callState.getState()` here would create a
+    // fresh, empty state and the whole block below would silently do nothing:
+    // no summary, no missed-call notification, and every short call tagged as
+    // spam because sawCallerFinal read false on a caller who spoke.
+    //
+    // Awaited once, here, before anything else touches it. The values are then
+    // held in locals for the same reason they were before: the async blocks
+    // below outlive callState.remove() at the end of this handler.
+    const shared = await callState.readShared(callSid);
+    const dbCallId = shared.dbCallId ?? null;
+    const businessId = shared.businessId ?? null;
+    const sawCallerFinal = !!shared.sawCallerFinal;
     const duration = req.body.CallDuration != null ? Number(req.body.CallDuration) : null;
     const callContext = {
       callerNumber: req.body.From || null,
       twilioNumber: req.body.To || null,
     };
 
-    db.completeCall(callSid, status, duration).catch((err) => {
-      log("error", { callSid, message: "completeCall failed", code: "db_complete" });
-      captureException(err, { callSid });
+    log.info("call_ended_status_callback", {
+      callSid,
+      callStatus: status,
+      durationSeconds: duration,
+    });
+
+    // Scoped, because completeCall is keyed by the Twilio call SID and carries
+    // no business id — so under row-level security it matches nothing unless
+    // somebody sets the tenant. `businessId` comes from the shared store above,
+    // which is the whole reason A4 put it there.
+    //
+    // Safe rather than strict: this handler returning 500 makes Twilio RETRY
+    // the callback, which turns one failed write into several.
+    //
+    // AWAITED, as of 2026-09-08, and it was not before. Every Cloud Run service
+    // in this estate runs `cpu_idle = true` (cost-controls.tf — it is the
+    // budget), so CPU is throttled the moment res.end() runs and work scheduled
+    // after it is not guaranteed to finish. This is the one write on this
+    // handler that MUST land: without it a completed call keeps a status of
+    // in-progress and a null duration forever, which is what the dashboard was
+    // showing. The await costs a few milliseconds against a Twilio callback
+    // timeout measured in seconds.
+    //
+    // withTenantSafe still swallows, so a failed write is still a 200 and still
+    // does not trigger a retry storm. Only the timing changed.
+    await db.withTenantSafe(businessId, () => db.completeCall(callSid, status, duration), {
+      operation: "completeCall",
+      callSid,
     });
 
     if (businessId && ["failed", "busy", "no-answer"].includes(status)) {
       notifications.notifyCallMissed({ businessId, call: callContext, status }).catch(() => {});
     }
 
+    // Missed-call caller text-back (Part 2). A call that never connected to
+    // the real-time pipeline never gets state.businessId/state.config set
+    // (lib/mediaStream.js and lib/voice/session.js both load those lazily
+    // once the WebSocket connects) — so look the business up fresh by the
+    // dialed number instead of depending on call state. "Missed" here is
+    // defined as: status is failed/busy/no-answer AND CallDuration is 0 (or
+    // absent) — Twilio reports a nonzero duration when the call leg was
+    // actually answered/connected before the failure, which we treat as
+    // "not a pure miss" and skip texting for.
+    if (["failed", "busy", "no-answer"].includes(status) && (duration == null || duration === 0)) {
+      (async () => {
+        // Short-circuit before the DB round-trip when SMS sending isn't
+        // configured at all (sendCallerSms would no-op anyway) — no reason
+        // to look the business up by phone first.
+        if (!notifications.HAS_SMS_CREDS) return;
+        if (!db.isEnabled() || !callContext.twilioNumber || !callContext.callerNumber) return;
+        const business = await db.lookupBusinessByPhone(callContext.twilioNumber);
+        if (!business) return;
+        const config = db.loadConfig(business);
+        await notifications.sendCallerSms(config, callContext.callerNumber, "missed_call", {
+          business: config.businessName,
+        });
+      })().catch((err) => {
+        log.error("missed_call_sms_failed", { callSid, message: err?.message });
+      });
+    }
+
     // Generate summary, sentiment, and outcome for completed calls (fire-and-forget)
     if (dbCallId && status === "completed") {
-      (async () => {
+      db.withTenantSafe(businessId, async () => {
         const transcript = await db.fetchCallTranscript(dbCallId);
-        if (transcript.length > 0) {
+        const callerTurns = transcript.filter((t) => t.speaker === "caller");
+        // Spam/robocall detection (Part 3): the AI's own greeting is logged
+        // even when the caller never speaks at all, so "transcript.length
+        // === 0" wouldn't catch silent/robo calls — check for zero CALLER
+        // turns specifically, combined with a short duration (a caller who
+        // stays silent 8+ minutes without ever speaking is unusual but not
+        // necessarily spam, so don't tag it). Skips the Gemini summary call
+        // entirely in the spam case (saves cost).
+        //
+        // Race guard: call_transcripts inserts are fire-and-forget during
+        // the live call (db.addTranscriptEntry), so a legitimate short call
+        // where the caller DID speak can have its status callback arrive
+        // before that insert lands — callerTurns.length would read 0 from
+        // the DB even though the caller genuinely spoke. sawCallerFinal is
+        // set live, in-memory, the moment STT delivers a caller final (both
+        // pipelines — see lib/callState.js), well before the call even
+        // ends, so it can't lose this race the same way the DB read can.
+        // Require BOTH signals before tagging spam.
+        if (!sawCallerFinal && callerTurns.length === 0 && duration != null && duration < 8) {
+          await db.updateCallSummary(callSid, "No caller speech (likely spam/robocall)", null, "spam");
+        } else if (transcript.length > 0) {
           const { summary, sentiment, outcome } =
             await geminiService.generateSummaryAndSentiment(transcript);
           await db.updateCallSummary(callSid, summary, sentiment, outcome);
         }
-      })().catch((err) => {
-        log("error", { callSid, message: "Summary generation failed", code: "summary_error" });
-      });
+        // Deliberately NOT awaited by the handler above, and therefore exposed
+        // to the same cpu_idle throttle completeCall was just moved out of.
+        // Awaiting it instead would put a Gemini round trip in front of
+        // Twilio's callback response, and a hang there earns a retry and a
+        // second summary. So it stays fire-and-forget and says when it lands:
+        // if this line never appears in production while transcripts do, the
+        // throttle is eating post-response work and the trade has to be
+        // revisited. An unmeasured guess in either direction is worse.
+        log.info("call_summary_written", {
+          callSid,
+          transcriptRows: transcript.length,
+          callerTurns: callerTurns.length,
+        });
+
+        // THE SHADOW JUDGE USED TO RUN HERE, and it now runs at the Live
+        // session's own teardown (lib/voice/live/index.js finish()). Moved
+        // 2026-09-12, and this comment is left in its place because the next
+        // person to want a post-call reader will look here first.
+        //
+        // The reason is evidence, not tidiness. The judge reads a transcript
+        // that the audited model WROTE -- on the Live front-end the model is
+        // also the speech recogniser -- so a model that lies about its own
+        // actions corrupts the only thing the judge can see. Measured on
+        // 2026-09-12: CA41622e81 claimed three completions on a call that wrote
+        // nothing, and the judge believed the transcript and got it wrong.
+        // Levelling that means handing it the tool traffic, and the tool
+        // traffic lives in the engine's closure: writesThisCall, the abandoned
+        // set, guards.counts(). It cannot reach this handler without a
+        // migration.
+        //
+        // This handler also could not tell WHICH calls to judge. There is no
+        // front-end column on `calls`, `call_state` refuses a fourth shared
+        // field in SQL, and /twilio/live-voice falls back to the cascade on any
+        // throw -- so an inference would be wrong on exactly the fallback calls
+        // and would silently skip their judge.
+        //
+        // And the loss is nothing: verifyCall and recoverOwedBooking are
+        // invoked only from the Live path, so postcall_verify is never emitted
+        // for a cascade call, and a judge verdict with no structural verdict
+        // beside it is the one thing this reader cannot be validated against.
+      }, { operation: "generateSummary", callSid });
+    }
+
+    // Per-call turn-latency rollup (Part 2) — fire-and-forget; skip silently
+    // if no turns were recorded for this call (e.g. degraded-mode voicemail
+    // calls that never went through the real-time pipeline).
+    if (status === "completed") {
+      try {
+        const stats = getCallStats(callSid);
+        if (stats) {
+          // Also SID-keyed, so also scoped. getCallStats reads an in-process
+          // ring buffer, so on a cold instance it returns nothing and this
+          // skips — the same per-process limitation A4 noted and did not fix.
+          db.withTenantSafe(businessId, () => db.updateCallLatency(callSid, stats.avgMs, stats.p95Ms), {
+            operation: "updateCallLatency",
+            callSid,
+          });
+        }
+      } catch (err) {
+        log.error("latency_rollup_failed", { callSid, message: err?.message });
+      }
     }
 
     callState.remove(callSid);
@@ -686,18 +977,196 @@ app.post("/twilio/status", twilioValidation, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard API: caller profile (reuses the same data as AI prompt injection)
+// GET /api/businesses/:id/callers/:phone was REMOVED.
+//
+// It returned a caller's prior-call count, their last call's summary, and the
+// times and names on their upcoming appointments — to anyone who knew a
+// business UUID and a phone number, with no authentication of any kind. A UUID
+// is an identifier, not a secret, and this server has no auth scheme to apply:
+// the only guard it has is debugAccessAllowed, which is a shared-token switch
+// for the /api/debug endpoints, not a per-tenant check.
+//
+// Nothing called it (no dashboard code, no test, no documented consumer), so
+// deletion is the strongest available lock and adds no new auth surface here.
+// Caller-scoped data belongs behind the dashboard backend's Supabase JWT plus
+// its ownership check — see AI-phone-dashboard/backend/src/routes/calls.js.
+//
+// The three routes that shared this UUID-as-bearer-token hole are now closed
+// (A1.5). /api/businesses/:id/notifications (GET+PUT) had zero callers and was
+// deleted for the same reason this one was. /api/businesses/:id/phone-numbers/
+// {available,buy} are live — Onboarding.jsx calls both — so they are guarded by
+// requireBusinessAccess instead, which is the per-tenant check this file
+// previously lacked. The dashboard was already sending a Supabase bearer token
+// on every one of those requests; this server simply never read it.
 // ---------------------------------------------------------------------------
 
-app.get("/api/businesses/:id/callers/:phone", async (req, res) => {
+// ---------------------------------------------------------------------------
+// Data-subject requests (UK GDPR Art. 15 access, Art. 17 erasure)
+//
+// Behind requireBusinessAccess, which is the whole reason these can live on
+// this server at all. The caller route that used to sit here was DELETED by
+// A1.5 because it served a caller's call history and upcoming appointments to
+// anyone who knew a business UUID and a phone number — a UUID is an
+// identifier, not a secret, and at the time this server had no per-tenant
+// check to apply. A1.5 added one. These routes are strictly more sensitive
+// than the one that was removed, so they get it unconditionally.
+//
+// Staff-operated rather than self-service: a data subject asks the clinic, the
+// clinic runs it. Verifying that a caller on the phone is who they say they
+// are is a problem this system cannot solve, and Art. 12(6) expects a
+// controller to confirm identity before disclosing. Getting that wrong turns a
+// compliance feature into a disclosure channel.
+// ---------------------------------------------------------------------------
+
+/** Shared parsing for both routes: a valid tenant and a plausible phone. */
+function dsrParams(req, res) {
   const businessId = req.params.id;
-  const callerPhone = decodeURIComponent(req.params.phone);
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  if (!callerPhone || !isValidE164(callerPhone)) return res.status(400).json({ error: "Invalid phone number" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  const context = await db.fetchCallerContext(businessId, callerPhone);
-  res.json(context);
+  if (!businessId || !isValidUUID(businessId)) {
+    res.status(400).json({ error: "Invalid business id" });
+    return null;
+  }
+  const phone = req.params.phone;
+  // Loose on purpose. The stored spellings are inconsistent — E.164 from
+  // Twilio, hand-typed rows from the dashboard — and the matching is done on
+  // the last ten digits, so demanding E.164 here would reject the very inputs
+  // a member of staff is most likely to paste out of a ticket.
+  const digits = (phone || "").replace(/\D/g, "");
+  if (digits.length < 7) {
+    res.status(400).json({ error: "Invalid phone number" });
+    return null;
+  }
+  return { businessId, phone };
+}
+
+// GET — Art. 15. Everything held about one caller, for one tenant.
+app.get("/api/businesses/:id/callers/:phone/export", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  // Scoped: one HTTP handler is a unit of work, and requireBusinessAccess has
+  // already proven this caller owns this tenant. Under row-level security the
+  // export reads nothing without it.
+  const data = await db.withTenant(
+    parsed.businessId,
+    () => db.exportCallerData(parsed.businessId, parsed.phone),
+    // The actor, so §164.312(b)'s row names a unique staff member rather than
+    // "system". A subject-access request is the single largest disclosure this
+    // system performs on purpose; "somebody exported everything about a patient
+    // and we do not know who" is not an acceptable audit answer.
+    { actor: { type: "user", id: req.user?.id } }
+  ).catch(() => null);
+  if (!data) return res.status(500).json({ error: "Export failed" });
+
+  // Logged as an event because an access request is itself a processing
+  // activity worth recording under Art. 30 — with no phone number in it, since
+  // this log is not the place to publish the thing being asked about.
+  log.info("dsr_export_served", {
+    businessId: parsed.businessId,
+    calls: data.calls.length,
+    transcripts: data.transcripts.length,
+    appointments: data.appointments.length,
+    customerRequests: data.customerRequests.length,
+  });
+
+  res.json({
+    subject: { phone: parsed.phone },
+    generatedAt: new Date().toISOString(),
+    ...data,
+  });
+});
+
+// DELETE — Art. 17. See services/db.js eraseCallerData for what is erased,
+// what is kept, and the HIPAA retention tension flagged for counsel.
+app.delete("/api/businesses/:id/callers/:phone", requireBusinessAccess, async (req, res) => {
+  const parsed = dsrParams(req, res);
+  if (!parsed) return;
+  if (!db.isEnabled()) return res.status(503).json({ error: "Database is not configured" });
+
+  const actor = { actor: { type: "user", id: req.user?.id } };
+
+  // -------------------------------------------------------------------------
+  // O28 — the erasure has to reach Twilio, and the ORDER is the design.
+  //
+  // The degraded voicemail path files `Voicemail recording: <url>` into a
+  // customer_requests message and the audio itself lives at Twilio. Erasing our
+  // rows first would NULL that message — destroying the only pointer to audio
+  // that still exists. For exactly these rows the pointer is all there is: the
+  // degraded path creates no `calls` row at all, so there is no call SID to
+  // recover the recording from afterwards.
+  //
+  // So: read the pointers, delete at the vendor, then erase our rows. A failure
+  // at any earlier step leaves everything needed to try again.
+  //
+  // Three separate units of work, not one. A Twilio call must not happen inside
+  // an open transaction — services/db.js's rule is "wrap a unit of work, never
+  // a call", and a network round trip to a third party is the clearest case of
+  // something that does not belong inside one.
+  // -------------------------------------------------------------------------
+  const messages = await db
+    .withTenant(parsed.businessId, () => db.listCallerRecordingMessages(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (messages === null) return res.status(500).json({ status: "failed", error: "Erasure failed" });
+
+  const recordingSids = messages.flatMap((m) => twilioRecordings.recordingSidsInText(m));
+  const vendor = await twilioRecordings.deleteRecordings(recordingSids);
+
+  // The database erasure runs REGARDLESS of what Twilio did. Twilio being
+  // unreachable must not leave the data subject's rows in place as well — that
+  // would turn one vendor's outage into a total refusal of a statutory right.
+  //
+  // Scoped, and NOT `withTenantSafe`: an erasure that partly failed must not
+  // report success. withTenant rolls back and rethrows; the catch below turns
+  // that into a 500, which is the honest answer.
+  const counts = await db
+    .withTenant(parsed.businessId, () => db.eraseCallerData(parsed.businessId, parsed.phone), actor)
+    .catch(() => null);
+  if (!counts) return res.status(500).json({ status: "failed", error: "Erasure failed" });
+
+  if (!vendor.ok) {
+    // NOT 200, and NOT 207 Multi-Status either.
+    //
+    // 207 is the semantically neat answer and it is the wrong one: it is 2xx,
+    // and every default client-side `res.ok` check reads 2xx as success — which
+    // is the precise misread this exists to prevent. The failure mode that
+    // matters is a member of staff ticking "erasure complete" off a green
+    // response.
+    //
+    // A non-2xx makes "not done" the default reading. The body still reports
+    // what WAS erased, so nobody re-runs blindly — and re-running is safe
+    // anyway: already-nulled rows are a no-op and an already-deleted recording
+    // is a 404, which deleteRecordings counts as success.
+    //
+    // No operator override is offered. "Proceed anyway and accept the audio
+    // stays at Twilio" is a decision with a legal shape, and it belongs to the
+    // owner and O18 counsel rather than to a query parameter.
+    log.error("dsr_erasure_blocked_by_vendor", {
+      businessId: parsed.businessId,
+      vendor: "twilio",
+      outstanding: vendor.failed.length,
+      reason: vendor.reason,
+      severity: "warn",
+    });
+    return res.status(502).json({
+      status: "partial",
+      erased: counts,
+      outstanding: {
+        vendor: "twilio",
+        recordings: vendor.failed.length,
+        reason: vendor.reason,
+      },
+    });
+  }
+
+  log.info("dsr_erasure_served", {
+    businessId: parsed.businessId,
+    recordingsDeleted: vendor.deleted.length,
+    recordingsAlreadyGone: vendor.alreadyGone.length,
+  });
+
+  // `erased` keeps its exact shape. The new `status` is additive so an existing
+  // consumer reading `body.erased` is unaffected.
+  res.json({ status: "complete", erased: counts });
 });
 
 // ---------------------------------------------------------------------------
@@ -722,59 +1191,17 @@ app.post("/api/integrations/:provider/callback", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard API: per-business notification settings (placeholder for future UI)
-// ---------------------------------------------------------------------------
-
-app.get("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  res.json({
-    notification_email: business.notification_email ?? null,
-    notification_phone: business.notification_phone ?? null,
-    notifications_enabled: business.notifications_enabled !== false,
-  });
-});
-
-app.put("/api/businesses/:id/notifications", async (req, res) => {
-  const businessId = req.params.id;
-  if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
-  if (!business) return res.status(404).json({ error: "Business not found" });
-  const body = req.body || {};
-  const payload = {};
-  if (body.notification_email !== undefined) {
-    if (body.notification_email !== null && body.notification_email !== "" && !isValidEmail(body.notification_email)) {
-      return res.status(400).json({ error: "Invalid notification email" });
-    }
-    payload.notification_email = body.notification_email;
-  }
-  if (body.notification_phone !== undefined) {
-    if (body.notification_phone !== null && body.notification_phone !== "" && !isValidE164(body.notification_phone)) {
-      return res.status(400).json({ error: "Invalid notification phone number" });
-    }
-    payload.notification_phone = body.notification_phone;
-  }
-  if (body.notifications_enabled !== undefined) payload.notifications_enabled = body.notifications_enabled;
-  const ok = await db.updateBusinessNotificationSettings(businessId, payload);
-  if (!ok) return res.status(500).json({ error: "Update failed" });
-  const updated = await db.fetchBusinessById(businessId);
-  res.json({
-    notification_email: updated?.notification_email ?? null,
-    notification_phone: updated?.notification_phone ?? null,
-    notifications_enabled: updated?.notifications_enabled !== false,
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Dashboard API: search and buy Twilio phone numbers
 // ---------------------------------------------------------------------------
 
-app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
+app.get("/api/businesses/:id/phone-numbers/available", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const country = req.query.country || "US";
   if (!isValidCountryCode(country)) return res.status(400).json({ error: "Invalid country code" });
@@ -797,10 +1224,14 @@ app.get("/api/businesses/:id/phone-numbers/available", async (req, res) => {
   }
 });
 
-app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
+app.post("/api/businesses/:id/phone-numbers/buy", requireBusinessAccess, async (req, res) => {
   const businessId = req.params.id;
   if (!businessId || !isValidUUID(businessId)) return res.status(400).json({ error: "Invalid business id" });
-  const business = await db.fetchBusinessById(businessId);
+  // Scoped. requireBusinessAccess has already proven this caller owns this
+  // tenant; under row-level security the read returns nothing without it.
+  const business = await db.withTenantSafe(businessId, () => db.fetchBusinessById(businessId), {
+    operation: "fetchBusinessById",
+  });
   if (!business) return res.status(404).json({ error: "Business not found" });
   const phoneNumber = req.body?.phone_number;
   if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
@@ -821,7 +1252,11 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
       voiceUrl: VOICE_URL,
       statusCallback: STATUS_URL,
     });
-    const ok = await db.updateBusinessPhoneNumber(businessId, result.phone_number);
+    const ok = await db.withTenantSafe(
+      businessId,
+      () => db.updateBusinessPhoneNumber(businessId, result.phone_number),
+      { operation: "updateBusinessPhoneNumber", fallback: false }
+    );
     if (!ok) {
       return res.status(500).json({ error: "Failed to save phone number to business" });
     }
@@ -837,12 +1272,143 @@ app.post("/api/businesses/:id/phone-numbers/buy", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Dev-only: per-turn voice pipeline latency stats (Phase 0 instrumentation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Is this request allowed to see debug data?
+ *
+ * Two independent conditions, both required. DEBUG_ENDPOINTS is an operational
+ * switch, not a secret — during a measurement run these routes are live on a
+ * public host, where the flag alone would serve call SIDs and infrastructure
+ * timing to anyone who guesses the path. So a shared secret is required as
+ * well, and it FAILS CLOSED: no DEBUG_TOKEN configured means no access, rather
+ * than falling back to flag-only.
+ *
+ * Comparison is over SHA-256 digests, which makes it constant-time in the
+ * value AND fixed-length — raw timingSafeEqual throws on a length mismatch,
+ * and that throw would become a 500 that confirms the route exists.
+ *
+ * @param {import("express").Request} req
+ * @returns {boolean}
+ */
+function debugAccessAllowed(req) {
+  if (process.env.DEBUG_ENDPOINTS !== "true") return false;
+  const expected = process.env.DEBUG_TOKEN;
+  if (!expected) return false;
+  const supplied = req.get("x-debug-token");
+  if (!supplied) return false;
+  const a = createHash("sha256").update(String(supplied)).digest();
+  const b = createHash("sha256").update(String(expected)).digest();
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Which model is fastest FROM HERE.
+ *
+ * A laptop cannot answer this: probing from a dev machine put gemini-3.6-flash
+ * at 2,090ms while this deployment was recording 702-1,156ms for the same model
+ * on the same prompt size. That gap is the network hop, not the model, and it
+ * makes any model comparison taken from outside the deployment worthless.
+ *
+ * SPENDS MONEY on every request — real Gemini calls, capped at
+ * MAX_MODELS x MAX_TRIALS (4 x 5 = 20) per invocation. Behind the same
+ * fails-closed debug gate as everything else here, and 404s identically.
+ *
+ *   /api/debug/model-latency?models=gemini-3.6-flash,gemini-2.5-flash&trials=5
+ */
+app.get("/api/debug/model-latency", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  const { probeModelLatency } = await import("./lib/probe/modelLatency.js");
+  const models = String(req.query.models || "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (!models.length) {
+    return res.status(400).json({ error: "models query parameter required (comma-separated)" });
+  }
+  try {
+    const out = await probeModelLatency({
+      models,
+      trials: Number(req.query.trials),
+      promptTokens: Number(req.query.promptTokens),
+    });
+    res.json({ ...out, bootId: BOOT_ID });
+  } catch (err) {
+    captureException(err);
+    res.status(500).json({ error: "probe failed" });
+  }
+});
+
+app.get("/api/debug/latency", async (req, res) => {
+  // 404, never 401/403: a rejected request must be indistinguishable from a
+  // route that does not exist, so probing can't confirm the endpoint is there.
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  const { ttsHealth } = await import("./lib/voice/ttsHealth.js");
+  // bootId lets a probe run prove the server did not restart underneath it. A
+  // deploy mid-run clears the ring buffer and splits the calls across two
+  // builds; without this the result is an empty report blamed on the wrong
+  // thing (see docs/latency-and-tts-tests.md, probe E).
+  // promptCache is registry-level truth, and it is not redundant with the
+  // per-turn `cache` block: a cache that was never created and a cache that was
+  // created but never applied to a request both read as a 0% hit rate there.
+  // Only creates/errors/cooldowns tell those two apart.
+  res.json({
+    ...getLatencyStats(),
+    elBreaker: ttsHealth.getState(),
+    promptCache: getCacheStats(),
+    bootId: BOOT_ID,
+  });
+});
+
+// The ring buffer lives as long as the process, so without this a second
+// measurement run would pool with the first and blur any before/after
+// comparison. Called by scripts/latency-probe.js before each run.
+app.post("/api/debug/latency/reset", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  clearStats();
+  // Probe results are per-run too — leaving them would pool a new run's
+  // ground truth with the previous one's.
+  const { clearProbeResults } = await import("./lib/probe/probeSocket.js");
+  clearProbeResults();
+  res.json({ cleared: true });
+});
+
+// Caller audio for the probe leg, uploaded before a run.
+//
+// A dedicated body parser: the global express.json() caps at 100kb and the
+// script is a few hundred kb of mu-law. Scoped to this route so the limit
+// increase cannot widen the attack surface of any other endpoint — and the
+// route itself is behind the same fail-closed token check.
+app.post("/api/debug/probe-script", express.json({ limit: "8mb" }), async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  try {
+    const { setProbeScript } = await import("./lib/probe/probeSocket.js");
+    const summary = setProbeScript(req.body?.lines);
+    log.info("probe_script_installed", summary);
+    res.json({ installed: true, ...summary });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Probe-side ground truth: what the far end of the phone network measured.
+// Kept separate from /latency because it comes from a different clock, and
+// conflating the two is exactly the mistake this run exists to avoid.
+app.get("/api/debug/probe-results", async (req, res) => {
+  if (!debugAccessAllowed(req)) return res.status(404).end();
+  const { getProbeResults } = await import("./lib/probe/probeSocket.js");
+  const runs = getProbeResults();
+  res.json({ calls: runs.length, runs });
+});
+
+// ---------------------------------------------------------------------------
 // Centralized error handler — never expose stack traces
 // ---------------------------------------------------------------------------
 
 app.use((err, req, res, next) => {
   captureException(err);
-  log("error", { message: err.message, code: "unhandled" });
+  log.error("unhandled_error", { message: err.message, code: "unhandled" });
   if (!res.headersSent) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -854,13 +1420,272 @@ app.use((err, req, res, next) => {
 
 export { app };
 
+// ---------------------------------------------------------------------------
+// Media Streams — WebSocket server for real-time audio
+// ---------------------------------------------------------------------------
+
+const wss = new WebSocketServer({ noServer: true });
+
+/**
+ * The call pipeline for a new Media Streams connection.
+ *
+ * There is one. A10 deleted lib/mediaStream.js and the PIPELINE_V2 opt-out
+ * that reached it.
+ *
+ * The escape hatch was retained for exactly one release, and by the end of it
+ * the two pipelines were not comparable. v2 has the LLM turn timeout (without
+ * which a hung Gemini stream holds a call to the 30-minute cap), the
+ * deterministic take-message fallback, per-business voice selection, ElevenLabs
+ * streaming, multilingual STT, the toSpeakable normalizer, the utterance cache,
+ * and VAD barge-in. Setting PIPELINE_V2=false during an incident would not have
+ * been a rollback, it would have been a second, worse incident — and one nobody
+ * had exercised, since every measurement in the ledger (A0's baseline, the
+ * probe, the eval suite) runs through v2.
+ *
+ * A rollback path that is never tested is not a rollback path. The real one is
+ * the ledger's, and it is better: repoint the Twilio webhooks.
+ *
+ * @returns {Function} the connection handler
+ */
+export function selectPipelineHandler() {
+  return handleVoiceSessionConnection;
+}
+
+/** Websocket path for the latency probe's scripted-caller leg. */
+const PROBE_WS_PATH = "/twilio/probe-stream";
+
+/** Websocket path Twilio Media Streams connects to. The token follows it. */
+const MEDIA_WS_PATH = "/twilio/media-stream";
+
+/**
+ * Websocket path for the speech-to-speech front-end. Same token scheme, its
+ * own handler: the cascade's upgrade branch below is unchanged.
+ */
+const LIVE_WS_PATH = "/twilio/live-stream";
+
+/**
+ * A raw HTTP refusal, written straight to the socket before the websocket
+ * handshake completes. Nothing is allocated: no Gemini session, no tenant
+ * lookup, no spend.
+ *
+ * Named rather than inlined because it is the one string here whose CRLFs are
+ * PROTOCOL rather than formatting — an editor or a codemod that "helpfully"
+ * normalises them turns a 403 into a malformed response, and the failure would
+ * show up as a websocket that never connects rather than as anything obviously
+ * about line endings.
+ */
+const FORBIDDEN_403 = "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n";
+
+/**
+ * May this upgrade become a call, and which call is it allowed to be?
+ *
+ * Exported for the test that matters most: the one asserting a GOOD token is
+ * ACCEPTED. This file already carries the scar — `verifyTwilioSignature` was
+ * broken for the life of a deployment and rejected EVERY request, and three
+ * negative tests plus a source scan all passed, because nothing ever asserted
+ * the positive case. "Correctly refuses bad input" and "refuses everything"
+ * are indistinguishable without it.
+ *
+ * @param {string} pathname
+ * @returns {{ ok: boolean, callSid: string|null, reason: string|null }}
+ */
+export function mediaStreamUpgradeVerdict(pathname, env = process.env) {
+  if (!mediaStreamTokenRequired(env)) {
+    // Dev, and the same switch that turns off signature validation. Announced
+    // at boot rather than only here, so it cannot be the quiet default.
+    return { ok: true, callSid: null, reason: "enforcement_disabled" };
+  }
+  return verifyMediaStreamToken(tokenFromPath(pathname, MEDIA_WS_PATH), { env });
+}
+
+/**
+ * Is this upgrade allowed to become a probe leg?
+ *
+ * Same fail-closed rule as the debug HTTP routes, but the token arrives as a
+ * query param because Twilio's <Stream url="..."> cannot set headers. That
+ * makes the URL itself a credential — it is generated per run and the whole
+ * feature is off unless DEBUG_ENDPOINTS is explicitly "true".
+ *
+ * @param {URL} url
+ * @returns {boolean}
+ */
+function probeUpgradeAllowed(url) {
+  if (process.env.DEBUG_ENDPOINTS !== "true") return false;
+  const expected = process.env.DEBUG_TOKEN;
+  if (!expected) return false;
+  // The token rides in the PATH, not the query string: Twilio does not carry a
+  // <Stream url="..."> query string through to the websocket handshake, so a
+  // ?token= form arrives empty and the upgrade is refused with a 31920 that
+  // looks exactly like a broken endpoint. Query form is still accepted for
+  // hand-testing with a normal websocket client.
+  const fromPath = url.pathname.startsWith(`${PROBE_WS_PATH}/`)
+    ? decodeURIComponent(url.pathname.slice(PROBE_WS_PATH.length + 1))
+    : null;
+  const supplied = fromPath || url.searchParams.get("token");
+  if (!supplied) return false;
+  const a = createHash("sha256").update(String(supplied)).digest();
+  const b = createHash("sha256").update(String(expected)).digest();
+  return timingSafeEqual(a, b);
+}
+
+function attachWebSocket(httpServer) {
+  httpServer.on("upgrade", async (req, socket, head) => {
+    // Only accept upgrades on the media-stream path
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+    if (pathname === MEDIA_WS_PATH || pathname.startsWith(`${MEDIA_WS_PATH}/`)) {
+      // P10. This path used to accept ANY upgrade — no signature, no token —
+      // while /twilio/probe-stream below it required one. Each accepted socket
+      // costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and ten
+      // of them exhaust the measured 10-concurrent ElevenLabs cap that real
+      // callers share, so the hole was a bill and an outage as well as a data
+      // question.
+      const verdict = mediaStreamUpgradeVerdict(pathname);
+      if (!verdict.ok) {
+        log.error("media_stream_upgrade_refused", { reason: verdict.reason, ip: req.socket?.remoteAddress });
+        // 403 before the handshake completes. Nothing is allocated: no
+        // Deepgram connection, no tenant lookup, no spend.
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        // The other half of the control. Without this, ONE valid token would
+        // authorise a session for any other call the caller cared to name in
+        // the `start` frame. null when enforcement is off.
+        ws.authorizedCallSid = verdict.callSid;
+        selectPipelineHandler()(ws, req);
+      });
+    } else if (pathname === LIVE_WS_PATH || pathname.startsWith(`${LIVE_WS_PATH}/`)) {
+      // Same per-call token as the cascade's socket, same fail-closed refusal
+      // before the handshake completes: a bad token allocates no Gemini
+      // session and spends nothing.
+      const verdict = verifyMediaStreamToken(tokenFromPath(pathname, LIVE_WS_PATH));
+      if (!verdict.ok && mediaStreamTokenRequired()) {
+        log.error("live_stream_upgrade_refused", { reason: verdict.reason, ip: req.socket?.remoteAddress });
+        socket.write(FORBIDDEN_403);
+        socket.destroy();
+        return;
+      }
+      // Imported lazily so the Live front-end costs nothing -- no @google/genai
+      // Live client, no strategy selection -- in a deployment that never uses
+      // it, which today is every deployment answering a real caller.
+      //
+      // The failure is handled rather than left to reject the upgrade listener:
+      // a module that throws at load (a bad @google/genai version, a transitive
+      // import error) would otherwise leak the raw socket with no 403 and no
+      // destroy, and the client would sit on a half-open connection until it
+      // timed out -- one leaked socket per attempt.
+      let handleLiveSessionConnection;
+      try {
+        ({ handleLiveSessionConnection } = await import("./lib/voice/live/index.js"));
+      } catch (err) {
+        log.error("live_module_load_failed", { reason: err?.message });
+        socket.write(FORBIDDEN_403);
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.authorizedCallSid = verdict.callSid;
+        handleLiveSessionConnection(ws, req).catch((err) => {
+          log.error("live_connection_failed", { reason: err?.message });
+          try {
+            ws.close();
+          } catch {
+            /* socket already gone */
+          }
+        });
+      });
+    } else if (
+      (pathname === PROBE_WS_PATH || pathname.startsWith(`${PROBE_WS_PATH}/`)) &&
+      probeUpgradeAllowed(url)
+    ) {
+      // Scripted caller side of a latency probe call. Imported lazily so the
+      // probe never loads — and costs nothing — in normal operation.
+      const { handleProbeConnection } = await import("./lib/probe/probeSocket.js");
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleProbeConnection(ws);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+}
+
 if (process.env.NODE_ENV !== "test") {
-  app.listen(PORT, () => {
+  // Before the port opens, not after. A configuration problem that surfaces on
+  // the first real call surfaces during a real call — the point of this is that
+  // it is impossible to be running and quietly broken at the same time.
+  //
+  // It throws rather than exiting, so the failure travels the same path as any
+  // other startup error and a supervisor sees a non-zero exit with a reason.
+  assertBootConfig();
+
+  // Cloud SQL's pool is built asynchronously (the connector fetches ephemeral
+  // client certificates), so it cannot be created at module load the way a
+  // DATABASE_URL pool is. Awaited HERE, before the port opens, for the same
+  // reason assertBootConfig runs here: a deployment that is listening and has
+  // no database is a deployment that answers a call and knows nothing about the
+  // business it is answering for.
+  //
+  // A no-op unless CLOUD_SQL_INSTANCE is set.
+  await db.initCloudSqlPool();
+
+  // AFTER the pool, because the Postgres store shares it rather than opening a
+  // second one — `instances x DB_POOL_MAX` under the instance's
+  // `max_connections` is the capacity constraint that binds this system, and
+  // call state must not move that number.
+  //
+  // Before the port opens, like everything else here: CALL_STATE_STORE=pg
+  // without a database throws, and it has to throw at boot. A process that
+  // starts with the wrong store answers calls flawlessly and loses the summary,
+  // the missed-call notification and the spam decision on every call whose
+  // status callback lands on another instance — with nothing in the logs.
+  callState.initCallStateStore({ pool: db.getPool() });
+
+  // The covered lane's encryption control, verified against the live API
+  // before the port opens rather than trusted from configuration.
+  //
+  // Google exposes NO field for the Speech-to-Text data-logging tier — the
+  // string does not appear anywhere in the v1 or v2 protos — while the
+  // "Logged" SKU is real and cheaper ($0.012/min against $0.016). So the tier
+  // cannot be asserted in code, and the encryption of the audio at rest can:
+  // with a customer-managed key the recording is under a key this org holds
+  // and can destroy. Runs only where it applies, and only where a failure
+  // means something — a `standard` deployment does not use Google STT at all.
+  if (sttProviderFor() === "google") {
+    const { kmsKeyName } = await assertSttEncryption();
+    console.log(`[boot] Speech-to-Text CMEK verified: ${kmsKeyName}`);
+  }
+
+  const httpServer = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Voice webhook: ${VOICE_URL}`);
     console.log(
       `Status callback: ${STATUS_URL}. Configure this URL in your Twilio number/app statusCallback.`
     );
+    const wsUrl = BASE_URL.replace(/^http/, "ws") + "/twilio/media-stream";
+    console.log(`Media Streams (WebSocket): ${wsUrl}/<per-call token>`);
+    // Announced at boot, because a subsystem that is off must say so — the
+    // difference between "protected" and "open to anyone who knows the URL" is
+    // otherwise invisible until somebody finds it.
+    if (!mediaStreamTokenRequired()) {
+      console.error(
+        "[boot] WARNING media-stream upgrades are NOT authenticated " +
+          "(TWILIO_VALIDATE_SIGNATURE=false). Anyone who knows this URL can open a call, spend " +
+          "vendor credit and consume the concurrency cap. Expected in dev, never in production."
+      );
+    } else if (!mediaStreamTokenAvailable()) {
+      // Fail-closed, so this is a total outage rather than a silent hole — and
+      // it must be legible as such, since "no calls connect" otherwise reads as
+      // a Twilio or networking fault.
+      console.error(
+        "[boot] FATAL-ish media-stream tokens are REQUIRED but no signing key exists " +
+          "(set TWILIO_AUTH_TOKEN, or MEDIA_STREAM_SECRET). Every upgrade will be refused with 403."
+      );
+    } else {
+      console.log("[boot] media-stream upgrades require a per-call token.");
+    }
     if (TRANSFER_NUMBER) {
       console.log(`Transfer number (env fallback): ${TRANSFER_NUMBER}`);
     } else {
@@ -870,4 +1695,5 @@ if (process.env.NODE_ENV !== "test") {
       `Call time limit: ${CALL_MAX_DURATION_MS / 60000} minutes (CALL_MAX_DURATION_MINUTES)`
     );
   });
+  attachWebSocket(httpServer);
 }

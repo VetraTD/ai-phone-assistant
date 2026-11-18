@@ -1,0 +1,758 @@
+{
+  "at": "2026-09-02T10:40:35.362Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T5",
+      "model": "2.5",
+      "passes": 15,
+      "total": 15,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental! Have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day, seven days a week. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental! Have a great day.",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day, seven days a week. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental! Have a great day."
+          ],
+          "usd": 0.0110575
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: "
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "answered opening hours question"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "answered opening hours question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "answered opening hours question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "answered opening hours question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller hung up"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.We are open 24 hours a day, every day. Is there anything else I can help you with?",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with? Thanks for calling Brightwork Family Dental, and have a great day.We are open 24 hours a day, every day. Is there anything else I can help you with?",
+            ""
+          ],
+          "usd": 0.30116200000000004
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental. Have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Provided business hours"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller had no further questions"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day, seven days a week. Is there anything else I can help you with?We are open 24 hours a day, seven days a week. Is there anything else I can help you with?We are open 24 hours a day, seven days a week. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental. Have a great day.",
+          "turnSaid": [
+            "We're open 24 hours a day, seven days a week. Is there anything else I can help you with?We are open 24 hours a day, seven days a week. Is there anything else I can help you with?We are open 24 hours a day, seven days a week. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental. Have a great day."
+          ],
+          "usd": 0.014689
+        },
+        {
+          "trial": 4,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, have a great day!Thanks for calling Brightwork Family Dental, have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup"
+              }
+            }
+          ],
+          "said": "We're open from 12 AM to 11 59 PM, seven days a week. Is there anything else I can help you with?We are open 24 hours a day. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day!Thanks for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "We're open from 12 AM to 11 59 PM, seven days a week. Is there anything else I can help you with?We are open 24 hours a day. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day!Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.0118495
+        },
+        {
+          "trial": 5,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, and have a great day.Thanks for calling Brightwork Family Dental, have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, and have a great day.Thanks for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, and have a great day.Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.010558500000000002
+        }
+      ]
+    }
+  ]
+}

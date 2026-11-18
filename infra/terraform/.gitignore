@@ -1,0 +1,17 @@
+# Local state and provider binaries. State goes to the GCS bucket after the
+# first apply; see README.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# A saved plan file embeds the whole configuration AND the variable values,
+# so it publishes the org and billing IDs that terraform.tfvars is gitignored
+# to keep out. It is also a snapshot that goes stale the moment state moves.
+*.tfplan
+
+# Contains the org and billing IDs. Identifiers rather than credentials, but
+# this repository is public and there is no reason to publish a map of the
+# account.
+terraform.tfvars
+*.auto.tfvars

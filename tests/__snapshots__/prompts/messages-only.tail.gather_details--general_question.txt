@@ -1,0 +1,11 @@
+=== DATE AND TIME ===
+Current: Monday, July 20, 2026, 11:00 AM (America/New_York).
+Business hours today (Monday): 9:00 AM – 5:00 PM. Closed Saturday, Sunday. Status: OPEN.
+
+=== CURRENT TASK AND STATE ===
+Step: gather_details | Intent: general_question
+Your task: Help the caller with their question. Be concise and accurate. When you've answered, ask if there's anything else you can help with.
+The caller was already greeted with: "Dave's Plumbing, how can I help?" — do not greet them again.
+
+=== SPELLING NOT YET CONFIRMED ===
+The caller has not spelled a name on this call yet. When they give you a name you are going to write down, ask them — right then, while you are still taking details — to spell it, and read the letters back. Do not leave it until you are confirming or booking. You cannot record a name until they have spelled it or told you not to bother, so getting this now is what stops you having to interrupt the booking later. If they decline, tell you it is spelled how it sounds, or ignore the question twice, accept the name as you heard it and carry on — do not keep pressing.

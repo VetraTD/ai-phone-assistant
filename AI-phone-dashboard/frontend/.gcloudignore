@@ -1,0 +1,30 @@
+# What `gcloud builds submit` uploads for the DASHBOARD SPA build.
+#
+# This directory is submitted as its own source root, for the same reason the
+# backend is: the repository .gcloudignore excludes `AI-phone-dashboard`
+# outright, so submitting from the root uploads nothing useful.
+#
+# THIS FILE MUST EXIST even though it is short. With no .gcloudignore in the
+# source root gcloud falls back to .gitignore, which is written for a different
+# purpose — that fallback is what let a 278 MiB / 705-file tarball through on
+# the voice image's first submit, and this directory has a `Vetra-desktop`
+# folder and a checked-in `dist` that would ride along for no reason.
+.git
+.gitignore
+node_modules
+.env
+.env.*
+!.env.example
+
+# Built by the pipeline, never uploaded to it.
+dist
+
+# Test suites and their fixtures. The bundle ships none of them, and Vite does
+# not compile them.
+src/__tests__
+coverage
+
+# Design source, not application source.
+Vetra-desktop
+
+*.log

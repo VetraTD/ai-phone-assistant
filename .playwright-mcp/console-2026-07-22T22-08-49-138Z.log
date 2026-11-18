@@ -1,0 +1,9 @@
+[      75ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2563aab5:20102
+[     536ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5173/app:0
+[  352622ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/settings/SettingsPage.jsx?t=1784758481507:0
+[  352623ms] [ERROR] [vite] Failed to reload /src/settings/SettingsPage.jsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5173/@vite/client:808
+[  373915ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/settings/SettingsPage.jsx?t=1784758502888:0
+[  373916ms] [ERROR] [vite] Failed to reload /src/App.jsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5173/@vite/client:808
+[  413197ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/settings/AfterHoursSection.jsx?t=1784758539527:0
+[  413198ms] [ERROR] [vite] Failed to reload /src/settings/AfterHoursSection.jsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5173/@vite/client:808
+[  413198ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5173/@vite/client:864

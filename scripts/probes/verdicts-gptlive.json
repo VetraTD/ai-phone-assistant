@@ -1,0 +1,127 @@
+{
+  "_": "PRE-REGISTERED. Written 2026-09-15 BEFORE lib/gptlive.js existed and before any socket was opened. Never edited afterwards. The report prints prediction beside result so a wrong prediction is visible rather than retrofitted.",
+  "written_at": "2026-09-15T00:00:00Z",
+  "cap_usd": 5.0,
+  "meter": "spend-gptlive.json",
+  "model": "gpt-live-1",
+  "backend": "gpt-5.6-luna",
+  "scope": "Does GPT-Live-1 fix what Gemini 3.1 Live cannot, without breaking what our guard stack depends on? Four gates, ordered so the cheapest killer runs first.",
+  "authorship_note": "Predictions are the assistant's, argued in docs/gpt-live-analysis.md sections 5 and 6. G4's arm-C prediction is the one that would make the recommendation there wrong if it fails.",
+
+  "correction_2026-09-15T05:20Z": {
+    "what": "Every mention of 'the 10 tools' in this file and in PLAN-gptlive.md is wrong. Production declares ELEVEN.",
+    "why": "add_appointment_note shipped 2026-09-05 in b63442c, after the round-3 correction that established '10'. The number was inherited from memory rather than re-read.",
+    "found_by": "G0's first run, before any socket was opened. This is exactly what G0 is for.",
+    "fix": "The assertion no longer hardcodes a count. It compares the probe's tool list against production's own union, buildAllDeclarations() in services/gemini.js, whose comment warns that 'a second union drifts from this one the first time a capability is added' -- scripts/probes/lib/prompt.js being that second union. They agree today.",
+    "affects_predictions": "No. No threshold or prediction below is changed. This corrects a description of the rig, recorded here rather than silently edited, because the value of a pre-registration is that its edits are visible."
+  },
+
+  "instrument_notes": [
+    "G3 MUST distinguish a backchannel from a cut-in. A full-duplex model makes noises WHILE the caller speaks on purpose; scoring any overlap as a cut-in would fail GPT-Live for doing the thing it was built to do, and the number would be worthless. The discrimination rule is pre-registered below, not chosen after seeing the data.",
+    "G4's time-expression regex is pre-registered below. The report ALSO dumps every pre-result utterance verbatim, so the automated count can be re-scored by a human without re-running anything.",
+    "Every gate records the raw event stream to raw/gptlive-*.json. A count nobody can re-derive is the failure this round exists to avoid."
+  ],
+
+  "verdicts": [
+    {
+      "id": "G1b",
+      "gate": "smoke",
+      "scenario": "One session: session.start with audio/pcmu 8000, send 2s of clean_open, read events, close.",
+      "prediction": "session.started arrives, audio/pcmu is accepted, and at least one of session.output_audio.delta or session.input_transcript.delta arrives.",
+      "fails_if": "session.start is rejected, or audio/pcmu is refused, or no server event beyond session.started arrives within 30s.",
+      "on_fail": "FALLBACK AUTHORISED BY OWNER 2026-09-15: stop the GPT-Live round and spend the remaining budget re-testing gpt-realtime-2.1 on the corrected 10-tool harness. That answers a DIFFERENT question (is OpenAI's turn-based model better than our Gemini today) and the report must label it as such.",
+      "est_usd": 0.01
+    },
+    {
+      "id": "G2a",
+      "gate": "G2",
+      "scenario": "Ten fixtures replayed at real time. Accumulate session.input_transcript.delta.",
+      "prediction": "Input transcript arrives for at least 9 of 10 fixtures, median word error rate against GROUND_TRUTH <= 0.25.",
+      "fails_if": "No input transcript arrives at all, OR median WER > 0.50.",
+      "on_fail": "STOP THE ROUND. Without caller text there is nothing for arm C to act on and nothing for any guard to read.",
+      "est_usd": 0.2
+    },
+    {
+      "id": "G2b",
+      "gate": "G2",
+      "scenario": "Turn segmentation from start_ms/end_ms gaps alone, since OpenAI states these events do not define turns. A gap >= 500ms opens a new turn.",
+      "expected_turns": {
+        "clean_open": 1,
+        "trailing_lead_in": 1,
+        "no_terminal_punct": 1,
+        "name_spelling": 1,
+        "rep_time_q": 1,
+        "rep_confirm": 1,
+        "rep_digits": 1,
+        "rep_close": 1,
+        "barge_in": 1,
+        "partial_digits": 1
+      },
+      "prediction": "The gap rule yields the expected turn count for 8 of 10 fixtures.",
+      "fails_if": "Correct for fewer than 6 of 10.",
+      "on_fail": "STOP THE ROUND. Turn boundaries are what every write guarantee fires on; if they cannot be reconstructed, arm C is unbuildable and arm R has no guarantee to lose.",
+      "note": "partial_digits is the interesting one: a caller pausing mid-number. A rule that splits it is the same defect as an endpointer that cuts in. Its gap distribution is recorded whatever the verdict.",
+      "est_usd": 0.0
+    },
+    {
+      "id": "G3",
+      "gate": "G3",
+      "scenario": "no_terminal_punct and trailing_lead_in, N=5 each. Gemini 3.1 cuts in 5/5 at default and 3/5 at END_SENSITIVITY_LOW+1200ms; no setting fixes it because the VAD is the vendor's.",
+      "discrimination_rule": {
+        "backchannel": "contiguous model output audio < 800ms that returns to silence while caller frames are still streaming. NOT a failure. Counted separately and reported.",
+        "cut_in": "contiguous model output audio >= 1500ms beginning before the caller's final audio frame, or within 300ms after it."
+      },
+      "prediction": "0 of 5 cut-ins on each fixture. Full duplex has no endpointing decision to get wrong. Backchannels expected and not scored against it.",
+      "fails_if": "2 or more of 5 cut in on either fixture.",
+      "on_fail": "The strongest argument for moving evaporates and the case reduces to residency alone. Continue the round; this does not stop it.",
+      "est_usd": 0.5
+    },
+    {
+      "id": "G4c",
+      "gate": "G4",
+      "arm": "C (client delegation, our brain)",
+      "scenario": "rep_time_q ('Do you have anything Tuesday morning?'), N=10. The harness holds check_appointment_availability back by exactly 1200ms, the real lookup latency we measured. Score what it says during the wait.",
+      "scoring": {
+        "a_any_speech": "said anything at all during the wait. DESIRABLE, not a defect: dead air is its own failure and we have fought it before.",
+        "b_implies_availability": "implied a slot exists without naming one ('should be fine', 'yes we can do that').",
+        "c_states_a_slot": "named a specific time or date. THE WRITE-INTEGRITY DEFECT."
+      },
+      "time_regex": "\\b(\\d{1,2}\\s*(?::|\\.)\\s*\\d{2}|\\d{1,2}\\s*(?:am|pm|a\\.m\\.|p\\.m\\.|o'clock)|half\\s+past\\s+\\w+|quarter\\s+(?:past|to)\\s+\\w+|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s*(?:am|pm|o'clock)|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\\b",
+      "prediction": "Scores c_states_a_slot in 0 of 10, and no more than 1 of 10 at the outside. The voice layer holds no tools and never received a slot list, so it cannot read one out.",
+      "fails_if": "c_states_a_slot in more than 1 of 10. Then client delegation buys nothing here and the two arms collapse into one question about code volume -- which would make the recommendation in docs/gpt-live-analysis.md section 8 wrong.",
+      "est_usd": 0.75
+    },
+    {
+      "id": "G4r",
+      "gate": "G4",
+      "arm": "R (responses delegation, gpt-5.6-luna)",
+      "scenario": "Identical to G4c, with delegation.responses configured and the same 10 tools declared to the backend.",
+      "prediction": "Scores c_states_a_slot in 3 or more of 10. Their model can see the diary, so what leaks early can be a fact. OpenAI's own eval cookbook names 'creating reservations when only availability was asked' a headline failure mode of this configuration.",
+      "fails_if": "This arm has no fail condition -- both outcomes are informative. If it scores 0 of 10 the assistant's argument for client delegation is materially weakened and the report must say so plainly.",
+      "est_usd": 0.75
+    },
+    {
+      "id": "G5",
+      "gate": "G5",
+      "scenario": "Push two exact strings via session.commentary.append, N=5 each: (1) the recording disclosure, a legal obligation; (2) the read-back 'Thursday the 18th of September at 2:15 pm'. Docs say commentary is spoken 'in its own words'.",
+      "prediction": "The disclosure is paraphrased in 3 or more of 5. The appointment time survives intact in 4 or more of 5.",
+      "fails_if": "The time is altered even once. A reworded legal sentence is a design problem; a wrong hour spoken to a caller is a wrong appointment.",
+      "on_fail": "Both the disclosure and the read-back need a mechanism that is not commentary.append, and that must be designed before either arm is built.",
+      "measured_by": "String comparison against the pushed text AND a WAV saved to audio/ so it can be judged by ear.",
+      "est_usd": 0.5
+    }
+  ],
+
+  "always_measured": [
+    "Real cost of a simulated 3-minute call, both arms, from session.usage.updated seconds plus backend tokens. The $0.158 figure in the analysis doc is arithmetic, not a measurement.",
+    "model_leg_ms, labelled exactly that. No Twilio leg, no playout queue, so it is NOT voice-to-voice. Reporting an in-process window as v2v is the 2026-08-04 error: 1,500ms assumed against 3,062ms actual.",
+    "Dead air during delegation. Full-Duplex-Bench-v3 reports silent gaps in ~25% of delegated cases. Count ours.",
+    "Whether gpt-live-transcribe changes the G2 answer."
+  ],
+
+  "cannot_answer": [
+    "How it sounds on a handset. No Twilio leg, no echo, no line.",
+    "Long calls. Sessions are capped at 120s by rule.",
+    "Inbound SIP. Only outbound is confirmed org-gated."
+  ]
+}

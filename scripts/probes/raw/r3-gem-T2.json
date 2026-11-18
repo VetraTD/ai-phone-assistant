@@ -1,0 +1,266 @@
+{
+  "at": "2026-09-02T06:05:59.927Z",
+  "n": 5,
+  "models": [
+    "3.1"
+  ],
+  "rows": [
+    {
+      "scenario": "T2",
+      "model": "3.1",
+      "passes": 20,
+      "total": 20,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: I'm sorry, that time is already taken. Would you like to try Tuesday at four thirty PM, or Wednesday at ten AM?I do have 4 30 that same day, on Tuesday, or 10 A"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller wants to think about availability."
+              }
+            }
+          ],
+          "said": "I'm sorry, that time is already taken. Would you like to try Tuesday at four thirty PM, or Wednesday at ten AM?I do have 4 30 that same day, on Tuesday, or 10 AM on Wednesday. Do either of those work for you?Of course. Is there anything else I can help you with today?\n\nThanks for calling Brightwork Family Dental, and have a great day.",
+          "turnSaid": [
+            "I'm sorry, that time is already taken. Would you like to try Tuesday at four thirty PM, or Wednesday at ten AM?",
+            "I do have 4 30 that same day, on Tuesday, or 10 AM on Wednesday. Do either of those work for you?",
+            "Of course. Is there anything else I can help you with today?\n\nThanks for calling Brightwork Family Dental, and have a great day."
+          ],
+          "usd": 0.0152655
+        },
+        {
+          "trial": 2,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: I'm sorry, that time is already taken — would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?We have next Tuesday at 4 30 PM, as"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "I'm sorry, that time is already taken — would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?We have next Tuesday at 4 30 PM, as well as next Wednesday at 10 AM. Do either of those work for you?Of course. Is there anything else I can help you with?",
+          "turnSaid": [
+            "I'm sorry, that time is already taken — would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?",
+            "We have next Tuesday at 4 30 PM, as well as next Wednesday at 10 AM. Do either of those work for you?",
+            "Of course. Is there anything else I can help you with?"
+          ],
+          "usd": 0.014935499999999999
+        },
+        {
+          "trial": 3,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: I'm sorry, that time is already taken. Would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?We have openings that Tuesday at 4 3"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller_hung_up"
+              }
+            }
+          ],
+          "said": "I'm sorry, that time is already taken. Would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?We have openings that Tuesday at 4 30 or the next day, Wednesday, at 10 in the morning — do either of those work for you?No problem. Is there anything else I can help you with today? Thanks for calling Brightwork Family Dental, and have a great day.",
+          "turnSaid": [
+            "I'm sorry, that time is already taken. Would you like to try next Tuesday at four thirty or Wednesday at ten in the morning?",
+            "We have openings that Tuesday at 4 30 or the next day, Wednesday, at 10 in the morning — do either of those work for you?",
+            "No problem. Is there anything else I can help you with today? Thanks for calling Brightwork Family Dental, and have a great day."
+          ],
+          "usd": 0.0148935
+        },
+        {
+          "trial": 4,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: I understand, thanks. Unfortunately, that time is already booked, but how about four thirty that same day, or ten o'clock the next morning?No problem. We have o"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "I understand, thanks. Unfortunately, that time is already booked, but how about four thirty that same day, or ten o'clock the next morning?No problem. We have openings on Tuesday at four thirty in the afternoon, or Wednesday at ten in the morning. Would either of those work for you?Sure, take your time. Is there anything else I can help you with right now?",
+          "turnSaid": [
+            "I understand, thanks. Unfortunately, that time is already booked, but how about four thirty that same day, or ten o'clock the next morning?",
+            "No problem. We have openings on Tuesday at four thirty in the afternoon, or Wednesday at ten in the morning. Would either of those work for you?",
+            "Sure, take your time. Is there anything else I can help you with right now?"
+          ],
+          "usd": 0.01565175
+        },
+        {
+          "trial": 5,
+          "model": "3.1",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental. I'm sorry, that time is already booked. Would you like to try 4 30 that day, or 10 AM on Wednesday?I have availabil"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Thanks for calling Brightwork Family Dental. I'm sorry, that time is already booked. Would you like to try 4 30 that day, or 10 AM on Wednesday?I have availability next Tuesday, September 8th at 4 30 p m, or Wednesday, September 9th at 10 a m. Do either of those work for you?No problem, take your time. Is there anything else I can help you with today?",
+          "turnSaid": [
+            "Thanks for calling Brightwork Family Dental. I'm sorry, that time is already booked. Would you like to try 4 30 that day, or 10 AM on Wednesday?",
+            "I have availability next Tuesday, September 8th at 4 30 p m, or Wednesday, September 9th at 10 a m. Do either of those work for you?",
+            "No problem, take your time. Is there anything else I can help you with today?"
+          ],
+          "usd": 0.01574925
+        }
+      ]
+    }
+  ]
+}

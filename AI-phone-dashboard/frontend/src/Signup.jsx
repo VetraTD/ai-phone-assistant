@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { supabase } from "./supabaseClient";
+// Aliased — the handler below is also `signUp`, and it would shadow this and
+// recurse. Same collision as Login.jsx.
+import { signUp as createAccount } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Signup.css";
+import { MARKETING_URL } from "./siteUrl";
 
 export default function Signup({ onSwitchToLogin }) {
   const [email, setEmail] = useState("");
@@ -17,15 +19,12 @@ export default function Signup({ onSwitchToLogin }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { error } = await createAccount(email, password);
 
     setLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
       return;
     }
 
@@ -36,9 +35,9 @@ export default function Signup({ onSwitchToLogin }) {
     <div className="signup-page">
       <div className="signup-shell">
         <div className="signup-top-row">
-          <Link to="/" className="signup-back-home">
+          <a href={MARKETING_URL} className="signup-back-home">
             ← Back to website
-          </Link>
+          </a>
         </div>
         <div className="signup-brand">
           <div className="signup-badge">

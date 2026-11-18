@@ -1,0 +1,415 @@
+{
+  "at": "2026-09-16T00:35:21.261Z",
+  "question": "can any vendor mechanism deliver an exact sentence reliably enough for a legal disclosure?",
+  "bar": "a disclosure must be delivered every time; 0.95 is the floor for calling a mechanism usable",
+  "sentence": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+  "g5_baseline": "commentary.append delivered 4 of 10 across two cases, acked 10 of 10",
+  "confound_removed": "pushed only after the model went quiet, so a miss is the mechanism and not a collision",
+  "not_tested": "injecting our own pre-rendered audio into the Twilio leg -- delivery is then our code's property, not the model's decision",
+  "byArm": {
+    "A": {
+      "label": "commentary, stock prompt",
+      "of": 8,
+      "acked": 8,
+      "delivered": 4,
+      "verbatim": 0,
+      "delivery_rate": 0.5,
+      "usd": 0.0275
+    },
+    "B": {
+      "label": "commentary, prompt says relay verbatim",
+      "of": 8,
+      "acked": 8,
+      "delivered": 3,
+      "verbatim": 2,
+      "delivery_rate": 0.38,
+      "usd": 0.0266
+    },
+    "C": {
+      "label": "instructions.append carries the sentence",
+      "of": 8,
+      "acked": 8,
+      "delivered": 5,
+      "verbatim": 5,
+      "delivery_rate": 0.63,
+      "usd": 0.0292
+    }
+  },
+  "rows": [
+    {
+      "arm": "A",
+      "take": 1,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 1,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "of appointment are you looking for?",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 1,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 2,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "18th",
+        "september"
+      ],
+      "spoken": "So, you're booked in for 2:15 on Thursday the eighteenth.",
+      "pushed_at_session_ms": 4200,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 2,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "appointment you need and what day works for you?",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 2,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 3,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "date of birth?",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 3,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm. Okay! You're all set.",
+      "pushed_at_session_ms": 3800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 3,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 4,
+      "acked": true,
+      "delivered": true,
+      "verbatim": false,
+      "missing_facts": [],
+      "spoken": "Got it, you're booked in for Thursday, the 18th of September at 2:15 p.m.",
+      "pushed_at_session_ms": 3400,
+      "usd": 0.00417,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 4,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "sec.",
+      "pushed_at_session_ms": 4600,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 4,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "",
+      "pushed_at_session_ms": 3400,
+      "usd": 0.00417,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 5,
+      "acked": true,
+      "delivered": true,
+      "verbatim": false,
+      "missing_facts": [],
+      "spoken": "You're all set for Thursday, September 18th at 2:15 p.m. We'll see you then!",
+      "pushed_at_session_ms": 4000,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 5,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "you been here before?",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 5,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "",
+      "pushed_at_session_ms": 3400,
+      "usd": 0.00417,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 6,
+      "acked": true,
+      "delivered": true,
+      "verbatim": false,
+      "missing_facts": [],
+      "spoken": ". Okay, I’ve got you down for Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 6,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "Let me check that. Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 2600,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 6,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "you hopingYour appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 7,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "And what's a good name for the chart?",
+      "pushed_at_session_ms": 4600,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 7,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "for?",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 7,
+      "acked": true,
+      "delivered": true,
+      "verbatim": true,
+      "missing_facts": [],
+      "spoken": "got. Your appointment is Thursday the 18th of September at 2:15 pm.",
+      "pushed_at_session_ms": 4800,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "A",
+      "take": 8,
+      "acked": true,
+      "delivered": true,
+      "verbatim": false,
+      "missing_facts": [],
+      "spoken": "Thanks for waiting! I can get you in Thursday, September 18th at 2:15 in the afternoon.",
+      "pushed_at_session_ms": 4000,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "B",
+      "take": 8,
+      "acked": true,
+      "delivered": true,
+      "verbatim": false,
+      "missing_facts": [],
+      "spoken": "Okay, you're booked for Thursday, the 18th of September, at 2:15 in the afternoon. If you need to change it later, just give us a call.",
+      "pushed_at_session_ms": 4000,
+      "usd": 0.00333,
+      "error": null
+    },
+    {
+      "arm": "C",
+      "take": 8,
+      "acked": true,
+      "delivered": false,
+      "verbatim": false,
+      "missing_facts": [
+        "thursday",
+        "18th",
+        "september",
+        "2",
+        "15"
+      ],
+      "spoken": "",
+      "pushed_at_session_ms": 3400,
+      "usd": 0.00417,
+      "error": null
+    }
+  ],
+  "best_arm": "C",
+  "best_rate": 0.63,
+  "usable_for_a_disclosure": false,
+  "spend": {
+    "cap": 5,
+    "spent": 0.911797,
+    "remaining": 4.088203,
+    "sessions": 116,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825,
+      "G2r": 0.044693,
+      "G3": 0.301736,
+      "G4": 0.298973,
+      "G5": 0.09167,
+      "G6": 0.093327
+    }
+  }
+}

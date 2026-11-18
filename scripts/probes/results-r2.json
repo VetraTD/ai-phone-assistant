@@ -1,0 +1,744 @@
+{
+  "at": "2026-09-02T04:27:34.376Z",
+  "discovery": {
+    "vertex:europe-west2:gemini-live-2.5-flash-native-audio": {
+      "ok": false,
+      "err": "timeout 12s"
+    },
+    "vertex:europe-west2:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west2:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "Unexpected server response: 400"
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash-native-audio": {
+      "ok": true
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-2.5-flash-preview-nat"
+    },
+    "vertex:europe-west1:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-2.5-flash` was not fo"
+    },
+    "vertex:europe-west1:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-2.0-flash-live-001` was no"
+    },
+    "vertex:europe-west1:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-3.1-flash-live-preview` wa"
+    },
+    "vertex:europe-west1:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-live-3.1-flash-native-audi"
+    },
+    "vertex:us-central1:gemini-live-2.5-flash-native-audio": {
+      "ok": true
+    },
+    "vertex:us-central1:gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-2.5-flash-preview-nati"
+    },
+    "vertex:us-central1:gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-2.5-flash` was not fou"
+    },
+    "vertex:us-central1:gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-2.0-flash-live-001` was not"
+    },
+    "vertex:us-central1:gemini-3.1-flash-live-preview": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-3.1-flash-live-preview` was"
+    },
+    "vertex:us-central1:gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: Publisher model `projects/vetra-uk-edc8ca/locations/us-central1/publishers/google/models/gemini-live-3.1-flash-native-audio"
+    },
+    "aistudio::gemini-live-2.5-flash-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash-native-audio is not found for API version v1beta, or is not supported for bidiGenerateContent."
+    },
+    "aistudio::gemini-live-2.5-flash-preview-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash-preview-native-audio is not found for API version v1beta, or is not supported for bidiGenerate"
+    },
+    "aistudio::gemini-live-2.5-flash": {
+      "ok": false,
+      "err": "closed: models/gemini-live-2.5-flash is not found for API version v1beta, or is not supported for bidiGenerateContent. Call ModelSe"
+    },
+    "aistudio::gemini-2.0-flash-live-001": {
+      "ok": false,
+      "err": "closed: models/gemini-2.0-flash-live-001 is not found for API version v1beta, or is not supported for bidiGenerateContent. Call Mod"
+    },
+    "aistudio::gemini-3.1-flash-live-preview": {
+      "ok": true
+    },
+    "aistudio::gemini-live-3.1-flash-native-audio": {
+      "ok": false,
+      "err": "closed: models/gemini-live-3.1-flash-native-audio is not found for API version v1beta, or is not supported for bidiGenerateContent."
+    }
+  },
+  "hold_times": [
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 2792,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Are you",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2770,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Is this",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 2864,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Are you",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 3613,
+      "heard": "Is four. Uh",
+      "said": "Is there",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 3882,
+      "heard": "Is four. Uh",
+      "said": "How can",
+      "usd": 0.0019305
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 3924,
+      "heard": "Is four. Uh",
+      "said": "It's for",
+      "usd": 0.0019305
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 2875,
+      "heard": "My number is 5552.",
+      "said": "Sorry, I'm",
+      "usd": 0.0020304999999999998
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2540,
+      "heard": "My number is 5552.",
+      "said": "Is there",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 2882,
+      "heard": "My number is 5552.",
+      "said": "I'm sorry,",
+      "usd": 0.0020304999999999998
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 1380,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0.0017400000000000002
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 1453,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Is this",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 1477,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Is this",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 2571,
+      "heard": "Is for a",
+      "said": "Is it",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2502,
+      "heard": "Is for a",
+      "said": "Is it",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 2563,
+      "heard": "Is for a",
+      "said": "Is this",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 1859,
+      "heard": "My number is 5552.",
+      "said": "Thanks, I",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 1352,
+      "heard": "My number is 5552.",
+      "said": "Thanks, how",
+      "usd": 0
+    },
+    {
+      "vendor": "gemini",
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 1758,
+      "heard": "My number is 5552.",
+      "said": "Okay, thank",
+      "usd": 0.0019495
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 9250,
+      "commit_ms": 8490,
+      "heard": "",
+      "said": "Of course. Are you a new",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 9727,
+      "commit_ms": 8499,
+      "heard": "",
+      "said": "Of course. Are you a new",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 11083,
+      "commit_ms": 8490,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Sure thing. Next Tuesday",
+      "usd": 0.0021257999999999997
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 2940,
+      "commit_ms": 1961,
+      "heard": "it's for",
+      "said": "Sure thing, it",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2574,
+      "commit_ms": 1987,
+      "heard": "",
+      "said": "Of course. Are you calling",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 3316,
+      "commit_ms": 2115,
+      "heard": "",
+      "said": "Of course. Are you looking",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "partial_digits",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 9384,
+      "commit_ms": 8156,
+      "heard": "My number is 5 5 5 2",
+      "said": "Got it. I heard 5",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "partial_digits",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 9982,
+      "commit_ms": 8103,
+      "heard": "My number is 5 5 5 2",
+      "said": "I’ve got 5 5 5",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "semantic:low",
+      "label": "partial_digits",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 8871,
+      "commit_ms": 7918,
+      "heard": "My number is 5 5 5 2",
+      "said": "Of course. I heard your number",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 2692,
+      "commit_ms": 552,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Sure thing. Next,",
+      "usd": 0.00134004
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2281,
+      "commit_ms": 556,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Got it, next Tuesday afternoon",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 1621,
+      "commit_ms": 552,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "Of course. Are you a",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 1774,
+      "commit_ms": -454,
+      "heard": "It's four? Uh...",
+      "said": "Sure thing. Are",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 1176,
+      "commit_ms": -460,
+      "heard": "It's four? Uh...",
+      "said": "Of course. Are you looking to",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 1346,
+      "commit_ms": -454,
+      "heard": "It's four?",
+      "said": "Of course, thanks for calling",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "partial_digits",
+      "trial": 1,
+      "responded": true,
+      "hold_ms": 1807,
+      "commit_ms": 349,
+      "heard": "",
+      "said": "Thanks, I heard the number 55",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "partial_digits",
+      "trial": 2,
+      "responded": true,
+      "hold_ms": 2127,
+      "commit_ms": 347,
+      "heard": "My number is 5 5 5 2.",
+      "said": "Sure thing, the number is five",
+      "usd": 0
+    },
+    {
+      "vendor": "openai",
+      "arm": "server:500",
+      "label": "partial_digits",
+      "trial": 3,
+      "responded": true,
+      "hold_ms": 2074,
+      "commit_ms": 348,
+      "heard": "My number is 5 5 5 2.",
+      "said": "Sure thing. I heard the number",
+      "usd": 0
+    }
+  ],
+  "verdicts": [
+    {
+      "id": "W1",
+      "pred": "Gemini at its most patient VAD holds no_terminal_punct AND trailing_lead_in >=4/5",
+      "res": "patient held 5/5 and 5/5",
+      "pass": true,
+      "note": "True as a binary — but the hold-time diagnostic shows \"held\" here means 2792 ms and 3882 ms of silence. Patience and dead air are the same measurement until you time them."
+    },
+    {
+      "id": "W2",
+      "pred": "Gemini's DEFAULT VAD cuts into trailing_lead_in >=3/5",
+      "res": "cut in 0/5",
+      "pass": false,
+      "note": "Wrong in the useful direction: the default holds trailing_lead_in for 2563 ms, past the 2,000 ms our own classifyHold charges. It cut into no_terminal_punct instead (3/5)."
+    },
+    {
+      "id": "W3",
+      "pred": "Gemini pure generation (manual activityEnd) p50 < 700 ms",
+      "res": "898 ms (n=5)",
+      "pass": false,
+      "note": "Like-for-like on a fresh single turn, Gemini generates SLOWER than OpenAI's ~790 ms, so Gemini's total-leg lead is endpointing (~152 ms) and not the model. But single-turn is OpenAI's best case only: in a real conversation the mini's generation grows to ~1,480 ms by turn 5 while Gemini's stays flat. Neither number generalises without the slope table above."
+    },
+    {
+      "id": "W4",
+      "pred": "OpenAI mini at silence_duration_ms=200 gets leg p50 < 1,500 ms",
+      "res": "200ms->1680ms, 300ms->1686ms, 500ms->2192ms",
+      "pass": false,
+      "note": "Endpointing tracks the setting exactly (169ms@200, 292ms@300, 483ms@500), so the knob works. The leg still misses 1,500 ms because the mini's GENERATION grows through the call — turn 1 is 990 ms, turn 5 is 2748 ms. Round 1 blamed the vendor for a number this harness set; round 2 shows the setting was only part of it."
+    },
+    {
+      "id": "W5",
+      "pred": "Against a LONG reply, audio keeps arriving after the interrupt signal in >=3/5 on at least one vendor",
+      "res": "Gemini 1/5, OpenAI 0/5",
+      "pass": false,
+      "note": "Both vendors mostly stop cleanly. But Gemini's worst trial delivered 2879 ms of audio AFTER announcing the interrupt — a tail a playout queue must still absorb."
+    },
+    {
+      "id": "W6",
+      "pred": "OpenAI full at N=5 holds leg p50 < 1,600 ms with 0 dropped turns",
+      "res": "1558 ms p50 (n=23), 2 dropped",
+      "pass": false,
+      "note": "Latency clause held (1558 ms < 1,600); the reliability clause did not — 2 turns produced no audio. Round 1's N=1 gave 1,375 ms and zero drops, which PLAN.md correctly said was \"compared to nothing\". Unlike the mini, the full model gets FASTER through a call (-613 ms)."
+    },
+    {
+      "id": "W7",
+      "pred": "Gemini 2.5 on Vertex costs less per turn than OpenAI mini ($0.0048)",
+      "res": "$0.0049 vs $0.0048",
+      "pass": false,
+      "note": "Round 1's $0.0044 was an artefact of L5's shorter 4-turn script. On the identical 5-turn script the two vendors are within 2% — cost is a tie, not an argument."
+    }
+  ],
+  "latency": {
+    "gemini_leg_p50": 1050,
+    "gemini_generation_p50": 898,
+    "openai_silence_sweep": [
+      {
+        "ms": 200,
+        "leg": 1680,
+        "endpoint": 169,
+        "n": 22,
+        "miss": 3
+      },
+      {
+        "ms": 300,
+        "leg": 1686,
+        "endpoint": 292,
+        "n": 21,
+        "miss": 4
+      },
+      {
+        "ms": 500,
+        "leg": 2192,
+        "endpoint": 483,
+        "n": 22,
+        "miss": 3
+      }
+    ],
+    "openai_full_p50": 1558
+  },
+  "cost_per_turn": {
+    "gemini_vertex_2_5": 0.00485216,
+    "openai_mini": 0.004815000000000001,
+    "openai_full": 0.014980639999999998
+  },
+  "barge_long": {
+    "gemini": [
+      {
+        "trial": 1,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 25,
+        "interrupted": true,
+        "barge_to_interrupted_ms": 667,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "audio_arrived_after_settle": false,
+        "usd": 0.0050045
+      },
+      {
+        "trial": 2,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 26,
+        "interrupted": true,
+        "barge_to_interrupted_ms": 664,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "audio_arrived_after_settle": false,
+        "usd": 0.0038439999999999998
+      },
+      {
+        "trial": 3,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 25,
+        "interrupted": true,
+        "barge_to_interrupted_ms": 693,
+        "audio_after_interrupt": true,
+        "chunks_after_interrupt": 19,
+        "ms_of_audio_after_interrupt": 2879,
+        "audio_arrived_after_settle": true,
+        "usd": 0.0085145
+      },
+      {
+        "trial": 4,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 25,
+        "interrupted": true,
+        "barge_to_interrupted_ms": 667,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "audio_arrived_after_settle": false,
+        "usd": 0.0034
+      },
+      {
+        "trial": 5,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 25,
+        "interrupted": true,
+        "barge_to_interrupted_ms": 671,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "audio_arrived_after_settle": false,
+        "usd": 0.0054145
+      }
+    ],
+    "openai": [
+      {
+        "trial": 1,
+        "barged": true,
+        "audio_in_flight_at_barge": false,
+        "chunks_before_barge": 12,
+        "interrupted": true,
+        "speech_detected": true,
+        "response_cancelled": true,
+        "barge_to_signal_ms": 475,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "usd": 0.004605399999999999
+      },
+      {
+        "trial": 2,
+        "barged": true,
+        "audio_in_flight_at_barge": false,
+        "chunks_before_barge": 11,
+        "interrupted": true,
+        "speech_detected": true,
+        "response_cancelled": true,
+        "barge_to_signal_ms": 468,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "usd": 0.0059098
+      },
+      {
+        "trial": 3,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 32,
+        "interrupted": true,
+        "speech_detected": true,
+        "response_cancelled": true,
+        "barge_to_signal_ms": 479,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "usd": 0.01681548
+      },
+      {
+        "trial": 4,
+        "barged": true,
+        "audio_in_flight_at_barge": false,
+        "chunks_before_barge": 11,
+        "interrupted": true,
+        "speech_detected": true,
+        "response_cancelled": true,
+        "barge_to_signal_ms": 470,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "usd": 0.00532364
+      },
+      {
+        "trial": 5,
+        "barged": true,
+        "audio_in_flight_at_barge": true,
+        "chunks_before_barge": 34,
+        "interrupted": true,
+        "speech_detected": true,
+        "response_cancelled": true,
+        "barge_to_signal_ms": 466,
+        "audio_after_interrupt": false,
+        "chunks_after_interrupt": 0,
+        "ms_of_audio_after_interrupt": 0,
+        "usd": 0.0098174
+      }
+    ]
+  },
+  "spend": {
+    "total": 2.238295,
+    "cap": 5,
+    "r2": 0.5660579199999998
+  }
+}

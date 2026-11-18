@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import VetraLogo from "./components/VetraLogo";
 import "./Legal.css";
+import { MARKETING_URL } from "./siteUrl";
 
 const CONTACT_EMAIL = "support@vetratd.com";
 
@@ -9,8 +10,8 @@ export default function Legal() {
     <div className="legal-page">
       <header className="legal-header">
         <div className="legal-header-inner">
-          <VetraLogo to="/" />
-          <Link to="/" className="legal-back">← Back to home</Link>
+          <VetraLogo href={MARKETING_URL} />
+          <a href={MARKETING_URL} className="legal-back">← Back to vetratd.com</a>
         </div>
       </header>
 
@@ -65,7 +66,7 @@ export default function Legal() {
 
           <div className="legal-footer-link">
             <Link to="/contact" className="legal-cta legal-cta-secondary">Contact</Link>
-            <Link to="/" className="legal-cta">Back to home</Link>
+            <a href={MARKETING_URL} className="legal-cta">Back to vetratd.com</a>
           </div>
         </div>
       </main>

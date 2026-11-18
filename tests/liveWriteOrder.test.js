@@ -1,0 +1,904 @@
+// ---------------------------------------------------------------------------
+// LVX95 — the confirmation was spoken AFTER the write, and nothing required it
+// to come first.
+//
+// Call be9bd6, 2026-09-09, the first Live call able to cancel anything. Sixty
+// seconds, and the caller asked to cancel all three of their appointments:
+//
+//   04:52:54  get_caller_appointments_from_db   ok
+//   04:53:13  cancel_appointment_db   success=true
+//   04:53:13  cancel_appointment_db   success=true
+//   04:53:13  cancel_appointment_db   success=true
+//   04:53:27  "Of course. Just to confirm, you'd like to cancel all three of
+//              your upcoming appointments? ..."
+//   04:53:33  end_call
+//
+// Every claim on that call was TRUE. Three tools ran, three rows changed,
+// tool_duration.success was true on all three. The defect is ORDERING: the
+// three writes committed fourteen seconds before the confirmation question was
+// asked, and the model went to end_call six seconds after asking, without
+// waiting for an answer that could not have changed anything.
+//
+// WHY confirmBeforeWrite DOES NOT FIX IT. That requirement exists and defaults
+// off, and turning it on leaves enforcement as a tool ARGUMENT the model sets
+// about itself (lib/capabilities/requirements.js:402). Nothing verifies that a
+// read-back happened, that the caller answered, or that the answer was yes. It
+// is an honour system, and this call is the evidence about the honour: a model
+// that will narrate a confirmation after the fact is a model that will set the
+// flag before it.
+//
+// So both halves are read off the call instead:
+//   - the assistant's PREVIOUS completed turn put the action to the caller
+//   - the caller's answer parses as agreement
+// Neither can be produced by choosing a tool argument.
+//
+// These tests are the certification. Remove the gate and the refusal cases go
+// red; the control cases go red if it is made too broad, and the ceiling case
+// goes red if the escape hatch is removed -- which would turn a phrasing list
+// into a livelock.
+// ---------------------------------------------------------------------------
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockCreateAppointment = vi.fn();
+const mockUpdateAppointmentStatus = vi.fn();
+const mockGetAppointmentById = vi.fn();
+const mockListAppointmentsByCaller = vi.fn();
+
+vi.mock("../services/db.js", () => ({
+  createAppointment: (...a) => mockCreateAppointment(...a),
+  createAppointmentIfAvailable: async (p) => {
+    const id = await mockCreateAppointment(p);
+    return id ? { id } : { full: true };
+  },
+  countScheduledOverlapping: async () => 0,
+  listScheduledBetween: async () => [],
+  listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
+  updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
+  updateAppointment: async () => false,
+  getAppointmentById: (...a) => mockGetAppointmentById(...a),
+}));
+vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));
+vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
+// Mocked so the PROBE PAYLOAD can be asserted, which is the one thing LVX144
+// shipped without. See the block at the bottom of this file.
+vi.mock("../lib/logger.js", () => ({
+  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  createRequestId: vi.fn(() => "req-1"),
+  recordTurnLatency: vi.fn(),
+}));
+
+import { executeToolCall } from "../services/tools.js";
+import { log } from "../lib/logger.js";
+import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
+
+const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
+const READ_BACK = "Just to confirm, shall I go ahead and book that for you?";
+const FUTURE_SLOT_ISO = new Date(Date.now() + 30 * 86_400_000).toISOString();
+
+const ctx = ({ said = "Yes", replied = READ_BACK, capabilityState = {}, config = {}, turn = 4, callerContext = null } = {}) => ({
+  businessId: "biz-1",
+  callerPhone: "+15551234567",
+  callId: "call-1",
+  integrations: [],
+  capabilityState,
+  config,
+  // Settled, so nothing below can be the spelling gate.
+  spellingSettled: true,
+  // The budget is spent per CALLER TURN, so anything driving more than one
+  // attempt has to move this or the second refusal silently costs nothing.
+  callerTurnCount: turn,
+  lastCallerText: said,
+  lastReplyText: replied,
+  callerContext,
+});
+
+const book = (c) =>
+  executeToolCall(
+    {
+      id: "fc1",
+      name: "book_appointment",
+      args: { client_name: "Marcus Bell", scheduled_at: FUTURE_SLOT, notes: "consultation" },
+    },
+    c
+  );
+
+const counters = () => getLatencyStats().turnTaking;
+
+beforeEach(() => {
+  clearStats();
+  vi.clearAllMocks();
+  mockCreateAppointment.mockResolvedValue("appt-1");
+  mockListAppointmentsByCaller.mockResolvedValue([]);
+});
+
+describe("LVX95 — a write needs a read-back that happened and a yes that was heard", () => {
+  it("refuses a write when the previous turn never put it to the caller", async () => {
+    // The shape of be9bd6: the assistant listed the appointments, the caller
+    // said what they wanted, and the write went out on the same turn the
+    // request was understood.
+    const { functionResponse, stateEffects } = await book(
+      ctx({ said: "Cancel all three of them", replied: "You have three appointments coming up." })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(counters().write_order_refused).toBe(1);
+    expect(counters().write_confirm_readback_missing).toBe(1);
+    // Silent, like the spelling gate's: nothing ran, so the session must not
+    // narrate work that was declined.
+    expect(stateEffects.toolCallEvent.silent).toBe(true);
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+  });
+
+  it("refuses when the read-back was made and the caller changed something", async () => {
+    // "Yes, but..." is the case a bare yes/no test misses, and it is the one
+    // that matters: the caller is agreeing to a DIFFERENT thing from the one
+    // that was read back.
+    const { functionResponse } = await book(ctx({ said: "Yes, but make it Thursday instead" }));
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(counters().write_confirm_readback_prev_turn).toBe(1);
+    expect(counters().write_order_refused).toBe(1);
+  });
+
+  it("allows the write when both halves are there", async () => {
+    const { functionResponse } = await book(ctx({ said: "Yes, that's right" }));
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(counters().write_order_refused).toBeFalsy();
+    expect(counters().write_confirm_readback_prev_turn).toBe(1);
+  });
+
+  it('accepts "Okay" as the yes, because that is how people agree on a phone', async () => {
+    // The opposite rule from the hang-up gate, and deliberately so. That gate
+    // follows "is there anything else?", where a vague "okay" is not a no, so
+    // it uses stripFillers -- whose list swallows "Okay" on purpose. This one
+    // follows "shall I go ahead?", where refusing on "Okay" would be its own
+    // defect (services/tools.js records exactly that argument).
+    for (const said of ["Okay", "Okay.", "Sure", "Yep", "Mm-hmm", "Go ahead", "Please do"]) {
+      clearStats();
+      vi.clearAllMocks();
+      mockCreateAppointment.mockResolvedValue("appt-1");
+      const { functionResponse } = await book(ctx({ said }));
+      expect(functionResponse.response.success, said).toBe(true);
+    }
+  });
+
+  it("covers a cancellation regardless of tenant configuration", async () => {
+    // The owner's decision, 2026-09-09: a cancellation is not recoverable by
+    // the caller, so it is gated on every tenant whether or not they have a
+    // business_capabilities row. Brightwork Studio had none, which is why
+    // confirmBeforeWrite was off and nothing stopped be9bd6.
+    mockGetAppointmentById.mockResolvedValue({
+      id: "a1",
+      client_phone: "+15551234567",
+      scheduled_at: FUTURE_SLOT,
+      status: "scheduled",
+    });
+
+    const { functionResponse } = await executeToolCall(
+      { id: "fc2", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+      ctx({ said: "Cancel all three", replied: "You have three appointments coming up." })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+    expect(counters().write_order_refused).toBe(1);
+  });
+
+  it("works in Spanish, or it protects only English callers", async () => {
+    const { functionResponse } = await book(
+      ctx({
+        config: { languagesSpoken: ["es"] },
+        replied: "Para confirmar, ¿procedo con la cita del martes?",
+        said: "Sí, está bien",
+      })
+    );
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(counters().write_confirm_readback_prev_turn).toBe(1);
+  });
+});
+
+describe("LVX95 — the three bounds, each of which is load-bearing", () => {
+  it("releases the write after two attempts at the SAME proposal", async () => {
+    // WITHOUT THIS the gate is a livelock. If the model re-reads a proposal in
+    // words confirmReadBackRe cannot see, or the caller's "yes" is lost in
+    // transcription -- and 2026-09-09 proved a caller turn can vanish from the
+    // transcript entirely -- the write would be refused forever.
+    //
+    // Driven through real refusals rather than seeded state, because the budget
+    // is keyed to the proposal now and a hand-written key would be testing the
+    // fixture rather than the gate.
+    const unchanged = { said: "Cancel all three", replied: READ_BACK };
+
+    const first = await book(ctx(unchanged));
+    expect(first.functionResponse.response.success).toBe(false);
+    const afterFirst = first.stateEffects.capabilityState;
+
+    const second = await book(ctx({ ...unchanged, capabilityState: afterFirst, turn: 5 }));
+    expect(second.functionResponse.response.success).toBe(false);
+    const afterSecond = second.stateEffects.capabilityState;
+
+    clearStats();
+    const third = await book(ctx({ ...unchanged, capabilityState: afterSecond, turn: 6 }));
+
+    expect(third.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_gate_ceiling).toBe(1);
+    expect(counters().write_order_refused).toBeFalsy();
+    // Still counted as a situation. The ceiling changes what we DO, never what
+    // we know.
+    expect(counters().write_order_would_refuse).toBe(1);
+  });
+
+  it("does not let ONE tool's refusals release a DIFFERENT tool's write", async () => {
+    // LVX125, and the reason it is here rather than in a unit test: this is the
+    // bug that deleted a caller's appointment on two consecutive production
+    // calls, 2026-09-12.
+    //
+    //   15:01:18  write_order_refused       reschedule  readBackMade=false
+    //   15:01:27  write_order_refused       reschedule  readBackMade=false
+    //   15:04:04  write_order_gate_ceiling  CANCEL      refusals=2
+    //
+    // The key for a write with no read-back was the literal string "none", so
+    // every unasked write in a pack shared one budget. Two refused RESCHEDULES
+    // released a CANCELLATION three minutes later, and the caller said "No. Why
+    // would you cancel that?".
+    //
+    // Driven through real refusals, not seeded state, for the same reason the
+    // test above says: a hand-written key would be testing the fixture.
+    // callerContext matters and its absence is why the first version of this
+    // test passed against the BUG. hasWriteTarget reads the call-start caller
+    // snapshot: with no upcoming appointment it returns false, the write-order
+    // gate opts out entirely, and the refusals below come from the pack instead
+    // -- spending no budget and reproducing nothing. Production had one.
+    const noReadBack = {
+      said: "8000",
+      replied: "Is that what you were looking for?",
+      callerContext: { callCount: 1, upcomingAppointments: [{ scheduled_at: FUTURE_SLOT_ISO }] },
+    };
+
+    const one = await executeToolCall(
+      { id: "r1", name: "reschedule_appointment_db", args: { new_scheduled_at: FUTURE_SLOT } },
+      ctx(noReadBack)
+    );
+    expect(one.functionResponse.response.success).toBe(false);
+
+    const two = await executeToolCall(
+      { id: "r2", name: "reschedule_appointment_db", args: { new_scheduled_at: FUTURE_SLOT } },
+      ctx({ ...noReadBack, capabilityState: one.stateEffects.capabilityState, turn: 5 })
+    );
+    expect(two.functionResponse.response.success).toBe(false);
+
+    // The budget for THAT proposal is now spent. A cancellation is a different
+    // proposal and must still be refused.
+    mockGetAppointmentById.mockResolvedValue({
+      id: "a1",
+      client_phone: "+15551234567",
+      scheduled_at: FUTURE_SLOT,
+      status: "scheduled",
+    });
+    clearStats();
+    const cancel = await executeToolCall(
+      { id: "c1", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+      ctx({ ...noReadBack, capabilityState: two.stateEffects.capabilityState, turn: 6 })
+    );
+
+    expect(cancel.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("still releases the SAME unasked proposal, so an unrecognised read-back cannot livelock", async () => {
+    // The other half, and the reason the fix is a narrower key rather than
+    // "never release when nothing was read back". If confirmReadBackRe stops
+    // recognising however the model phrases itself, the model re-reads the SAME
+    // proposal, the args do not move, and the escape must still work -- or that
+    // tenant cannot book at all.
+    const unchanged = {
+      said: "Yeah go ahead",
+      replied: "So I have you down for Tuesday at ten. Sound good?",
+    };
+
+    const first = await book(ctx(unchanged));
+    expect(first.functionResponse.response.success).toBe(false);
+    const second = await book(
+      ctx({ ...unchanged, capabilityState: first.stateEffects.capabilityState, turn: 5 })
+    );
+    expect(second.functionResponse.response.success).toBe(false);
+
+    clearStats();
+    const third = await book(
+      ctx({ ...unchanged, capabilityState: second.stateEffects.capabilityState, turn: 6 })
+    );
+
+    expect(third.functionResponse.response.success).toBe(true);
+    expect(counters().write_order_gate_ceiling).toBe(1);
+  });
+
+  it("gives a CHANGED proposal a fresh budget", async () => {
+    // The correction of 2026-09-09, and the call that forced it. Two refusals
+    // were spent on a caller who was still changing their mind:
+    //
+    //   A: "...you're booking a second appointment? Who is it for?"
+    //   C: "You can use the same name. I actually do Nitin Dodla."   refused
+    //   A: "You're booking another for Nithin Dodla... Shall I confirm?"
+    //   C: "Yeah, actually, could you change the name to <...>?"      refused
+    //
+    // Both refusals were CORRECT -- read-back recognised, no agreement given.
+    // They then burned the whole budget, and the write that followed landed on
+    // a turn whose only content was the caller spelling a name.
+    //
+    // There is no livelock when the caller is the one moving: every new
+    // read-back is a new question, and they can end it at any time by agreeing.
+    const first = await book(
+      ctx({ said: "Actually make it Thursday", replied: "Just to confirm, shall I book Tuesday?" })
+    );
+    const second = await book(
+      ctx({
+        said: "No, sorry, Friday",
+        replied: "Just to confirm, shall I book Thursday?",
+        capabilityState: first.stateEffects.capabilityState,
+        turn: 5,
+      })
+    );
+
+    clearStats();
+    const third = await book(
+      ctx({
+        said: "Hmm, what about Monday",
+        replied: "Just to confirm, shall I book Friday?",
+        capabilityState: second.stateEffects.capabilityState,
+        turn: 6,
+      })
+    );
+
+    // Third refusal in a row, and NOT released: each was a different question.
+    expect(third.functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+    expect(counters().write_order_gate_ceiling).toBeFalsy();
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("spends a refusal only on a NEW caller turn", async () => {
+    // Per caller TURN, not per tool round. services/gemini.js rebuilds ctx from
+    // merged capabilityState after every round, so a model calling the same
+    // tool three times inside one turn would otherwise burn the whole budget
+    // without the caller ever being asked anything.
+    const sameTurn = { appointments: { writeOrderRefusals: 1, writeOrderRefusedTurn: 4 } };
+    const { stateEffects } = await book(
+      ctx({
+        said: "Cancel all three",
+        replied: "You have three appointments coming up.",
+        capabilityState: sameTurn,
+      })
+    );
+
+    expect(stateEffects.capabilityState.appointments.writeOrderRefusals).toBeUndefined();
+  });
+
+  it("counts but does not refuse when the switch is off", async () => {
+    // Every guard on this path has an off switch, and the measurement has to
+    // survive it: a gate turned off that also stops reporting leaves nobody
+    // able to say whether turning it back on is safe.
+    const prev = process.env.LIVE_WRITE_ORDER_GATE;
+    process.env.LIVE_WRITE_ORDER_GATE = "off";
+    try {
+      const { functionResponse } = await book(
+        ctx({ said: "Cancel all three", replied: "You have three appointments coming up." })
+      );
+
+      expect(functionResponse.response.success).toBe(true);
+      expect(counters().write_order_would_refuse).toBe(1);
+      expect(counters().write_order_refused).toBeFalsy();
+      expect(counters().write_confirm_readback_missing).toBe(1);
+    } finally {
+      if (prev === undefined) delete process.env.LIVE_WRITE_ORDER_GATE;
+      else process.env.LIVE_WRITE_ORDER_GATE = prev;
+    }
+  });
+
+  it("leaves the cascade byte-identical — it never sets lastCallerText", async () => {
+    const c = ctx({ said: "Cancel all three", replied: "You have three appointments coming up." });
+    delete c.lastCallerText;
+
+    const { functionResponse } = await book(c);
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(counters().write_order_would_refuse).toBeFalsy();
+    expect(counters().write_confirm_readback_missing).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TWO GATES, ALTERNATING, AND NEITHER ONE EVER EXHAUSTS.
+//
+// Call CA9e3788, 2026-09-10. Four book_appointment attempts, all refused, no
+// row, and the caller was told "that's all set":
+//
+//   19:13:25  book -> write-order refused
+//   19:13:52  book -> spelling gate refused
+//   19:14:43  book -> write-order refused
+//   19:14:51  book -> spelling gate refused      ...then the model gave up.
+//
+// WRITE_ORDER_MAX_REFUSALS is 2 and spellMissCap() is 2, so on paper both are
+// bounded. But each gate only SAW two of the four attempts, so each counted to
+// two while the caller sat through four. Every gate here has an escape hatch
+// keyed to its own refusals, and nothing was counting the thing the caller
+// actually experiences: attempts at this write.
+//
+// LVX104's lesson one level up. An escape hatch has a population, and this
+// population spans two gates that cannot see each other.
+//
+// THE KEY IS THE PROPOSAL WITHOUT THE NAME. A spelling correction changes
+// client_name on every retry -- that is the whole point of the exchange -- so a
+// fingerprint including the name would reset the budget on each correction and
+// rebuild the exact livelock this closes. A different TIME is a new proposal
+// and does reset it, which is what LVX104 requires.
+// ---------------------------------------------------------------------------
+describe("the shared attempt budget — refusals across gates, counted together", () => {
+  // Production merges capabilityState per capability (lib/capabilities/effects.js
+  // mergeCapabilityState), it does not replace it. Two different gates write
+  // different fields on the same pack, so a test that replaced would lose one
+  // gate's bookkeeping and prove nothing.
+  const merge = (prior, patch) => {
+    const out = { ...prior };
+    for (const [cap, value] of Object.entries(patch || {})) {
+      out[cap] = { ...(out[cap] || {}), ...value };
+    }
+    return out;
+  };
+
+  const attempt = ({ capabilityState, turn, said, settled, name = "Marcus Bell", when = FUTURE_SLOT }) =>
+    executeToolCall(
+      { id: "fc1", name: "book_appointment", args: { client_name: name, scheduled_at: when, notes: "consultation" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState,
+        config: {},
+        spellingSettled: settled,
+        callerTurnCount: turn,
+        lastCallerText: said,
+        lastReplyText: READ_BACK,
+      }
+    );
+
+  // The sequence alternates on purpose. Three refusals from ONE gate would trip
+  // that gate's own ceiling of two first, which is correct and is not what this
+  // is about -- the shared budget exists only for the case where no single gate
+  // ever sees enough refusals to act.
+  const alternateToCeiling = async (nameFor = () => "Marcus Bell") => {
+    let cs = {};
+    // spelling refuses: the caller agreed, so write-order is satisfied.
+    const a = await attempt({ capabilityState: cs, turn: 4, said: "Yes", settled: false, name: nameFor(0) });
+    expect(a.functionResponse.response.success).toBe(false);
+    cs = merge(cs, a.stateEffects.capabilityState);
+
+    // write-order refuses: no agreement this time.
+    const b = await attempt({ capabilityState: cs, turn: 5, said: "No, hang on", settled: true, name: nameFor(1) });
+    expect(b.functionResponse.response.success).toBe(false);
+    cs = merge(cs, b.stateEffects.capabilityState);
+
+    // spelling again. Shared count is now three; neither gate is at its own two.
+    const c = await attempt({ capabilityState: cs, turn: 6, said: "Yes", settled: false, name: nameFor(2) });
+    expect(c.functionResponse.response.success).toBe(false);
+    return merge(cs, c.stateEffects.capabilityState);
+  };
+
+  it("releases the write once the ATTEMPT budget is spent, whichever gates refused", async () => {
+    const cs = await alternateToCeiling();
+
+    clearStats();
+    // The write-order gate would refuse again on its own count, which is one of
+    // its permitted two. The shared budget is the only thing that ends this.
+    const d = await attempt({ capabilityState: cs, turn: 7, said: "No, hang on", settled: true });
+
+    expect(d.functionResponse.response.success).toBe(true);
+    expect(counters().write_attempt_budget_released).toBe(1);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+  });
+
+  it("does NOT reset when only the NAME changes — that is the spelling exchange", async () => {
+    // The call that forced this. The caller spells, the model retries with a
+    // different client_name, and if that counted as a new proposal the budget
+    // would restart on every correction and never run out.
+    const names = ["Venkat Yalavarupu", "Venkat Ayalavarupu", "Venkat Yalavarapu"];
+    const cs = await alternateToCeiling((i) => names[i]);
+
+    clearStats();
+    const released = await attempt({
+      capabilityState: cs,
+      turn: 7,
+      said: "No, hang on",
+      settled: true,
+      name: "Venkat Yalavarapu",
+    });
+    expect(released.functionResponse.response.success).toBe(true);
+    expect(counters().write_attempt_budget_released).toBe(1);
+  });
+
+  it("DOES reset when the caller proposes a different time", async () => {
+    // LVX104, preserved. A caller changing their mind is the opposite of a
+    // livelock: there is no trap, because they can end it by agreeing.
+    const cs = await alternateToCeiling();
+
+    clearStats();
+    const other = `${new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10)}T14:00:00`;
+    const fresh = await attempt({
+      capabilityState: cs,
+      turn: 7,
+      said: "No, hang on",
+      settled: true,
+      when: other,
+    });
+    // Still refused, and refused for the RIGHT reason: a new proposal gets a
+    // new budget rather than inheriting a spent one.
+    expect(fresh.functionResponse.response.success).toBe(false);
+    expect(counters().write_attempt_budget_released).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A CHANGE TOOL WITH NOTHING TO CHANGE IS NOT A CONSENT PROBLEM.
+//
+// Call CA0c8ce7, 2026-09-10. At 20:18:58 the assistant said "Perfect, I have
+// you down for 9 AM tomorrow" with nothing booked -- caught, correctly, as a
+// claim with no action behind it. But the model now believed the appointment
+// existed, so when the name came out wrong it reached for
+// correct_appointment_name instead of book_appointment. TWICE, on a row that
+// did not exist.
+//
+// The write-order gate refused both, and its refusal says "read the details
+// back and ask whether to go ahead" -- advice for a write that could happen.
+// The model dutifully re-asked, was refused again, and then told the caller
+// "I'm not sure why it's not updating" and offered a callback. Two and a half
+// minutes to reach a booking that then worked first time.
+//
+// The pack already has the right words for this ("no upcoming appointments on
+// record ... there is nothing to change"). It just never got to say them,
+// because a gate about CONSENT ran ahead of the tool that knows the operation
+// is impossible. Order of refusals is the fix, not new refusal text.
+// ---------------------------------------------------------------------------
+describe("a change tool with no appointment to change", () => {
+  const correct = (over = {}) =>
+    executeToolCall(
+      { id: "fc1", name: "correct_appointment_name", args: { client_name: "Venkat Ilovarpu" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState: {},
+        config: {},
+        spellingSettled: true,
+        callerTurnCount: 4,
+        // The caller has nothing booked. This is the state the call was in.
+        callerContext: { callCount: 1, upcomingAppointments: [] },
+        lastCallerText: "No, that's still wrong",
+        lastReplyText: "May I go ahead and confirm the appointment under that name?",
+        ...over,
+      }
+    );
+
+  it("says there is nothing to change, not 'shall I go ahead'", async () => {
+    const { functionResponse } = await correct();
+    const message = String(functionResponse.response.message || "");
+
+    expect(functionResponse.response.success).toBe(false);
+    // The useful reason.
+    expect(message).toMatch(/nothing to change|no upcoming appointments/i);
+    // NOT the consent refusal, which sends the model back to ask for a
+    // go-ahead on an operation that cannot succeed however many times it asks.
+    expect(message).not.toMatch(/shall i go ahead/i);
+  });
+
+  it("does not spend a write-order refusal on it", async () => {
+    // The budget is for writes that could land. Spending it here is what let
+    // three refusals stack up on one caller.
+    clearStats();
+    await correct();
+    expect(counters().write_order_refused).toBeFalsy();
+  });
+
+  it("still gates a change tool that DOES have a target", async () => {
+    // The guard must not become a way around the write-order gate. With a real
+    // appointment to act on, consent is required exactly as before.
+    clearStats();
+    const { functionResponse } = await correct({
+      callerContext: {
+        callCount: 1,
+        upcomingAppointments: [
+          { id: "appt-1", client_name: "Venkat", scheduled_at: FUTURE_SLOT_ISO },
+        ],
+      },
+    });
+    expect(functionResponse.response.success).toBe(false);
+    expect(counters().write_order_refused).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE MODEL ASKS AND ACTS IN THE SAME BREATH, AND THE CALLER PAYS FOR IT TWICE.
+//
+// Call CA6b662e, 2026-09-11:
+//
+//   00:29:18.254  "...so that's Nithin Dodla, spelled N I T H I N... Is that
+//                  correct?"
+//   00:29:18.270  book_appointment                            <- 16 ms later
+//
+// It never waited. So `callerAgreed` was false because the caller had not been
+// given a chance to agree, the gate refused — correctly — and the refusal then
+// told the model to "read the details back and ask whether to go ahead", which
+// it dutifully did A SECOND TIME. The caller confirmed the same booking twice
+// and was told in between that "the booking didn't go through".
+//
+// Two fixes, and the split between them is the point:
+//
+//   1. When the read-back HAS happened and only the yes is missing, say so.
+//      Telling it to read back again is what produces the second confirmation.
+//   2. Stash the write so it can be re-issued in code when the caller does
+//      agree, through retryPendingWrite -> handleToolCall, where every gate
+//      still applies.
+//
+// STASHED ONLY WHEN readBackMade IS TRUE. If nothing was ever read back, a
+// later "yes" is agreement to something the caller never heard — which is the
+// exact write this gate exists to stop. LVX77 is the standing warning here: a
+// booking retry once wrote a name the caller never said.
+// ---------------------------------------------------------------------------
+describe("a refusal that only lacks the yes", () => {
+  const attempt = (over = {}) =>
+    executeToolCall(
+      { id: "fc1", name: "book_appointment", args: { client_name: "Marcus Bell", scheduled_at: FUTURE_SLOT, notes: "consultation" } },
+      {
+        businessId: "biz-1",
+        callerPhone: "+15551234567",
+        callId: "call-1",
+        integrations: [],
+        capabilityState: {},
+        config: {},
+        spellingSettled: true,
+        callerTurnCount: 4,
+        // Non-empty and non-affirmative: the whole write-order block is skipped
+        // when lastCallerText is empty (that is what keeps the cascade
+        // byte-identical), so an empty fixture tests nothing. This is what the
+        // caller had actually last said on CA6b662e — spelling their name.
+        lastCallerText: "N I T H I N D O D L A",
+        lastReplyText: READ_BACK,
+        ...over,
+      }
+    );
+
+  it("does not tell the model to read it back again", async () => {
+    const { functionResponse } = await attempt();
+    const message = String(functionResponse.response.message || "");
+
+    expect(functionResponse.response.success).toBe(false);
+    // The instruction that produced the second confirmation.
+    expect(message).not.toMatch(/read the details back/i);
+    // What it should say instead.
+    expect(message).toMatch(/already read/i);
+    expect(message).toMatch(/wait/i);
+    // Unchanged, and the model ignored it three calls running — but removing it
+    // would be conceding the point.
+    expect(message).toMatch(/do not tell the caller anything went wrong/i);
+  });
+
+  it("stashes the write so it can be re-issued once the caller agrees", async () => {
+    const { stateEffects } = await attempt();
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toEqual({
+      name: "book_appointment",
+      args: { client_name: "Marcus Bell", scheduled_at: FUTURE_SLOT, notes: "consultation" },
+      // WHICH gate held it. A spelling-gate stash carries the unspelled name
+      // and must not be released by a "yes"; this one was held for that yes.
+      reason: "write_order",
+    });
+  });
+
+  it("does NOT stash when nothing was read back", async () => {
+    // The dangerous half. With no read-back, a later "yes" is agreement to
+    // something the caller never heard, and re-issuing on it would write
+    // exactly what this gate exists to prevent.
+    const { functionResponse, stateEffects } = await attempt({
+      lastReplyText: "You have three appointments coming up.",
+    });
+    expect(functionResponse.response.success).toBe(false);
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toBeFalsy();
+    // And this one SHOULD still be told to read the details back.
+    expect(String(functionResponse.response.message)).toMatch(/read the details back/i);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// CAb4c0eb, 2026-09-17 -- the booking the caller agreed to and never got.
+//
+// This is the whole chain in two assertions, because the phrasing fix in
+// lib/voice/strings.js is only half of why that call lost a row. The other half
+// is HERE: the pendingWrite stash is conditioned on `readBackMade`, so a
+// read-back the regex does not recognise does not merely cost one refusal -- it
+// withholds the stash, and retryPendingWrite then has nothing to re-issue when
+// the caller says yes.
+//
+// Live sequence, abridged:
+//
+//   01:36:51  book_appointment  -> write_order_refused (correctly: nothing read
+//                                 back, nothing agreed)
+//   01:36:58  "One second, I have that down for your free strategy call at 1 PM
+//              on Friday, September 18th. Shall we book that in for you?"
+//   01:37:04  book_appointment  -> write_order_refused, readBackMade=false
+//   ~01:37:06 caller: "Yes please"      <- nothing stashed, nothing retried
+//   01:37:15  "Perfect, I've booked that in for you"   <- no row exists
+//
+// The first test is what makes the second one reachable.
+// ---------------------------------------------------------------------------
+describe("the read-back that lost a booking", () => {
+  // Verbatim from live_debug_assistant_turn. Do not tidy it.
+  const LIVE_READ_BACK =
+    "One second, I have that down for your free strategy call at 1 PM on Friday, September 18th. Shall we book that in for you?";
+
+  it("stashes the write for retry when the caller has not answered yet", async () => {
+    // The model asked and called the tool six seconds later, while its own
+    // question was still playing. Refusing is RIGHT -- no agreement existed yet.
+    // What must not happen is losing the write: the caller is about to say yes.
+    const { functionResponse, stateEffects } = await book(
+      ctx({ said: "Sorry, could you say that again?", replied: LIVE_READ_BACK })
+    );
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The stash, and its reason. `write_order` is what lets a later "yes"
+    // release it while a SPELLING stash -- whose args carry an unspelled name --
+    // stays sealed.
+    expect(stateEffects.capabilityState.appointments.pendingWrite).toMatchObject({
+      name: "book_appointment",
+      reason: "write_order",
+    });
+  });
+
+  it("writes the row once the caller agrees", async () => {
+    const { functionResponse } = await book(ctx({ said: "Yes please", replied: LIVE_READ_BACK }));
+
+    expect(functionResponse.response.success).toBe(true);
+    expect(mockCreateAppointment).toHaveBeenCalled();
+    expect(counters().write_order_refused).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX144 — SAYING THE TIME BACK IS AGREEING TO IT.
+//
+// CA239c7cd2, production, 2026-09-18:
+//
+//   05:09:29  A: "Shall we reschedule your appointment to Thursday,
+//                 September 24 at 2:00 PM?"
+//   05:09:38  caller: "the Thursday 2 p.m."
+//   05:09:42  probe: readback_now=TRUE  agreed_now=FALSE  -> REFUSED
+//
+// changed_rows: 0. The caller answered a direct question by naming the exact
+// slot back, which is how people confirm times out loud, and the gate read it
+// as no answer at all. Four of the eight refusals in the corpus that had a
+// read-back standing were agreements a person would have acted on; this is one
+// of them, and it is the one the owner heard.
+//
+// WHAT MAKES THIS SAFE ENOUGH TO SHIP, stated because it is the first change to
+// this gate that puts risk on the WRITE side. Every error the gate has made in
+// 50 recorded attempts has been a wrong refusal; there has never been a wrong
+// write. So the bar is not "is this free" but "is the new failure bounded":
+//
+//   - the slot must be the one being WRITTEN, generated by
+//     lib/voice/slotMention.js rather than parsed out of the caller's speech.
+//     A different time, or the same time on a different weekday, does not match.
+//   - the read-back requirement is untouched. This only ever supplies the
+//     second half of `readBackMade && callerAgreed`.
+//   - a withdrawal still wins. "No, ten a.m." names the slot and is not consent.
+//   - a QUESTION is not an answer. "Ten a.m.?" is the caller checking, and the
+//     matcher cannot tell it from agreement -- so the question mark is read
+//     directly. This is the known hole and it is closed by punctuation, which
+//     is the one thing on this path that is not a judgement.
+//
+// The owner accepted this trade explicitly on 2026-09-18: "we can always test
+// and see in practice and if it is not good we can change".
+// ---------------------------------------------------------------------------
+describe("LVX144 — the caller restates the time instead of saying yes", () => {
+  const SLOT_READ_BACK = "Just to confirm, shall I book that for ten a.m. for you?";
+
+  it("writes when the caller names the slot being written", async () => {
+    const res = await book(ctx({ said: "Ten a.m.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(true);
+  });
+
+  it("writes on the shape from the call — an article in front of it", async () => {
+    const res = await book(ctx({ said: "the ten a.m.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(true);
+  });
+
+  it("REFUSES when the caller names a DIFFERENT time", async () => {
+    const res = await book(ctx({ said: "Eleven a.m.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(false);
+  });
+
+  it("REFUSES when the caller is asking rather than agreeing", async () => {
+    const res = await book(ctx({ said: "Ten a.m.?", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(false);
+  });
+
+  it("REFUSES when the caller names the slot and withdraws", async () => {
+    const res = await book(ctx({ said: "No, ten a.m. is no good.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(false);
+  });
+
+  it("REFUSES when the caller says something that names no time at all", async () => {
+    // "I love it." from CAd97855 -- a real agreement this still cannot read.
+    // Recorded rather than fixed: it names nothing, so there is no slot to
+    // compare, and the honest answer is a refusal the caller clears by
+    // answering again.
+    const res = await book(ctx({ said: "I love it.", replied: SLOT_READ_BACK }));
+    expect(res.functionResponse.response.success).toBe(false);
+  });
+
+  it("still refuses without a read-back, however clearly the time is named", async () => {
+    const res = await book(ctx({ said: "Ten a.m.", replied: "What time suits you?" }));
+    expect(res.functionResponse.response.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX144's INSTRUMENT. A rule that decides writes and leaves no trace on the
+// call it decided is a rule nobody can audit.
+//
+// It shipped as a bare `bumpCounter("write_consent_restated_slot")` and nothing
+// else. That counter is not a field of live_call_summary and bumpCounter emits
+// no log line, so on CA7ec8af -- the first call carrying the rule -- there was
+// no way to tell from the log or the summary whether it had fired. It had not,
+// as it happens, but that was established by reading `agreed_now` on each probe
+// and reasoning backwards, which is exactly what the probe exists to avoid.
+//
+// `restated_slot` is logged on EVERY attempt rather than only the ones it
+// changes, because the pair is what carries the meaning:
+//
+//   agreed_now=false restated_slot=true   this write happened because of LVX144
+//   agreed_now=true  restated_slot=true   it would have gone through anyway
+//   agreed_now=false restated_slot=false  refused, and not for this reason
+//
+// A counter alone collapses the first two, and the first is the population the
+// owner asked to be able to watch.
+// ---------------------------------------------------------------------------
+describe("LVX144's probe line", () => {
+  const SLOT_READ_BACK = "Just to confirm, shall I book that for ten a.m. for you?";
+  const probes = () =>
+    log.info.mock.calls.filter((c) => c[0] === "write_consent_probe").map((c) => c[1]);
+
+  it("records the restatement that carried the write", async () => {
+    await book(ctx({ said: "Ten a.m.", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p).toBeTruthy();
+    expect(p.agreed_now).toBe(false);
+    expect(p.restated_slot).toBe(true);
+  });
+
+  it("records it as false when the caller said a plain yes", async () => {
+    await book(ctx({ said: "Yes", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.agreed_now).toBe(true);
+    expect(p.restated_slot).toBe(false);
+  });
+
+  it("records it as false when the caller named a different time", async () => {
+    await book(ctx({ said: "Eleven a.m.", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.agreed_now).toBe(false);
+    expect(p.restated_slot).toBe(false);
+  });
+
+  it("records it as false when the caller was asking", async () => {
+    await book(ctx({ said: "Ten a.m.?", replied: SLOT_READ_BACK }));
+    const p = probes().at(-1);
+    expect(p.restated_slot).toBe(false);
+  });
+});

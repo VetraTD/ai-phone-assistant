@@ -16,7 +16,7 @@ export const LANDING_TRANSLATIONS = {
     navPricing: "Pricing",
     navFaq: "FAQ",
     navLogin: "Log in",
-    getStarted: "Get started",
+    requestAccess: "Request access",
     mainNav: "Main",
     skipToContent: "Skip to content",
 
@@ -99,7 +99,7 @@ export const LANDING_TRANSLATIONS = {
       {
         id: "dashboard",
         title: "Every call, in one place.",
-        body: "A summary, the full transcript, and how the caller felt, for every call. Filter, export, and sync bookings to Google Calendar.",
+        body: "A summary, the full transcript, and how the caller felt, for every call. Filter and export every call.",
       },
     ],
     fragBookLabel: "New booking",
@@ -181,7 +181,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "Do I need a new phone number?",
-        a: "No. Keep your existing number and forward unanswered calls to Vetra through your phone provider. Your phone rings first, and Vetra picks up if you can't. We'll help you set it up. Prefer a separate line? Choose a new local or toll-free number when you sign up.",
+        a: "No. Keep your existing number and forward unanswered calls to Vetra through your phone provider. Your phone rings first, and Vetra picks up if you can't. We'll help you set it up. Prefer a separate line? We can set you up with a new local or toll-free number.",
       },
       {
         q: "Can calls be transferred to me?",
@@ -197,7 +197,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "Does it work with my calendar?",
-        a: "Bookings can be synced to Google Calendar from your dashboard.",
+        a: "Yes. Vetra checks your availability before it books, so it never double-books.",
       },
       {
         q: "Does it work with GoHighLevel?",
@@ -232,7 +232,7 @@ export const LANDING_TRANSLATIONS = {
     navPricing: "Precios",
     navFaq: "Preguntas",
     navLogin: "Iniciar sesión",
-    getStarted: "Empezar",
+    requestAccess: "Solicitar acceso",
     mainNav: "Principal",
     skipToContent: "Saltar al contenido",
 
@@ -314,7 +314,7 @@ export const LANDING_TRANSLATIONS = {
       {
         id: "dashboard",
         title: "Todas las llamadas, en un solo lugar.",
-        body: "Un resumen, la transcripción completa y el tono del cliente en cada llamada. Filtra, exporta y sincroniza reservas con Google Calendar.",
+        body: "Un resumen, la transcripción completa y el tono del cliente en cada llamada. Filtra y exporta cada llamada.",
       },
     ],
     fragBookLabel: "Nueva reserva",
@@ -396,7 +396,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "¿Necesito un número nuevo?",
-        a: "No. Conserva tu número actual y desvía a Vetra las llamadas no contestadas a través de tu proveedor de telefonía. Tu teléfono suena primero y Vetra contesta si tú no puedes. Te ayudamos a configurarlo. ¿Prefieres una línea aparte? Elige un número local o gratuito nuevo al registrarte.",
+        a: "No. Conserva tu número actual y desvía a Vetra las llamadas no contestadas a través de tu proveedor de telefonía. Tu teléfono suena primero y Vetra contesta si tú no puedes. Te ayudamos a configurarlo. ¿Prefieres una línea aparte? Podemos darte un número local o gratuito nuevo.",
       },
       {
         q: "¿Me pueden transferir las llamadas?",
@@ -412,7 +412,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "¿Funciona con mi calendario?",
-        a: "Las reservas se pueden sincronizar con Google Calendar desde tu panel.",
+        a: "Sí. Vetra revisa tu disponibilidad antes de reservar, así que nunca agenda dos citas a la misma hora.",
       },
       {
         q: "¿Funciona con GoHighLevel?",
@@ -447,7 +447,7 @@ export const LANDING_TRANSLATIONS = {
     navPricing: "Tarifs",
     navFaq: "FAQ",
     navLogin: "Connexion",
-    getStarted: "Commencer",
+    requestAccess: "Demander l'accès",
     mainNav: "Principale",
     skipToContent: "Aller au contenu",
 
@@ -529,7 +529,7 @@ export const LANDING_TRANSLATIONS = {
       {
         id: "dashboard",
         title: "Tous les appels, au même endroit.",
-        body: "Un résumé, la transcription complète et le ressenti de l'appelant, pour chaque appel. Filtrez, exportez et synchronisez les rendez-vous avec Google Agenda.",
+        body: "Un résumé, la transcription complète et le ressenti de l'appelant, pour chaque appel. Filtrez et exportez chaque appel.",
       },
     ],
     fragBookLabel: "Nouveau rendez-vous",
@@ -611,7 +611,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "Ai-je besoin d'un nouveau numéro ?",
-        a: "Non. Gardez votre numéro actuel et renvoyez les appels sans réponse vers Vetra via votre opérateur. Votre téléphone sonne d'abord, et Vetra répond si vous ne pouvez pas. Nous vous aidons à le configurer. Vous préférez une ligne séparée ? Choisissez un nouveau numéro local ou gratuit à l'inscription.",
+        a: "Non. Gardez votre numéro actuel et renvoyez les appels sans réponse vers Vetra via votre opérateur. Votre téléphone sonne d'abord, et Vetra répond si vous ne pouvez pas. Nous vous aidons à le configurer. Vous préférez une ligne séparée ? Nous pouvons vous fournir un nouveau numéro local ou gratuit.",
       },
       {
         q: "Les appels peuvent-ils m'être transférés ?",
@@ -627,7 +627,7 @@ export const LANDING_TRANSLATIONS = {
       },
       {
         q: "Est-ce compatible avec mon agenda ?",
-        a: "Les rendez-vous peuvent être synchronisés avec Google Agenda depuis votre tableau de bord.",
+        a: "Oui. Vetra vérifie vos disponibilités avant de réserver et ne fait jamais de double réservation.",
       },
       {
         q: "Est-ce compatible avec GoHighLevel ?",

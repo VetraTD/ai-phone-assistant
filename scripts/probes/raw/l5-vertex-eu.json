@@ -1,0 +1,323 @@
+{
+  "summary": {
+    "probe": "L5",
+    "project": "vetra-uk-edc8ca",
+    "location": "europe-west1",
+    "model": "gemini-live-2.5-flash-native-audio",
+    "n": 5,
+    "fully_working_runs": 5,
+    "turn1_ok_runs": 5,
+    "turn2_silence_reproduced": false,
+    "connect_failures": 0,
+    "errors": [],
+    "usd": 0.0888955
+  },
+  "runs": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "turn": 1,
+          "label": "clean_open",
+          "model_turn": true,
+          "model_leg_ms": 1138,
+          "audio_chunks": 17,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new patient or an existing one?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "turn": 2,
+          "label": "rep_time_q",
+          "model_turn": true,
+          "model_leg_ms": 895,
+          "audio_chunks": 6,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you an existing patient?",
+          "tools": []
+        },
+        {
+          "turn": 3,
+          "label": "rep_digits",
+          "model_turn": true,
+          "model_leg_ms": 938,
+          "audio_chunks": 20,
+          "heard": "It's 555-1234.",
+          "said": "I'm sorry, I don't have the ability to send text messages. Are you an existing patient?",
+          "tools": []
+        },
+        {
+          "turn": 4,
+          "label": "rep_confirm",
+          "model_turn": true,
+          "model_leg_ms": 1058,
+          "audio_chunks": 10,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Is that a new or existing patient?",
+          "tools": []
+        }
+      ],
+      "turn1_ok": true,
+      "turns_2_4_ok": true,
+      "silent_turns": [],
+      "usage": {
+        "text_in": 15763,
+        "audio_in": 1089,
+        "text_out": 105,
+        "audio_out": 316,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.015150499999999999,
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "turn": 1,
+          "label": "clean_open",
+          "model_turn": true,
+          "model_leg_ms": 1113,
+          "audio_chunks": 18,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "turn": 2,
+          "label": "rep_time_q",
+          "model_turn": true,
+          "model_leg_ms": 867,
+          "audio_chunks": 7,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you an existing patient?",
+          "tools": []
+        },
+        {
+          "turn": 3,
+          "label": "rep_digits",
+          "model_turn": true,
+          "model_leg_ms": 980,
+          "audio_chunks": 15,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I missed that. Are you an existing or new patient?",
+          "tools": []
+        },
+        {
+          "turn": 4,
+          "label": "rep_confirm",
+          "model_turn": true,
+          "model_leg_ms": 1056,
+          "audio_chunks": 9,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Are you a new or existing patient?",
+          "tools": []
+        }
+      ],
+      "turn1_ok": true,
+      "turns_2_4_ok": true,
+      "silent_turns": [],
+      "usage": {
+        "text_in": 15733,
+        "audio_in": 1040,
+        "text_out": 94,
+        "audio_out": 285,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0145945,
+      "error": null
+    },
+    {
+      "run": 3,
+      "turns": [
+        {
+          "turn": 1,
+          "label": "clean_open",
+          "model_turn": true,
+          "model_leg_ms": 1094,
+          "audio_chunks": 17,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new patient, or have you been here before?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "turn": 2,
+          "label": "rep_time_q",
+          "model_turn": true,
+          "model_leg_ms": 1339,
+          "audio_chunks": 23,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Which service are you looking for?Yes, we have an opening at 10:00 AM or 2:30 PM that day.",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "turn": 3,
+          "label": "rep_digits",
+          "model_turn": true,
+          "model_leg_ms": 965,
+          "audio_chunks": 31,
+          "heard": "It's 555-1234.",
+          "said": "Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.calling Brightwork Family Dental, have a great day!",
+          "tools": [
+            "end_call"
+          ]
+        },
+        {
+          "turn": 4,
+          "label": "rep_confirm",
+          "model_turn": true,
+          "model_leg_ms": 1053,
+          "audio_chunks": 18,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Great, I'll schedule that for you. Are you a new or existing patient?",
+          "tools": []
+        }
+      ],
+      "turn1_ok": true,
+      "turns_2_4_ok": true,
+      "silent_turns": [],
+      "usage": {
+        "text_in": 22590,
+        "audio_in": 1904,
+        "text_out": 194,
+        "audio_out": 513,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.023551000000000002,
+      "error": null
+    },
+    {
+      "run": 4,
+      "turns": [
+        {
+          "turn": 1,
+          "label": "clean_open",
+          "model_turn": true,
+          "model_leg_ms": 1093,
+          "audio_chunks": 16,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or an existing patient?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "turn": 2,
+          "label": "rep_time_q",
+          "model_turn": true,
+          "model_leg_ms": 1040,
+          "audio_chunks": 9,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you a new or an existing patient?",
+          "tools": []
+        },
+        {
+          "turn": 3,
+          "label": "rep_digits",
+          "model_turn": true,
+          "model_leg_ms": 864,
+          "audio_chunks": 18,
+          "heard": "It's 555-1234.",
+          "said": "I see. Are you looking to book an appointment as a new or existing patient?",
+          "tools": []
+        },
+        {
+          "turn": 4,
+          "label": "rep_confirm",
+          "model_turn": true,
+          "model_leg_ms": 1265,
+          "audio_chunks": 27,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Is that as a new or an existing patient?That time is available. Could you please provide your full name and date of birth?",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        }
+      ],
+      "turn1_ok": true,
+      "turns_2_4_ok": true,
+      "silent_turns": [],
+      "usage": {
+        "text_in": 19048,
+        "audio_in": 1561,
+        "text_out": 145,
+        "audio_out": 401,
+        "cached_in": 0,
+        "turns_billed": 6
+      },
+      "usd": 0.019309,
+      "error": null
+    },
+    {
+      "run": 5,
+      "turns": [
+        {
+          "turn": 1,
+          "label": "clean_open",
+          "model_turn": true,
+          "model_leg_ms": 1139,
+          "audio_chunks": 15,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "turn": 2,
+          "label": "rep_time_q",
+          "model_turn": true,
+          "model_leg_ms": 965,
+          "audio_chunks": 14,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you looking for this Tuesday, September 8th, or a different Tuesday?",
+          "tools": []
+        },
+        {
+          "turn": 3,
+          "label": "rep_digits",
+          "model_turn": true,
+          "model_leg_ms": 911,
+          "audio_chunks": 20,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I missed that. Are you looking for this Tuesday, September 8th, or a later date?",
+          "tools": []
+        },
+        {
+          "turn": 4,
+          "label": "rep_confirm",
+          "model_turn": true,
+          "model_leg_ms": 1029,
+          "audio_chunks": 21,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Okay, I'll schedule you for a 10:00 AM appointment this Tuesday, September 8th. Is that correct?",
+          "tools": []
+        }
+      ],
+      "turn1_ok": true,
+      "turns_2_4_ok": true,
+      "silent_turns": [],
+      "usage": {
+        "text_in": 15745,
+        "audio_in": 1088,
+        "text_out": 135,
+        "audio_out": 407,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.0162905,
+      "error": null
+    }
+  ]
+}

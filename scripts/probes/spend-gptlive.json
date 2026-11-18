@@ -1,0 +1,5396 @@
+{
+  "cap_usd": 25,
+  "spent_usd": 21.734503,
+  "entries": [
+    {
+      "at": "2026-09-15T05:17:06.776Z",
+      "probe": "G1b",
+      "arm": "smoke",
+      "model": "gpt-live-1",
+      "usd": 0.007575833333333333,
+      "seconds": 9.091,
+      "estimated": true,
+      "note": "first socket; protocol validation"
+    },
+    {
+      "at": "2026-09-15T05:17:53.657Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-clean_open",
+      "model": "gpt-live-1",
+      "usd": 0.00628,
+      "seconds": 7.536,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:01.323Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-trailing_lead_in",
+      "model": "gpt-live-1",
+      "usd": 0.006380833333333334,
+      "seconds": 7.657,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:08.542Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-no_terminal_punct",
+      "model": "gpt-live-1",
+      "usd": 0.006010833333333334,
+      "seconds": 7.213,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:29.730Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-name_spelling",
+      "model": "gpt-live-1",
+      "usd": 0.017654166666666665,
+      "seconds": 21.185,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:36.910Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_time_q",
+      "model": "gpt-live-1",
+      "usd": 0.005980833333333334,
+      "seconds": 7.177,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:44.021Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_confirm",
+      "model": "gpt-live-1",
+      "usd": 0.005923333333333333,
+      "seconds": 7.108,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:51.769Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_digits",
+      "model": "gpt-live-1",
+      "usd": 0.006454166666666667,
+      "seconds": 7.745,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:18:57.676Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-rep_close",
+      "model": "gpt-live-1",
+      "usd": 0.004919166666666666,
+      "seconds": 5.903,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:05.274Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-barge_in",
+      "model": "gpt-live-1",
+      "usd": 0.006329166666666667,
+      "seconds": 7.595,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:14.749Z",
+      "probe": "G2",
+      "arm": "client",
+      "label": "g2-partial_digits",
+      "model": "gpt-live-1",
+      "usd": 0.007893333333333334,
+      "seconds": 9.472,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:19:58.277Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-1",
+      "model": "gpt-live-1",
+      "usd": 0.008738333333333334,
+      "seconds": 10.486,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:05.314Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-1",
+      "model": "gpt-live-1",
+      "usd": 0.005854166666666667,
+      "seconds": 7.025,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:17.213Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-2",
+      "model": "gpt-live-1",
+      "usd": 0.0099125,
+      "seconds": 11.895,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:24.292Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-2",
+      "model": "gpt-live-1",
+      "usd": 0.005895833333333334,
+      "seconds": 7.075,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:34.428Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-name_spelling-3",
+      "model": "gpt-live-1",
+      "usd": 0.008444166666666666,
+      "seconds": 10.133,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:20:41.451Z",
+      "probe": "G2r",
+      "arm": "client",
+      "label": "g2r-clean_open-3",
+      "model": "gpt-live-1",
+      "usd": 0.0058491666666666674,
+      "seconds": 7.019,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:08.869Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.006879166666666668,
+      "seconds": 8.255,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:17.070Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.006823333333333334,
+      "seconds": 8.188,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:25.236Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.006799166666666668,
+      "seconds": 8.159,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:33.385Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.006788333333333335,
+      "seconds": 8.146,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:41.568Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.006816666666666667,
+      "seconds": 8.18,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:49.791Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.006848333333333334,
+      "seconds": 8.218,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:21:58.059Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.006886666666666667,
+      "seconds": 8.264,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:06.234Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.006807500000000001,
+      "seconds": 8.169,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:14.513Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.006895,
+      "seconds": 8.274,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:22:22.740Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.006852500000000001,
+      "seconds": 8.223,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-15T05:23:40.444Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:04.075Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:27.671Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:24:51.250Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:25:14.775Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:25:38.396Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:02.161Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:25.856Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:26:49.510Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:27:13.171Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:28:25.551Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:28:49.310Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:29:12.875Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:29:36.527Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:00.063Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-no_terminal_punct-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:23.662Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:30:47.328Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:10.934Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:34.615Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:31:58.226Z",
+      "probe": "G3",
+      "arm": "client",
+      "label": "g3-trailing_lead_in-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:32:59.832Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:33:20.231Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.010434800000000001,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:33:46.686Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:05.825Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.011065333333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:24.313Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-2",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:34:46.665Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-2",
+      "model": "gpt-live-1",
+      "usd": 0.0102708,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:04.831Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-3",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:25.817Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-3",
+      "model": "gpt-live-1",
+      "usd": 0.009710666666666668,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:35:43.971Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-4",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:05.167Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-4",
+      "model": "gpt-live-1",
+      "usd": 0.011868466666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:23.379Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-5",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:36:45.879Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-5",
+      "model": "gpt-live-1",
+      "usd": 0.010287600000000001,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:04.018Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-6",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:25.505Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-6",
+      "model": "gpt-live-1",
+      "usd": 0.011060733333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:37:43.858Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-7",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:03.492Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-7",
+      "model": "gpt-live-1",
+      "usd": 0.011247933333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:21.610Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-8",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:40.956Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-8",
+      "model": "gpt-live-1",
+      "usd": 0.011161333333333334,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:38:59.118Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-9",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:39:20.524Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-9",
+      "model": "gpt-live-1",
+      "usd": 0.010987933333333333,
+      "seconds": 10,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:39:38.753Z",
+      "probe": "G4",
+      "arm": "client",
+      "label": "g4-C-10",
+      "model": "gpt-live-1",
+      "usd": 0.009166666666666667,
+      "seconds": 11,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:40:01.247Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-10",
+      "model": "gpt-live-1",
+      "usd": 0.0102582,
+      "seconds": 9,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:41:08.116Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-1",
+      "model": "gpt-live-1",
+      "usd": 0.008504466666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:41:34.536Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-2",
+      "model": "gpt-live-1",
+      "usd": 0.008425266666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:00.800Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-3",
+      "model": "gpt-live-1",
+      "usd": 0.0069772666666666665,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:27.306Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-4",
+      "model": "gpt-live-1",
+      "usd": 0.008316466666666668,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:42:54.076Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-5",
+      "model": "gpt-live-1",
+      "usd": 0.008356866666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:43:20.257Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-6",
+      "model": "gpt-live-1",
+      "usd": 0.008397466666666666,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:43:46.624Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-7",
+      "model": "gpt-live-1",
+      "usd": 0.008452466666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:44:12.912Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-8",
+      "model": "gpt-live-1",
+      "usd": 0.007016866666666666,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:44:39.393Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-9",
+      "model": "gpt-live-1",
+      "usd": 0.008547266666666668,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:45:05.681Z",
+      "probe": "G4",
+      "arm": "responses",
+      "label": "g4-R-10",
+      "model": "gpt-live-1",
+      "usd": 0.006789866666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:45:52.097Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-1",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:46:13.877Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-2",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:46:44.977Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-3",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:06.656Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-4",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:28.501Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-disclosure-5",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:47:59.603Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-1",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:48:30.653Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-2",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:48:52.672Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-3",
+      "model": "gpt-live-1",
+      "usd": 0.006666666666666667,
+      "seconds": 8,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:49:23.640Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-4",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-15T05:49:54.732Z",
+      "probe": "G5",
+      "arm": "client",
+      "label": "g5-readback-5",
+      "model": "gpt-live-1",
+      "usd": 0.011666666666666667,
+      "seconds": 14,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:23:03.312Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:23:31.697Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:23:59.565Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:24:36.578Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:25:04.508Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:25:32.406Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-1",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:26:00.336Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-2",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:26:28.392Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-2",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:26:56.267Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-2",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:27:24.260Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-3",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:27:52.115Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-3",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:28:20.067Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-3",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:28:47.120Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-4",
+      "model": "gpt-live-1",
+      "usd": 0.004166666666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:29:15.068Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-4",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:29:42.332Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-4",
+      "model": "gpt-live-1",
+      "usd": 0.004166666666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:30:10.218Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-5",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:30:38.097Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-5",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:31:05.145Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-5",
+      "model": "gpt-live-1",
+      "usd": 0.004166666666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:31:33.066Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-6",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:32:00.410Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-6",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:32:28.321Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-6",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:32:56.186Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-7",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:33:24.079Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-7",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:33:51.928Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-7",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:34:26.061Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-A-8",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:34:54.026Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-B-8",
+      "model": "gpt-live-1",
+      "usd": 0.0033333333333333335,
+      "seconds": 4,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T00:35:21.257Z",
+      "probe": "G6",
+      "arm": "client",
+      "label": "g6-C-8",
+      "model": "gpt-live-1",
+      "usd": 0.004166666666666667,
+      "seconds": 5,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T01:04:14.294Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.013457499999999999
+    },
+    {
+      "at": "2026-09-16T01:04:22.810Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0057155
+    },
+    {
+      "at": "2026-09-16T01:04:45.872Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.023157999999999998
+    },
+    {
+      "at": "2026-09-16T01:05:02.702Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0108295
+    },
+    {
+      "at": "2026-09-16T01:05:09.776Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0049145
+    },
+    {
+      "at": "2026-09-16T01:05:19.147Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0118355
+    },
+    {
+      "at": "2026-09-16T01:05:28.348Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.011524499999999998
+    },
+    {
+      "at": "2026-09-16T01:05:38.201Z",
+      "probe": "H1",
+      "arm": "no_terminal_punct",
+      "label": "no_terminal_punct-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.011991
+    },
+    {
+      "at": "2026-09-16T01:05:46.132Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0052175
+    },
+    {
+      "at": "2026-09-16T01:05:54.020Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0051355
+    },
+    {
+      "at": "2026-09-16T01:06:02.038Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0052455
+    },
+    {
+      "at": "2026-09-16T01:06:09.154Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0046115
+    },
+    {
+      "at": "2026-09-16T01:06:16.281Z",
+      "probe": "H1",
+      "arm": "trailing_lead_in",
+      "label": "trailing_lead_in-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0045755
+    },
+    {
+      "at": "2026-09-16T01:06:52.045Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0828535
+    },
+    {
+      "at": "2026-09-16T01:07:13.357Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0199905
+    },
+    {
+      "at": "2026-09-16T01:07:36.172Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.022637499999999998
+    },
+    {
+      "at": "2026-09-16T01:07:57.589Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.020609
+    },
+    {
+      "at": "2026-09-16T01:08:18.989Z",
+      "probe": "H2",
+      "arm": "multi",
+      "label": "multi-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0202405
+    },
+    {
+      "at": "2026-09-16T01:33:38.346Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0170535
+    },
+    {
+      "at": "2026-09-16T01:34:35.949Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-1",
+      "model": "gpt-live-1",
+      "usd": 0.018333333333333333
+    },
+    {
+      "at": "2026-09-16T01:35:26.348Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0203075
+    },
+    {
+      "at": "2026-09-16T01:36:47.521Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-1",
+      "model": "gpt-live-1",
+      "usd": 0.030000000000000002
+    },
+    {
+      "at": "2026-09-16T01:38:23.245Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.09519799999999999
+    },
+    {
+      "at": "2026-09-16T01:40:45.039Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-1",
+      "model": "gpt-live-1",
+      "usd": 0.05333333333333334
+    },
+    {
+      "at": "2026-09-16T01:42:07.693Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.049325
+    },
+    {
+      "at": "2026-09-16T01:44:33.923Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0695805
+    },
+    {
+      "at": "2026-09-16T01:46:55.647Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-1",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T01:47:59.029Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.07909899999999999
+    },
+    {
+      "at": "2026-09-16T01:50:20.775Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-2",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T01:51:12.595Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.056003
+    },
+    {
+      "at": "2026-09-16T01:53:34.286Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-3",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T01:54:35.088Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.07372100000000001
+    },
+    {
+      "at": "2026-09-16T01:55:39.767Z",
+      "probe": "VOICE",
+      "arm": "kore-on-2.5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.018500000000000003,
+      "note": "voice availability check"
+    },
+    {
+      "at": "2026-09-16T01:56:56.774Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-4",
+      "model": "gpt-live-1",
+      "usd": 0.05333333333333334
+    },
+    {
+      "at": "2026-09-16T01:57:53.031Z",
+      "probe": "B",
+      "arm": "gemini-S1_happy",
+      "label": "b-gemini-S1_happy-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.06902849999999999
+    },
+    {
+      "at": "2026-09-16T02:00:14.775Z",
+      "probe": "B",
+      "arm": "gptlive-S1_happy",
+      "label": "b-gptlive-S1_happy-5",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:01:16.410Z",
+      "probe": "B",
+      "arm": "gemini-S2_refusal",
+      "label": "b-gemini-S2_refusal-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0648745
+    },
+    {
+      "at": "2026-09-16T02:03:46.387Z",
+      "probe": "B",
+      "arm": "gptlive-S2_refusal",
+      "label": "b-gptlive-S2_refusal-1",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:04:17.058Z",
+      "probe": "TURNEND",
+      "arm": "turnComplete-on-tool-turn",
+      "model": "both",
+      "usd": 0.0285,
+      "note": "turn-close event comparison"
+    },
+    {
+      "at": "2026-09-16T02:04:43.218Z",
+      "probe": "B",
+      "arm": "gemini-S2_refusal",
+      "label": "b-gemini-S2_refusal-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.04902800000000001
+    },
+    {
+      "at": "2026-09-16T02:07:13.182Z",
+      "probe": "B",
+      "arm": "gptlive-S2_refusal",
+      "label": "b-gptlive-S2_refusal-2",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:08:17.324Z",
+      "probe": "B",
+      "arm": "gemini-S2_refusal",
+      "label": "b-gemini-S2_refusal-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.073905
+    },
+    {
+      "at": "2026-09-16T02:10:47.107Z",
+      "probe": "B",
+      "arm": "gptlive-S2_refusal",
+      "label": "b-gptlive-S2_refusal-3",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:12:09.434Z",
+      "probe": "B",
+      "arm": "gemini-S2_refusal",
+      "label": "b-gemini-S2_refusal-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.07130950000000001
+    },
+    {
+      "at": "2026-09-16T02:14:39.116Z",
+      "probe": "B",
+      "arm": "gptlive-S2_refusal",
+      "label": "b-gptlive-S2_refusal-4",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:15:37.398Z",
+      "probe": "B",
+      "arm": "gemini-S2_refusal",
+      "label": "b-gemini-S2_refusal-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.057399500000000006
+    },
+    {
+      "at": "2026-09-16T02:18:07.719Z",
+      "probe": "B",
+      "arm": "gptlive-S2_refusal",
+      "label": "b-gptlive-S2_refusal-5",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:19:30.990Z",
+      "probe": "B",
+      "arm": "gemini-S3_slow_write",
+      "label": "b-gemini-S3_slow_write-1",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.074322
+    },
+    {
+      "at": "2026-09-16T02:21:52.707Z",
+      "probe": "B",
+      "arm": "gptlive-S3_slow_write",
+      "label": "b-gptlive-S3_slow_write-1",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:22:48.789Z",
+      "probe": "B",
+      "arm": "gemini-S3_slow_write",
+      "label": "b-gemini-S3_slow_write-2",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.06079249999999999
+    },
+    {
+      "at": "2026-09-16T02:25:10.495Z",
+      "probe": "B",
+      "arm": "gptlive-S3_slow_write",
+      "label": "b-gptlive-S3_slow_write-2",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:26:07.781Z",
+      "probe": "B",
+      "arm": "gemini-S3_slow_write",
+      "label": "b-gemini-S3_slow_write-3",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.06488200000000001
+    },
+    {
+      "at": "2026-09-16T02:28:29.862Z",
+      "probe": "B",
+      "arm": "gptlive-S3_slow_write",
+      "label": "b-gptlive-S3_slow_write-3",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:29:22.428Z",
+      "probe": "B",
+      "arm": "gemini-S3_slow_write",
+      "label": "b-gemini-S3_slow_write-4",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.0548235
+    },
+    {
+      "at": "2026-09-16T02:31:44.183Z",
+      "probe": "B",
+      "arm": "gptlive-S3_slow_write",
+      "label": "b-gptlive-S3_slow_write-4",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T02:32:44.379Z",
+      "probe": "B",
+      "arm": "gemini-S3_slow_write",
+      "label": "b-gemini-S3_slow_write-5",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "usd": 0.073273
+    },
+    {
+      "at": "2026-09-16T02:35:06.211Z",
+      "probe": "B",
+      "arm": "gptlive-S3_slow_write",
+      "label": "b-gptlive-S3_slow_write-5",
+      "model": "gpt-live-1",
+      "usd": 0.052500000000000005
+    },
+    {
+      "at": "2026-09-16T04:21:57.674Z",
+      "probe": "M38",
+      "arm": "gemini-3.8-live",
+      "model": "gemini-3.8-live",
+      "usd": 0.093,
+      "note": "3.8 live comparison (priced on the 2.5 card; 3.8 rates unknown)"
+    },
+    {
+      "at": "2026-09-16T04:31:34.571Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.004533499999999999
+    },
+    {
+      "at": "2026-09-16T04:31:40.880Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0
+    },
+    {
+      "at": "2026-09-16T04:32:10.117Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016647187499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:32:16.318Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.00167071875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:32:22.546Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.00176971875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:32:29.856Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.011134499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:32:36.809Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:32:43.089Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0044485,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:32:49.349Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018453854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:32:55.652Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017493854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:33:01.951Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018123854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:33:08.229Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0019083854166666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:33:45.481Z",
+      "probe": "T2",
+      "arm": "gemini-3.8-live",
+      "label": "t2-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0094775,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:34:05.681Z",
+      "probe": "T2",
+      "arm": "gemini-3.8-live",
+      "label": "t2-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0190825,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:34:19.375Z",
+      "probe": "T2",
+      "arm": "gemini-3.8-live",
+      "label": "t2-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.009297,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:34:35.397Z",
+      "probe": "T2",
+      "arm": "gemini-3.8-live",
+      "label": "t2-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0135705,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:34:50.660Z",
+      "probe": "T2",
+      "arm": "gemini-3.8-live",
+      "label": "t2-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.013367500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:35:33.555Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:35:40.391Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:35:46.606Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.00135871875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:35:53.158Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:35:59.344Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017727187499999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:36:05.613Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018243854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:36:11.881Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018093854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:36:18.193Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018483854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:36:24.520Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017853854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:36:30.804Z",
+      "probe": "T1",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018933854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:38:26.717Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.046266,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:40:07.473Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.073904,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:41:11.259Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.035,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:43:03.975Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.055,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:44:52.912Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.05666666666666667,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:47:13.864Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07916666666666668,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:50:05.021Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.088451,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:52:08.890Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12373133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:54:09.275Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0657615,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:56:17.947Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.15662933333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T04:58:16.747Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.097472,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T04:59:50.370Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.09026533333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:02:01.879Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.08176249999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:03:27.171Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07859866666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:05:48.211Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.1105605,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:07:31.884Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.155228,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:09:34.881Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.07697799999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:11:17.764Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11219733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:13:34.699Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0859525,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:15:26.513Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12303066666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:17:38.996Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.08085600000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:19:33.405Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11123133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:21:43.449Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.08427950000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:23:17.270Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.08943200000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:25:26.790Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0869555,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:27:09.103Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11219733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:29:11.654Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.1009305,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:30:40.632Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07609866666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:32:54.891Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.079595,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:35:08.032Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13469733333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:37:27.070Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0972185,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:39:20.286Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14329599999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:41:17.886Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.094418,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:43:10.414Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:45:16.900Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.07015,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:47:03.654Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.15342866666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:50:48.114Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0976595,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:52:52.313Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14483000000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:54:47.938Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.096023,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T05:56:50.007Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13303066666666669,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T05:59:13.261Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.098537,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:01:35.053Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.18939466666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:03:56.064Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0607085,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:06:06.156Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12456466666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:08:16.102Z",
+      "probe": "T3",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.08054449999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:10:02.066Z",
+      "probe": "T3",
+      "arm": "gptlive-S1_happy",
+      "label": "t3-gptlive-S1_happy-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.12053066666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:12:27.808Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.100748,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:14:38.499Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.155796,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:17:00.186Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.099497,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:18:50.524Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.088466,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:20:55.170Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.005026,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:09.668Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0987335,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:12.922Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.005074,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:30.750Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005026,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:48.487Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.005074,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:21:57.628Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0089635,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:06.219Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.007396,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:14.367Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036940000000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:32.138Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.008476000000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:49.973Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.004666,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:22:56.895Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.11123133333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:07.770Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0110005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:23:13.744Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-clean_open",
+      "model": "gemini-3.8-live",
+      "usd": 0.0013162625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:18.627Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-trailing_lead_in",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011746666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:23.731Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-no_terminal_punct",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016011666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:31.698Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-name_spelling",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018546791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:36.624Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_time_q",
+      "model": "gemini-3.8-live",
+      "usd": 0.0014483333333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:43.411Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_confirm",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036904999999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:23:48.762Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_digits",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015076791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:52.262Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-rep_close",
+      "model": "gemini-3.8-live",
+      "usd": 0.0012844166666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:23:58.021Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-barge_in",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017936666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:24:05.169Z",
+      "probe": "T6W",
+      "arm": "gemini-3.8-live",
+      "label": "t6w-partial_digits",
+      "model": "gemini-3.8-live",
+      "usd": 0.001756429166666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:24:16.141Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.005043,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:25.543Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.004731,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:35.117Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.005043,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:44.523Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/disclosure",
+      "label": "t7-disclosure-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0048389999999999996,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:24:53.952Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.004683,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:03.593Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.009665,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:12.831Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.004671,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:19.317Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.09595300000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:25:22.541Z",
+      "probe": "T7",
+      "arm": "gemini-3.8-live/readback",
+      "label": "t7-readback-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.009868499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:27:10.751Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:28:32.627Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.141517,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:29:20.509Z",
+      "probe": "T3",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.114147,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:30:41.276Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14399666666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:31:15.556Z",
+      "probe": "T3",
+      "arm": "gptlive-S2_refusal",
+      "label": "t3-gptlive-S2_refusal-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14329599999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:33:22.112Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0686135,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:34:20.332Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.2214305,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:35:06.279Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-1",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.08943200000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:36:37.096Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.143864,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:37:38.646Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.1187125,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:39:39.698Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.1460415,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:40:04.728Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-2",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.179262,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:41:36.732Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:42:00.475Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0845345,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:43:56.996Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-3",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.13399666666666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:45:06.423Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.19262600000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:46:27.659Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.10363449999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:47:20.415Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.177728,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:48:13.136Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-4",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.07763266666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:50:27.489Z",
+      "probe": "T4",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.16387800000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:50:35.873Z",
+      "probe": "T3",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.09252849999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:52:20.363Z",
+      "probe": "T4",
+      "arm": "gptlive",
+      "label": "t4-gptlive-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.154262,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:52:42.167Z",
+      "probe": "T3",
+      "arm": "gptlive-S3_slow_write",
+      "label": "t3-gptlive-S3_slow_write-5",
+      "model": "gpt-live-1+gpt-5.6-terra",
+      "usd": 0.14149666666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T06:53:38.831Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0091035,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:53:51.007Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.008829,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:54:13.389Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0075555,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:54:26.285Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.009997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:54:48.694Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0075555,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:55:01.777Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.008799,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:55:10.995Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0046949999999999995,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:55:21.685Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.0131125,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:55:44.072Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.010519,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T06:55:58.017Z",
+      "probe": "T5",
+      "arm": "gemini-3.8-live",
+      "label": "t5-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.013547,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:21:48.287Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2357,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:25:39.029Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.11721499999999999,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:28:57.827Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.1730985,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:32:23.943Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.21256750000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:35:24.006Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.1404705,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:38:31.973Z",
+      "probe": "T4-v2",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.15216849999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:41:27.369Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2155125,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:46:05.680Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.5548775,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:49:00.235Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.258054,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:53:06.727Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.32760149999999993,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:57:05.521Z",
+      "probe": "T4-et",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.27348300000000003,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T13:59:35.178Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.085522,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:02:58.356Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.250935,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:06:29.479Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.333413,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:10:05.883Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.178414,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:12:51.323Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.1948985,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:15:35.524Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.17982049999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:18:10.992Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.1927395,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:21:38.882Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.2842,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:23:42.614Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.133431,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:26:10.026Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.21854949999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:29:07.107Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.22604950000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:32:14.408Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.184785,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:34:29.540Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.131579,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:37:35.385Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.17876699999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:10.032Z",
+      "probe": "T3-et",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.25094550000000004,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:20.712Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063565,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:28.729Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0061525,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:36.924Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0059965,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:44.564Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0061645,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:40:55.364Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0069085,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:03.709Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063195000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:14.002Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.006583500000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:23.101Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0064995,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:31.151Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0062475000000000004,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T14:41:39.065Z",
+      "probe": "T1-et",
+      "arm": "gemini-3.8-live-extended-thinking",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live-extended-thinking",
+      "usd": 0.0063435,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T15:30:12.751Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Kore",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007800124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:14.783Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Aoede",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007829999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:16.812Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Puck",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008160124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:18.842Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Charon",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007980124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:21.063Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Leda",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008579999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:23.274Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Fenrir",
+      "model": "gemini-3.8-live",
+      "usd": 0.0006899999999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:25.493Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Zephyr",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007500124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T15:30:27.515Z",
+      "probe": "VOICE38",
+      "arm": "gemini-3.8-live",
+      "label": "voice-Orus",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008160124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:48:46.445Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0018509062499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:48:53.213Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0027327312500000003,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:48:59.422Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00182690625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:06.522Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0030267312499999994,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:13.086Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00247790625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:19.375Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0019563979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:25.642Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0017043979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:31.914Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014763979166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:38.171Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015663979166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:49:44.464Z",
+      "probe": "T1-31",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0018243979166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:52:58.719Z",
+      "probe": "T4-31",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.016067083333333336,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:56:23.974Z",
+      "probe": "T4-31",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.017104333333333336,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T16:59:47.258Z",
+      "probe": "T4-31",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.016940083333333335,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:03:32.990Z",
+      "probe": "T4-31",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.01881075,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:06:22.545Z",
+      "probe": "T4-31",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.014129333333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:27.295Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.001086,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:30.030Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_AUTO",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009239999999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:32.562Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0019200124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:35.100Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010650125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:37.665Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010200125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:40.397Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-behavior_NON_BLOCKING",
+      "model": "gemini-3.8-live",
+      "usd": 0.001053,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:42.937Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-behavior_BLOCKING",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011160125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:08:56.840Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012699,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:18.753Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009960124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:21.275Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010440125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:23.793Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.001014,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:26.112Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.001167,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:28.428Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010710124999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:30.952Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0014309999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:33.476Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010800125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:35.992Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009330124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:38.513Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009329999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:40.829Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_ANY",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010320124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:43.558Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009840125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:46.077Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010080125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:48.598Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010560125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:51.101Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010680124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:53.416Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.001086,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:55.947Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011279999999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:09:58.463Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.001119,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:01.174Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.001047,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:03.710Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0012299999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:06.252Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.001044,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:36.403Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0.001254,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:39.324Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:42.041Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:44.555Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:47.074Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-baseline",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:50.001Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017909999999999996,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:52.717Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.001233,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:55.647Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.001656,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:10:58.577Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0.0012659999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:01.517Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-mode_NONE",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:04.433Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:07.345Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0014279999999999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:09.865Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015119999999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:12.996Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008100000000000001,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:14.005Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.011429916666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:11:15.525Z",
+      "probe": "KNOBS",
+      "arm": "gemini-3.8-live",
+      "label": "knob-allowedFunctionNames",
+      "model": "gemini-3.8-live",
+      "usd": 0,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:13:37.584Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.011964666666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:16:10.485Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0127415,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:18:42.816Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S1_happy",
+      "label": "t3-gemini38-S1_happy-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012694,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:21:08.122Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012108583333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:23:51.334Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013600583333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:25:51.941Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.010050333333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:28:30.770Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013235416666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:31:10.611Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S2_refusal",
+      "label": "t3-gemini38-S2_refusal-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.01331975,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:33:44.369Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.012812916666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:36:31.497Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013927083333333335,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:38:51.170Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.011639083333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:41:32.122Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013412333333333335,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:44:13.816Z",
+      "probe": "T3-31",
+      "arm": "gemini38-S3_slow_write",
+      "label": "t3-gemini38-S3_slow_write-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.013474166666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:56:55.634Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0013949062499999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:01.943Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00222290625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:08.962Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0022947312499999994,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:15.850Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00287090625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:23.852Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00397773125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:30.969Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-6",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0030417312499999996,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:37.902Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-7",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0027417312499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:44.098Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-8",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014157312499999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:50.307Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-9",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00138309375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:57:59.457Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-no_terminal_punct-10",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0038787312499999997,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:05.728Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010925729166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:12.015Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0017613979166666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:18.313Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011913979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:24.573Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015273979166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:30.805Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011015729166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:37.102Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-6",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015543979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:43.368Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-7",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014073979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:49.613Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-8",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0014943979166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:58:56.012Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-9",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0016685729166666663,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:02.262Z",
+      "probe": "T1-31b",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "t1-trailing_lead_in-10",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0015213979166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:10.747Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:16.956Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.00177571875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:24.212Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0073950000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:30.409Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.00129571875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:36.611Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0013647187499999998,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T17:59:45.546Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.0073950000000000005,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:51.734Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0045815,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T17:59:57.937Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.0045214999999999995,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:04.184Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:11.508Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-no_terminal_punct-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0036934999999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T18:00:17.830Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016473854166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:24.142Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017073854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:30.436Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0015873854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:36.724Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017943854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:43.001Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017163854166666664,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:49.286Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.0018903854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:00:55.583Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017733854166666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:01.897Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017583854166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:08.192Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.0016773979166666668,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:01:14.493Z",
+      "probe": "T1-38b",
+      "arm": "gemini-3.8-live",
+      "label": "t1-trailing_lead_in-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.0017433854166666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:18.152Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011540125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:24.694Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011329291666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:31.320Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0011519291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:37.817Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010751791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:44.351Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.8-live",
+      "label": "mv-gemini-3.8-live-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0010602625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:51.316Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011142708333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:02:58.126Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010623458333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:04.626Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0010034291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:11.546Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011584291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T18:03:18.607Z",
+      "probe": "MANUALVAD",
+      "arm": "gemini-3.1-flash-live-preview",
+      "label": "mv-gemini-3.1-flash-live-preview-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011161791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T19:17:42.582Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.126624,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:20:53.953Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.159377,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:23:51.726Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.142019,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:27:09.376Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.22819649999999997,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:30:19.796Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.2454015,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:33:01.079Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-6",
+      "model": "gemini-3.8-live",
+      "usd": 0.274317,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:36:24.289Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-7",
+      "model": "gemini-3.8-live",
+      "usd": 0.23256300000000002,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:39:47.416Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-8",
+      "model": "gemini-3.8-live",
+      "usd": 0.2020225,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:42:29.133Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-9",
+      "model": "gemini-3.8-live",
+      "usd": 0.31893,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:45:09.486Z",
+      "probe": "T4-38n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-10",
+      "model": "gemini-3.8-live",
+      "usd": 0.099496,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:52:45.864Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.1239455,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:55:32.000Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.10645450000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T19:58:17.059Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.09832350000000001,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:01:10.682Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.1104815,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:04:06.392Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.120177,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:06:56.082Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-6",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.1002565,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:10:34.206Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-7",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.1819865,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:13:31.473Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-8",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.12602549999999998,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:16:54.254Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-9",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.1592055,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:19:59.806Z",
+      "probe": "T4-31n10",
+      "arm": "gemini38",
+      "label": "t4-gemini38-10",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.136399,
+      "estimated": false
+    },
+    {
+      "at": "2026-09-16T20:21:57.621Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/rep_confirm",
+      "label": "hl-gemini-3.8-live-rep_confirm-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008306666666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:03.642Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/rep_confirm",
+      "label": "hl-gemini-3.8-live-rep_confirm-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0008855,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:09.671Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/rep_confirm",
+      "label": "hl-gemini-3.8-live-rep_confirm-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009310833333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:15.052Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/rep_confirm",
+      "label": "hl-gemini-3.8-live-rep_confirm-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007811791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:21.006Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/rep_confirm",
+      "label": "hl-gemini-3.8-live-rep_confirm-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.0009369166666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:25.470Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/trailing_lead_in",
+      "label": "hl-gemini-3.8-live-trailing_lead_in-1",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007586791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:29.908Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/trailing_lead_in",
+      "label": "hl-gemini-3.8-live-trailing_lead_in-2",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007055958333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:34.496Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/trailing_lead_in",
+      "label": "hl-gemini-3.8-live-trailing_lead_in-3",
+      "model": "gemini-3.8-live",
+      "usd": 0.0007300958333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:39.126Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/trailing_lead_in",
+      "label": "hl-gemini-3.8-live-trailing_lead_in-4",
+      "model": "gemini-3.8-live",
+      "usd": 0.0006736791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:43.951Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.8-live/trailing_lead_in",
+      "label": "hl-gemini-3.8-live-trailing_lead_in-5",
+      "model": "gemini-3.8-live",
+      "usd": 0.00087275,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:48.871Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/rep_confirm",
+      "label": "hl-gemini-3.1-flash-live-preview-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007337625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:53.751Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/rep_confirm",
+      "label": "hl-gemini-3.1-flash-live-preview-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007425208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:22:58.813Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/rep_confirm",
+      "label": "hl-gemini-3.1-flash-live-preview-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007757708333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:03.689Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/rep_confirm",
+      "label": "hl-gemini-3.1-flash-live-preview-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007300958333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:08.780Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/rep_confirm",
+      "label": "hl-gemini-3.1-flash-live-preview-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005949291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:13.665Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/trailing_lead_in",
+      "label": "hl-gemini-3.1-flash-live-preview-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007428458333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:18.560Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/trailing_lead_in",
+      "label": "hl-gemini-3.1-flash-live-preview-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007558541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:23.235Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/trailing_lead_in",
+      "label": "hl-gemini-3.1-flash-live-preview-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006803458333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:28.229Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/trailing_lead_in",
+      "label": "hl-gemini-3.1-flash-live-preview-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006709291666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:23:33.303Z",
+      "probe": "HOLDLATENCY",
+      "arm": "gemini-3.1-flash-live-preview/trailing_lead_in",
+      "label": "hl-gemini-3.1-flash-live-preview-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005125958333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:19.867Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005747708333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:24.067Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005177625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:28.413Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005001041666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:32.610Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006166875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:36.884Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005391041666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:41.395Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/trailing_lead_in",
+      "label": "vk-silence1200-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005795958333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:45.371Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/trailing_lead_in",
+      "label": "vk-silence1200-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0009342708333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:49.421Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/trailing_lead_in",
+      "label": "vk-silence1200-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011682625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:53.923Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/trailing_lead_in",
+      "label": "vk-silence1200-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005401041666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:35:57.909Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/trailing_lead_in",
+      "label": "vk-silence1200-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0011179291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:03.836Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/trailing_lead_in",
+      "label": "vk-silence2500-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0008058541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:09.733Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/trailing_lead_in",
+      "label": "vk-silence2500-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007193541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:15.510Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/trailing_lead_in",
+      "label": "vk-silence2500-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006641791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:21.291Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/trailing_lead_in",
+      "label": "vk-silence2500-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006854291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:27.177Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/trailing_lead_in",
+      "label": "vk-silence2500-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007784375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:31.522Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/trailing_lead_in",
+      "label": "vk-endsens_low-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0004940208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:35.151Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/trailing_lead_in",
+      "label": "vk-endsens_low-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0008693541666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:38.802Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/trailing_lead_in",
+      "label": "vk-endsens_low-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007661041666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:42.419Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/trailing_lead_in",
+      "label": "vk-endsens_low-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007541791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:46.620Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/trailing_lead_in",
+      "label": "vk-endsens_low-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006620208333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:50.553Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005195125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:54.430Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005839375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:36:58.366Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005346791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:02.292Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005580208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:06.221Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005011791666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:10.470Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/rep_confirm",
+      "label": "vk-silence1200-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005850208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:14.769Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/rep_confirm",
+      "label": "vk-silence1200-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005619291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:19.027Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/rep_confirm",
+      "label": "vk-silence1200-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005825124999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:23.248Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/rep_confirm",
+      "label": "vk-silence1200-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005163458333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:27.495Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1200/rep_confirm",
+      "label": "vk-silence1200-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005938541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:33.226Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/rep_confirm",
+      "label": "vk-silence2500-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006723458333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:38.897Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/rep_confirm",
+      "label": "vk-silence2500-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007155208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:44.493Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/rep_confirm",
+      "label": "vk-silence2500-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006972708333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:50.224Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/rep_confirm",
+      "label": "vk-silence2500-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0008612625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:55.731Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2500/rep_confirm",
+      "label": "vk-silence2500-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006509375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:37:59.632Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/rep_confirm",
+      "label": "vk-endsens_low-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005048458333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:38:03.539Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/rep_confirm",
+      "label": "vk-endsens_low-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005534374999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:38:07.454Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/rep_confirm",
+      "label": "vk-endsens_low-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006231874999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:38:11.348Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/rep_confirm",
+      "label": "vk-endsens_low-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006363541666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:38:15.294Z",
+      "probe": "VADKNOBS",
+      "arm": "endsens_low/rep_confirm",
+      "label": "vk-endsens_low-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005475958333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:38:56.548Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005395125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:00.452Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0008319291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:04.675Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005828541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:08.807Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005931875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:13.031Z",
+      "probe": "VADKNOBS",
+      "arm": "default/trailing_lead_in",
+      "label": "vk-default-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005529375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:17.990Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/trailing_lead_in",
+      "label": "vk-silence1600-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006531875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:23.219Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/trailing_lead_in",
+      "label": "vk-silence1600-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006666875,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:28.163Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/trailing_lead_in",
+      "label": "vk-silence1600-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006758541666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:33.116Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/trailing_lead_in",
+      "label": "vk-silence1600-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005865125,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:38.221Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/trailing_lead_in",
+      "label": "vk-silence1600-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007763541666666666,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:43.642Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/trailing_lead_in",
+      "label": "vk-silence2000-trailing_lead_in-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006194291666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:49.027Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/trailing_lead_in",
+      "label": "vk-silence2000-trailing_lead_in-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006916874999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:54.356Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/trailing_lead_in",
+      "label": "vk-silence2000-trailing_lead_in-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006718458333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:39:59.702Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/trailing_lead_in",
+      "label": "vk-silence2000-trailing_lead_in-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006341791666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:04.997Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/trailing_lead_in",
+      "label": "vk-silence2000-trailing_lead_in-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006721874999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:08.988Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.00048826249999999995,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:13.241Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005700958333333334,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:17.163Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005065958333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:21.107Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005446041666666665,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:25.097Z",
+      "probe": "VADKNOBS",
+      "arm": "default/rep_confirm",
+      "label": "vk-default-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006143541666666667,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:29.747Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/rep_confirm",
+      "label": "vk-silence1600-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005852625,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:34.619Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/rep_confirm",
+      "label": "vk-silence1600-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006549374999999999,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:39.264Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/rep_confirm",
+      "label": "vk-silence1600-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006689375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:43.897Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/rep_confirm",
+      "label": "vk-silence1600-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005178458333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:48.536Z",
+      "probe": "VADKNOBS",
+      "arm": "silence1600/rep_confirm",
+      "label": "vk-silence1600-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006625208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:53.632Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/rep_confirm",
+      "label": "vk-silence2000-rep_confirm-1",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006315208333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:40:58.684Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/rep_confirm",
+      "label": "vk-silence2000-rep_confirm-2",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006849375,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:41:03.686Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/rep_confirm",
+      "label": "vk-silence2000-rep_confirm-3",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0006357708333333332,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:41:08.741Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/rep_confirm",
+      "label": "vk-silence2000-rep_confirm-4",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0007002708333333333,
+      "estimated": true
+    },
+    {
+      "at": "2026-09-16T20:41:13.865Z",
+      "probe": "VADKNOBS",
+      "arm": "silence2000/rep_confirm",
+      "label": "vk-silence2000-rep_confirm-5",
+      "model": "gemini-3.1-flash-live-preview",
+      "usd": 0.0005886791666666666,
+      "estimated": true
+    }
+  ],
+  "started_at": "2026-09-15T05:17:06.776Z",
+  "_": "GPT-Live round, 2026-09-15. Voice layer billed per wall-clock second; backend billed per token.",
+  "updated_at": "2026-09-16T20:41:13.865Z",
+  "cap_history": [
+    {
+      "cap": 5,
+      "at": "2026-09-15",
+      "note": "GPT-Live gate round, owner authorised"
+    },
+    {
+      "cap": 25,
+      "at": "2026-09-15",
+      "note": "raised by owner in session for the gemini-3.8-live comparison round; $3.40 already spent at the time of the raise"
+    }
+  ]
+}

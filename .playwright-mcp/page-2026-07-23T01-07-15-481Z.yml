@@ -1,0 +1,84 @@
+- generic [ref=f5e5]:
+  - banner [ref=f5e6]:
+    - generic [ref=f5e7]:
+      - generic [ref=f5e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f5e9]
+      - paragraph [ref=f5e10]: Your calls at a glance for today
+      - generic [ref=f5e11]:
+        - generic [ref=f5e12]: "+18175803291"
+        - generic [ref=f5e13]: America/Chicago
+    - generic [ref=f5e14]:
+      - button "🌐 EN" [ref=f5e16] [cursor=pointer]:
+        - generic [ref=f5e17]: 🌐
+        - generic [ref=f5e18]: EN
+      - generic [ref=f5e19]:
+        - button "Dashboard" [ref=f5e20] [cursor=pointer]
+        - button "Analytics" [ref=f5e21] [cursor=pointer]
+        - button "Appointments" [ref=f5e22] [cursor=pointer]
+        - button "Settings" [ref=f5e23] [cursor=pointer]
+        - button "Guide" [ref=f5e24] [cursor=pointer]
+      - button "Logout" [ref=f5e25] [cursor=pointer]
+  - main [ref=f5e26]:
+    - generic [ref=f5e27]:
+      - generic [ref=f5e28]:
+        - heading "Settings" [level=2] [ref=f5e30]
+        - generic [ref=f5e31]:
+          - status [ref=f5e32]: All changes saved
+          - generic [ref=f5e265]: Everything is saved
+          - button "Save changes" [disabled] [ref=f5e35]
+      - generic [ref=f5e36]:
+        - tablist "Settings sections" [ref=f5e37]:
+          - tab "General Name, hours, timezone" [ref=f5e38] [cursor=pointer]:
+            - generic [ref=f5e44]:
+              - generic [ref=f5e45]: General
+              - generic [ref=f5e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language" [ref=f5e47] [cursor=pointer]:
+            - generic [ref=f5e52]:
+              - generic [ref=f5e53]: Voice & Language
+              - generic [ref=f5e54]: 1 language
+          - tab "Capabilities 2 of 7 turned on" [ref=f5e540] [cursor=pointer]:
+            - generic [ref=f5e60]:
+              - generic [ref=f5e61]: Capabilities
+              - generic [ref=f5e62]: 2 of 7 turned on
+          - tab "Knowledge Base Answers to questions" [ref=f5e63] [cursor=pointer]:
+            - generic [ref=f5e67]:
+              - generic [ref=f5e68]: Knowledge Base
+              - generic [ref=f5e69]: Answers to questions
+          - tab "Notifications Email and text alerts" [active] [selected] [ref=f5e70] [cursor=pointer]:
+            - generic [ref=f5e75]:
+              - generic [ref=f5e76]: Notifications
+              - generic [ref=f5e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [ref=f5e78] [cursor=pointer]:
+            - generic [ref=f5e82]:
+              - generic [ref=f5e83]: Billing & Integrations
+              - generic [ref=f5e84]: Plan, usage, calendar
+        - tabpanel "Notifications Email and text alerts" [ref=f5e648]:
+          - generic [ref=f5e86]:
+            - heading "Notifications" [level=2] [ref=f5e649]
+            - paragraph [ref=f5e88]: How you hear about calls, and what callers get texted afterwards.
+          - generic [ref=f5e650]:
+            - generic [ref=f5e652]:
+              - heading "How we reach you" [level=3] [ref=f5e653]
+              - paragraph [ref=f5e654]: Where alerts about your calls are sent.
+            - generic [ref=f5e655]:
+              - generic [ref=f5e656]:
+                - generic [ref=f5e657]: Notification emailoptional
+                - textbox "Notification emailoptional" [ref=f5e658]:
+                  - /placeholder: you@business.com
+              - generic [ref=f5e659]:
+                - generic [ref=f5e660]: Notification phoneoptional
+                - textbox "Notification phoneoptional" [ref=f5e661]:
+                  - /placeholder: "+447700900123"
+              - generic [ref=f5e662] [cursor=pointer]:
+                - checkbox "Email or text me when a caller leaves a message or asks for a callback" [checked] [ref=f5e663]
+                - generic [ref=f5e664]: Email or text me when a caller leaves a message or asks for a callback
+          - generic [ref=f5e665]:
+            - generic [ref=f5e667]:
+              - heading "What callers get afterwards" [level=3] [ref=f5e668]
+              - paragraph [ref=f5e669]: An automatic text message once the call ends, so the caller has something in writing.
+            - generic [ref=f5e671] [cursor=pointer]:
+              - checkbox "Text callers a follow-up SMS Covers message receipts and missed calls." [ref=f5e672]
+              - generic [ref=f5e673]:
+                - text: Text callers a follow-up SMS
+                - generic [ref=f5e674]: Covers message receipts and missed calls.
+  - contentinfo [ref=f5e255]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

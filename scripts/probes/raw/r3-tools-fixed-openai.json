@@ -1,0 +1,300 @@
+{
+  "at": "2026-09-02T05:47:47.501Z",
+  "n": 5,
+  "models": [
+    "gpt"
+  ],
+  "rows": [
+    {
+      "scenario": "T3",
+      "model": "gpt",
+      "passes": 14,
+      "total": 20,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": false,
+              "detail": "never called"
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": false,
+              "detail": "never called"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that. First I need to ask a quick question to get the right details.Of course. Let me check that time for availability before we gather your details.That time is available. Please tell me your full name so I can read it back, then I’ll ask for your date of birth and what the visit is for.Sure thing, I just need one quick detail so I can finish the booking correctly.Of c",
+          "turnSaid": [
+            "Sure thing, I can help with that. First I need to ask a quick question to get the right details.",
+            "Of course. Let me check that time for availability before we gather your details.",
+            "That time is available. Please tell me your full name so I can read it back, then I’ll ask for your date of birth and what the visit is for.",
+            "Sure thing, I just need one quick detail so I can finish the booking correctly.",
+            "Of course. Thanks, Sarah Miller. I have you as a new patient wanting Tuesday, September 8 at 3 PM. What is the visit for, like a cleaning, exam, or something specific?"
+          ],
+          "usd": 0.0909176
+        },
+        {
+          "trial": 2,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller confirmed booking and said they need nothing else."
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that.Of course. I can help book that, but first I need your full name and date of birth to move forward.Thanks, Sarah Miller — I have your date of birth as March 3, 1990.\n\nThis would be for Tuesday at 3 PM. What type of appointment is this for, for example a cleaning, an exam, or something else?Okay, I’ll finish booking that now, then we’ll make sure you’re all set.",
+          "turnSaid": [
+            "Sure thing, I can help with that.",
+            "Of course. I can help book that, but first I need your full name and date of birth to move forward.",
+            "Thanks, Sarah Miller — I have your date of birth as March 3, 1990.\n\nThis would be for Tuesday at 3 PM. What type of appointment is this for, for example a cleaning, an exam, or something else?",
+            "",
+            "Okay, I’ll finish booking that now, then we’ll make sure you’re all set."
+          ],
+          "usd": 0.069304
+        },
+        {
+          "trial": 3,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": false,
+              "detail": "never called"
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": false,
+              "detail": "never called"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Of course, let me think through what we need to do next to get that started.Of course. I have you as Sarah Miller, born March 3, 1990, requesting Tuesday at 3 PM. Do I have that right, and should I go ahead and book it?Sure, let me wrap this up and confirm everything is set for you.",
+          "turnSaid": [
+            "",
+            "Of course, let me think through what we need to do next to get that started.",
+            "Of course. I have you as Sarah Miller, born March 3, 1990, requesting Tuesday at 3 PM. Do I have that right, and should I go ahead and book it?",
+            "",
+            "Sure, let me wrap this up and confirm everything is set for you."
+          ],
+          "usd": 0.0387016
+        },
+        {
+          "trial": 4,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00",
+                "identity_dob": "1990-03-03"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller confirmed booking and said they need nothing else."
+              }
+            }
+          ],
+          "said": "Sure, I can help with that. First I’ll check whether that time is available.Of course. I have you as Sarah Miller, born March 3, 1990, for Tuesday at 3 PM. Please say yes to confirm so I can book it.Got it, I’ll go ahead and place that appointment now and then confirm the result.",
+          "turnSaid": [
+            "Sure, I can help with that. First I’ll check whether that time is available.",
+            "",
+            "Of course. I have you as Sarah Miller, born March 3, 1990, for Tuesday at 3 PM. Please say yes to confirm so I can book it.",
+            "Got it, I’ll go ahead and place that appointment now and then confirm the result.",
+            ""
+          ],
+          "usd": 0.0598304
+        },
+        {
+          "trial": 5,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called book_appointment",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with scheduled_at = the requested slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment with caller name carried",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00-05:00"
+              }
+            },
+            {
+              "name": "book_appointment",
+              "args": {
+                "client_name": "Sarah Miller",
+                "scheduled_at": "2026-09-08T15:00:00-05:00",
+                "identity_dob": "1990-03-03"
+              }
+            }
+          ],
+          "said": "Sure thing, I can help with that. First, are you a new patient or an existing patient?Are you a new patient or an existing patient?Okay, thanks for letting me know—let’s sort out the details for that appointment.Sure thing. I have you as Sarah Miller with a requested appointment on Tuesday at 3 PM, using the date of birth March 3, 1990. Does that look correct, and would you like me to book it?Got ",
+          "turnSaid": [
+            "Sure thing, I can help with that. First, are you a new patient or an existing patient?Are you a new patient or an existing patient?",
+            "Okay, thanks for letting me know—let’s sort out the details for that appointment.",
+            "Sure thing. I have you as Sarah Miller with a requested appointment on Tuesday at 3 PM, using the date of birth March 3, 1990. Does that look correct, and would you like me to book it?",
+            "Got it, thanks for confirming—let me take care of that now.",
+            ""
+          ],
+          "usd": 0.0722848
+        }
+      ]
+    }
+  ]
+}

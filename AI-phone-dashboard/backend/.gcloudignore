@@ -1,0 +1,34 @@
+# What `gcloud builds submit` uploads for the DASHBOARD BACKEND image.
+#
+# This directory is submitted as its own source root:
+#
+#   gcloud builds submit AI-phone-dashboard/backend \
+#     --config=cloudbuild.dashboard.yaml --project=vetra-shared-c3a3bd
+#
+# rather than the repository root, because the root .gcloudignore EXCLUDES
+# `AI-phone-dashboard` outright — which is why nothing has ever built this
+# image. Un-excluding it there would upload the whole dashboard on every voice
+# build for no benefit; submitting this directory keeps both uploads minimal and
+# neither build carries the other's source.
+#
+# THIS FILE MUST EXIST even though it is short. With no .gcloudignore in the
+# source root gcloud falls back to .gitignore, which is written for a different
+# purpose — that fallback is what let a 278 MiB / 705-file tarball through on
+# the voice image's first submit.
+#
+# Keep in step with .dockerignore. They are not the same list — this one governs
+# what leaves the workstation, that one what the daemon sees — but anything
+# excluded there and not here is uploaded for no reason.
+.git
+.gitignore
+node_modules
+.env
+.env.*
+!.env.example
+
+# The test suite. The image does not ship it, and the Dockerfile deletes it
+# again on the way in as a belt to this brace.
+src/__tests__
+
+*.log
+coverage

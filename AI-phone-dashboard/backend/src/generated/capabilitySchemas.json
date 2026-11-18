@@ -1,0 +1,180 @@
+{
+  "capabilities": [
+    {
+      "id": "appointments",
+      "label": "Appointments",
+      "description": "Book, check, cancel and reschedule appointments.",
+      "core": false,
+      "adapterKind": "scheduling",
+      "configSchema": {
+        "adapter": {
+          "type": "choice",
+          "label": "Where do appointments live?",
+          "options": [
+            "internal",
+            "athenahealth",
+            "webhook"
+          ],
+          "default": "internal"
+        },
+        "existingAppointment": {
+          "type": "choice",
+          "label": "If the caller already has an upcoming appointment",
+          "options": [
+            "confirm",
+            "allow",
+            "block"
+          ],
+          "optionLabels": {
+            "confirm": "Check with them first — only book a second one if they say yes",
+            "allow": "Just book it",
+            "block": "Don't book a second one — offer to move the existing one"
+          },
+          "default": "confirm"
+        },
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we look up or change an appointment?",
+            "builtinOptions": [
+              "name",
+              "dob",
+              "phone_on_file"
+            ],
+            "allowCustom": true
+          },
+          "confirmBeforeWrite": {
+            "type": "toggle",
+            "label": "Read details back and require a clear yes before booking",
+            "default": false
+          },
+          "businessHoursOnly": {
+            "type": "toggle",
+            "label": "Only allow booking changes during opening hours",
+            "default": false
+          }
+        },
+        "availability": {
+          "length": {
+            "type": "number",
+            "label": "Appointment length (minutes)",
+            "default": 30,
+            "min": 5,
+            "max": 480,
+            "step": 5
+          },
+          "capacity": {
+            "type": "number",
+            "label": "How many appointments can share one time slot",
+            "default": 1,
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you book?",
+          "placeholder": "e.g. Ask if they're a new or existing patient first"
+        }
+      }
+    },
+    {
+      "id": "messages",
+      "label": "Messages & callbacks",
+      "description": "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": {
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we take a message?",
+            "builtinOptions": [
+              "name",
+              "callback_number"
+            ],
+            "allowCustom": true
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you take messages?",
+          "placeholder": "e.g. Always ask which department the message is for"
+        }
+      }
+    },
+    {
+      "id": "quotes",
+      "label": "Quote requests",
+      "description": "Collect pricing enquiries and pass them to your team.",
+      "core": false,
+      "adapterKind": null,
+      "configSchema": {
+        "require": {
+          "identity": {
+            "type": "identityFields",
+            "label": "What must the caller provide before we log a quote request?",
+            "builtinOptions": [
+              "name",
+              "callback_number"
+            ],
+            "allowCustom": true
+          }
+        },
+        "notes": {
+          "type": "longtext",
+          "label": "Anything specific about how you quote?",
+          "placeholder": "e.g. Always ask whether it's an emergency. Never quote a price on the phone."
+        }
+      }
+    },
+    {
+      "id": "transfer",
+      "label": "Transfer to a person",
+      "description": "Hand the caller to a human when they ask or when we cannot help.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": null
+    },
+    {
+      "id": "sms_consent",
+      "label": "Text confirmations",
+      "description": "The receptionist asks permission before texting a caller, and records the answer. Only used when caller text follow-ups are switched on in Settings; texts are never sent without a recorded yes.",
+      "core": true,
+      "adapterKind": null,
+      "configSchema": null
+    }
+  ],
+  "adapters": {
+    "scheduling": [
+      {
+        "id": "internal",
+        "label": "Our built-in calendar",
+        "selfServe": true,
+        "verifiableFields": [
+          "phone_on_file",
+          "phone_last4"
+        ]
+      },
+      {
+        "id": "athenahealth",
+        "label": "athenahealth",
+        "selfServe": false,
+        "verifiableFields": [
+          "name",
+          "dob",
+          "phone_on_file",
+          "patient_id",
+          "customfields.*"
+        ]
+      },
+      {
+        "id": "webhook",
+        "label": "Send to my own system",
+        "selfServe": false,
+        "verifiableFields": []
+      }
+    ]
+  }
+}

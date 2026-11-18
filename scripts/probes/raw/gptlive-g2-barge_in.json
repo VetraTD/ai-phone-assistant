@@ -1,0 +1,905 @@
+{
+  "label": "g2-barge_in",
+  "events": [
+    {
+      "at": 1789449538083,
+      "sinceStart": 404,
+      "event_id": "event_EOFrF58JsRAmolrWkS2T2",
+      "type": "session.started",
+      "client_event_id": "start_1",
+      "session": {
+        "id": "live_u0_EOFrFduHvjzSPXwDfLAXi",
+        "expires_at": 1789456737,
+        "model": "gpt-live-1",
+        "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+        "audio": {
+          "output": {
+            "voice": "marin"
+          },
+          "format": {
+            "type": "audio/pcmu",
+            "rate": 8000
+          }
+        },
+        "delegation": {
+          "type": "client"
+        },
+        "status": "active",
+        "input": []
+      }
+    },
+    {
+      "at": 1789449538678,
+      "sinceStart": 999,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449538780,
+      "sinceStart": 1101,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449538879,
+      "sinceStart": 1200,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449538979,
+      "sinceStart": 1300,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539077,
+      "sinceStart": 1398,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539193,
+      "sinceStart": 1514,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539277,
+      "sinceStart": 1598,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539377,
+      "sinceStart": 1698,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539493,
+      "sinceStart": 1814,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539577,
+      "sinceStart": 1898,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539699,
+      "sinceStart": 2020,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539799,
+      "sinceStart": 2120,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539898,
+      "sinceStart": 2219,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449539999,
+      "sinceStart": 2320,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540105,
+      "sinceStart": 2426,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540206,
+      "sinceStart": 2527,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540308,
+      "sinceStart": 2629,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540405,
+      "sinceStart": 2726,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540505,
+      "sinceStart": 2826,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540605,
+      "sinceStart": 2926,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540610,
+      "sinceStart": 2931,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1000,
+      "end_ms": 1200,
+      "delta": " Actually",
+      "event_id": "event_EOFrIO9PMSIuAJ0Bt5GjR"
+    },
+    {
+      "at": 1789449540680,
+      "sinceStart": 3001,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1200,
+      "end_ms": 1400,
+      "delta": ", could",
+      "event_id": "event_EOFrIvOPJmhGWM6kMmbsT"
+    },
+    {
+      "at": 1789449540680,
+      "sinceStart": 3001,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1400,
+      "end_ms": 1600,
+      "delta": " we",
+      "event_id": "event_EOFrIz1wQ43HssvuMt91m"
+    },
+    {
+      "at": 1789449540680,
+      "sinceStart": 3001,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1600,
+      "end_ms": 1800,
+      "delta": " make it",
+      "event_id": "event_EOFrIaHh29ha4kpwPQp0U"
+    },
+    {
+      "at": 1789449540707,
+      "sinceStart": 3028,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540767,
+      "sinceStart": 3088,
+      "type": "session.input_transcript.delta",
+      "start_ms": 2200,
+      "end_ms": 2400,
+      "delta": " Wednesday",
+      "event_id": "event_EOFrIsjhcs5aHnJNTDzZM"
+    },
+    {
+      "at": 1789449540806,
+      "sinceStart": 3127,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449540912,
+      "sinceStart": 3233,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541012,
+      "sinceStart": 3333,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541108,
+      "sinceStart": 3429,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541185,
+      "sinceStart": 3506,
+      "type": "session.input_transcript.delta",
+      "start_ms": 2600,
+      "end_ms": 2800,
+      "delta": " instead",
+      "event_id": "event_EOFrI1fJPaRfwmkvwwc2V"
+    },
+    {
+      "at": 1789449541207,
+      "sinceStart": 3528,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541306,
+      "sinceStart": 3627,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541406,
+      "sinceStart": 3727,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541481,
+      "sinceStart": 3802,
+      "type": "session.delegation.created",
+      "offset_ms": 2800,
+      "delegation": {
+        "id": "item_EOFrJBXXs5GEdktyJgguw",
+        "type": "delegation",
+        "target": "client"
+      },
+      "event_id": "event_EOFrJp8r3Bbp0QAs1qkhR"
+    },
+    {
+      "at": 1789449541557,
+      "sinceStart": 3878,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541658,
+      "sinceStart": 3979,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541669,
+      "sinceStart": 3990,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3000,
+      "end_ms": 3200,
+      "delta": " Okay,",
+      "event_id": "event_EOFrJhmLlRJne3pH3MU0f"
+    },
+    {
+      "at": 1789449541758,
+      "sinceStart": 4079,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541858,
+      "sinceStart": 4179,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449541961,
+      "sinceStart": 4282,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542072,
+      "sinceStart": 4393,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542073,
+      "sinceStart": 4394,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3400,
+      "end_ms": 3600,
+      "delta": " let's",
+      "event_id": "event_EOFrJlDHYS4KLSJM8up03"
+    },
+    {
+      "at": 1789449542158,
+      "sinceStart": 4479,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542258,
+      "sinceStart": 4579,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542358,
+      "sinceStart": 4679,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542458,
+      "sinceStart": 4779,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542474,
+      "sinceStart": 4795,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3800,
+      "end_ms": 4000,
+      "delta": " see.",
+      "event_id": "event_EOFrKmLlvgE3NBkYqLxhZ"
+    },
+    {
+      "at": 1789449542558,
+      "sinceStart": 4879,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542658,
+      "sinceStart": 4979,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542758,
+      "sinceStart": 5079,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542858,
+      "sinceStart": 5179,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449542959,
+      "sinceStart": 5280,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543058,
+      "sinceStart": 5379,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543160,
+      "sinceStart": 5481,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543259,
+      "sinceStart": 5580,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543360,
+      "sinceStart": 5681,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543458,
+      "sinceStart": 5779,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543559,
+      "sinceStart": 5880,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543661,
+      "sinceStart": 5982,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543760,
+      "sinceStart": 6081,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543859,
+      "sinceStart": 6180,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449543959,
+      "sinceStart": 6280,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544058,
+      "sinceStart": 6379,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544249,
+      "sinceStart": 6570,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544349,
+      "sinceStart": 6670,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544455,
+      "sinceStart": 6776,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544548,
+      "sinceStart": 6869,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789449544909,
+      "sinceStart": 7230,
+      "type": "session.output_audio.delta",
+      "bytes": 480
+    },
+    {
+      "at": 1789449545274,
+      "sinceStart": 7595,
+      "event_id": "event_EOFrNSyqZkbPE1jqtzcFw",
+      "type": "session.closed",
+      "reason": "close_requested",
+      "session": {
+        "id": "live_u0_EOFrFduHvjzSPXwDfLAXi",
+        "expires_at": 1789456737,
+        "model": "gpt-live-1",
+        "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+        "audio": {
+          "output": {
+            "voice": "marin"
+          },
+          "format": {
+            "type": "audio/pcmu",
+            "rate": 8000
+          }
+        },
+        "delegation": {
+          "type": "client"
+        },
+        "status": "active",
+        "input": []
+      },
+      "usage": {
+        "seconds": 6
+      }
+    }
+  ],
+  "inputTranscript": [
+    {
+      "delta": " Actually",
+      "start_ms": 1000,
+      "end_ms": 1200,
+      "at": 1789449540610
+    },
+    {
+      "delta": ", could",
+      "start_ms": 1200,
+      "end_ms": 1400,
+      "at": 1789449540680
+    },
+    {
+      "delta": " we",
+      "start_ms": 1400,
+      "end_ms": 1600,
+      "at": 1789449540680
+    },
+    {
+      "delta": " make it",
+      "start_ms": 1600,
+      "end_ms": 1800,
+      "at": 1789449540680
+    },
+    {
+      "delta": " Wednesday",
+      "start_ms": 2200,
+      "end_ms": 2400,
+      "at": 1789449540767
+    },
+    {
+      "delta": " instead",
+      "start_ms": 2600,
+      "end_ms": 2800,
+      "at": 1789449541185
+    }
+  ],
+  "outputTranscript": [
+    {
+      "delta": " Okay,",
+      "start_ms": 3000,
+      "end_ms": 3200,
+      "at": 1789449541669
+    },
+    {
+      "delta": " let's",
+      "start_ms": 3400,
+      "end_ms": 3600,
+      "at": 1789449542073
+    },
+    {
+      "delta": " see.",
+      "start_ms": 3800,
+      "end_ms": 4000,
+      "at": 1789449542474
+    }
+  ],
+  "audioOut": [
+    {
+      "bytes": 800,
+      "at": 1789449538678,
+      "sinceStart": 999
+    },
+    {
+      "bytes": 800,
+      "at": 1789449538780,
+      "sinceStart": 1101
+    },
+    {
+      "bytes": 800,
+      "at": 1789449538879,
+      "sinceStart": 1200
+    },
+    {
+      "bytes": 800,
+      "at": 1789449538979,
+      "sinceStart": 1300
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539077,
+      "sinceStart": 1398
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539193,
+      "sinceStart": 1514
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539277,
+      "sinceStart": 1598
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539377,
+      "sinceStart": 1698
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539493,
+      "sinceStart": 1814
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539577,
+      "sinceStart": 1898
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539699,
+      "sinceStart": 2020
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539799,
+      "sinceStart": 2120
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539898,
+      "sinceStart": 2219
+    },
+    {
+      "bytes": 800,
+      "at": 1789449539999,
+      "sinceStart": 2320
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540105,
+      "sinceStart": 2426
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540206,
+      "sinceStart": 2527
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540308,
+      "sinceStart": 2629
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540405,
+      "sinceStart": 2726
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540505,
+      "sinceStart": 2826
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540605,
+      "sinceStart": 2926
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540707,
+      "sinceStart": 3028
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540806,
+      "sinceStart": 3127
+    },
+    {
+      "bytes": 800,
+      "at": 1789449540912,
+      "sinceStart": 3233
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541012,
+      "sinceStart": 3333
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541108,
+      "sinceStart": 3429
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541207,
+      "sinceStart": 3528
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541306,
+      "sinceStart": 3627
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541406,
+      "sinceStart": 3727
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541557,
+      "sinceStart": 3878
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541658,
+      "sinceStart": 3979
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541758,
+      "sinceStart": 4079
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541858,
+      "sinceStart": 4179
+    },
+    {
+      "bytes": 800,
+      "at": 1789449541961,
+      "sinceStart": 4282
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542072,
+      "sinceStart": 4393
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542158,
+      "sinceStart": 4479
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542258,
+      "sinceStart": 4579
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542358,
+      "sinceStart": 4679
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542458,
+      "sinceStart": 4779
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542558,
+      "sinceStart": 4879
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542658,
+      "sinceStart": 4979
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542758,
+      "sinceStart": 5079
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542858,
+      "sinceStart": 5179
+    },
+    {
+      "bytes": 800,
+      "at": 1789449542959,
+      "sinceStart": 5280
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543058,
+      "sinceStart": 5379
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543160,
+      "sinceStart": 5481
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543259,
+      "sinceStart": 5580
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543360,
+      "sinceStart": 5681
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543458,
+      "sinceStart": 5779
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543559,
+      "sinceStart": 5880
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543661,
+      "sinceStart": 5982
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543760,
+      "sinceStart": 6081
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543859,
+      "sinceStart": 6180
+    },
+    {
+      "bytes": 800,
+      "at": 1789449543959,
+      "sinceStart": 6280
+    },
+    {
+      "bytes": 800,
+      "at": 1789449544058,
+      "sinceStart": 6379
+    },
+    {
+      "bytes": 800,
+      "at": 1789449544249,
+      "sinceStart": 6570
+    },
+    {
+      "bytes": 800,
+      "at": 1789449544349,
+      "sinceStart": 6670
+    },
+    {
+      "bytes": 800,
+      "at": 1789449544455,
+      "sinceStart": 6776
+    },
+    {
+      "bytes": 800,
+      "at": 1789449544548,
+      "sinceStart": 6869
+    },
+    {
+      "bytes": 480,
+      "at": 1789449544909,
+      "sinceStart": 7230
+    }
+  ],
+  "delegations": [
+    {
+      "id": "item_EOFrJBXXs5GEdktyJgguw",
+      "target": "client",
+      "offset_ms": 2800,
+      "at": 1789449541481
+    }
+  ],
+  "responseEvents": [],
+  "toolCalls": [],
+  "usageSeconds": null,
+  "contextRatio": null,
+  "errors": [],
+  "info": [],
+  "startedAt": 1789449538083,
+  "resolvedSession": {
+    "id": "live_u0_EOFrFduHvjzSPXwDfLAXi",
+    "expires_at": 1789456737,
+    "model": "gpt-live-1",
+    "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+    "audio": {
+      "output": {
+        "voice": "marin"
+      },
+      "format": {
+        "type": "audio/pcmu",
+        "rate": 8000
+      }
+    },
+    "delegation": {
+      "type": "client"
+    },
+    "status": "active",
+    "input": []
+  },
+  "closeReason": "close_requested",
+  "lastCallerFrameAt": 1789449544562,
+  "t0": 1789449537679,
+  "aborted": false,
+  "abortReason": null,
+  "wallClockSeconds": 7.595
+}

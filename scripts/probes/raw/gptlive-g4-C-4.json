@@ -1,0 +1,2043 @@
+{
+  "label": "g4-C-4",
+  "events": [
+    {
+      "at": 1789450526250,
+      "sinceStart": 427,
+      "event_id": "event_EOG7BEb642BdxpzTbzJo4",
+      "type": "session.started",
+      "client_event_id": "start_1",
+      "session": {
+        "id": "live_u2_EOG7BOtvwtTvnIBy8Y01X",
+        "expires_at": 1789457725,
+        "model": "gpt-live-1",
+        "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+        "audio": {
+          "output": {
+            "voice": "marin"
+          },
+          "format": {
+            "type": "audio/pcmu",
+            "rate": 8000
+          }
+        },
+        "delegation": {
+          "type": "client"
+        },
+        "status": "active",
+        "input": []
+      }
+    },
+    {
+      "at": 1789450526901,
+      "sinceStart": 1078,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527000,
+      "sinceStart": 1177,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527101,
+      "sinceStart": 1278,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527192,
+      "sinceStart": 1369,
+      "type": "session.input_transcript.delta",
+      "start_ms": 400,
+      "end_ms": 600,
+      "delta": " Do",
+      "event_id": "event_EOG7CGmaw4mZaMNVajYT7"
+    },
+    {
+      "at": 1789450527199,
+      "sinceStart": 1376,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527303,
+      "sinceStart": 1480,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527380,
+      "sinceStart": 1557,
+      "type": "session.input_transcript.delta",
+      "start_ms": 600,
+      "end_ms": 800,
+      "delta": " you",
+      "event_id": "event_EOG7DE0c5cERafGUQqmlE"
+    },
+    {
+      "at": 1789450527398,
+      "sinceStart": 1575,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527499,
+      "sinceStart": 1676,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527541,
+      "sinceStart": 1718,
+      "type": "session.input_transcript.delta",
+      "start_ms": 800,
+      "end_ms": 1000,
+      "delta": " have",
+      "event_id": "event_EOG7DId7sEJUjl5zsarh7"
+    },
+    {
+      "at": 1789450527601,
+      "sinceStart": 1778,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527699,
+      "sinceStart": 1876,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527800,
+      "sinceStart": 1977,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527899,
+      "sinceStart": 2076,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450527966,
+      "sinceStart": 2143,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1200,
+      "end_ms": 1400,
+      "delta": " anything",
+      "event_id": "event_EOG7Data6ed8dY2s0gKEq"
+    },
+    {
+      "at": 1789450527998,
+      "sinceStart": 2175,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528099,
+      "sinceStart": 2276,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528199,
+      "sinceStart": 2376,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528308,
+      "sinceStart": 2485,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528400,
+      "sinceStart": 2577,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528499,
+      "sinceStart": 2676,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528591,
+      "sinceStart": 2768,
+      "type": "session.input_transcript.delta",
+      "start_ms": 1800,
+      "end_ms": 2000,
+      "delta": " Tuesday",
+      "event_id": "event_EOG7EeloutKj1PBuUwybP"
+    },
+    {
+      "at": 1789450528599,
+      "sinceStart": 2776,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528700,
+      "sinceStart": 2877,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528800,
+      "sinceStart": 2977,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450528920,
+      "sinceStart": 3097,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529023,
+      "sinceStart": 3200,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529115,
+      "sinceStart": 3292,
+      "type": "session.input_transcript.delta",
+      "start_ms": 2200,
+      "end_ms": 2400,
+      "delta": " morning",
+      "event_id": "event_EOG7EcNJRw5PCG5gR5gOd"
+    },
+    {
+      "at": 1789450529115,
+      "sinceStart": 3292,
+      "type": "session.delegation.created",
+      "offset_ms": 2200,
+      "delegation": {
+        "id": "item_EOG7EK3wJqiuu0aGaAqk0",
+        "type": "delegation",
+        "target": "client"
+      },
+      "event_id": "event_EOG7EZKmoov6sBcmz6sS5"
+    },
+    {
+      "at": 1789450529195,
+      "sinceStart": 3372,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529291,
+      "sinceStart": 3468,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529310,
+      "sinceStart": 3487,
+      "type": "session.output_transcript.delta",
+      "start_ms": 2400,
+      "end_ms": 2600,
+      "delta": " Hmm.",
+      "event_id": "event_EOG7Fnec1YcpzcZXjhjO2"
+    },
+    {
+      "at": 1789450529391,
+      "sinceStart": 3568,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529492,
+      "sinceStart": 3669,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529518,
+      "sinceStart": 3695,
+      "type": "session.output_transcript.delta",
+      "start_ms": 2600,
+      "end_ms": 2800,
+      "delta": " Let",
+      "event_id": "event_EOG7FkxrrZ4wSZNGW3JLd"
+    },
+    {
+      "at": 1789450529599,
+      "sinceStart": 3776,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529695,
+      "sinceStart": 3872,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529708,
+      "sinceStart": 3885,
+      "type": "session.output_transcript.delta",
+      "start_ms": 2800,
+      "end_ms": 3000,
+      "delta": " me just",
+      "event_id": "event_EOG7FUUyorcz9jU6tmM3p"
+    },
+    {
+      "at": 1789450529796,
+      "sinceStart": 3973,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529895,
+      "sinceStart": 4072,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450529898,
+      "sinceStart": 4075,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3000,
+      "end_ms": 3200,
+      "delta": " check",
+      "event_id": "event_EOG7FRNy9qOT0NWV1R7Pg"
+    },
+    {
+      "at": 1789450529997,
+      "sinceStart": 4174,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530096,
+      "sinceStart": 4273,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530197,
+      "sinceStart": 4374,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530286,
+      "sinceStart": 4463,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3400,
+      "end_ms": 3600,
+      "delta": " the diary",
+      "event_id": "event_EOG7GAKxkvpSIyNm6gduU"
+    },
+    {
+      "at": 1789450530295,
+      "sinceStart": 4472,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530395,
+      "sinceStart": 4572,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530495,
+      "sinceStart": 4672,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530608,
+      "sinceStart": 4785,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530704,
+      "sinceStart": 4881,
+      "type": "session.output_transcript.delta",
+      "start_ms": 3800,
+      "end_ms": 4000,
+      "delta": " for",
+      "event_id": "event_EOG7GsEjDeo0IpTFD5ZUm"
+    },
+    {
+      "at": 1789450530705,
+      "sinceStart": 4882,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530805,
+      "sinceStart": 4982,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450530898,
+      "sinceStart": 5075,
+      "type": "session.output_transcript.delta",
+      "start_ms": 4000,
+      "end_ms": 4200,
+      "delta": " that.",
+      "event_id": "event_EOG7GFWyztzUlEzfjeyg2"
+    },
+    {
+      "at": 1789450530898,
+      "sinceStart": 5075,
+      "type": "session.commentary.appended",
+      "start_ms": 4000,
+      "end_ms": 4200,
+      "event_id": "event_EOG7G0FoVpL7sFY3X1jDr",
+      "client_event_id": "release_4"
+    },
+    {
+      "at": 1789450530905,
+      "sinceStart": 5082,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531007,
+      "sinceStart": 5184,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531106,
+      "sinceStart": 5283,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531205,
+      "sinceStart": 5382,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531305,
+      "sinceStart": 5482,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531406,
+      "sinceStart": 5583,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531505,
+      "sinceStart": 5682,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531605,
+      "sinceStart": 5782,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531706,
+      "sinceStart": 5883,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531810,
+      "sinceStart": 5987,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450531905,
+      "sinceStart": 6082,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450534759,
+      "sinceStart": 8936,
+      "type": "session.output_transcript.delta",
+      "start_ms": 5000,
+      "end_ms": 5200,
+      "delta": " Tuesday",
+      "event_id": "event_EOG7KBBP9WyESHj0lNNEG"
+    },
+    {
+      "at": 1789450534834,
+      "sinceStart": 9011,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450534931,
+      "sinceStart": 9108,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450534942,
+      "sinceStart": 9119,
+      "type": "session.output_transcript.delta",
+      "start_ms": 5200,
+      "end_ms": 5400,
+      "delta": " morning",
+      "event_id": "event_EOG7KdM1LfGRexJNT9fSB"
+    },
+    {
+      "at": 1789450535031,
+      "sinceStart": 9208,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535131,
+      "sinceStart": 9308,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535235,
+      "sinceStart": 9412,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535335,
+      "sinceStart": 9512,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535355,
+      "sinceStart": 9532,
+      "type": "session.output_transcript.delta",
+      "start_ms": 5600,
+      "end_ms": 5800,
+      "delta": " has",
+      "event_id": "event_EOG7LMgujtODiAKTwdwTs"
+    },
+    {
+      "at": 1789450535436,
+      "sinceStart": 9613,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535534,
+      "sinceStart": 9711,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535548,
+      "sinceStart": 9725,
+      "type": "session.output_transcript.delta",
+      "start_ms": 5800,
+      "end_ms": 6000,
+      "delta": " a",
+      "event_id": "event_EOG7Lt9N2HawlEuxsOQmF"
+    },
+    {
+      "at": 1789450535633,
+      "sinceStart": 9810,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535733,
+      "sinceStart": 9910,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535756,
+      "sinceStart": 9933,
+      "type": "session.output_transcript.delta",
+      "start_ms": 6000,
+      "end_ms": 6200,
+      "delta": " couple",
+      "event_id": "event_EOG7Ls4bWfkT1M6Zjpdw5"
+    },
+    {
+      "at": 1789450535833,
+      "sinceStart": 10010,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450535934,
+      "sinceStart": 10111,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536034,
+      "sinceStart": 10211,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536131,
+      "sinceStart": 10308,
+      "type": "session.output_transcript.delta",
+      "start_ms": 6400,
+      "end_ms": 6600,
+      "delta": " openings,",
+      "event_id": "event_EOG7Lh1eysJag3WyaRbv7"
+    },
+    {
+      "at": 1789450536132,
+      "sinceStart": 10309,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536233,
+      "sinceStart": 10410,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536333,
+      "sinceStart": 10510,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536432,
+      "sinceStart": 10609,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536533,
+      "sinceStart": 10710,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536633,
+      "sinceStart": 10810,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536732,
+      "sinceStart": 10909,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536843,
+      "sinceStart": 11020,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536939,
+      "sinceStart": 11116,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450536952,
+      "sinceStart": 11129,
+      "type": "session.output_transcript.delta",
+      "start_ms": 7200,
+      "end_ms": 7400,
+      "delta": " at",
+      "event_id": "event_EOG7MyC9deSKFZalMuAWR"
+    },
+    {
+      "at": 1789450537039,
+      "sinceStart": 11216,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537133,
+      "sinceStart": 11310,
+      "type": "session.output_transcript.delta",
+      "start_ms": 7400,
+      "end_ms": 7600,
+      "delta": " ten",
+      "event_id": "event_EOG7MUzce8AGP1dzZpE5o"
+    },
+    {
+      "at": 1789450537147,
+      "sinceStart": 11324,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537239,
+      "sinceStart": 11416,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537339,
+      "sinceStart": 11516,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537441,
+      "sinceStart": 11618,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537544,
+      "sinceStart": 11721,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537547,
+      "sinceStart": 11724,
+      "type": "session.output_transcript.delta",
+      "start_ms": 7800,
+      "end_ms": 8000,
+      "delta": " a.m",
+      "event_id": "event_EOG7N3ElfeP8xGoaxdG1K"
+    },
+    {
+      "at": 1789450537639,
+      "sinceStart": 11816,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537725,
+      "sinceStart": 11902,
+      "type": "session.output_transcript.delta",
+      "start_ms": 8000,
+      "end_ms": 8200,
+      "delta": ". and",
+      "event_id": "event_EOG7N8akf8cPHJ6cjQePM"
+    },
+    {
+      "at": 1789450537739,
+      "sinceStart": 11916,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537839,
+      "sinceStart": 12016,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450537940,
+      "sinceStart": 12117,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538040,
+      "sinceStart": 12217,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538139,
+      "sinceStart": 12316,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538260,
+      "sinceStart": 12437,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538362,
+      "sinceStart": 12539,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538393,
+      "sinceStart": 12570,
+      "type": "session.output_transcript.delta",
+      "start_ms": 8600,
+      "end_ms": 8800,
+      "delta": " two-th",
+      "event_id": "event_EOG7Oy0bYmzJEfxCcsVgc"
+    },
+    {
+      "at": 1789450538469,
+      "sinceStart": 12646,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538534,
+      "sinceStart": 12711,
+      "type": "session.output_transcript.delta",
+      "start_ms": 8800,
+      "end_ms": 9000,
+      "delta": "irty",
+      "event_id": "event_EOG7OMveQs1o4nO4RU2MF"
+    },
+    {
+      "at": 1789450538570,
+      "sinceStart": 12747,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538669,
+      "sinceStart": 12846,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538769,
+      "sinceStart": 12946,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538868,
+      "sinceStart": 13045,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450538959,
+      "sinceStart": 13136,
+      "type": "session.output_transcript.delta",
+      "start_ms": 9200,
+      "end_ms": 9400,
+      "delta": " p.m",
+      "event_id": "event_EOG7OxW0wgi4Ijxlq2vnv"
+    },
+    {
+      "at": 1789450538969,
+      "sinceStart": 13146,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539069,
+      "sinceStart": 13246,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539145,
+      "sinceStart": 13322,
+      "type": "session.output_transcript.delta",
+      "start_ms": 9400,
+      "end_ms": 9600,
+      "delta": ".",
+      "event_id": "event_EOG7OzmBjv42Ylhcz3VB0"
+    },
+    {
+      "at": 1789450539170,
+      "sinceStart": 13347,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539283,
+      "sinceStart": 13460,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539370,
+      "sinceStart": 13547,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539468,
+      "sinceStart": 13645,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539568,
+      "sinceStart": 13745,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539670,
+      "sinceStart": 13847,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539768,
+      "sinceStart": 13945,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539869,
+      "sinceStart": 14046,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450539971,
+      "sinceStart": 14148,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540111,
+      "sinceStart": 14288,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540211,
+      "sinceStart": 14388,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540313,
+      "sinceStart": 14490,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540411,
+      "sinceStart": 14588,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540512,
+      "sinceStart": 14689,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540614,
+      "sinceStart": 14791,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540710,
+      "sinceStart": 14887,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540811,
+      "sinceStart": 14988,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450540911,
+      "sinceStart": 15088,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541012,
+      "sinceStart": 15189,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541111,
+      "sinceStart": 15288,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541145,
+      "sinceStart": 15322,
+      "type": "session.usage.updated",
+      "usage": {
+        "seconds": 11
+      },
+      "context_window": {
+        "usage_ratio": 0.0107421875
+      },
+      "event_id": "event_EOG7QEv8B6ikzACm5u99r"
+    },
+    {
+      "at": 1789450541210,
+      "sinceStart": 15387,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541326,
+      "sinceStart": 15503,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541426,
+      "sinceStart": 15603,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541532,
+      "sinceStart": 15709,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541626,
+      "sinceStart": 15803,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541726,
+      "sinceStart": 15903,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541828,
+      "sinceStart": 16005,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450541927,
+      "sinceStart": 16104,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542026,
+      "sinceStart": 16203,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542127,
+      "sinceStart": 16304,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542227,
+      "sinceStart": 16404,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542326,
+      "sinceStart": 16503,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542433,
+      "sinceStart": 16610,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542528,
+      "sinceStart": 16705,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542627,
+      "sinceStart": 16804,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542729,
+      "sinceStart": 16906,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542828,
+      "sinceStart": 17005,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450542927,
+      "sinceStart": 17104,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450543026,
+      "sinceStart": 17203,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450543127,
+      "sinceStart": 17304,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450543227,
+      "sinceStart": 17404,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450543326,
+      "sinceStart": 17503,
+      "type": "session.output_audio.delta",
+      "bytes": 800
+    },
+    {
+      "at": 1789450543648,
+      "sinceStart": 17825,
+      "type": "session.output_audio.delta",
+      "bytes": 160
+    },
+    {
+      "at": 1789450543970,
+      "sinceStart": 18147,
+      "event_id": "event_EOG7TILkKS4OYWctmo5cV",
+      "type": "session.closed",
+      "reason": "close_requested",
+      "session": {
+        "id": "live_u2_EOG7BOtvwtTvnIBy8Y01X",
+        "expires_at": 1789457725,
+        "model": "gpt-live-1",
+        "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+        "audio": {
+          "output": {
+            "voice": "marin"
+          },
+          "format": {
+            "type": "audio/pcmu",
+            "rate": 8000
+          }
+        },
+        "delegation": {
+          "type": "client"
+        },
+        "status": "active",
+        "input": []
+      },
+      "usage": {
+        "seconds": 13
+      }
+    }
+  ],
+  "inputTranscript": [
+    {
+      "delta": " Do",
+      "start_ms": 400,
+      "end_ms": 600,
+      "at": 1789450527192
+    },
+    {
+      "delta": " you",
+      "start_ms": 600,
+      "end_ms": 800,
+      "at": 1789450527380
+    },
+    {
+      "delta": " have",
+      "start_ms": 800,
+      "end_ms": 1000,
+      "at": 1789450527541
+    },
+    {
+      "delta": " anything",
+      "start_ms": 1200,
+      "end_ms": 1400,
+      "at": 1789450527966
+    },
+    {
+      "delta": " Tuesday",
+      "start_ms": 1800,
+      "end_ms": 2000,
+      "at": 1789450528591
+    },
+    {
+      "delta": " morning",
+      "start_ms": 2200,
+      "end_ms": 2400,
+      "at": 1789450529115
+    }
+  ],
+  "outputTranscript": [
+    {
+      "delta": " Hmm.",
+      "start_ms": 2400,
+      "end_ms": 2600,
+      "at": 1789450529310
+    },
+    {
+      "delta": " Let",
+      "start_ms": 2600,
+      "end_ms": 2800,
+      "at": 1789450529518
+    },
+    {
+      "delta": " me just",
+      "start_ms": 2800,
+      "end_ms": 3000,
+      "at": 1789450529708
+    },
+    {
+      "delta": " check",
+      "start_ms": 3000,
+      "end_ms": 3200,
+      "at": 1789450529898
+    },
+    {
+      "delta": " the diary",
+      "start_ms": 3400,
+      "end_ms": 3600,
+      "at": 1789450530286
+    },
+    {
+      "delta": " for",
+      "start_ms": 3800,
+      "end_ms": 4000,
+      "at": 1789450530704
+    },
+    {
+      "delta": " that.",
+      "start_ms": 4000,
+      "end_ms": 4200,
+      "at": 1789450530898
+    },
+    {
+      "delta": " Tuesday",
+      "start_ms": 5000,
+      "end_ms": 5200,
+      "at": 1789450534759
+    },
+    {
+      "delta": " morning",
+      "start_ms": 5200,
+      "end_ms": 5400,
+      "at": 1789450534942
+    },
+    {
+      "delta": " has",
+      "start_ms": 5600,
+      "end_ms": 5800,
+      "at": 1789450535355
+    },
+    {
+      "delta": " a",
+      "start_ms": 5800,
+      "end_ms": 6000,
+      "at": 1789450535548
+    },
+    {
+      "delta": " couple",
+      "start_ms": 6000,
+      "end_ms": 6200,
+      "at": 1789450535756
+    },
+    {
+      "delta": " openings,",
+      "start_ms": 6400,
+      "end_ms": 6600,
+      "at": 1789450536131
+    },
+    {
+      "delta": " at",
+      "start_ms": 7200,
+      "end_ms": 7400,
+      "at": 1789450536952
+    },
+    {
+      "delta": " ten",
+      "start_ms": 7400,
+      "end_ms": 7600,
+      "at": 1789450537133
+    },
+    {
+      "delta": " a.m",
+      "start_ms": 7800,
+      "end_ms": 8000,
+      "at": 1789450537547
+    },
+    {
+      "delta": ". and",
+      "start_ms": 8000,
+      "end_ms": 8200,
+      "at": 1789450537725
+    },
+    {
+      "delta": " two-th",
+      "start_ms": 8600,
+      "end_ms": 8800,
+      "at": 1789450538393
+    },
+    {
+      "delta": "irty",
+      "start_ms": 8800,
+      "end_ms": 9000,
+      "at": 1789450538534
+    },
+    {
+      "delta": " p.m",
+      "start_ms": 9200,
+      "end_ms": 9400,
+      "at": 1789450538959
+    },
+    {
+      "delta": ".",
+      "start_ms": 9400,
+      "end_ms": 9600,
+      "at": 1789450539145
+    }
+  ],
+  "audioOut": [
+    {
+      "bytes": 800,
+      "at": 1789450526901,
+      "sinceStart": 1078
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527000,
+      "sinceStart": 1177
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527101,
+      "sinceStart": 1278
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527199,
+      "sinceStart": 1376
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527303,
+      "sinceStart": 1480
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527398,
+      "sinceStart": 1575
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527499,
+      "sinceStart": 1676
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527601,
+      "sinceStart": 1778
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527699,
+      "sinceStart": 1876
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527800,
+      "sinceStart": 1977
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527899,
+      "sinceStart": 2076
+    },
+    {
+      "bytes": 800,
+      "at": 1789450527998,
+      "sinceStart": 2175
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528099,
+      "sinceStart": 2276
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528199,
+      "sinceStart": 2376
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528308,
+      "sinceStart": 2485
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528400,
+      "sinceStart": 2577
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528499,
+      "sinceStart": 2676
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528599,
+      "sinceStart": 2776
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528700,
+      "sinceStart": 2877
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528800,
+      "sinceStart": 2977
+    },
+    {
+      "bytes": 800,
+      "at": 1789450528920,
+      "sinceStart": 3097
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529023,
+      "sinceStart": 3200
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529195,
+      "sinceStart": 3372
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529291,
+      "sinceStart": 3468
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529391,
+      "sinceStart": 3568
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529492,
+      "sinceStart": 3669
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529599,
+      "sinceStart": 3776
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529695,
+      "sinceStart": 3872
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529796,
+      "sinceStart": 3973
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529895,
+      "sinceStart": 4072
+    },
+    {
+      "bytes": 800,
+      "at": 1789450529997,
+      "sinceStart": 4174
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530096,
+      "sinceStart": 4273
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530197,
+      "sinceStart": 4374
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530295,
+      "sinceStart": 4472
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530395,
+      "sinceStart": 4572
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530495,
+      "sinceStart": 4672
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530608,
+      "sinceStart": 4785
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530705,
+      "sinceStart": 4882
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530805,
+      "sinceStart": 4982
+    },
+    {
+      "bytes": 800,
+      "at": 1789450530905,
+      "sinceStart": 5082
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531007,
+      "sinceStart": 5184
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531106,
+      "sinceStart": 5283
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531205,
+      "sinceStart": 5382
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531305,
+      "sinceStart": 5482
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531406,
+      "sinceStart": 5583
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531505,
+      "sinceStart": 5682
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531605,
+      "sinceStart": 5782
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531706,
+      "sinceStart": 5883
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531810,
+      "sinceStart": 5987
+    },
+    {
+      "bytes": 800,
+      "at": 1789450531905,
+      "sinceStart": 6082
+    },
+    {
+      "bytes": 800,
+      "at": 1789450534834,
+      "sinceStart": 9011
+    },
+    {
+      "bytes": 800,
+      "at": 1789450534931,
+      "sinceStart": 9108
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535031,
+      "sinceStart": 9208
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535131,
+      "sinceStart": 9308
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535235,
+      "sinceStart": 9412
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535335,
+      "sinceStart": 9512
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535436,
+      "sinceStart": 9613
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535534,
+      "sinceStart": 9711
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535633,
+      "sinceStart": 9810
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535733,
+      "sinceStart": 9910
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535833,
+      "sinceStart": 10010
+    },
+    {
+      "bytes": 800,
+      "at": 1789450535934,
+      "sinceStart": 10111
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536034,
+      "sinceStart": 10211
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536132,
+      "sinceStart": 10309
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536233,
+      "sinceStart": 10410
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536333,
+      "sinceStart": 10510
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536432,
+      "sinceStart": 10609
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536533,
+      "sinceStart": 10710
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536633,
+      "sinceStart": 10810
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536732,
+      "sinceStart": 10909
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536843,
+      "sinceStart": 11020
+    },
+    {
+      "bytes": 800,
+      "at": 1789450536939,
+      "sinceStart": 11116
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537039,
+      "sinceStart": 11216
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537147,
+      "sinceStart": 11324
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537239,
+      "sinceStart": 11416
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537339,
+      "sinceStart": 11516
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537441,
+      "sinceStart": 11618
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537544,
+      "sinceStart": 11721
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537639,
+      "sinceStart": 11816
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537739,
+      "sinceStart": 11916
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537839,
+      "sinceStart": 12016
+    },
+    {
+      "bytes": 800,
+      "at": 1789450537940,
+      "sinceStart": 12117
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538040,
+      "sinceStart": 12217
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538139,
+      "sinceStart": 12316
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538260,
+      "sinceStart": 12437
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538362,
+      "sinceStart": 12539
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538469,
+      "sinceStart": 12646
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538570,
+      "sinceStart": 12747
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538669,
+      "sinceStart": 12846
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538769,
+      "sinceStart": 12946
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538868,
+      "sinceStart": 13045
+    },
+    {
+      "bytes": 800,
+      "at": 1789450538969,
+      "sinceStart": 13146
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539069,
+      "sinceStart": 13246
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539170,
+      "sinceStart": 13347
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539283,
+      "sinceStart": 13460
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539370,
+      "sinceStart": 13547
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539468,
+      "sinceStart": 13645
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539568,
+      "sinceStart": 13745
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539670,
+      "sinceStart": 13847
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539768,
+      "sinceStart": 13945
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539869,
+      "sinceStart": 14046
+    },
+    {
+      "bytes": 800,
+      "at": 1789450539971,
+      "sinceStart": 14148
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540111,
+      "sinceStart": 14288
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540211,
+      "sinceStart": 14388
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540313,
+      "sinceStart": 14490
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540411,
+      "sinceStart": 14588
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540512,
+      "sinceStart": 14689
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540614,
+      "sinceStart": 14791
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540710,
+      "sinceStart": 14887
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540811,
+      "sinceStart": 14988
+    },
+    {
+      "bytes": 800,
+      "at": 1789450540911,
+      "sinceStart": 15088
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541012,
+      "sinceStart": 15189
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541111,
+      "sinceStart": 15288
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541210,
+      "sinceStart": 15387
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541326,
+      "sinceStart": 15503
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541426,
+      "sinceStart": 15603
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541532,
+      "sinceStart": 15709
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541626,
+      "sinceStart": 15803
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541726,
+      "sinceStart": 15903
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541828,
+      "sinceStart": 16005
+    },
+    {
+      "bytes": 800,
+      "at": 1789450541927,
+      "sinceStart": 16104
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542026,
+      "sinceStart": 16203
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542127,
+      "sinceStart": 16304
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542227,
+      "sinceStart": 16404
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542326,
+      "sinceStart": 16503
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542433,
+      "sinceStart": 16610
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542528,
+      "sinceStart": 16705
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542627,
+      "sinceStart": 16804
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542729,
+      "sinceStart": 16906
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542828,
+      "sinceStart": 17005
+    },
+    {
+      "bytes": 800,
+      "at": 1789450542927,
+      "sinceStart": 17104
+    },
+    {
+      "bytes": 800,
+      "at": 1789450543026,
+      "sinceStart": 17203
+    },
+    {
+      "bytes": 800,
+      "at": 1789450543127,
+      "sinceStart": 17304
+    },
+    {
+      "bytes": 800,
+      "at": 1789450543227,
+      "sinceStart": 17404
+    },
+    {
+      "bytes": 800,
+      "at": 1789450543326,
+      "sinceStart": 17503
+    },
+    {
+      "bytes": 160,
+      "at": 1789450543648,
+      "sinceStart": 17825
+    }
+  ],
+  "delegations": [
+    {
+      "id": "item_EOG7EK3wJqiuu0aGaAqk0",
+      "target": "client",
+      "offset_ms": 2200,
+      "at": 1789450529115
+    }
+  ],
+  "responseEvents": [],
+  "toolCalls": [],
+  "usageSeconds": 11,
+  "contextRatio": 0.0107421875,
+  "errors": [],
+  "info": [],
+  "startedAt": 1789450526250,
+  "resolvedSession": {
+    "id": "live_u2_EOG7BOtvwtTvnIBy8Y01X",
+    "expires_at": 1789457725,
+    "model": "gpt-live-1",
+    "instructions": "You are the receptionist answering the phone for Brightwork Family Dental.\nSpeak naturally and briefly, the way a person on a phone does.\n\nYou do not have access to the diary, the price list, or any customer record.\nDelegate anything that needs one: appointments, availability, prices, opening\nhours, taking a message, or anything about a specific customer.\n\nWhile you are waiting for an answer, it is fine to acknowledge the caller and\nsay you are checking. Do not state a time or date as available, and do not say\na booking is made, until the answer comes back.",
+    "audio": {
+      "output": {
+        "voice": "marin"
+      },
+      "format": {
+        "type": "audio/pcmu",
+        "rate": 8000
+      }
+    },
+    "delegation": {
+      "type": "client"
+    },
+    "status": "active",
+    "input": []
+  },
+  "closeReason": "close_requested",
+  "lastCallerFrameAt": 1789450543326,
+  "t0": 1789450525823,
+  "aborted": false,
+  "abortReason": null,
+  "wallClockSeconds": 18.147
+}

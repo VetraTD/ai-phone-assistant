@@ -1,0 +1,197 @@
+- generic [ref=e3]:
+  - region "Launch announcement" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: Launching very soon
+      - generic [ref=e7]: ·
+      - generic [ref=e8]:
+        - text: Plans from
+        - strong [ref=e9]: $49/mo
+  - banner [ref=e10]:
+    - generic [ref=e11]:
+      - link "Vetra" [ref=e12] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e15]:
+        - link "How it works" [ref=e16] [cursor=pointer]:
+          - /url: "#how-it-works"
+        - link "Features" [ref=e17] [cursor=pointer]:
+          - /url: "#features"
+        - link "Dashboard" [ref=e18] [cursor=pointer]:
+          - /url: "#preview"
+        - link "Why Vetra" [ref=e19] [cursor=pointer]:
+          - /url: "#different"
+        - link "FAQ" [ref=e20] [cursor=pointer]:
+          - /url: "#faq"
+      - generic [ref=e21]:
+        - link "Contact us" [ref=e22] [cursor=pointer]:
+          - /url: /contact
+        - link "Log in" [ref=e23] [cursor=pointer]:
+          - /url: /app
+        - link "+1 (817) 601-1171" [ref=e24] [cursor=pointer]:
+          - /url: tel:+1(817)601-1171
+  - generic [ref=e28]:
+    - generic [ref=e29]:
+      - generic [ref=e30]: Call handling for modern businesses
+      - heading "Your virtual receptionist, always on." [level=1] [ref=e32]
+      - paragraph [ref=e33]: We answer your phone when you can't — bookings, messages, and follow-ups handled for you, day and night. You get a simple dashboard with everything in one place.
+      - generic [ref=e34]:
+        - link "Get started" [ref=e35] [cursor=pointer]:
+          - /url: /app
+        - link "Call the demo line" [ref=e36] [cursor=pointer]:
+          - /url: tel:+1(817)601-1171
+        - link "Talk to us" [ref=e37] [cursor=pointer]:
+          - /url: /contact
+      - paragraph [ref=e38]: Secure • Written summaries of every call • One dashboard
+    - generic [ref=e46]:
+      - generic [ref=e47]: 9:41
+      - generic [ref=e57]:
+        - generic [ref=e58]: V
+        - generic [ref=e60]: Vetra
+        - generic [ref=e61]: calling…
+      - generic [ref=e62]:
+        - button "Play demo call" [ref=e63] [cursor=pointer]
+        - generic [ref=e68]: Tap to hear a real call
+  - generic [ref=e71]:
+    - heading "How it works" [level=2] [ref=e72]
+    - paragraph [ref=e73]: Three simple steps — no technical setup required.
+    - generic [ref=e74]:
+      - generic [ref=e75]:
+        - generic [ref=e80]: "1"
+        - heading "Get your number" [level=3] [ref=e81]
+        - paragraph [ref=e82]: Sign up and choose a phone number for your business. Set your greeting, hours, and when calls should come through to you.
+      - generic [ref=e83]:
+        - generic [ref=e89]: "2"
+        - heading "We answer every call" [level=3] [ref=e90]
+        - paragraph [ref=e91]: When someone rings, Vetra picks up, has a natural conversation, books appointments, and takes messages — even after hours.
+      - generic [ref=e92]:
+        - generic [ref=e99]: "3"
+        - heading "Everything in one place" [level=3] [ref=e100]
+        - paragraph [ref=e101]: Every call shows up in your dashboard with a summary, bookings, and follow-ups — so nothing slips through the cracks.
+  - generic [ref=e103]:
+    - heading "Hear it for yourself" [level=2] [ref=e104]
+    - paragraph [ref=e105]: Call our demo line — no signup needed. You'll hear how Vetra answers, handles a conversation, and books an appointment.
+    - link "+1 (817) 601-1171" [ref=e106] [cursor=pointer]:
+      - /url: tel:+1(817)601-1171
+    - paragraph [ref=e109]:
+      - text: Prefer to talk to us first?
+      - link "Get in touch" [ref=e110] [cursor=pointer]:
+        - /url: /contact
+  - generic [ref=e112]:
+    - heading "Why businesses choose Vetra" [level=2] [ref=e113]
+    - paragraph [ref=e114]: We don't just answer calls — we help you stay on top of every enquiry.
+    - generic [ref=e115]:
+      - generic [ref=e116]:
+        - heading "Calls answered, instantly" [level=4] [ref=e122]
+        - paragraph [ref=e123]: Every call gets a friendly, professional answer — mornings, evenings, weekends, and holidays included.
+      - generic [ref=e124]:
+        - heading "Bookings & messages handled" [level=4] [ref=e129]
+        - paragraph [ref=e130]: Appointments go straight into your dashboard. Messages are captured with the details you need — no sticky notes required.
+      - generic [ref=e131]:
+        - heading "Nothing slips through" [level=4] [ref=e136]
+        - paragraph [ref=e137]: Each call comes with a written summary and any follow-ups flagged for your team. We can email you a digest so you stay in the loop.
+  - generic [ref=e139]:
+    - generic [ref=e140]: Written summary of every call
+    - generic [ref=e146]: Bookings and messages captured
+    - generic [ref=e151]: 24/7 coverage, one number
+    - generic [ref=e157]: Follow-ups organised for you
+  - generic [ref=e164]:
+    - heading "One dashboard for every call" [level=2] [ref=e165]
+    - paragraph [ref=e166]: See what happened on each call, how busy you've been, and what needs your attention.
+    - generic [ref=e167]:
+      - generic [ref=e168]: app / analytics
+      - generic [ref=e173]:
+        - generic [ref=e174]:
+          - generic [ref=e175]:
+            - heading "Call overview" [level=3] [ref=e176]
+            - paragraph [ref=e177]: A clear picture of your business calls
+          - generic [ref=e178]: Last 3 months
+        - generic [ref=e179]:
+          - generic [ref=e180]:
+            - generic [ref=e181]: "74"
+            - text: Calls handled
+          - generic [ref=e182]:
+            - generic [ref=e183]: "19"
+            - text: Appointments booked
+          - generic [ref=e184]:
+            - generic [ref=e185]: "4"
+            - text: Follow-ups needed
+          - generic [ref=e186]:
+            - generic [ref=e187]: 26%
+            - text: Calls → bookings
+        - generic [ref=e188]:
+          - generic [ref=e189]:
+            - heading "Calls last 3 months" [level=4] [ref=e190]
+            - generic [ref=e191]:
+              - generic [ref=e192]: Jan
+              - generic [ref=e195]: Feb
+              - generic [ref=e198]: Mar
+          - generic [ref=e201]:
+            - heading "Call outcomes" [level=4] [ref=e202]
+            - generic [ref=e203]: 89% answered / completed
+            - list [ref=e204]:
+              - listitem [ref=e205]: "Completed: 56"
+              - listitem [ref=e207]: "Transferred: 8"
+              - listitem [ref=e209]: "Failed: 0"
+    - link "Try the guided dashboard demo" [ref=e211] [cursor=pointer]:
+      - /url: /app?demo=1
+  - generic [ref=e213]:
+    - generic [ref=e214]:
+      - generic [ref=e215]: 24/7
+      - text: Availability
+    - generic [ref=e216]:
+      - generic [ref=e217]: One
+      - text: Dashboard for all calls
+    - generic [ref=e218]:
+      - generic [ref=e219]: Zero
+      - text: Missed leads
+  - generic [ref=e222]:
+    - img "James T., small business owner" [ref=e225]
+    - generic [ref=e226]:
+      - paragraph [ref=e227]: “Our calls get answered straight away and everything lands in one dashboard. It's been a real help for after-hours and when we're busy with customers.”
+      - paragraph [ref=e228]: James T.Small business owner
+  - generic [ref=e230]:
+    - heading "Common questions" [level=2] [ref=e231]
+    - generic [ref=e232]:
+      - group [ref=e233]:
+        - generic "How do we connect our phone number? +" [ref=e234] [cursor=pointer]
+      - group [ref=e235]:
+        - generic "Is our call data secure? +" [ref=e236] [cursor=pointer]
+      - group [ref=e237]:
+        - generic "What if we already have an answering service? +" [ref=e238] [cursor=pointer]
+      - group [ref=e239]:
+        - generic "Can calls be transferred to a person? +" [ref=e240] [cursor=pointer]
+      - group [ref=e241]:
+        - generic "What languages are supported? +" [ref=e242] [cursor=pointer]
+      - group [ref=e243]:
+        - generic "How quickly can we get started? +" [ref=e244] [cursor=pointer]
+  - generic [ref=e246]:
+    - heading "Download Vetra for Windows" [level=2] [ref=e247]
+    - paragraph [ref=e248]: Prefer a desktop app? Run the same dashboard from your taskbar.
+    - link "Download for Windows" [ref=e249] [cursor=pointer]:
+      - /url: https://github.com/VetraTD/ai-phone-assistant/releases/download/v0.1.0/vetra-desktop_0.1.0_x64_en-US.msi
+    - paragraph [ref=e250]: Requires Windows 10 or later. Internet connection needed for login and syncing.
+  - generic [ref=e252]:
+    - heading "Ready to never miss a call again?" [level=2] [ref=e254]
+    - paragraph [ref=e255]: Create an account, call the demo line, or drop us a message — whatever suits you.
+    - generic [ref=e256]:
+      - link "Get started" [ref=e257] [cursor=pointer]:
+        - /url: /app
+      - link "Call demo line" [ref=e258] [cursor=pointer]:
+        - /url: tel:+1(817)601-1171
+      - link "Contact us" [ref=e259] [cursor=pointer]:
+        - /url: /contact
+  - contentinfo [ref=e260]:
+    - generic [ref=e261]:
+      - link "Vetra" [ref=e262] [cursor=pointer]:
+        - /url: /
+      - generic [ref=e265]:
+        - link "Log in" [ref=e266] [cursor=pointer]:
+          - /url: /app
+        - link "Contact" [ref=e267] [cursor=pointer]:
+          - /url: /contact
+        - link "Privacy Policy" [ref=e268] [cursor=pointer]:
+          - /url: http://localhost:5173/legal
+        - link "Terms" [ref=e269] [cursor=pointer]:
+          - /url: /legal
+        - link "+1 (817) 601-1171" [ref=e270] [cursor=pointer]:
+          - /url: tel:+1(817)601-1171
+      - generic [ref=e273]: © 2026 Vetra

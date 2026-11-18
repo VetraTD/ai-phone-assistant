@@ -1,0 +1,261 @@
+// ---------------------------------------------------------------------------
+// A write needs consent that was actually given, in speech we actually heard.
+//
+// LVX56 — turn 10 of a real call: the caller said "Ah!" and nothing else, and
+// the assistant executed a reschedule AND a name correction, then announced
+// both as done. The LVX45 fix threaded the caller's last utterance into the
+// end_call gate ONLY, so the hang-up was protected and every write was not.
+//
+// LVX50 — an English turn came back as "에레는" and was answered "Great, 8 AM on
+// Tuesday, September 8th, is available"; the call then booked from it. This is
+// the input path to a WRITE, which is what makes it worse than a misheard word:
+// a misheard time gives a wrong row, an invented reading of noise gives a row
+// nobody asked for.
+//
+// The gate is deliberately ABOVE the spelling gate: checking the spelling of a
+// name on a write nobody authorised is checking the spelling of a decision that
+// was never made.
+// ---------------------------------------------------------------------------
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockCreateAppointment = vi.fn();
+const mockListAppointmentsByCaller = vi.fn();
+const mockUpdateAppointmentStatus = vi.fn();
+const mockUpdateAppointment = vi.fn();
+const mockGetAppointmentById = vi.fn();
+const mockCountScheduledOverlapping = vi.fn().mockResolvedValue(0);
+const mockListScheduledBetween = vi.fn().mockResolvedValue([]);
+
+vi.mock("../services/db.js", () => ({
+  createAppointment: (...a) => mockCreateAppointment(...a),
+  createAppointmentIfAvailable: async (p) => {
+    const id = await mockCreateAppointment(p);
+    return id ? { id } : { full: true };
+  },
+  countScheduledOverlapping: (...a) => mockCountScheduledOverlapping(...a),
+  listScheduledBetween: (...a) => mockListScheduledBetween(...a),
+  listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
+  updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
+  updateAppointment: (...a) => mockUpdateAppointment(...a),
+  getAppointmentById: (...a) => mockGetAppointmentById(...a),
+}));
+vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));
+vi.mock("../lib/sentry.js", () => ({ captureException: vi.fn() }));
+
+import { executeToolCall } from "../services/tools.js";
+import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
+
+const FUTURE_SLOT = `${new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)}T10:00:00`;
+
+const ctxWith = (lastCallerText) => ({
+  businessId: "biz-1",
+  callerPhone: "+15551234567",
+  callId: "call-1",
+  integrations: [],
+  capabilityState: {},
+  config: {},
+  // Settled, so a refusal here is the consent gate and never the spelling gate.
+  spellingSettled: true,
+  lastCallerText,
+  // ...and a read-back already made, so a refusal here is never the LVX95
+  // write-order gate either. Added 2026-09-09 when that gate shipped and four
+  // tests in this file went red: they were asserting that "Okay" authorises a
+  // write, which is still true, on a fixture where nothing had ever been put to
+  // the caller — which under the new gate is a different refusal for a
+  // different reason.
+  //
+  // The alternative was to weaken the assertions, and that would have been the
+  // wrong trade: this file's subject is WHICH WORDS COUNT AS AGREEMENT, and it
+  // can only test that on a turn where agreement is the only thing in question.
+  // The ordering gate has its own file.
+  lastReplyText: "Just to confirm, shall I go ahead and book that for you?",
+});
+
+const book = (ctx) =>
+  executeToolCall(
+    {
+      id: "fc1",
+      name: "book_appointment",
+      args: { client_name: "Nithin Dodla", scheduled_at: FUTURE_SLOT, notes: "cleaning" },
+    },
+    ctx
+  );
+
+const counters = () => getLatencyStats().turnTaking;
+
+beforeEach(() => {
+  clearStats();
+  vi.clearAllMocks();
+  mockCreateAppointment.mockResolvedValue("appt-1");
+  mockCountScheduledOverlapping.mockResolvedValue(0);
+  mockListScheduledBetween.mockResolvedValue([]);
+});
+
+describe("LVX56 — a hesitation cannot be the agreement that triggers a write", () => {
+  it("refuses the write, and nothing reaches the database", async () => {
+    const { functionResponse, stateEffects } = await book(ctxWith("Ah!"));
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    // The refusal is model-facing; the caller hears a plain question instead.
+    expect(functionResponse.response.message).toContain("[not caller speech]");
+    expect(stateEffects.toolResult.callerSafe).toBe(true);
+    expect(stateEffects.toolResult.message).toBe("Sorry — did you want me to go ahead with that?");
+    // Silent, for the same reason the spelling gate's event is: nothing ran, so
+    // the session must not narrate work that was declined.
+    expect(stateEffects.toolCallEvent.silent).toBe(true);
+  });
+
+  it("covers every action tool, not just end_call", async () => {
+    // The exact pair executed off "Ah!" on the real call.
+    mockGetAppointmentById.mockResolvedValue({
+      id: "a1",
+      client_phone: "+15551234567",
+      scheduled_at: FUTURE_SLOT,
+      status: "scheduled",
+    });
+    for (const fc of [
+      { id: "1", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+      { id: "2", name: "reschedule_appointment_db", args: { new_scheduled_at: FUTURE_SLOT } },
+      { id: "3", name: "correct_appointment_name", args: { client_name: "Nathan Dodla" } },
+      { id: "4", name: "record_customer_request", args: { request_type: "message" } },
+    ]) {
+      const { functionResponse } = await executeToolCall(fc, ctxWith("umm"));
+      expect(functionResponse.response.success, fc.name).toBe(false);
+    }
+    expect(mockUpdateAppointment).not.toHaveBeenCalled();
+    expect(mockUpdateAppointmentStatus).not.toHaveBeenCalled();
+  });
+
+  it("does NOT refuse on an acknowledgement, which is how people agree", async () => {
+    // The whole reason this uses isHesitationOnly and not stripFillers, which
+    // reduces all of these to the empty string. Refusing to book on "Okay."
+    // would be a worse defect than the one being fixed.
+    for (const said of ["Okay", "Okay.", "OK", "Right", "Mm-hmm", "uh-huh", "Yes", "Yep", "Sure"]) {
+      mockCreateAppointment.mockResolvedValue(`appt-${said}`);
+      const { functionResponse } = await book(ctxWith(said));
+      expect(functionResponse.response.success, said).toBe(true);
+    }
+  });
+
+  it("does not fire when the caller said nothing at all", async () => {
+    // An empty turn is silence, which the silence ladder owns. Treating it here
+    // would block a legitimate write after a pause.
+    const { functionResponse } = await book(ctxWith(""));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("leaves the cascade byte-identical — it never sets the field", async () => {
+    const ctx = ctxWith(undefined);
+    delete ctx.lastCallerText;
+    const { functionResponse } = await book(ctx);
+    expect(functionResponse.response.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX117 — the silent-turn refusal, at the layer that decides it.
+//
+// tests/liveWritePathEndToEnd.test.js drives this through a real session and
+// asserts the row. What it cannot produce is the END-OF-CALL SWEEP, which
+// re-issues a promised message after the line is down. tests/
+// messageLastChance.test.js covers that sweep with a STUBBED executor, so
+// services/tools.js is not in its path and neither file can see this gate meet
+// that write. Both suites were green while the gate silently refused it.
+// ---------------------------------------------------------------------------
+describe("LVX117 — a write on a silent turn, with nothing ever agreed", () => {
+  // Live, unlike ctxWith: callerSaidThisCall is what separates the two
+  // front-ends, and it is non-null on Live from the first turn.
+  const liveCtx = (over = {}) => ({ ...ctxWith(""), callerSaidThisCall: "I'd like to cancel", ...over });
+
+  it("refuses when the caller's turn was empty and no agreement exists", async () => {
+    const { functionResponse } = await book(liveCtx());
+    expect(functionResponse.response.success).toBe(false);
+    // Held, not failed, so the session does not tell the caller it went wrong.
+    expect(functionResponse.response.gated).toBe(true);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+  });
+
+  it("allows it when the caller agreed earlier on the call", async () => {
+    // The benign shape. The token is read ONLY to permit the gate to stand
+    // down -- never to authorise anything -- which is why an action-blind token
+    // is safe here and would not be as permission.
+    mockCreateAppointment.mockResolvedValue("appt-token");
+    const { functionResponse } = await book(liveCtx({ lastAgreementReadBackKey: "k1" }));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("leaves the cascade alone — no callerSaidThisCall, no refusal", async () => {
+    mockCreateAppointment.mockResolvedValue("appt-cascade");
+    const { functionResponse } = await book(ctxWith(""));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("EXEMPTS the end-of-call message sweep, or the promised message is lost", async () => {
+    // saveOutstandingMessage re-issues this after the line is down: no caller
+    // turn is possible, and a call that only took a message never produced an
+    // agreement token either. Refusing here bumps message_lost_at_close and
+    // undoes the whole point of the sweep. Messages only, and the callback
+    // number rather than a caller's decision is what identifies the row.
+    const fc = { id: "lc", name: "record_customer_request", args: { request_type: "message" } };
+    const { functionResponse } = await executeToolCall(fc, liveCtx({ lastChance: true }));
+    expect(functionResponse.response.success).toBe(true);
+  });
+
+  it("still refuses that same message write when it is NOT the sweep", async () => {
+    // The exemption is the flag, not the tool. Without it this is an ordinary
+    // write on a turn the caller never spoke on.
+    const fc = { id: "m1", name: "record_customer_request", args: { request_type: "message" } };
+    const { functionResponse } = await executeToolCall(fc, liveCtx());
+    expect(functionResponse.response.success).toBe(false);
+    expect(functionResponse.response.gated).toBe(true);
+  });
+});
+
+describe("LVX50 — an unusable transcript cannot authorise a write either", () => {
+  it("refuses the booking that a Korean-character transcript produced", async () => {
+    const { functionResponse, stateEffects } = await book(ctxWith("에레는"));
+
+    expect(functionResponse.response.success).toBe(false);
+    expect(mockCreateAppointment).not.toHaveBeenCalled();
+    expect(functionResponse.response.message).toContain("did not transcribe as usable speech");
+    expect(stateEffects.toolResult.message).toBe("Sorry, I didn't catch that — could you say it again?");
+  });
+
+  it("does not refuse a Spanish turn, which is a supported locale", async () => {
+    const { functionResponse } = await book(ctxWith("Sí, el martes está bien"));
+    expect(functionResponse.response.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The counters, end to end.
+//
+// A guard can fire correctly, block correctly, log correctly and contribute
+// nothing to /api/debug/latency, with every one of its own unit tests passing.
+// bumpCounter silently drops a name that is not in COUNTER_NAMES, so an
+// unregistered guard blocks and reports nothing. Asserted through
+// getLatencyStats, which is what the debug endpoint actually serves.
+// ---------------------------------------------------------------------------
+describe("consent counters reach getLatencyStats", () => {
+  it("counts a hesitation refusal", async () => {
+    await book(ctxWith("Ah!"));
+    expect(counters().write_refused_hesitation).toBe(1);
+    expect(counters().write_consent_checked).toBe(0);
+  });
+
+  it("counts an unusable-transcript refusal", async () => {
+    await book(ctxWith("에레는"));
+    expect(counters().live_unusable_transcript).toBe(1);
+  });
+
+  it("counts the POSITIVE case, so a clean call is distinguishable from no call", async () => {
+    // The measure that makes the pair readable. Without this, a call that
+    // booked cleanly and a call that never attempted a write both report
+    // write_refused_hesitation: 0 — which is exactly how LVX45 sat in the tree
+    // for a day looking finished while its gate was unreachable.
+    await book(ctxWith("Yes, please"));
+    expect(counters().write_consent_checked).toBe(1);
+    expect(counters().write_refused_hesitation).toBe(0);
+  });
+});

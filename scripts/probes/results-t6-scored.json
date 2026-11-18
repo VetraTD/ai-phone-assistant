@@ -1,0 +1,147 @@
+{
+  "n": 10,
+  "median_wer_raw": 0.091,
+  "median_wer_numeric_normalised": 0,
+  "perfect_raw": 5,
+  "perfect_normalised": 8,
+  "number_format_only": [
+    "rep_confirm",
+    "rep_digits",
+    "partial_digits"
+  ],
+  "real_errors": [
+    {
+      "fixture": "trailing_lead_in",
+      "wer": 0.5,
+      "truth": "It's for, uh",
+      "heard": "It's 4:00."
+    },
+    {
+      "fixture": "name_spelling",
+      "wer": 0.083,
+      "truth": "My name is Nithin. That's N, I, T, H, I, N.",
+      "heard": "My name is Nathan. That's N I T H I N."
+    }
+  ],
+  "rows": [
+    {
+      "fixture": "clean_open",
+      "truth": "Hi, I'd like to book an appointment.",
+      "heard": "Hi, I'd like to book an appointment.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00132,
+      "wer_raw": 0,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "truth": "It's for, uh",
+      "heard": "It's 4:00.",
+      "blank": false,
+      "wer": 0.667,
+      "usd_estimated": true,
+      "usd": 0.00117,
+      "wer_raw": 0.667,
+      "wer_numeric_normalised": 0.5,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "truth": "Next Tuesday afternoon works",
+      "heard": "Next Tuesday afternoon works.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.0016,
+      "wer_raw": 0,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "name_spelling",
+      "truth": "My name is Nithin. That's N, I, T, H, I, N.",
+      "heard": "My name is Nathan. That's N I T H I N.",
+      "blank": false,
+      "wer": 0.091,
+      "usd_estimated": true,
+      "usd": 0.00185,
+      "wer_raw": 0.091,
+      "wer_numeric_normalised": 0.083,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "rep_time_q",
+      "truth": "Do you have anything Tuesday morning?",
+      "heard": "Do you have anything Tuesday morning?",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00145,
+      "wer_raw": 0,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "rep_confirm",
+      "truth": "Tuesday at ten works for me.",
+      "heard": "Tuesday at 10:00 works for me.",
+      "blank": false,
+      "wer": 0.333,
+      "usd": 0.00369,
+      "wer_raw": 0.333,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": true
+    },
+    {
+      "fixture": "rep_digits",
+      "truth": "It's five five five, one two three four.",
+      "heard": "It's 5551234.",
+      "blank": false,
+      "wer": 0.875,
+      "usd_estimated": true,
+      "usd": 0.00151,
+      "wer_raw": 0.875,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": true
+    },
+    {
+      "fixture": "rep_close",
+      "truth": "Thanks, bye.",
+      "heard": "Thanks, bye.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00128,
+      "wer_raw": 0,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "barge_in",
+      "truth": "Actually, could we make it Wednesday instead?",
+      "heard": "Actually, could we make it Wednesday instead?",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00179,
+      "wer_raw": 0,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": false
+    },
+    {
+      "fixture": "partial_digits",
+      "truth": "My number is five five five, two",
+      "heard": "My number is 5552.",
+      "blank": false,
+      "wer": 0.571,
+      "usd_estimated": true,
+      "usd": 0.00176,
+      "wer_raw": 0.571,
+      "wer_numeric_normalised": 0,
+      "differs_only_by_number_format": true
+    }
+  ]
+}

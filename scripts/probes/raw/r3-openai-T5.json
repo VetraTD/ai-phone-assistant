@@ -1,0 +1,205 @@
+{
+  "at": "2026-09-02T05:55:19.977Z",
+  "n": 5,
+  "models": [
+    "gpt"
+  ],
+  "rows": [
+    {
+      "scenario": "T5",
+      "model": "gpt",
+      "passes": 13,
+      "total": 15,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: "
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            }
+          ],
+          "said": "Of course. We’re open today, Wednesday, from midnight to 11:59 PM. Is there anything else I can help you with?",
+          "turnSaid": [
+            "Of course. We’re open today, Wednesday, from midnight to 11:59 PM. Is there anything else I can help you with?",
+            ""
+          ],
+          "usd": 0.026576799999999998
+        },
+        {
+          "trial": 2,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thank you for calling Brightwork Family Dental, and have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller has no further questions and is ending the call."
+              }
+            }
+          ],
+          "said": "Of course. We’re open today from midnight to 11:59 PM. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, and have a great day.",
+          "turnSaid": [
+            "Of course. We’re open today from midnight to 11:59 PM. Is there anything else I can help you with?",
+            "Thank you for calling Brightwork Family Dental, and have a great day."
+          ],
+          "usd": 0.033858400000000004
+        },
+        {
+          "trial": 3,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: "
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [],
+          "said": "",
+          "turnSaid": [
+            "",
+            ""
+          ],
+          "usd": 0
+        },
+        {
+          "trial": 4,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thank you for calling Brightwork Family Dental, and have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller said they are all set and is ending the call."
+              }
+            }
+          ],
+          "said": "Of course. We’re open today, Wednesday, from midnight to 11:59 PM. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, and have a great day.",
+          "turnSaid": [
+            "Of course. We’re open today, Wednesday, from midnight to 11:59 PM. Is there anything else I can help you with?",
+            "Thank you for calling Brightwork Family Dental, and have a great day."
+          ],
+          "usd": 0.034104
+        },
+        {
+          "trial": 5,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: "
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller said they are all set and ended the conversation."
+              }
+            }
+          ],
+          "said": "Of course. Today we’re open from midnight through 11:59 PM. Is there anything else I can help you with?",
+          "turnSaid": [
+            "Of course. Today we’re open from midnight through 11:59 PM. Is there anything else I can help you with?",
+            ""
+          ],
+          "usd": 0.0326
+        }
+      ]
+    }
+  ]
+}

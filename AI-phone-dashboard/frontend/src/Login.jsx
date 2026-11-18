@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "./supabaseClient";
+// Aliased. The form handler below is also called `signIn`, and an unaliased
+// import is SHADOWED by it — the handler then calls itself with the submit
+// event as the email argument. Vite built it, the tests passed, and the only
+// symptom was a button stuck on "Signing in...".
+import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
 import VetraMark from "./components/VetraMark";
 import "./Login.css";
+import { MARKETING_URL } from "./siteUrl";
 
-export default function Login({ onSwitchToSignup }) {
+export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,15 +23,12 @@ export default function Login({ onSwitchToSignup }) {
     setMessage("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error } = await signInWithPassword(email, password);
 
     setLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
     }
   };
 
@@ -41,21 +43,25 @@ export default function Login({ onSwitchToSignup }) {
 
     setResetLoading(true);
 
-    const redirectTo =
+    // Where the person lands AFTER the reset, not where the reset happens —
+    // Identity Platform issues a one-shot code rather than a recovery session,
+    // so the link goes to the action handler and only then here. The domain must
+    // be in Identity Platform's authorized_domains or the link is refused.
+    const continueUrl =
       typeof window !== "undefined"
         ? `${window.location.origin}/reset-password`
         : "http://localhost:5173/reset-password";
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    });
+    const { error } = await sendPasswordReset(email, { continueUrl });
 
     setResetLoading(false);
 
     if (error) {
-      setError(error.message);
+      setError(error);
     } else {
-      setMessage("Check your email for a password reset link.");
+      // The same sentence whether or not that address has an account. Saying
+      // "no such user" would turn this form into a way to enumerate staff.
+      setMessage("If that email has an account, a reset link is on its way.");
       setPassword("");
     }
   };
@@ -64,9 +70,10 @@ export default function Login({ onSwitchToSignup }) {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
-          <Link to="/" className="login-back-home">
+          {/* External. This origin is the app now; its root is the dashboard. */}
+          <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
-          </Link>
+          </a>
         </div>
         <div className="login-brand">
           <div className="login-badge">
@@ -153,15 +160,32 @@ export default function Login({ onSwitchToSignup }) {
                 Your account is protected with secure sign-in and encrypted storage.
               </p>
 
+              {/*
+                NO SELF-SERVE SIGN-UP, and this is a safety gate rather than a
+                missing feature.
+
+                Creating an account calls app_create_business_for_user, which
+                makes a NEW EMPTY business and binds the account to it. There is
+                no join-an-existing-business path: app_attach_user_to_business is
+                granted to nobody and is operator-only, because taking a business
+                id as an argument would make it a tenant-hopping primitive on a
+                request path.
+
+                So a customer who signs up before their configuration is imported
+                binds themselves to an empty business, and attaching them to the
+                real one then fails with "already belongs to a business". The only
+                recovery is deleting their account. Onboarding is done with them,
+                by hand, and the front door should say so.
+
+                Signup.jsx and Onboarding.jsx are intact and still tested — this
+                is the route being closed, not the code being deleted. It reopens
+                the day there is an invite or claim token to attach against.
+              */}
               <div className="login-footer">
-                <span>Need an account?</span>
-                <button
-                  type="button"
-                  onClick={onSwitchToSignup}
-                  className="login-link"
-                >
-                  Sign up
-                </button>
+                <span>Don&apos;t have an account yet?</span>
+                <Link to="/contact" className="login-link">
+                  Request access
+                </Link>
               </div>
             </div>
           </form>

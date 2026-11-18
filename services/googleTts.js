@@ -1,14 +1,7 @@
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 import crypto from "crypto";
 import { buildSayContent } from "../lib/twiml.js";
-
-// ---------------------------------------------------------------------------
-// In-memory audio store: UUID → { buffer, ts }
-// Entries are deleted immediately when consumed (Twilio fetches the Play URL).
-// A TTL cleanup runs every minute to remove entries that were never fetched.
-// ---------------------------------------------------------------------------
-
-const audioStore = new Map();
+import { log } from "../lib/logger.js";
 
 // ---------------------------------------------------------------------------
 // In-memory synthesis cache: hash(voice|text) → Buffer
@@ -42,102 +35,88 @@ function getClient() {
 }
 
 // ---------------------------------------------------------------------------
-// Core synthesis
+// WAV header stripper
 // ---------------------------------------------------------------------------
 
 /**
- * Synthesize text to an MP3 buffer using Google Cloud TTS.
- * Results are cached by hash(voiceName + "|" + text).
+ * Strip the WAV container header from a Google TTS MULAW response.
+ * Google returns MULAW audio wrapped in a WAV container. Twilio expects raw
+ * mulaw bytes — the WAV header plays as a loud click if not removed.
  *
- * @param {string} text - Plain text to speak (abbreviation expansion + SSML breaks added automatically)
- * @param {string} voiceName - Google voice name, e.g. "en-US-Neural2-F" or "en-US-Chirp3-HD-Aoede"
- * @returns {Promise<Buffer>} MP3 audio buffer
+ * Searches for the "data" chunk marker and returns everything after the
+ * 8-byte chunk descriptor (4-byte "data" tag + 4-byte data length).
+ *
+ * @param {Buffer} buffer - WAV-wrapped mulaw bytes from Google TTS
+ * @returns {Buffer} Raw mulaw bytes
  */
-export async function synthesize(text, voiceName) {
+function stripWavHeader(buffer) {
+  const dataMarker = Buffer.from("data");
+  const idx = buffer.indexOf(dataMarker);
+  if (idx === -1) return buffer; // not a WAV container — return as-is
+  return buffer.subarray(idx + 8); // skip "data" (4 bytes) + data-chunk size (4 bytes)
+}
+
+// ---------------------------------------------------------------------------
+// Mulaw synthesis (for Media Streams — Twilio WebSocket expects mulaw 8kHz)
+// ---------------------------------------------------------------------------
+
+/**
+ * Synthesize text to a raw mulaw 8 kHz buffer using Google Cloud TTS.
+ * Cache key is prefixed with "mulaw|" to namespace it within audioCache.
+ *
+ * @param {string} text      - Plain text to speak
+ * @param {string} voiceName - Google voice name, e.g. "en-US-Chirp3-HD-Aoede"
+ * @param {string|null} callSid - Optional call ID for logging
+ * @param {{ bypassCache?: boolean }} [opts] - measurement harnesses only
+ * @returns {Promise<Buffer>} Raw mulaw audio bytes (no container/header)
+ *
+ * `bypassCache` exists because the cache silently invalidates a measurement.
+ * Synthesizing the same line twice to sample the variance returns the SAME
+ * BYTES the second time, at 0 ms — so repeats look perfectly consistent
+ * whatever the synthesizer actually does, and a harness reports n=2 while
+ * holding n=1. Found by noticing `synth 0ms` in a repeat run. Never set on the
+ * call path: the cache is a real latency win there and the repetition is the
+ * point.
+ */
+export async function synthesizeMulaw(text, voiceName, callSid = null, opts = {}) {
   const cacheKey = crypto
     .createHash("sha256")
-    .update(voiceName + "|" + text)
+    .update("mulaw|" + voiceName + "|" + text)
     .digest("hex");
 
-  if (audioCache.has(cacheKey)) {
+  if (!opts.bypassCache && audioCache.has(cacheKey)) {
+    log.debug("tts_cache_hit", { callSid, text: text.slice(0, 40) });
     return audioCache.get(cacheKey);
   }
 
-  // Derive BCP-47 language code from the voice name ("en-US-Neural2-F" → "en-US")
+  log.debug("tts_synthesizing", { callSid, voiceName, text: text.slice(0, 40) });
   const languageCode = voiceName.split("-").slice(0, 2).join("-");
-
-  // Reuse the existing SSML helper (abbreviation expansion + sentence break injection)
-  // then wrap in <speak> root element required by Google TTS
   const ssml = `<speak>${buildSayContent(text)}</speak>`;
 
-  const [response] = await getClient().synthesizeSpeech({
-    input: { ssml },
-    voice: { languageCode, name: voiceName },
-    audioConfig: { audioEncoding: "MP3" },
-  });
+  try {
+    const start = Date.now();
+    const [response] = await getClient().synthesizeSpeech({
+      input: { ssml },
+      voice: { languageCode, name: voiceName },
+      audioConfig: { audioEncoding: "MULAW", sampleRateHertz: 8000 },
+    });
+    const elapsed = Date.now() - start;
+    log.debug("tts_synthesized", { callSid, latencyMs: elapsed, audioBytes: response.audioContent?.length || 0 });
 
-  const buffer = Buffer.from(response.audioContent, "binary");
+    // Google TTS MULAW output is a WAV container — strip the WAV header so
+    // Twilio receives raw mulaw bytes (otherwise the header bytes play as a click).
+    const raw = Buffer.from(response.audioContent, "binary");
+    const buffer = stripWavHeader(raw);
+    log.debug("tts_wav_stripped", { callSid, bytes: buffer.length });
 
-  // Simple LRU-by-insertion eviction: remove oldest entry when cache is full
-  if (audioCache.size >= CACHE_MAX) {
-    audioCache.delete(audioCache.keys().next().value);
-  }
-  audioCache.set(cacheKey, buffer);
-
-  return buffer;
-}
-
-// ---------------------------------------------------------------------------
-// One-time audio store (serve once → delete)
-// ---------------------------------------------------------------------------
-
-/**
- * Store an audio buffer and return a one-time UUID for fetching it.
- * @param {Buffer} buffer - MP3 audio data
- * @returns {string} UUID key
- */
-export function storeAudio(buffer) {
-  const id = crypto.randomUUID();
-  audioStore.set(id, { buffer, ts: Date.now() });
-  return id;
-}
-
-/**
- * Retrieve and immediately delete an audio buffer by UUID.
- * Returns null if the ID is not found (already consumed or expired).
- * @param {string} id - UUID returned by storeAudio
- * @returns {Buffer|null}
- */
-export function consumeAudio(id) {
-  const entry = audioStore.get(id);
-  if (!entry) return null;
-  audioStore.delete(id);
-  return entry.buffer;
-}
-
-/**
- * Synthesize text and store the resulting audio buffer.
- * Returns the UUID to use in the /audio/:id route.
- * @param {string} text
- * @param {string} voiceName
- * @returns {Promise<string>} UUID
- */
-export async function synthesizeAndStore(text, voiceName) {
-  const buffer = await synthesize(text, voiceName);
-  return storeAudio(buffer);
-}
-
-// ---------------------------------------------------------------------------
-// TTL cleanup — remove stale entries that were never fetched (e.g. Twilio error)
-// ---------------------------------------------------------------------------
-
-const AUDIO_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-setInterval(() => {
-  const cutoff = Date.now() - AUDIO_TTL_MS;
-  for (const [id, { ts }] of audioStore) {
-    if (ts < cutoff) {
-      audioStore.delete(id);
+    if (audioCache.size >= CACHE_MAX) {
+      audioCache.delete(audioCache.keys().next().value);
     }
+    audioCache.set(cacheKey, buffer);
+
+    return buffer;
+  } catch (err) {
+    log.error("tts_error", { callSid, text: text.slice(0, 80), error: err.message });
+    throw err;
   }
-}, 60_000).unref();
+}

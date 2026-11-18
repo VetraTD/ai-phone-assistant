@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "The A0 latency baseline, as DATA. It has lived in the ledger as a markdown",
+    "table since 2026-08-20, which is fine to read and impossible to compare",
+    "against without a person retyping numbers. C4 is exactly that comparison,",
+    "so the numbers move here and the ledger table stays as the narrative.",
+    "",
+    "RECORD HERE, NEVER OVERWRITE. A baseline that gets updated to match the",
+    "current deployment is not a baseline. If the target changes, add a second",
+    "file; do not edit this one."
+  ],
+  "capturedAt": "2026-08-20",
+  "run": "latency-runs/run-2026-08-20T19-06-18-056Z",
+  "calls": 12,
+  "serverTurns": 84,
+  "cleanProbeTurns": 72,
+  "script": "diagnostic",
+
+  "_platformCaveat": [
+    "A0 ran on RAILWAY, reached through carrier hops from a real handset.",
+    "Everything C4 compares it against runs on Cloud Run. End-to-end numbers",
+    "are therefore not strictly comparable and a delta on them is partly the",
+    "network.",
+    "",
+    "The per-STAGE numbers are server-side and measured inside one process, so",
+    "they are comparable. That distinction is not pedantry: it is what let the",
+    "TTS finding stand up — tts_ttfb_ms 92 -> 1,408 ms is a server-side stage",
+    "and 15x is not a carrier artefact."
+  ],
+
+  "endToEnd": {
+    "_note": "Not strictly comparable across platforms. Read the deltas as indicative.",
+    "voice_to_voice_ms": { "p50": 2980, "p95": 4444 },
+    "true_v2v_ms": { "p50": 4022, "p95": 9556, "max": 10628 }
+  },
+
+  "stages": {
+    "_note": "Server-side, single process. These are the comparable numbers.",
+    "llm_ttfb_ms": { "p50": 1704, "p95": 3581, "note": "42% of the turn at A0 — the dominant stage" },
+    "llm_tool_ms": { "p50": 1515, "p95": 3077, "conditional": true, "note": "null on turns with no tool call — metrics.js says so in its own comment. Absence is normal, not a finding." },
+    "llm_reply_after_tool_ms": { "p50": 1216, "p95": 2015, "conditional": true, "note": "same — tool-calling turns only." },
+    "stt_endpoint_ms": { "p50": 620, "p95": 5686 },
+    "stt_tail_ms": { "p50": 381, "p95": 2504 },
+    "tts_ttfb_ms": { "p50": 92, "p95": 286, "note": "At A0, TTS was not a latency problem. On the covered lane it is the largest single regression." }
+  },
+
+  "quality": {
+    "turnsTimedOutNoReply": { "count": 12, "of": 84, "pct": 14.3,
+      "note": "Predates the migration and is not fixed by it. Recorded so it cannot be misattributed to the migration, and because it is the thing a clinic notices first." }
+  },
+
+  "_covered_lane_reference": {
+    "_note": [
+      "NOT part of the baseline. Measured 2026-08-22 over 14 live turns on",
+      "Cloud Run in hipaa mode (Google STT v2 + Google TTS + Vertex), and kept",
+      "here because C4's real question is whether the deployed stack has moved",
+      "since THAT, not since Railway.",
+      "",
+      "Session 11i measured voice_to_voice_ms p50 3,757 on a later revision."
+    ],
+    "capturedAt": "2026-08-22",
+    "voice_to_voice_ms": { "p50": 4084 },
+    "stages": {
+      "stt_endpoint_ms": { "p50": 1120 },
+      "stt_tail_ms": { "p50": 2 },
+      "llm_ttfb_ms": { "p50": 1922 },
+      "tts_ttfb_ms": { "p50": 1408 }
+    }
+  }
+}

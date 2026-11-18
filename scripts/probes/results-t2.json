@@ -1,0 +1,410 @@
+{
+  "at": "2026-09-16T04:33:30.643Z",
+  "model": "gemini-3.8-live",
+  "surface": "aistudio",
+  "n": 5,
+  "turns": [
+    "clean_open",
+    "rep_time_q"
+  ],
+  "rows": [
+    {
+      "take": 1,
+      "turns": [
+        {
+          "fixture": "clean_open",
+          "tool_rounds": 0,
+          "tool_names": [],
+          "tool_counts": {},
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 0,
+          "turn_completes": 0,
+          "turn_complete_after_tool_ms": null,
+          "had_tool": false,
+          "transcript": "Thanks for calling Brightwork Family Dental. Are you a new or existing patient?",
+          "event_order": "firstAudio"
+        },
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 8,
+          "had_tool": true,
+          "transcript": "Next Tuesday, September twenty-second, we haveavailabilityin themorningat teno'clock. Would thattime workfor you?",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "connect_ms": 223,
+      "tool_turns": [
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 8,
+          "had_tool": true,
+          "transcript": "Next Tuesday, September twenty-second, we haveavailabilityin themorningat teno'clock. Would thattime workfor you?",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "usage": {
+        "text_in": 11533,
+        "audio_in": 725,
+        "text_out": 0,
+        "audio_out": 128,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.00948
+    },
+    {
+      "take": 2,
+      "turns": [
+        {
+          "fixture": "clean_open",
+          "tool_rounds": 0,
+          "tool_names": [],
+          "tool_counts": {},
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 0,
+          "turn_completes": 0,
+          "turn_complete_after_tool_ms": null,
+          "had_tool": false,
+          "transcript": "Sure thing. Are you a new or an existing patient with us?寵物貓的品種繁多，從優雅的純種貓如波斯貓、暹羅貓，到充滿活力的混種貓，每一種都有其獨特的性格特質與外觀。在選擇貓咪作為家庭成員時，考慮牠們的活動量、照顧需求以及與家人相處的模式是非常重要的。無論是哪種品種，良好的互動與關愛都能讓貓咪建立起對主人的信任，成為最貼心的伴侶。",
+          "event_order": "firstAudio"
+        },
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 20,
+          "had_tool": true,
+          "transcript": "I'm sorry, we don't have any appointments available for Tuesday morning.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "connect_ms": 150,
+      "tool_turns": [
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 20,
+          "had_tool": true,
+          "transcript": "I'm sorry, we don't have any appointments available for Tuesday morning.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "usage": {
+        "text_in": 11633,
+        "audio_in": 1362,
+        "text_out": 0,
+        "audio_out": 765,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.01908
+    },
+    {
+      "take": 3,
+      "turns": [
+        {
+          "fixture": "clean_open",
+          "tool_rounds": 0,
+          "tool_names": [],
+          "tool_counts": {},
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 0,
+          "turn_completes": 0,
+          "turn_complete_after_tool_ms": null,
+          "had_tool": false,
+          "transcript": "Welcome to Brightwork Family Dental. Are you a new or existing patient?",
+          "event_order": "firstAudio"
+        },
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 17,
+          "had_tool": true,
+          "transcript": "We do have an opening next Tuesday at ten in the morning if that works for you.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "connect_ms": 143,
+      "tool_turns": [
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 1,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 1
+          },
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 1,
+          "turn_completes": 2,
+          "turn_complete_after_tool_ms": 17,
+          "had_tool": true,
+          "transcript": "We do have an opening next Tuesday at ten in the morning if that works for you.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "usage": {
+        "text_in": 11532,
+        "audio_in": 713,
+        "text_out": 0,
+        "audio_out": 116,
+        "cached_in": 0,
+        "turns_billed": 2
+      },
+      "usd": 0.0093
+    },
+    {
+      "take": 4,
+      "turns": [
+        {
+          "fixture": "clean_open",
+          "tool_rounds": 0,
+          "tool_names": [],
+          "tool_counts": {},
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 0,
+          "turn_completes": 0,
+          "turn_complete_after_tool_ms": null,
+          "had_tool": false,
+          "transcript": "Welcome to Brightwork Family Dental. Are you a new or existing patient?",
+          "event_order": "firstAudio"
+        },
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 2,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ],
+            [
+              "set_call_intent",
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 2,
+            "set_call_intent": 1
+          },
+          "batched": true,
+          "refired": true,
+          "max_same_tool": 2,
+          "turn_completes": 3,
+          "turn_complete_after_tool_ms": 18,
+          "had_tool": true,
+          "transcript": "I'm sorry, there are no morning appointments available next Tuesday. What other day or time might work for you?",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "connect_ms": 185,
+      "tool_turns": [
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 2,
+          "tool_names": [
+            [
+              "check_appointment_availability"
+            ],
+            [
+              "set_call_intent",
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "check_appointment_availability": 2,
+            "set_call_intent": 1
+          },
+          "batched": true,
+          "refired": true,
+          "max_same_tool": 2,
+          "turn_completes": 3,
+          "turn_complete_after_tool_ms": 18,
+          "had_tool": true,
+          "transcript": "I'm sorry, there are no morning appointments available next Tuesday. What other day or time might work for you?",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "usage": {
+        "text_in": 17385,
+        "audio_in": 1158,
+        "text_out": 0,
+        "audio_out": 117,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.01357
+    },
+    {
+      "take": 5,
+      "turns": [
+        {
+          "fixture": "clean_open",
+          "tool_rounds": 0,
+          "tool_names": [],
+          "tool_counts": {},
+          "batched": false,
+          "refired": false,
+          "max_same_tool": 0,
+          "turn_completes": 0,
+          "turn_complete_after_tool_ms": null,
+          "had_tool": false,
+          "transcript": "Sure thing. Are you a new or an existing patient of the practice?",
+          "event_order": "firstAudio"
+        },
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 2,
+          "tool_names": [
+            [
+              "set_call_intent",
+              "check_appointment_availability"
+            ],
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "set_call_intent": 1,
+            "check_appointment_availability": 2
+          },
+          "batched": true,
+          "refired": true,
+          "max_same_tool": 2,
+          "turn_completes": 3,
+          "turn_complete_after_tool_ms": 8,
+          "had_tool": true,
+          "transcript": "I'm checking the schedule for next Tuesday, September 22nd.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "connect_ms": 118,
+      "tool_turns": [
+        {
+          "fixture": "rep_time_q",
+          "tool_rounds": 2,
+          "tool_names": [
+            [
+              "set_call_intent",
+              "check_appointment_availability"
+            ],
+            [
+              "check_appointment_availability"
+            ]
+          ],
+          "tool_counts": {
+            "set_call_intent": 1,
+            "check_appointment_availability": 2
+          },
+          "batched": true,
+          "refired": true,
+          "max_same_tool": 2,
+          "turn_completes": 3,
+          "turn_complete_after_tool_ms": 8,
+          "had_tool": true,
+          "transcript": "I'm checking the schedule for next Tuesday, September 22nd.",
+          "event_order": "interrupted>turnComplete>toolCall>turnComplete>toolCall>turnComplete>firstAudio"
+        }
+      ],
+      "usage": {
+        "text_in": 17411,
+        "audio_in": 1134,
+        "text_out": 0,
+        "audio_out": 105,
+        "cached_in": 0,
+        "turns_billed": 3
+      },
+      "usd": 0.01337
+    }
+  ],
+  "tally": {
+    "takes": 5,
+    "errored": 0,
+    "takes_with_no_tool_call_at_all": 0,
+    "tool_turns_seen": 5,
+    "tool_turns_missing_turnComplete": 0,
+    "takes_that_refired_a_tool": 2,
+    "worst_same_tool_count": 2,
+    "takes_that_batched": 2,
+    "median_turnComplete_after_tool_ms": 17
+  },
+  "verdict": {
+    "predicted": "turnComplete present 5/5; the same tool re-fired inside one caller turn in 2 or more of 5",
+    "measured_turnComplete": "5 of 5 tool turns closed with turnComplete",
+    "measured_refire": "2 of 5 takes re-fired a tool (worst: same tool x2)",
+    "fails": false,
+    "prediction_held_refire": true,
+    "baselines": {
+      "gemini-live-2.5-flash-native-audio": "turnComplete 914ms after toolCall; fired check_appointment_availability 3x in ~700ms, splitting",
+      "gemini-3.1-flash-live-preview": "turnComplete 6,750ms after toolCall; batched set_call_intent + check_avail in ONE round",
+      "gpt-live-1": "no turnComplete event exists at all -- boundaries must be reconstructed"
+    }
+  }
+}

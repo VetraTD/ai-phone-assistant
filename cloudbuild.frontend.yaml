@@ -1,0 +1,277 @@
+# Build the dashboard SPA and publish it to the Cloud Storage bucket B5 created.
+#
+# ---------------------------------------------------------------------------
+# The last missing piece of the dashboard path
+# ---------------------------------------------------------------------------
+#
+# B5 created the bucket, the CDN backend, the URL map and the certificate. What
+# it did not create was anything that BUILDS the site or PUTS FILES IN THE
+# BUCKET — so the bucket has existed and been empty since 2026-08-21, and
+# `enable_load_balancer` would have switched on a CDN in front of nothing.
+#
+# ---------------------------------------------------------------------------
+# Running it
+# ---------------------------------------------------------------------------
+#
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit AI-phone-dashboard/frontend \
+#     --config=cloudbuild.frontend.yaml \
+#     --project=vetra-core-edc8ca \
+#     --substitutions=_API_URL=https://dashboard-api-uk-prod-qn43z3hljq-nw.a.run.app,_FIREBASE_API_KEY=...,_FIREBASE_PROJECT=vetra-core-edc8ca,_HOSTING_SITE=vetra-core-edc8ca,_BUCKET=unused
+#
+# THIS PIPELINE HAS NOT RUN ON ATTEMPT 2. The 2026-08-31 dashboard deploy was a
+# LOCAL build plus AI-phone-dashboard/frontend/scripts/deploy-hosting.js, so the
+# values above are correct but the path is unproven. Read _API_URL and the key
+# rather than trusting them:
+#   gcloud run services describe dashboard-api-uk-prod --region=europe-west2 \
+#     --project=vetra-uk-edc8ca --format='value(status.url)'
+#   terraform output -json identity_platform
+#
+# The SOURCE DIRECTORY argument matters for the same reason it does for the
+# dashboard backend: the repository .gcloudignore excludes `AI-phone-dashboard`
+# outright, so submitting from the root uploads nothing useful.
+#
+# ---------------------------------------------------------------------------
+# EVERY VALUE HERE IS BAKED IN AT BUILD TIME AND IS PUBLIC
+# ---------------------------------------------------------------------------
+#
+# Vite substitutes VITE_* at build time and the result ships inside the
+# JavaScript bundle. There is no runtime configuration for a static site, which
+# means two things: the API URL and the Identity Platform key are compiled in
+# and a change to either needs a rebuild, and NOTHING SECRET MAY BE PASSED HERE.
+#
+# An Identity Platform web API key is public by design — it identifies the
+# project and authorises nothing, and Terraform restricts it to identitytoolkit
+# so a copy lifted out of the bundle cannot be spent on Vertex or Speech. Read
+# the values with `terraform output -json identity_platform`.
+# ---------------------------------------------------------------------------
+
+substitutions:
+  # The GCS bucket for the OTHER serving path (bucket + CDN load balancer).
+  # Firebase Hosting is the chosen path — see the P18 decision — so these steps
+  # are dormant, but the default was `vetra-dashboard-c3a3bd`, an attempt-1
+  # bucket that no longer exists. Emptied and guarded with the rest.
+  _BUCKET: ""
+  # The dashboard backend's Cloud Run URL.
+  #
+  # ⚠ IT IS NOT DERIVABLE. This file used to claim the format was
+  # "deterministic — https://SERVICE-PROJECTNUMBER.REGION.run.app — which is
+  # what lets this be built BEFORE the service exists". That is FALSE for these
+  # projects. The live services are
+  #
+  #   https://dashboard-api-us-staging-7aaa2qfltq-uc.a.run.app
+  #   https://voice-us-staging-7aaa2qfltq-uc.a.run.app
+  #
+  # — the opaque-hash form, where the hash belongs to the PROJECT and the
+  # project number (536266051432) appears nowhere. Google issues one form or the
+  # other per project and does not let you pick. A bundle built from the guessed
+  # format compiles, deploys, verifies clean, and calls a hostname that does not
+  # resolve. Read the real value:
+  #
+  #   gcloud run services describe dashboard-api-us-staging --region=us-central1   #     --project=vetra-us-staging-c3a3bd --format='value(status.url)'
+  _API_URL: ""
+  _FIREBASE_API_KEY: ""
+  # EMPTY ON PURPOSE, both of them. They used to default to
+  # `vetra-shared-c3a3bd` — an attempt-1 project that no longer exists — and a
+  # default that LOOKS like a real project is worse than no default at all:
+  # the build succeeds, the bundle verifies clean against its own substitution,
+  # and it ships an auth domain pointing at a dead project. Nobody can sign in,
+  # and nothing in the build says why. Caught 2026-08-31 while deploying the
+  # dashboard by hand; the pipeline itself has not run on attempt 2.
+  #
+  # Now guarded below exactly like _API_URL and _FIREBASE_API_KEY, so the
+  # project must be stated rather than inherited.
+  #
+  # Today's values (attempt 2):
+  #   _FIREBASE_PROJECT=vetra-core-edc8ca
+  #   _HOSTING_SITE=vetra-core-edc8ca
+  _FIREBASE_PROJECT: ""
+  # Firebase Hosting site id. Normally identical to the project id — that is
+  # what the default site is always named — but stated separately because a
+  # project can host more than one site.
+  _HOSTING_SITE: ""
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # -------------------------------------------------------------------------
+  # Refuse to build a bundle that points nowhere.
+  #
+  # With VITE_API_URL empty the app falls back to http://localhost:3001 — see
+  # src/api.js — and every request from a deployed dashboard goes to the
+  # VIEWER'S OWN MACHINE. That fails as a connection error in a browser console
+  # and looks like the backend being down, so it is refused here where the cause
+  # is obvious.
+  # -------------------------------------------------------------------------
+  - id: check-substitutions
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        fail=0
+        if [ -z "${_API_URL}" ]; then
+          echo "FAIL: _API_URL is empty. The bundle would call http://localhost:3001."
+          fail=1
+        fi
+        if [ -z "${_FIREBASE_API_KEY}" ]; then
+          echo "FAIL: _FIREBASE_API_KEY is empty. Nobody could sign in."
+          fail=1
+        fi
+        if [ -z "${_FIREBASE_PROJECT}" ]; then
+          echo "FAIL: _FIREBASE_PROJECT is empty. It has no default any more, deliberately:"
+          echo "      it used to default to vetra-shared-c3a3bd, a project that no longer"
+          echo "      exists, and that shipped a bundle nobody could sign in to."
+          fail=1
+        fi
+        if [ -z "${_HOSTING_SITE}" ]; then
+          echo "FAIL: _HOSTING_SITE is empty. Usually the same as _FIREBASE_PROJECT."
+          fail=1
+        fi
+        if [ -z "${_BUCKET}" ]; then
+          echo "FAIL: _BUCKET is empty. Only needed for the bucket+CDN path, but the"
+          echo "      publish steps below reference it unconditionally."
+          fail=1
+        fi
+        # A dead project named explicitly is still a dead project. Cheap to
+        # check, and the failure it prevents is invisible until somebody signs in.
+        case "${_FIREBASE_PROJECT}${_HOSTING_SITE}${_BUCKET}" in
+          *c3a3bd*)
+            echo "FAIL: that is an attempt-1 project (-c3a3bd). Those were suspended and are gone."
+            fail=1
+            ;;
+        esac
+        exit $fail
+
+  - id: install
+    name: node:22-slim
+    entrypoint: npm
+    args: ["ci", "--no-audit", "--no-fund"]
+    waitFor: [check-substitutions]
+
+  - id: build
+    name: node:22-slim
+    entrypoint: npm
+    env:
+      - VITE_API_URL=${_API_URL}
+      - VITE_FIREBASE_API_KEY=${_FIREBASE_API_KEY}
+      - VITE_FIREBASE_AUTH_DOMAIN=${_FIREBASE_PROJECT}.firebaseapp.com
+      - VITE_FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT}
+    args: ["run", "build"]
+    waitFor: [install]
+
+  # -------------------------------------------------------------------------
+  # Prove the bundle carries what it was built with.
+  #
+  # A mistyped substitution name does not fail a Vite build — it produces a
+  # bundle with the fallback baked in, which deploys cleanly and then cannot
+  # reach the API or sign anybody in. Grepping the output is the only place that
+  # is cheap to catch.
+  # -------------------------------------------------------------------------
+  - id: verify-bundle
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if ! grep -rqF "${_API_URL}" dist/assets/*.js; then
+          echo "FAIL: the API URL is not in the bundle — VITE_API_URL did not reach the build."
+          exit 1
+        fi
+        if grep -rqF "localhost:3001" dist/assets/*.js; then
+          echo "FAIL: the localhost fallback is in the bundle."
+          exit 1
+        fi
+        if ! grep -rqF "${_FIREBASE_PROJECT}" dist/assets/*.js; then
+          echo "FAIL: the Identity Platform project is not in the bundle."
+          exit 1
+        fi
+        echo "bundle carries the API URL and the auth project"
+    waitFor: [build]
+
+  # -------------------------------------------------------------------------
+  # Publish, with cache headers that differ by file and have to.
+  #
+  # Vite fingerprints every asset (index-BG3vjkMw.js), so those are immutable
+  # and may be cached for a year. `index.html` is NOT fingerprinted and is the
+  # file that points at the current asset names — cached, a browser keeps asking
+  # for assets that no longer exist and the dashboard breaks for exactly the
+  # people who used it most recently.
+  #
+  # Uploaded in that order deliberately: assets first, so index.html never
+  # references a file that is not there yet.
+  # -------------------------------------------------------------------------
+  - id: publish-assets
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud storage rsync dist gs://${_BUCKET} --recursive --delete-unmatched-destination-objects \
+          --exclude='index\.html' \
+          --cache-control='public, max-age=31536000, immutable'
+    waitFor: [verify-bundle]
+
+  - id: publish-index
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud storage cp dist/index.html gs://${_BUCKET}/index.html \
+          --cache-control='no-cache, max-age=0'
+        echo "published to gs://${_BUCKET}"
+    waitFor: [publish-assets]
+
+  # -------------------------------------------------------------------------
+  # AND THE STEP THAT ACTUALLY SERVES IT.
+  #
+  # The bucket above is NOT the serving path. The owner chose Firebase Hosting
+  # on 2026-08-23 over the Cloud CDN + load balancer: $0 against ~$18/month, no
+  # DNS record needed, and no `allUsers` binding on a bucket sitting in the same
+  # project as the audit trail. The bucket publish is kept anyway, and
+  # deliberately: `enable_load_balancer` is still a live option for retiring the
+  # VOICE service's public invoker, and a bucket left to rot behind that toggle
+  # would serve a stale bundle the day somebody flips it. Writing twelve small
+  # files twice is a cheaper way to hold that property than a comment asking
+  # someone to remember.
+  #
+  # NOT `firebase deploy`. firebase-tools keeps its own credential store, it
+  # takes precedence over GOOGLE_APPLICATION_CREDENTIALS, and on the workstation
+  # this was written on it was signed in as a PERSONAL Gmail account - so the
+  # CLI authenticated as the wrong identity and failed with "Failed to get
+  # Firebase project ... make sure the project exists", which names the wrong
+  # cause entirely. scripts/deploy-hosting.js resolves a token explicitly and
+  # has no store to be signed into; in here it reads the metadata server, so it
+  # runs as this build's service account.
+  #
+  # WARNING - THIS STEP HAS NEVER RUN IN CLOUD BUILD. The deploy path itself IS
+  # proven: the live site was published with this exact script from the
+  # workstation. What is unproven is this step, because
+  # `roles/firebasehosting.admin` for vetra-deployer is a Terraform change that
+  # has not been applied yet (shared.tf). Until that apply lands this fails with
+  # a 403, and the first build after it is what proves the grant.
+  #
+  # The script lives under AI-phone-dashboard/frontend/scripts/ rather than the
+  # repository's root scripts/ for one concrete reason: this build's SOURCE ROOT
+  # is AI-phone-dashboard/frontend, so /workspace holds that directory and
+  # nothing above it. A root-level script simply would not be there, and the
+  # step would fail on a missing file that exists perfectly well in the repo.
+  # -------------------------------------------------------------------------
+  - id: publish-hosting
+    name: node:22-slim
+    entrypoint: node
+    args:
+      - /workspace/scripts/deploy-hosting.js
+      - --dir
+      - /workspace/dist
+      - --config
+      - /workspace/firebase.json
+      - --project
+      - ${_FIREBASE_PROJECT}
+      - --site
+      - ${_HOSTING_SITE}
+    waitFor: [verify-bundle]
+
+timeout: 1200s

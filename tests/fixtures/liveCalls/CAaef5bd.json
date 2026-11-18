@@ -1,0 +1,208 @@
+{
+  "callSid": "CAaef5bd",
+  "model": "gemini-3.8-live",
+  "note": "3.8 on the gate fixes. The first successful booking of the round, and the call that proves the supersession removal on real audio.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 15,
+    "probes": 2,
+    "write_order_refused": 1,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": {
+    "claimed": 2,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 1,
+    "suppressed_signoff": 0,
+    "turns_audited": 15,
+    "turns_reply_empty": 1,
+    "unbacked_action": 1,
+    "unbacked_any": 1
+  },
+  "guards": {
+    "availability_allowed": 2,
+    "availability_blocked": 0,
+    "availability_day_listed": 19,
+    "availability_point_open": 1,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 1,
+    "read_memo_hit": 0,
+    "verified_slots": 17
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T05:02:38.148Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T05:02:52.015Z",
+      "step": "identify_intent",
+      "caller": "I'd like to book an appointment for Friday afternoon.",
+      "assistant": "I have several times available that Friday afternoon. Would one o'clock or four thirty work better for you?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T05:03:02.143Z",
+      "step": "gather_details",
+      "caller": "A quarter to 1:00",
+      "assistant": "That time is available. May I please have your name?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T05:03:09.981Z",
+      "step": "gather_details",
+      "caller": "IAM Market Bell",
+      "assistant": "Thanks ? and could you please spell your full name for me?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T05:03:19.320Z",
+      "step": "gather_details",
+      "caller": "m a r c u s b e l l",
+      "assistant": "Thank you, Marcus. What is the best number to reach you at?"
+    },
+    {
+      "i": 5,
+      "ts": "2026-09-17T05:03:30.457Z",
+      "step": "gather_details",
+      "caller": "?Qui?n no lo compra?",
+      "assistant": "Thanks ? to confirm, should I use the number you are calling from, which is 469 933 8887?"
+    },
+    {
+      "i": 6,
+      "ts": "2026-09-17T05:03:37.222Z",
+      "step": "gather_details",
+      "caller": "Yes.",
+      "assistant": "Thanks ? and what is the name of your company?"
+    },
+    {
+      "i": 7,
+      "ts": "2026-09-17T05:03:44.980Z",
+      "step": "gather_details",
+      "caller": "Bell Consulting",
+      "assistant": "Thank you. And which industry does your company operate within?"
+    },
+    {
+      "i": 8,
+      "ts": "2026-09-17T05:03:52.539Z",
+      "step": "gather_details",
+      "caller": "the consulting industry",
+      "assistant": "Great. And what services or products does your company offer?"
+    },
+    {
+      "i": 9,
+      "ts": "2026-09-17T05:04:01.657Z",
+      "step": "gather_details",
+      "caller": "consulting services",
+      "assistant": "And what is your main marketing challenge right now?"
+    },
+    {
+      "i": 10,
+      "ts": "2026-09-17T05:04:17.907Z",
+      "step": "gather_details",
+      "caller": "getting clients through the door, I guess our Google ads and and whatever else ads that we post online. Aren't reaching the right audience.",
+      "assistant": "Thank you for sharing that. I'd like to offer you a free strategy call with our team to discuss this further."
+    },
+    {
+      "i": 11,
+      "ts": "2026-09-17T05:04:32.253Z",
+      "step": "gather_details",
+      "caller": "Okay.",
+      "assistant": "I have you down for a free strategy call this Friday, September eighteenth at twelve forty-five PM. Shall we go ahead and book that?"
+    },
+    {
+      "i": 12,
+      "ts": "2026-09-17T05:04:46.655Z",
+      "step": "gather_details",
+      "caller": "Yes, that works.",
+      "assistant": "That's all set ? I've booked your free strategy call for Friday, September 18th at 12:45 PM. Thanks for calling Digile Media, and have a wonderful day."
+    },
+    {
+      "i": 13,
+      "ts": "2026-09-17T05:04:57.452Z",
+      "step": "confirm",
+      "caller": "",
+      "assistant": "I'm still here whenever you're ready."
+    },
+    {
+      "i": 14,
+      "ts": "2026-09-17T05:05:01.029Z",
+      "step": "confirm",
+      "caller": "Ranze",
+      "assistant": ""
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T05:04:24.284Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": false,
+        "agreed_now": true,
+        "token_present": true,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 5,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "the model fired book_appointment straight after 'I'd like to offer you a free strategy call' -- no time named, nothing to agree to. A token from five caller turns earlier (confirming a phone number) was present and did NOT authorise it.",
+      "standing_turn": 10,
+      "agreed_turn": 5,
+      "standing_read_back": "Thank you for sharing that. I'd like to offer you a free strategy call with our team to discuss this further.",
+      "agreed_read_back": "Thanks ? to confirm, should I use the number you are calling from, which is 469 933 8887?",
+      "target": null,
+      "target_candidates": [],
+      "target_from": "Thanks ? to confirm, should I use the number you are calling from, which is 469 933 8887?",
+      "target_derived": true,
+      "caller_text": "Okay.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-17T05:04:37.062Z",
+      "tool": "book_appointment",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": 6,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "THE COUNTERFACTUAL, visible in the probe: readback_now=true, agreed_now=true, token_present=FALSE. The token was nulled because the agreement on the ledger was for an earlier read-back, which is precisely the state the old supersession disjunct refused on. Five attempts died on CA03558d in exactly this shape. Here it wrote first time.",
+      "standing_turn": 11,
+      "agreed_turn": 5,
+      "standing_read_back": "I have you down for a free strategy call this Friday, September eighteenth at twelve forty-five PM. Shall we go ahead and book that?",
+      "agreed_read_back": "Thanks ? to confirm, should I use the number you are calling from, which is 469 933 8887?",
+      "target": "2026-09-18T17:00:00",
+      "target_candidates": [
+        "2026-09-18T17:00:00"
+      ],
+      "target_from": "I have you down for a free strategy call this Friday, September eighteenth at twelve forty-five PM. Shall we go ahead and book that?",
+      "target_derived": true,
+      "caller_text": "Yes, that works.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

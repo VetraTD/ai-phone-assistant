@@ -1,0 +1,230 @@
+{
+  "at": "2026-09-02T10:38:05.111Z",
+  "n": 5,
+  "models": [
+    "2.5"
+  ],
+  "rows": [
+    {
+      "scenario": "T5",
+      "model": "2.5",
+      "passes": 15,
+      "total": 15,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup after hours question"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.010936
+        },
+        {
+          "trial": 2,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup after question was answered"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help with?We're open 24 hours a day. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help with?We're open 24 hours a day. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!"
+          ],
+          "usd": 0.0109415
+        },
+        {
+          "trial": 3,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental. Have a great day!Thanks for calling Brightwork Family Dental, have a good day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller initiated hangup after hours question"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day, seven days a week. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental. Have a great day!Thanks for calling Brightwork Family Dental, have a good day.",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with?We're open 24 hours a day, seven days a week. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental. Have a great day!Thanks for calling Brightwork Family Dental, have a good day."
+          ],
+          "usd": 0.011113
+        },
+        {
+          "trial": 4,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thank you for calling Brightwork Family Dental, have a great day!"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "answered opening hours question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller indicated they are finished"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day. Is there anything else I can help you with?We are open 24 hours a day. Is there anything else I can help you with?Brightwork Family Dental is open 24 hours a day. Is there anything else I can help you with?Thank you for calling Brightwork Family Dental, have a great day!",
+          "turnSaid": [
+            "We're open 24 hours a day. Is there anything else I can help you with?We are open 24 hours a day. Is there anything else I can help you with?Brightwork Family Dental is open 24 hours a day. Is there anything else I can help you with?",
+            "Thank you for calling Brightwork Family Dental, have a great day!"
+          ],
+          "usd": 0.013725500000000002
+        },
+        {
+          "trial": 5,
+          "model": "2.5",
+          "checks": [
+            {
+              "name": "called end_call",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not ask 'anything else' on the goodbye turn",
+              "pass": true,
+              "detail": "said: Thanks for calling Brightwork Family Dental, have a great day."
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "general_question"
+              }
+            },
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "caller is done"
+              }
+            }
+          ],
+          "said": "We're open 24 hours a day, seven days a week. Is there anything else I can help you with?Thanks for calling Brightwork Family Dental, have a great day.",
+          "turnSaid": [
+            "We're open 24 hours a day, seven days a week. Is there anything else I can help you with?",
+            "Thanks for calling Brightwork Family Dental, have a great day."
+          ],
+          "usd": 0.008734
+        }
+      ]
+    }
+  ]
+}

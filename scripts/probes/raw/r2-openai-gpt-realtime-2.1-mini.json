@@ -1,0 +1,762 @@
+{
+  "silence": [
+    {
+      "silence_ms": 200,
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1256,
+          "commit_ms": -1143,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 3215,
+          "commit_ms": 149,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1529,
+          "commit_ms": 159,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 839,
+          "commit_ms": 104,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 2748,
+          "commit_ms": 208,
+          "heard": "Thanks, bye.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.02519412,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": null,
+          "commit_ms": -1140,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1079,
+          "commit_ms": 214,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2249,
+          "commit_ms": 167,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1828,
+          "commit_ms": 137,
+          "heard": "Tuesday at 10 works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 2052,
+          "commit_ms": 198,
+          "heard": "Thanks, bye.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.0172238,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 990,
+          "commit_ms": -1136,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1680,
+          "commit_ms": 169,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": null,
+          "commit_ms": 164,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1615,
+          "commit_ms": 146,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 3211,
+          "commit_ms": 180,
+          "heard": "Thanks, bye.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.01868436,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 628,
+          "commit_ms": -1148,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 852,
+          "commit_ms": 168,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2859,
+          "commit_ms": 202,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": null,
+          "commit_ms": 105,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 3232,
+          "commit_ms": 194,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.014535999999999999,
+      "error": null
+    },
+    {
+      "silence_ms": 200,
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 971,
+          "commit_ms": -1134,
+          "heard": "Hi. I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1202,
+          "commit_ms": 186,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1737,
+          "commit_ms": 183,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 3360,
+          "commit_ms": 104,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1412,
+          "commit_ms": 183,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.02270316,
+      "error": null
+    },
+    {
+      "silence_ms": 300,
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": null,
+          "commit_ms": 357,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1469,
+          "commit_ms": 294,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1789,
+          "commit_ms": 267,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 2591,
+          "commit_ms": 279,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1317,
+          "commit_ms": 292,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.019019960000000002,
+      "error": null
+    },
+    {
+      "silence_ms": 300,
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1335,
+          "commit_ms": 323,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1385,
+          "commit_ms": 339,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1731,
+          "commit_ms": 276,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": null,
+          "commit_ms": 188,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1766,
+          "commit_ms": 288,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.01835484,
+      "error": null
+    },
+    {
+      "silence_ms": 300,
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1499,
+          "commit_ms": 327,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1300,
+          "commit_ms": 292,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1998,
+          "commit_ms": 301,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 2319,
+          "commit_ms": 206,
+          "heard": "Tuesday at 10 works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1147,
+          "commit_ms": 288,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.02560868,
+      "error": null
+    },
+    {
+      "silence_ms": 300,
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": null,
+          "commit_ms": 341,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1068,
+          "commit_ms": 275,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 630,
+          "commit_ms": 287,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1686,
+          "commit_ms": 220,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1737,
+          "commit_ms": 314,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.014880359999999999,
+      "error": null
+    },
+    {
+      "silence_ms": 300,
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1260,
+          "commit_ms": 328,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 2139,
+          "commit_ms": 337,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2538,
+          "commit_ms": 305,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1742,
+          "commit_ms": 229,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": null,
+          "commit_ms": 274,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.02218148,
+      "error": null
+    },
+    {
+      "silence_ms": 500,
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1247,
+          "commit_ms": 514,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 2603,
+          "commit_ms": 478,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 3105,
+          "commit_ms": 478,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1348,
+          "commit_ms": 436,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 2290,
+          "commit_ms": 487,
+          "heard": "Thanks, bye.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.023318159999999998,
+      "error": null
+    },
+    {
+      "silence_ms": 500,
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 2122,
+          "commit_ms": 512,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": null,
+          "commit_ms": 515,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2927,
+          "commit_ms": 513,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 2321,
+          "commit_ms": 382,
+          "heard": "Tuesday at 10 works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1974,
+          "commit_ms": 522,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.015079,
+      "error": null
+    },
+    {
+      "silence_ms": 500,
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 2173,
+          "commit_ms": 511,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 2137,
+          "commit_ms": 474,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2645,
+          "commit_ms": 457,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 2013,
+          "commit_ms": 513,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1444,
+          "commit_ms": 457,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.028206000000000002,
+      "error": null
+    },
+    {
+      "silence_ms": 500,
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": null,
+          "commit_ms": 507,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": []
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1087,
+          "commit_ms": 511,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1625,
+          "commit_ms": 443,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 3799,
+          "commit_ms": 413,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 3442,
+          "commit_ms": 483,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.02091268,
+      "error": null
+    },
+    {
+      "silence_ms": 500,
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 2158,
+          "commit_ms": 517,
+          "heard": "Hi, I'd like to book an appointment.",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 2757,
+          "commit_ms": 503,
+          "heard": "Do you have anything Tuesday morning?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 2192,
+          "commit_ms": 478,
+          "heard": "It's 555-1234.",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": null,
+          "commit_ms": 436,
+          "heard": "Tuesday at 10, works for me.",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 2539,
+          "commit_ms": 452,
+          "heard": "Thanks, bye.",
+          "tools": []
+        }
+      ],
+      "usd": 0.01830276,
+      "error": null
+    }
+  ],
+  "meta": {
+    "model": "gpt-realtime-2.1-mini",
+    "n": 5,
+    "at": "2026-09-02T04:21:40.478Z"
+  },
+  "longbarge": [
+    {
+      "trial": 1,
+      "barged": true,
+      "audio_in_flight_at_barge": false,
+      "chunks_before_barge": 12,
+      "interrupted": true,
+      "speech_detected": true,
+      "response_cancelled": true,
+      "barge_to_signal_ms": 475,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "usd": 0.004605399999999999
+    },
+    {
+      "trial": 2,
+      "barged": true,
+      "audio_in_flight_at_barge": false,
+      "chunks_before_barge": 11,
+      "interrupted": true,
+      "speech_detected": true,
+      "response_cancelled": true,
+      "barge_to_signal_ms": 468,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "usd": 0.0059098
+    },
+    {
+      "trial": 3,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 32,
+      "interrupted": true,
+      "speech_detected": true,
+      "response_cancelled": true,
+      "barge_to_signal_ms": 479,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "usd": 0.01681548
+    },
+    {
+      "trial": 4,
+      "barged": true,
+      "audio_in_flight_at_barge": false,
+      "chunks_before_barge": 11,
+      "interrupted": true,
+      "speech_detected": true,
+      "response_cancelled": true,
+      "barge_to_signal_ms": 470,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "usd": 0.00532364
+    },
+    {
+      "trial": 5,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 34,
+      "interrupted": true,
+      "speech_detected": true,
+      "response_cancelled": true,
+      "barge_to_signal_ms": 466,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "usd": 0.0098174
+    }
+  ]
+}

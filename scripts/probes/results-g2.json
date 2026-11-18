@@ -1,0 +1,217 @@
+{
+  "at": "2026-09-15T05:19:14.752Z",
+  "gap_ms": 500,
+  "rows": [
+    {
+      "fixture": "clean_open",
+      "truth": "Hi, I'd like to book an appointment.",
+      "heard": " Hi. I'd like to book an appointment",
+      "wer": 0,
+      "fragments": 5,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        400,
+        0,
+        0,
+        200
+      ],
+      "started_ms": 985,
+      "usd": 0.00628,
+      "error": null
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "truth": "It's for, uh",
+      "heard": " Is four a",
+      "wer": 1,
+      "fragments": 3,
+      "turns": 2,
+      "expected_turns": 1,
+      "turns_correct": false,
+      "inter_fragment_gaps_ms": [
+        400,
+        600
+      ],
+      "started_ms": 874,
+      "usd": 0.00638,
+      "error": null
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "truth": "Next Tuesday afternoon works",
+      "heard": " Next Tuesday afternoon works",
+      "wer": 0,
+      "fragments": 4,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        0,
+        400,
+        200
+      ],
+      "started_ms": 514,
+      "usd": 0.00601,
+      "error": null
+    },
+    {
+      "fixture": "name_spelling",
+      "truth": "My name is Nithin. That's N, I, T, H, I, N.",
+      "heard": "",
+      "wer": 1,
+      "fragments": 0,
+      "turns": 0,
+      "expected_turns": 1,
+      "turns_correct": false,
+      "inter_fragment_gaps_ms": [],
+      "started_ms": 9083,
+      "usd": 0.01765,
+      "error": null
+    },
+    {
+      "fixture": "rep_time_q",
+      "truth": "Do you have anything Tuesday morning?",
+      "heard": " Do you have anything Tuesday morning",
+      "wer": 0,
+      "fragments": 6,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        0,
+        0,
+        200,
+        400,
+        200
+      ],
+      "started_ms": 431,
+      "usd": 0.00598,
+      "error": null
+    },
+    {
+      "fixture": "rep_confirm",
+      "truth": "Tuesday at ten works for me.",
+      "heard": "Tuesday at ten works for me",
+      "wer": 0,
+      "fragments": 5,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        200,
+        200,
+        0,
+        200
+      ],
+      "started_ms": 408,
+      "usd": 0.00592,
+      "error": null
+    },
+    {
+      "fixture": "rep_digits",
+      "truth": "It's five five five, one two three four.",
+      "heard": " It's five-five-five-one-two-three-four",
+      "wer": 0,
+      "fragments": 6,
+      "turns": 2,
+      "expected_turns": 1,
+      "turns_correct": false,
+      "inter_fragment_gaps_ms": [
+        600,
+        200,
+        200,
+        200,
+        200
+      ],
+      "started_ms": 414,
+      "usd": 0.00645,
+      "error": null
+    },
+    {
+      "fixture": "rep_close",
+      "truth": "Thanks, bye.",
+      "heard": " Thanks, bye",
+      "wer": 0,
+      "fragments": 2,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        200
+      ],
+      "started_ms": 401,
+      "usd": 0.00492,
+      "error": null
+    },
+    {
+      "fixture": "barge_in",
+      "truth": "Actually, could we make it Wednesday instead?",
+      "heard": " Actually, could we make it Wednesday instead",
+      "wer": 0,
+      "fragments": 6,
+      "turns": 1,
+      "expected_turns": 1,
+      "turns_correct": true,
+      "inter_fragment_gaps_ms": [
+        0,
+        0,
+        0,
+        400,
+        200
+      ],
+      "started_ms": 404,
+      "usd": 0.00633,
+      "error": null
+    },
+    {
+      "fixture": "partial_digits",
+      "truth": "My number is five five five, two",
+      "heard": " My number is five five five two",
+      "wer": 0,
+      "fragments": 7,
+      "turns": 3,
+      "expected_turns": 1,
+      "turns_correct": false,
+      "inter_fragment_gaps_ms": [
+        200,
+        200,
+        600,
+        600,
+        400,
+        400
+      ],
+      "started_ms": 378,
+      "usd": 0.00789,
+      "error": null
+    }
+  ],
+  "g2a": {
+    "prediction": "transcript for >=9 of 10, median WER <= 0.25",
+    "fails_if": "no transcript at all, or median WER > 0.50",
+    "fixtures_with_text": 9,
+    "median_wer": 0,
+    "pass": true,
+    "prediction_held": true
+  },
+  "g2b": {
+    "prediction": "gap rule yields expected turn count for 8 of 10",
+    "fails_if": "correct for fewer than 6 of 10",
+    "correct": 6,
+    "of": 10,
+    "pass": true,
+    "prediction_held": false
+  },
+  "pass": true,
+  "spend": {
+    "cap": 5,
+    "spent": 0.081402,
+    "remaining": 4.918598,
+    "sessions": 11,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825
+    }
+  }
+}

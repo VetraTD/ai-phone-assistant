@@ -1,0 +1,160 @@
+{
+  "at": "2026-09-02T14:34:19.944Z",
+  "n": 3,
+  "models": [
+    "gpt"
+  ],
+  "rows": [
+    {
+      "scenario": "T2F",
+      "model": "gpt",
+      "passes": 12,
+      "total": 12,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing, let’s start by getting a couple basics so we can set this up correctly.Of course. I see a couple of options right away: Tuesday at 4:30 PM, or Wedne"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Sure thing, let’s start by getting a couple basics so we can set this up correctly.Of course. I see a couple of options right away: Tuesday at 4:30 PM, or Wednesday at 10:00 AM. Would you like one of those?Sure thing. Is there anything else I can help you with today, or would you like to call back when you’ve decided?",
+          "turnSaid": [
+            "Sure thing, let’s start by getting a couple basics so we can set this up correctly.",
+            "Of course. I see a couple of options right away: Tuesday at 4:30 PM, or Wednesday at 10:00 AM. Would you like one of those?",
+            "Sure thing. Is there anything else I can help you with today, or would you like to call back when you’ve decided?"
+          ],
+          "usd": 0.0560176
+        },
+        {
+          "trial": 2,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Okay, let’s sort this out together so we can find a time that works.Sure thing. That Tuesday at 3 PM is already taken, but we do have Tuesday at 4:30 PM and Wed"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Okay, let’s sort this out together so we can find a time that works.Sure thing. That Tuesday at 3 PM is already taken, but we do have Tuesday at 4:30 PM and Wednesday at 10 AM open. Are you a new patient or an existing patient?",
+          "turnSaid": [
+            "Okay, let’s sort this out together so we can find a time that works.",
+            "Sure thing. That Tuesday at 3 PM is already taken, but we do have Tuesday at 4:30 PM and Wednesday at 10 AM open. Are you a new patient or an existing patient?",
+            ""
+          ],
+          "usd": 0.048977599999999996
+        },
+        {
+          "trial": 3,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "book_appointment NEVER with the taken slot",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "did not claim the taken slot was booked",
+              "pass": true,
+              "detail": "said: Sure thing — I’ll first confirm whether you’re a new or existing patient, then we can check that time.Sure thing — I just need to confirm something basic before"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            },
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Sure thing — I’ll first confirm whether you’re a new or existing patient, then we can check that time.Sure thing — I just need to confirm something basic before we look at that time.Of course. I also need to ask first if you’re a new patient or an existing patient. Tuesday at 3 PM isn’t available, but I do see 4:30 PM that day open, and there’s also Wednesday at 10 AM. Which would you like?",
+          "turnSaid": [
+            "Sure thing — I’ll first confirm whether you’re a new or existing patient, then we can check that time.Sure thing — I just need to confirm something basic before we look at that time.Of course. I also need to ask",
+            " first if you’re a new patient or an existing patient. Tuesday at 3 PM isn’t available, but I do see 4:30 PM that day open, and there’s also Wednesday at 10 AM. Which would you like?",
+            ""
+          ],
+          "usd": 0.057909600000000006
+        }
+      ]
+    }
+  ]
+}

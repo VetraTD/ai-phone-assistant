@@ -1,0 +1,92 @@
+- generic [ref=f6e5]:
+  - banner [ref=f6e6]:
+    - generic [ref=f6e7]:
+      - generic [ref=f6e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f6e9]
+      - paragraph [ref=f6e10]: Your calls at a glance for today
+      - generic [ref=f6e11]:
+        - generic [ref=f6e12]: "+18175803291"
+        - generic [ref=f6e13]: America/Chicago
+    - generic [ref=f6e14]:
+      - button "🌐 EN" [ref=f6e16] [cursor=pointer]:
+        - generic [ref=f6e17]: 🌐
+        - generic [ref=f6e18]: EN
+      - generic [ref=f6e19]:
+        - button "Dashboard" [ref=f6e20] [cursor=pointer]
+        - button "Analytics" [ref=f6e21] [cursor=pointer]
+        - button "Appointments" [ref=f6e22] [cursor=pointer]
+        - button "Settings" [ref=f6e23] [cursor=pointer]
+        - button "Guide" [ref=f6e24] [cursor=pointer]
+      - button "Logout" [ref=f6e25] [cursor=pointer]
+  - main [ref=f6e26]:
+    - generic [ref=f6e27]:
+      - generic [ref=f6e28]:
+        - heading "Settings" [level=2] [ref=f6e30]
+        - generic [ref=f6e31]:
+          - status [ref=f6e32]: All changes saved
+          - generic [ref=f6e614]: Everything is saved
+          - button "Save changes" [disabled] [ref=f6e35]
+      - generic [ref=f6e36]:
+        - tablist "Settings sections" [ref=f6e37]:
+          - tab "General Name, hours, timezone" [ref=f6e38] [cursor=pointer]:
+            - generic [ref=f6e44]:
+              - generic [ref=f6e45]: General
+              - generic [ref=f6e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language" [ref=f6e616] [cursor=pointer]:
+            - generic [ref=f6e52]:
+              - generic [ref=f6e53]: Voice & Language
+              - generic [ref=f6e54]: 1 language
+          - tab "Capabilities 3 of 7 turned on" [ref=f6e55] [cursor=pointer]:
+            - generic [ref=f6e60]:
+              - generic [ref=f6e61]: Capabilities
+              - generic [ref=f6e62]: 3 of 7 turned on
+          - tab "Knowledge Base 8 answers saved" [ref=f6e618] [cursor=pointer]:
+            - generic [ref=f6e67]:
+              - generic [ref=f6e68]: Knowledge Base
+              - generic [ref=f6e69]: 8 answers saved
+          - tab "Notifications Email and text alerts" [ref=f6e70] [cursor=pointer]:
+            - generic [ref=f6e75]:
+              - generic [ref=f6e76]: Notifications
+              - generic [ref=f6e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [selected] [ref=f6e78] [cursor=pointer]:
+            - generic [ref=f6e82]:
+              - generic [ref=f6e83]: Billing & Integrations
+              - generic [ref=f6e84]: Plan, usage, calendar
+        - tabpanel "Billing & Integrations Plan, usage, calendar" [active] [ref=f6e811]:
+          - generic [ref=f6e86]:
+            - heading "Billing & Integrations" [level=2] [ref=f6e812]
+            - paragraph [ref=f6e88]: Your plan, how much you've used this month, and connected apps.
+          - generic [ref=f6e813]:
+            - generic [ref=f6e815]:
+              - heading "Usage this month" [level=3] [ref=f6e816]
+              - paragraph [ref=f6e817]: Resets on the 1st. Useful for keeping an eye on your plan.
+            - generic [ref=f6e819]:
+              - generic [ref=f6e820]:
+                - generic [ref=f6e821]: "93"
+                - generic [ref=f6e822]: Calls answered
+              - generic [ref=f6e823]:
+                - generic [ref=f6e824]: "110"
+                - generic [ref=f6e825]: Minutes used
+          - generic [ref=f6e826]:
+            - heading "Billing & Plan" [level=3] [ref=f6e829]
+            - generic [ref=f6e830]:
+              - generic [ref=f6e831]:
+                - term [ref=f6e832]: Current plan
+                - definition [ref=f6e833]:
+                  - generic [ref=f6e834]: Starter
+                - term [ref=f6e835]: Billing status
+                - definition [ref=f6e836]: Not connected yet
+                - term [ref=f6e837]: Usage this month
+                - definition [ref=f6e838]: 93 calls, 110 min
+                - term [ref=f6e839]: Phone number
+                - definition [ref=f6e840]: "+18175803291"
+              - paragraph [ref=f6e841]:
+                - generic [ref=f6e842]: You're on the Starter beta plan. Paid plans with detailed usage and billing controls are coming soon.
+          - generic [ref=f6e843]:
+            - generic [ref=f6e844]:
+              - generic [ref=f6e845]:
+                - heading "Calendar sync" [level=3] [ref=f6e846]
+                - paragraph [ref=f6e847]: Sync appointments to Google Calendar so they appear in your calendar app.
+              - generic [ref=f6e848]: Not connected
+            - button "Connect Google Calendar" [ref=f6e852] [cursor=pointer]
+  - contentinfo [ref=f6e265]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

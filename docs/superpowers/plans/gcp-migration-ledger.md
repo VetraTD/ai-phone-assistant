@@ -1,0 +1,4281 @@
+# GCP Migration — Execution Ledger
+
+**Spec:** `docs/superpowers/specs/2026-08-19-gcp-migration-two-region.md` (rev. 2026-08-20).
+The spec is the *what and why* and does not change during execution. This file is the *where we
+are*, and it changes every session.
+
+**Opened:** 2026-08-20 · **Status (2026-08-25, session 14 — SUSPENDED AGAIN):** **⚠ FOUR PROJECTS ARE SUSPENDED BY GOOGLE FOR AN ACCEPTABLE USE POLICY VIOLATION, HOURS AFTER THE UK STACK WENT LIVE.** `vetra-uk-prod`, `vetra-shared`, `vetra-us-prod` and `ultra-glyph-506120-v5`. **`vetra-us-staging` is NOT suspended and still serves 200. RAILWAY IS UNAFFECTED — the paying clinic is still answering.** **THE BILLING HYPOTHESIS WAS WRONG AND IS CORRECTED HERE:** two of the four suspended projects are EMPTY, which read as a billing sweep, and it is not — the billing account is **Active with $0 spend** and the console banner says *"detected for multiple projects **you own**"*. **The action is scoped to the OWNER, which is why empty projects were swept in.** Email wording: *"associated with **repeated** Terms of Service violations"* — the same load-bearing word as 2026-08-22, when `vetra-us-staging` was suspended, reinstated, and **nobody was ever told the cause.** This file predicted this exactly: *"a cause you never found is not a cause you fixed."* **THE APPEAL EVIDENCE ROUTE THAT WORKED LAST TIME IS DEAD:** the org-node sinks export into buckets inside `vetra-shared`, and `vetra-shared` is suspended in this action — the audit trail is behind the same wall as the projects it documents. **A drafted appeal is at `docs/compliance/gcp-suspension-appeal-2026-08-25.md`**, one per project, built around the fact that verifies best: **this system has NO call-origination path** — `calls(callSid).update()` redirects an already-answered INBOUND call into a warm transfer, and there is no dialler, campaign or contact list, which is what robocall heuristics look for. **DO NOT REPOINT `+441372656055`** — it serves from Railway and is fine; moving it now aims a working demo at a suspended project. Previously: **Status (2026-08-25, session 14 — SESSION CLOSE):** **THE UK STACK ANSWERS AS A REAL TENANT. `Digile Media` IS MIGRATED AND `+441372656055` RESOLVES ON GCP.** The proof is the same signed Twilio webhook sent an hour apart: before, `<Say>Sorry — I can't connect you to this office right now</Say><Record>`; after, `<Connect><Stream url="wss://voice-uk-prod-.../twilio/media-stream">` carrying `businessPhone=+441372656055`. **Signature validation was proven in BOTH directions first** — signed 200, tampered 403, unsigned 403 — which is the positive control B4 never had. `scripts/import-tenant.js` is committed, CONFIG-ONLY (it refuses a payload naming any PHI table before opening a connection), tested by 13 tests as a NOSUPERUSER NOBYPASSRLS role, and sabotage-verified — removing its `set_config` gives `new row violates row-level security policy`. **A test found that `businesses.timezone` has NO database constraint**: `pg_constraint` carries CHECKs for `locale` and `compliance_tier` and nothing for timezone, so `Not/AZone` inserted happily and only the dashboard API ever validated it. **Owner item #7 is CLOSED by one query: NO production tenant has `sms_followup_enabled`**, so O25's deploy changes nobody's behaviour. **Production Supabase is several migrations behind** — no `knowledge_base`, `sms_consents`, `phi_access_log`, `business_directory` or `user_directory`, which means production has no PHI audit trail at all today. **What is left is ONE owner action: repoint `+441372656055` from Railway to `twilio_webhook_base`.** Previously: **Status (2026-08-25, session 14 — earlier):** **THE UK STACK IS BUILT, SERVING AND MIGRATED. U1 THROUGH U4 ARE DONE AND U6's DATABASE HALF IS PROVEN.** `voice-uk-prod` is `Ready` in **europe-west2** on `voice:61294bd`, `GET /` returns **200**, and its boot log reads `Speech-to-text provider: Deepgram nova-3 (DEPLOYMENT_MODE=standard)` — the fast lane, no HIPAA machinery, no $2,000/month Twilio fee. **`DEEPGRAM_REGION=eu` is on the serving revision**, verified against the shipping module (`eu -> wss://api.eu.deepgram.com`, unset -> `wss://api.deepgram.com`), so the residency claim is now a measured fact rather than a hope. Cloud SQL `vetra-uk-prod` is RUNNABLE, `db-g1-small`, europe-west2, CMEK on the London key ring — and **PITR on a shared-core tier WORKS**, which was the one setting nothing in this estate had ever demonstrated: `pointInTimeRecoveryEnabled: True`, backups pinned to `europe-west2`, 7-day log retention. Migrations: **empty database, schema.sql as baseline, `applied: 36, pending: none`** confirmed by `--status` rather than believed. **C8's RLS proof passes 58/58 on the UK production database**, identical to US staging, positive controls first, transaction rolled back. **THE APPLY COST ONE SELF-INFLICTED FAILURE AND IT IS THE SESSION'S BEST LESSON:** a Twilio SID placeholder was pushed after checking `lib/bootChecks.js` and `server.js` for format validation and finding none — **the validation is in the Twilio SDK, reached at import time from `services/notifications.js:56`**, so `voice-uk-prod` crash-looped with `accountSid must start with AC` before any boot check ran. The wrong layer was verified. **What remains is U5 and it is entirely the owner's:** a UK number on the cofounder's Twilio account, media edge IE1, the webhook pointed at `twilio_webhook_base` (**not** `uri` — both hostnames resolve and the signature is over the exact URL), and the real Twilio credentials replacing the placeholders. Previously: **Status (2026-08-25, session 14 — later):** **THE UK LANE COULD NOT HAVE BEEN BUILT IN LONDON AT ALL, AND NOTHING SHORT OF AN APPLY WOULD HAVE FOUND IT.** `in:eu-locations` — the org-policy value group the whole two-region design rests on — **is the EUROPEAN UNION, and `europe-west2` is London. The UK left the EU.** The first apply that ever tried to create anything in a UK project was refused: `Constraint constraints/gcp.resourceLocations violated ... attempting to create a secret in [europe-west2]`. Measured afterwards: the effective policy expands to **66 values, 36 of them `europe-west*`, and nothing matching `west2` anywhere**. **It blocked Cloud SQL, Cloud Run, KMS and the subnet equally** — the secret was merely first in the graph — and it was latent since B0w, unreachable while `enable_uk_resources` was off, and **invisible to `terraform plan`, which does not evaluate org policy.** Owner chose to **keep London and widen** rather than move to europe-west1, which would have cost one tfvars line and ~10 ms but downgrades the sentence said to a clinic from *"your data is in London"* to *"your data is in Belgium"*. **Two more findings came out of the same thread:** Cloud SQL backups were going to the **`eu` multi-region, EU-only too**, so a London instance's backups would have sat outside the UK — now pinned to the instance region; and **`gcp.resourceLocations` is enforced PER SERVICE**, proven by two log buckets already sitting in `europe-west2` in a project whose policy has never allowed it, so the constraint's coverage gaps **fail open silently.** **APPLIED so far, all free and reversible: the three widened org policies.** The five secrets are still refused because **an org policy is not enforced when the API says it is** — the widening reported `Modifications complete after 0s`, reads back correctly, and still refuses; same ~15 min propagation this file records for the DRS exception. A retry loop is running. **Nothing that costs money has been applied.** Previously: **Status (2026-08-25, session 14):** **U1 IS DONE AND IT FOUND THAT `enable_uk_resources = true` — THE EXACT EDIT THIS FILE INSTRUCTED — PLANNED A DESTROY OF THE ONLY DATABASE IN THE ESTATE.** The brief was right that `enable_prod_databases` was a coupled global bool and it is now a list of project keys; **the second bool was worse.** `enable_uk_resources = true` also activates `uk-staging`, which is merged into the `us-staging` PROJECT, which adds a stack to that project's VPC `description`, which **forces `google_compute_network` to be replaced**, which cascades through the peering range and the service-networking connection into `google_sql_database_instance.this["us-staging"]` — **77 add / 3 change / 5 DESTROY, one of the five being the database holding 8 tenants, migration head 037, the phi_access_log and C7's evidence.** Staging carries no deletion protection by design, so nothing would have stopped the apply. **A one-word change to a description string.** `enable_uk_resources` is now a list of STACK keys; `["uk-prod"]` plans **46 add, 2 change, 0 destroy**, and both changes are the documented `min_instance_count` phantom. **AND A SECOND FINDING THAT WOULD HAVE BEEN INVISIBLE: `DEEPGRAM_REGION` HAS NEVER BEEN SET BY ANY TERRAFORM**, so the UK service this lane exists to build would have streamed every caller's audio to Deepgram's **US** endpoint — working calls, correct transcripts, and the residency claim the whole lane rests on quietly false. This file listed it under "already built for UK". **Also corrected: Cloud Run here issues BOTH URL forms, not one per project** — the live service answers on the project-number form AND the opaque hash, `uri` returns the hash, `BASE_URL` is the project-number form, and the Twilio signature is an HMAC over the exact URL, so `cloud_run_services` now emits `twilio_webhook_base`. Gates all green: root **118 files / 2283 tests**, `test:db` **178**, `sim:cutoff`, dashboard **126** and **36**. **NOTHING APPLIED — U3 is the owner's, and U2 must land first.** Previously: **Status (2026-08-25, session 13 — SESSION CLOSE):** **LANE C IS 6 OF 10, UP FROM 2. C2, C4, C7 AND C8 ALL CLOSED THIS SESSION, AND THE MIGRATION IS NOW GATED ON ONE DECISION: PRODUCTION DOES NOT EXIST.** Two applies landed. **C7 passed 13/13 with a measured restore wall clock of 341 s** — the §164.308(a)(7) recovery time nobody had ever taken — and its drift itemised as `calls −2, appointments −1, sms_consents −1, phi_access_log −47`, **exactly the two live calls made that morning**, whose 47 audit entries had been counted independently from Cloud Logging an hour earlier. **C8 is proven where the PHI is: 58 passed, 0 failed** against Cloud SQL, after its own preflight caught that `SET ROLE` was the means and not the requirement. **C4 came free off the call session** — `voice_to_voice_ms` p50 3,140 against A0's 2,980, and **−23% against the covered lane's own figure**, with **zero turns of 15 producing no reply** against A0's 12 of 84. **Two live calls proved the reschedule works against real UUIDs** — supporting the fixture hypothesis for the eval's id-invention — while `text_channel_tool_call` fired and `outbound_sanitized` caught it before the caller heard it. **The cost alarm was found firing into a mailbox nobody opens and now reaches a proven address**; both IAM routes were refused by controls working correctly. Previously: **Status (2026-08-24, session 13):** **FOUR ITEMS CLOSED, NOTHING APPLIED, AND TWO OF THIS FILE'S OWN CONCLUSIONS CORRECTED IN PLACE.** The migration is still gated on the same cost decision — production does not exist — but **C7 is no longer behind it**: re-derived rather than cited, C7 is NOT the production build, needs no `terraform apply`, and can run against staging's existing automated backups for about four cents. **C1's Vertex arm was unrunnable** — `eval/run.js` refused to start without `GEMINI_API_KEY`, the fourth copy of a check placed above `getClient` and a pure false blocker — now fixed and sabotage-verified, with ADC reauth (owner-only) the single remaining obstacle. **The three standing advisory-judge failures turned out to have three different root causes and only one is a product bug:** `impatient-booker` asks about a caller the fixture never makes impatient, `reschedule-two-appointments` **was never flaky at all — its fixture seeded non-UUID ids against a declaration promising a UUID and the model invented them** (2/5 → 5/5 once corrected, and the mechanism metric reached p=0.024 where the aggregate could not leave p=0.083), and `long-call-memory` conceals a **livelock in which the assistant asked the same spelling question nine times in nine consecutive turns while every hard assert stayed green**. **C8's RLS half is now a committed script** — 58 assertions, 11 of 11 policy-carrying tables, one always-rolled-back transaction, sabotage-verified five ways — **and its first honest run found that `business_directory` and `user_directory` are granted read AND WRITE to `vetra_app` while the schema asserts twice that they are not, which is the entire security argument for those two tables carrying no RLS.** Four findings PARKED at the owner's direction, O25 included. Previously: **Status (2026-08-24, session 12 — SESSION CLOSE):** **THE DASHBOARD IS DEPLOYED, SERVED AND USABLE, AND THE HUMAN PHI PATH IS AUDITED FOR THE FIRST TIME.** The apply landed: `voice:ff52ea4`, `dashboard:ff52ea4`, `CORS_ORIGINS`, and the Firebase Hosting grant. **TWO LIVE TEST CALLS FOUND THAT O25 IS BROKEN IN A WAY NO SUITE COULD SEE:** `record_sms_consent` fires without the disclosure ever being spoken and writes a row asserting it was — the caller said "no d as in dog" and the system recorded a declined SMS consent. **Deliberately PARKED at the owner's direction** ("I just want to get the migration done"): it cannot leak today, because the code is staging-only and A2P blocks delivery, and **its real deadline is toll-free verification rather than D7.** **The migration is now gated on a COST DECISION rather than on code: production does not exist**, and D3 onward waits behind building it. Previously: **Status (2026-08-23, session 12 — SESSION CLOSE):** **THE DASHBOARD IS SERVED AND REACHABLE — https://vetra-shared-c3a3bd.web.app/app renders its sign-in page — AND IT CANNOT CALL ITS API UNTIL ONE APPLY LANDS.** The owner chose Firebase Hosting over the CDN + load balancer; the Firebase project and its default Hosting site turned out to ALREADY EXIST, having arrived with Identity Platform at B3, so nothing had to be created. **The eval noise band is measured at last: 35-37 of 37 across five runs of identical code, and `eval:compare` false-alarms on 17 of 20 ordered pairs — 85% — so C1's method was retired rather than resized.** **C6's credential half is verified against the project that actually runs PHI**, which is not the one its guard was checking. **C8's app layer passes 15/15 against the live deployment** — and found that **the dashboard backend writes NO PHI-access audit record at all**, so §164.312(b) covers the automated path and not the human one. **O25's flag is genuinely set this time**, read back from the row rather than believed. What needs the owner: one `terraform apply` (CORS + the hosting IAM grant), and a call from +14699338887. **C7 cannot be done unattended and the brief's "none of these needs me" does not hold for it.** Previously: **Status (2026-08-23, session 11j — SESSION CLOSE):** **LANE B'S LAST CODE-SIDE PIECE IS DONE: THE SPA IS BUILT AND PUBLISHED, AND THE VOICE SERVICE'S AUTH GAP IS CLOSED.** `voice-us-staging-00020-zgf` runs `voice:001bdfb` with `IDENTITY_PLATFORM_PROJECT_ID` set — **both `auth_not_configured` and `sms_channel_off` are gone from the boot notices**, which is the pair of controls confirming themselves rather than being asserted. The Art. 15/17 endpoints are reachable for the first time. 28 objects are in the SPA bucket with the staging API URL and auth domain correctly baked in. **PUBLISHING IT TOOK ONE MORE IAM FINDING: `roles/storage.objectAdmin` does not grant `storage.buckets.get`**, which `loadbalancer.tf`'s own comment names as the exact error the first publish hit — so the recorded fix had never addressed the recorded symptom, and the second attempt failed identically. **WHAT IS NOT DONE: nothing serves the SPA.** The bucket is private and `enable_load_balancer` is false; choosing between the LB (cost + a DRS exception in the audit-trail project) and Firebase Hosting (free, sidesteps it) is an owner decision and is now the last thing between a deployed dashboard and a usable one. Previously: **Status (2026-08-23, session 11i):** **THE CONSENT FLAG WAS NEVER ACTUALLY SET, AND THE EVAL BASELINE IS NOT WHAT THIS FILE CLAIMS.** The first O25 test call asked no consent question, and the audit trail settles why: `latestSmsConsent` never appears, so `sendCallerSms` stopped at gate 1 and the database value was still false. Not a caching artefact — `loadConfig` has no cache and the Gemini cache is content-addressed by design. Most likely Cloud SQL Studio not carrying session state between executions, so `set_config` was gone by the time the UPDATE ran and FORCE RLS matched zero rows **and reported success**. **On call quality: the numbers say no regression** — `voice_to_voice_ms` p50 **3,757** against the recorded covered-lane **4,084**. **But chasing it found something worse than a regression:** two full eval runs both scored 36/37 **with a different scenario failing each time**, and the loser fails 1-in-7 with this session's changes reverted. **The "34/37 or worse is a regression" gate rests on a noise band nobody has measured.** Previously: **Status (2026-08-23, session 11h):** **THE VOICE SERVICE'S AUTH GAP IS FIXED IN CONFIG AND DELIBERATELY NOT APPLIED** — the owner is mid-test-call and the apply would spin a new revision under them. `IDENTITY_PLATFORM_PROJECT_ID` now reaches `voice-us-staging`, pointed at `shared` rather than the running project (the same trap the dashboard's copy documents: `securetoken` is one signer for every Firebase project on earth, so this value is the whole defence). That makes the Art. 15 and Art. 17 endpoints reachable, and with them today's `sms_consents` additions to export and erasure. **Also: staging's database is private-IP only, so there is no path to it from a workstation at all** — `scripts/seed-staging.js` now takes `SEED_SMS_FOLLOWUP` so flipping the consent flag stops being hand-SQL against a table under FORCE RLS. Plan: `0 add, 2 change, 0 destroy`. Previously: **Status (2026-08-23, session 11g):** **`TWILIO_SMS_FROM` APPLIED — `voice-us-staging-00019-9gg` carries `+18176326969` and the `sms_channel_off` boot notice is GONE**, which is the channel confirming itself rather than being asserted. O25 is now testable end to end short of carrier delivery. **AND THE SAME BOOT LOG SURFACED A GAP: `IDENTITY_PLATFORM_PROJECT_ID` IS NOT SET ON THE VOICE SERVICE** — `[boot] notice auth_not_configured` — so every authenticated route on it returns 401 unconditionally. **That is where the Art. 15 export and Art. 17 erasure endpoints live**, so the `sms_consents` additions shipped today to `exportCallerData` and `eraseCallerData` have NO path to verification on staging. Calls are unaffected. The dashboard has it set (`vetra-shared-c3a3bd`), so its earlier `/api/me` 401 was a genuine missing-token rejection and that reading still holds. Previously: **Status (2026-08-23, session 11f):** **THE SMS CHANNEL IS BLOCKED BY A2P, NOT BY ANYTHING WE BUILT — and `TWILIO_SMS_FROM` was never a Secret Manager change.** The Twilio console settles both: `vetratd_staging` DOES own `+18176326969` (this file said the subaccount owned zero numbers — stale since session 9b), it is SMS/MMS/Voice capable, its voice webhook already points at `voice-us-staging`, and its Traffic Status reads **`✓ Voice enabled` beside `❌ Messaging disabled — Complete A2P registration`**. Capability and permission are different fields, and the receptionist answering real calls on that number is exactly why nobody noticed the messaging half was off. Balance is **$0.00** on top. `var.twilio_sms_from` is now wired per STACK and set for `us-staging`, one apply away — **and applying it will not make a text arrive.** What it buys is an observable send ATTEMPT, which is what turns "did the consent gate open" into a question Twilio's message log can answer. Previously: **Status (2026-08-23, session 11e):** **APPLIED, WITH THE OWNER DIRECTING IT. O25 IS DEPLOYED AND THE DASHBOARD BACKEND IS SERVING FOR THE FIRST TIME.** Three steps in the order the migrate-job finding required: `-target` the job → execute it → full apply. `Apply complete! Resources: 1 imported, 3 added, 1 changed, 0 destroyed.` `voice-us-staging-00018-2xl` is Ready on `voice:d02cdc8` with CMEK verified, and `dashboard-api-us-staging-00001-lt9` is Ready on `dashboard:d02cdc8` — `/health` 200, `/api/me` **401 unauthenticated**. **THE MIGRATION JOB APPLIED FOUR MIGRATIONS, NOT ONE: 034, 035, 036 AND 037.** Staging's database was three behind and nobody knew — including **036, the migration that closed the tenant-claim escalation**, which this file has recorded as closed since session 10 and which had never reached this database. **HONEST LIMIT: the dashboard's DATABASE PATH IS UNPROVEN.** `init()` builds the pool and runs no query, so an open port proves the Cloud SQL connector fetched its certificates and nothing more; no query has been executed against Cloud SQL from that service. Previously: **Status (2026-08-23, session 11d):** **BOTH IMAGES BUILT AND VERIFIED BY CONTENT, TAGS PINNED, AND THE PLAN NOW SHOWS THE DEPLOY-ORDER HAZARD AS A SINGLE LINE.** `voice:d02cdc8` and `dashboard:d02cdc8` are in Artifact Registry — checked by inspecting the images, not by reading the tags, because a tag here is a hand-typed `_TAG` substitution and reading one gave the wrong answer earlier today. Both `image_tag` and `dashboard_image_tag` are now pinned in tfvars; the latter had never been set at all and was falling back to `latest`. **The re-plan is `1 to import, 4 to add, 2 to change, 0 to destroy`, and the second change is the discovery: THE MIGRATE JOB'S IMAGE IS TERRAFORM-MANAGED off the same `image_tag`.** So one `terraform apply` moves the migrate job AND the voice service to the new image together — and updating a job does not RUN it. Applying the whole plan in one step therefore serves code that reads `sms_consents` against a database that has no such table, which breaks `exportCallerData` and `eraseCallerData`. **The safe sequence is now written down: `-target` the job, execute it, then apply the rest.** Previously: **Status (2026-08-23, session 11c):** **FIRST UNTARGETED `terraform plan` SINCE THE SUSPENSION: `1 to import, 4 to add, 1 to change, 0 to destroy`, and the one change is the documented `min_instance_count` phantom.** No errors, no `CONSUMER_SUSPENDED`, nothing unexplained — a full refresh across every resource in state now succeeds. **BUT STAGING IS RUNNING CODE FROM BEFORE SESSION 11**: the live revision is `voice:7cea364`, a commit from 2026-08-22 14:01, so **none of O25, O32 or D7 is deployed and migration 037 has never been applied to the staging database.** That creates a deploy-ordering hazard worth reading before anyone builds: **037 must land BEFORE the new image serves**, or `exportCallerData` returns null and `eraseCallerData` throws — the two DSR endpoints — because both now query a table that would not exist. Previously: **Status (2026-08-23, session 11b):** **THE SUSPENSION IS LIFTED AND THE COVERED CONFIGURATION SURVIVED IT.** `vetra-us-staging` is back: Cloud Run `Ready: True`, Cloud SQL RUNNABLE, Secret Manager and Logging answering, `GET /` 200, and a fresh boot log showing `DEPLOYMENT_MODE=hipaa`, Google STT v2 and CMEK verified. **Nobody confirmed the appeal — that is INFERRED from the APIs answering, because Google's reply went to the mailbox nobody reads, so the trigger is still unknown and can therefore recur.** **AND THE O25 END-TO-END TEST CANNOT PASS ON STAGING AS CONFIGURED:** the boot log announces `sms_channel_off` — `TWILIO_SMS_FROM` is unset, so `sendSms` drops every message one layer BELOW the consent gate, and a test run today would read as "the consent gate is broken". Setting it is a Secret Manager change and a hard stop. Previously: **Status (2026-08-22, session 11):** **THE ONLY LIVE PHI EXPOSURE LEFT IS CLOSED, AND IT DID NOT COST THE FEATURE.** O25 is done: a caller-facing SMS now requires a recorded express consent, captured IN THE CALL by one tool, stored with the caller's number, the call id, the timestamp and the exact disclosure (migration 037, `sms_consents`). One question closes BOTH the PHI-in-SMS exposure and TCPA ($500-$1,500 per message, no cap), because 45 CFR 164.522(b) and TCPA express consent are the same event. **The templates stopped lying too** — two of three promised "Reply to this number" and **no inbound SMS route exists anywhere in this repo**. **O32 is done and its own comment was the wrong part**: every per-turn write was already scoped by the live-call fix, so the accepted gap had closed while nobody updated the text; the ONE genuinely unscoped PHI write left was the degraded voicemail file, which on Cloud SQL is a REFUSED insert reported to Twilio as 200. **O31 IS IMPOSSIBLE AS WRITTEN, verified against the live API and the discovery document**: the Identity Platform `Config` resource has **18 schema fields, 15 of them returned live, and not one is a token lifetime**. **D7 is now a clean cancellation** — nothing in the repo imports or depends on `@supabase/supabase-js`, and both remaining ports had the same latent RLS trap. **O26, O21 and O22 drafted.** **The org has TEN policies and only THREE are ours — the ledger's own "nine unread `.managed.` constraints" was wrong (there are three `.managed.`), and one of the unread ones explains a trap that has now fired three times.** Nothing applied to GCP: `vetra-us-staging` is still SUSPENDED. Previously: **Status (2026-08-22, session 10):** **B3 IS DONE — STAFF AUTH RUNS ON IDENTITY PLATFORM AND A REAL PERSON LOGGED IN.** `supabaseClient.js` is deleted, Identity Platform is live in `vetra-shared` (US only, no tenants), and the whole path was exercised in a browser rather than asserted by a suite: sign in, reload with the session surviving, tenant resolved, dashboard rendered, sign out. **Lane B is now complete except the two items deferred by decision.** **THREE DEFECTS WERE FOUND BY USING IT AND NONE BY A TEST** — migration 034 (the auth bootstrap hit the SAME FORCE-RLS trap as 032 and 033, so on Cloud SQL every authenticated request 403'd), migration 035 (an Identity Platform account id is not a uuid, so signup 500'd while login worked), and a submit handler that shadowed its own import and called itself while `vite build` and 2,189 tests stayed green. **⚠ SEPARATELY AND URGENTLY: `vetra-us-staging-c3a3bd` IS SUSPENDED BY GOOGLE**, so the receptionist that answered a real call yesterday is down — and the reason nobody knew is that **no Essential Contacts exist and every Google notice goes to a mailbox the owner cannot read**, including the free-trial expiry that will suspend the rest. Previously: **Status (2026-08-22, session 9):** **THE RECEPTIONIST ANSWERS REAL CALLS ON GCP IN `hipaa` MODE, END TO END.** A real caller booked, rescheduled and was heard, on Google STT + Google TTS + Vertex, with no Deepgram, ElevenLabs or Gemini API credential anywhere in the project. **Getting from "deployed and serving" to "answers the phone" took SEVEN more defects, none of them the STT work** — see Standing facts: no Twilio number pointed at the service; signature validation rejected 100% of requests; the tenant could not be created (032); the dialled number could not be resolved (033); the LLM demanded an API key Vertex forbids; the Vertex SDK built an invalid hostname; and per-turn writes plus capability effects escaped their tenant scope. **Every one predates this session's STT work.** **MEASURED ON LIVE CALLS: the TTS swap costs more than the STT swap** — `tts_ttfb_ms` p50 92→1,408 ms against A0, `voice_to_voice_ms` 2,980→4,084. C5 was filed as an aesthetic question and is worth ~1.3 s per turn. **C5b predicted the live name failure almost verbatim**, confirming the mispronunciation is STT rather than TTS. Previously: **Status (2026-08-22, session 9):** **✅ `voice-us-staging` IS SERVING WITH `DEPLOYMENT_MODE=hipaa`. THE MIGRATION'S REAL BLOCKER IS GONE, APPLIED AND VERIFIED.** Revision `voice-us-staging-00003-lxz` is `Ready: True` on image `2fe7da1`, boot log carries `Speech-to-Text provider: Google Speech-to-Text v2 (DEPLOYMENT_MODE=hipaa)` and `Speech-to-Text CMEK verified:`, `GET /` returns 200, all three signature-rejection paths return 403, `check:credentials` says **Boundary holds** (3 secrets, 0 forbidden — was 4/1), and `terraform plan` shows only the documented `min_instance_count` phantom. **Staging ran `standard` for exactly one reason and that reason is now gone.** Google Speech-to-Text v2 is built behind the `sttStream.js` seam (`5692027`), the provider is selected by COMPLIANCE TIER rather than any env flag (`89fdbbc`), and the boot contradiction that made a covered deployment impossible to start is resolved (`820349a`) — `server.js` no longer demands the one credential `checkCoveredVendors` refuses to let it hold. **C5b IS RUN AND RECORDED** (`243f6d6`): Google is **~880 ms slower on the median turn and 6.8 SECONDS faster on the worst one** — that worst one being A0 finding 4, the caller pausing mid-phone-number, which Deepgram takes 7,959 ms to finish and Google takes 1,200 ms. **Staging is flipped back to `hipaa` in Terraform and NOT APPLIED** (`911e627`): plan is 14 add / 1 change / 4 destroy, and 4 of 4 destroys are Secret Manager, which is a hard stop. **That apply is the migration's objective proof** — staging ran `standard` for exactly one reason and the reason is gone. **Four traps found by running the API rather than reading about it**, all in Standing facts, and one of them was a whole-call bug: **Google sends the final AFTER the end-of-speech event**, the opposite of Deepgram, so the first implementation delivered every turn ONE TURN LATE and only the C5b harness driving the shipping module could have caught it. Also: it endpoints on RECEIVED SILENCE not idle time; a stream dies at **5 minutes of wall clock** against 30-minute calls; and **there is no API for the data-logging tier at all**, so the owner chose CMEK as the assertable control. Root suite **108 files / 2118 tests**; `sim:cutoff` green; `npm run eval` **36/37 hard, inside A0's noise band**. **Deepgram is now a credential-boundary violation in a PHI project** and the gate correctly fails against `vetra-us-prod` today. · Previously: **LANE A COMPLETE, plus the four quota-independent compliance items (O29, O28, dashboard RLS, automatic logoff) — all on `feat/gcp-lane-a`, nothing pushed.** Root suite **101 files / 1974 tests green**. B0a partially applied. **UNBLOCKED 2026-08-21: the six projects collapse to FOUR billed** — prod stays split US/UK, staging and logging merged, `vetra-uk-staging` + `vetra-logging` left dormant and unbilled as the restore path. Lane B provisioning can start; read "SIX IS THE TARGET. FOUR IS WHAT IS BILLED" and its compensating-control table FIRST. **The US stack still cannot hear — `DEPLOYMENT_MODE=hipaa` has no STT (see UNASSIGNED WORK); Deepgram was asked for a BAA 2026-08-21, awaiting reply.** · **Owner remaining:** resubmit the quota request as `admin@vetratd.com` (the first was filed from an identity with no role on the billing account), repo-private decision, then Block 1 · **Owner remaining:** repo-private decision, then Block 1 (Twilio, clinic email, athenahealth, Deepgram, 2× counsel)
+
+> **THIS FILE HAS TWO HALVES. ATTEMPT 1 IS DEAD.** Everything before the `# ATTEMPT 2` heading describes a GCP estate Google suspended on 2026-08-25 and is HISTORY — true about the CODE, never about a resource. **Current state starts at `# ATTEMPT 2 — opened 2026-08-28`.** Jump there first.
+
+> **⚠ `main` IS PRODUCTION.** Railway autodeploys from it. Never merge or push to `main`; push nothing while the repo is public. See Non-negotiable contracts.
+
+---
+
+## How to use this file
+
+1. **Every session opens by reading this file in full.** It is the only thing that carries state
+   across a context reset.
+2. **Every session closes by updating it** — statuses, evidence, the decision log, the session log.
+3. **Status vocabulary:** `todo` · `wip` · `done` · `blocked` · `n/a`
+4. **The Evidence column is not optional.** `done` with an empty Evidence cell means `todo`.
+   Evidence is a command output, a commit SHA, a recorded number, or a screenshot filename —
+   never a claim.
+5. **Never mark a gate `done` from reasoning.** Run the command, read the output, paste the fact.
+
+---
+
+## NEXT SESSION — start here
+
+> **✅ THE SUSPENSION IS LIFTED — re-probed 2026-08-23, session 11b.** Every API that
+> returned `CONSUMER_SUSPENDED` now answers:
+>
+> | Probe | Result |
+> |---|---|
+> | `projects describe` | `lifecycleState: ACTIVE`, org `564252011558` |
+> | **Cloud Run** | `voice-us-staging` **`Ready: True`**, revision `voice-us-staging-00017-jhw` |
+> | **Cloud SQL** | `vetra-us-staging` **RUNNABLE**, POSTGRES_16 |
+> | **Secret Manager** | 4 secrets list |
+> | **Logging** | reads |
+> | Billing | `True`, `01C71E-7C0893-377AE9` |
+> | `GET /` from the public internet | **200** |
+>
+> **The covered configuration survived the suspension**, which was not guaranteed. Boot log,
+> from a cold start at `2026-08-23T14:39:41` that the probe's own `GET /` triggered:
+>
+> ```
+> [boot] notice stt_provider: Speech-to-Text provider: Google Speech-to-Text v2 (DEPLOYMENT_MODE=hipaa) in us-central1
+> [boot] Speech-to-Text CMEK verified: .../cryptoKeys/vetra-speech-us-staging
+> db_backend
+> Server running on port 3000
+> ```
+>
+> Image `voice:7cea364`, `DEPLOYMENT_MODE=hipaa`, `VERTEX_LOCATION=us`.
+>
+> **WHAT THIS DOES NOT SAY, and the distinction is the whole of this file's history:**
+>
+>   1. **Nobody told us the appeal succeeded.** This is INFERRED from the APIs answering.
+>      Google's reply went to the mailbox nobody reads. Whether it was granted, and whether
+>      they ever said what was detected, is **still unknown** — so the heuristic that fired
+>      can fire again and nothing has been learned that would stop it.
+>   2. **`GET /` 200 says the process is up. It does not say a caller can reach it.** Twilio
+>      number routing and signature validation are the two layers that sat between "deployed
+>      and serving" and "answers the phone" last time, and neither is re-verified here.
+>   3. **An untargeted `terraform plan` is unblocked by this and still blocked by ADC.** The
+>      reauth window closed between session 11 and 11b; `gcloud auth login` was refreshed,
+>      `application-default login` was not, and Terraform reads only the latter. Plan output
+>      is therefore still unknown.
+>
+> Previously, and kept because the cause was never confirmed: **`vetra-us-staging-c3a3bd`
+> WAS SUSPENDED BY GOOGLE (found 2026-08-22, session 10).** Every resource-serving API
+> returned `CONSUMER_SUSPENDED`: Cloud Run, Cloud SQL, Secret Manager, Logging. The project
+> was `lifecycleState: ACTIVE`, billing `True`, the billing account `open: True`, and
+> `serviceusage` still answered — a per-project suspension, not billing and not the org.
+> `vetra-shared`, `vetra-us-prod` and `vetra-uk-prod` stayed healthy throughout.
+>
+> **The receptionist that answered a real call on 2026-08-22 was down for a day**, and so was
+> its database. Nothing in session 10 touched that project.
+>
+> **An untargeted `terraform plan` COULD NOT RUN while it held** — it reads every resource in
+> state, including that project's. `-target` works and is how B3 was planned and applied.
+>
+> **THE REASON, from the appeal form itself:** an **Acceptable Use Policy / Terms of Service**
+> suspension — *"repeatedly violating"*, *"Committing repeated terms of service violations"*,
+> and *"Your project may be deleted unless you take action and submit an appeal."* **NOT
+> billing, not quota, not the free trial** — an earlier note in this file guessed an
+> unreachable billing contact might be the cause and that guess was wrong. The notice does not
+> name the specific violation; that is the generic AUP template, and the detail is in the email
+> nobody could read. **The appeal should therefore ASK what was detected.**
+>
+> **"Repeatedly" is the load-bearing word:** Google says prior notices were sent, and none were
+> ever seen. The mailbox gap is no longer a hypothesis — it already cost the warnings that
+> would have prevented this.
+>
+> **NO EVIDENCE OF COMPROMISE**, checked rather than assumed. The suspended project's audit
+> logs are exported by the org sinks into buckets in `vetra-shared`, which is healthy, so they
+> are still readable:
+>
+> ```
+> gcloud logging read 'resource.labels.project_id="vetra-us-staging-c3a3bd" AND logName:"cloudaudit.googleapis.com"' \
+>   --project=vetra-shared-c3a3bd --bucket=vetra-audit-us --location=us-central1 --view=_AllLogs
+> ```
+>
+> Distinct principals that ever acted on it: `admin@vetratd.com` (147), the project's own
+> runtime SA (45), Cloud Run's serverless robot (10), Google's `service-agent-manager` (2), and
+> system events. **`serviceAccountKeys.create`: ZERO** — the keyless design held. No unknown
+> principal, no exportable credential, and every entry is a Cloud Run deploy, a Cloud SQL
+> connect or a migration job. **That is the appeal's evidence.**
+>
+> Best guess at the trigger, unconfirmed and only Google's email can settle it: a one-day-old
+> free-trial project running a PUBLIC Cloud Run endpoint doing TELEPHONY trips automated abuse
+> heuristics readily. **The data is synthetic staging data — deletion would cost the staging
+> environment, not PHI. Do NOT rebuild under a new project id as a workaround; that reads as
+> evasion and escalates.**
+>
+> **ESSENTIAL CONTACTS: FIXED 2026-08-22.** `nithin.dodla@vetratd.com`, org node,
+> ALL categories, `validationState: VALID`. Codified in `infra/terraform/essential-contacts.tf`
+> with an import block; the adoption plans as `1 to import, 0 to add, 0 to change, 0 to
+> destroy`, and `adopt_existing_contacts` must be blanked once applied.
+>
+> **AND A TRAP FOUND BY HITTING IT: only `@vetratd.com` addresses are permitted.**
+> `constraints/essentialcontacts.managed.allowedContactDomains` is one of Google's
+> secure-by-default MANAGED constraints, applied to this org at creation with
+> `allowedDomains = ['@vetratd.com']` — **it is not ours and is in no Terraform we wrote.** A
+> personal address is refused with `Operation denied by org policy`, which reads as a Console
+> bug. Deliberately NOT relaxed: org security and legal notices for an organization handling
+> PHI should not standingly land in a personal mailbox, and a company address is the one that
+> survives somebody leaving. ~~**There are nine other `.managed.` constraints on this org that
+> nobody has read**~~ — **WRONG, corrected 2026-08-22: there are TEN policies in total, THREE
+> are ours, and only THREE carry `.managed.`.** All ten are now read; see Standing facts.
+> The expectation was right even though the count was not — one of the unread ones turned out
+> to be the root cause of a trap this file had recorded three times as a Cloud Build quirk.
+>
+> **Still owner work:**
+>   1. ~~**Submit the appeal**~~ — **the project is back, so this is closed in effect.** What is
+>      NOT closed: **find out what Google actually detected.** The reply went to an unreadable
+>      mailbox, so the trigger is still a guess, and a suspension whose cause is unknown is one
+>      that can recur on the same schedule. Ask, on the same appeal thread, with a readable
+>      address in the *"Additional email for notifications"* field.
+>   2. **Add the cofounder** as a second Essential Contact. One contact is a single point of
+>      failure for the one class of message that carries a deadline.
+>   3. **`admin@vetratd.com` still has no mailbox.** It remains the account Google associates
+>      with the org, so add it as an alias on the licensed M365 mailbox. **Also verify
+>      `nithin.dodla@vetratd.com` actually DELIVERS** — `validationState: VALID` means Google
+>      accepted the address, not that mail arrives.
+>   4. **Payments-profile contacts are separate** from Essential Contacts and still unset.
+
+
+### ▶ NEXT SESSION STARTS HERE — U1 IS DONE. THE NEXT MOVE IS THE OWNER'S: U2, THEN U3.
+
+**Read the whole of "Standing facts" before touching anything.** It is long and
+it is the point: ~70 traps found by doing rather than reading, several of which
+are corrections of earlier confident conclusions in this same file.
+
+**THE OWNER'S STATED GOAL: "I just want to get the migration done."** Findings
+that are real but not on the U-path get RECORDED AND PARKED.
+
+---
+
+**U1 DONE 2026-08-25 (`d54002e`), U1b DONE (`329c45d`).** The remaining plan is
+**`41 to add, 3 to change, 0 to destroy`** — 46 minus the five secrets now
+applied. **Re-plan before applying**; a saved plan goes stale the moment state
+moves. The 3 changes are all in-place on `us-staging`: the two documented
+`min_instance_count` phantoms, `DEEPGRAM_REGION=us` added to the voice service
+(a no-op value that still spins a revision), and the SQL backup location
+moving `us` -> `us-central1`.
+
+**WHAT HAS BEEN APPLIED, all free: three widened org policies and five empty
+secrets. Nothing that costs money.**
+
+**⚠ THE FIRST DRAFT OF THIS EDIT PLANNED A DESTROY OF THE STAGING DATABASE, and
+the instruction to make it came from this file.** `enable_uk_resources = true`
+turns on `uk-staging` as well as `uk-prod`. `uk-staging` is merged into the
+`us-staging` PROJECT, `network.tf` composes the VPC's `description` from that
+project's ACTIVE stacks, and `description` FORCES REPLACEMENT on
+`google_compute_network`. The cascade:
+
+```
+google_compute_network.this["us-staging"]              must be replaced
+  -> google_compute_global_address.private_services     must be replaced
+  -> google_service_networking_connection.private_...   must be replaced
+  -> google_sql_database_instance.this["us-staging"]    MUST BE REPLACED
+```
+
+`77 to add, 3 to change, 5 to destroy`. Staging's `deletion_protection` is keyed
+to `has_prod` and is therefore **false** — correct for staging, and it means
+nothing would have stopped it. **BOTH bools are now lists**, and
+`enable_uk_resources = ["uk-prod"]` touches the us-staging project not at all.
+
+**▶ THE ONLY THING BETWEEN HERE AND A WORKING DEMO: REPOINT THE NUMBER.**
+
+`+441372656055` (cofounder's Twilio account, verified live) still has its voice
+webhook on **Railway**. Point it at:
+
+```
+https://voice-uk-prod-693741698596.europe-west2.run.app/twilio/voice
+```
+
+**NOT the `…-nw.a.run.app` form.** Both hostnames resolve; the signature is an
+HMAC over the exact URL, so the wrong one 403s every call including genuine
+ones. `terraform output cloud_run_services` labels them.
+
+**VERIFIED WITHOUT A HANDSET, each with a negative control:** signed webhook
+200 / tampered 403 / unsigned 403; Deepgram key accepted at the EU endpoint
+(400 on junk body) and REFUSED for a bogus key (401); ElevenLabs 200 with the
+tenant's `voice_id` resolving to "Alice — Clear, Engaging Educator";
+`gemini-3.6-flash` at `locations/eu` in the UK project 200 with a bogus model
+404. Every field of the tenant round-trips, JSONB included, proven by running
+the real payload through local PG16.
+
+**STILL UNPROVEN AND ONLY A CALL CAN CLOSE IT: no audio has ever crossed this
+stack.** No media-stream WebSocket has been opened, nothing transcribed,
+nothing synthesised. This file's own record is seven defects between "deployed"
+and "answers the phone". **The owner should ring it once before the cofounder
+does.**
+
+**THREE DIFFERENCES FROM RAILWAY, all by decision rather than defect:** no
+appointment history (config-only import, so `check_appointment` correctly finds
+nothing while booking works), no SMS (`TWILIO_SMS_FROM` unset, number is
+voice-only), and no dashboard user for the tenant (deliberate — a synthetic
+`auth_uid` would strand the cofounder's real signup later, and no
+join-an-existing-business flow exists).
+
+---
+
+**WHAT THE OWNER HAS TO DO, IN THIS ORDER. The order is not negotiable.**
+
+  1. ~~**U2 — five secret VALUES**~~ — **HALF DONE 2026-08-25. The five secrets
+     EXIST; four are still empty and each empty one blocks the apply.**
+
+     This file said "Deepgram + ElevenLabs; both secrets are already declared,
+     only the values are missing". **True of the us-staging project and wrong
+     for a new one** — `uk-prod` had no runtime secret at all, because
+     `smtp-password`, `twilio-account-sid` and `twilio-auth-token` are
+     `lanes = ["us","uk"]` and get created per project.
+
+     **DONE:** the containers (`terraform apply -target=
+     'google_secret_manager_secret.runtime'`, 5 added, all replicated to
+     `europe-west2`), and **`smtp-password`, copied from `us-staging` and
+     verified by byte-length rather than by printing it.**
+
+     **STILL EMPTY — the apply fails at `google_cloud_run_v2_service.this
+     ["uk-prod/voice"]` until all four have a version**, because Cloud Run
+     refuses a revision referencing a secret with none:
+
+     ```
+     export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
+     printf '%s' 'VALUE' | gcloud secrets versions add SECRET \
+       --project=vetra-uk-prod-c3a3bd --data-file=-
+     ```
+     `deepgram-api-key` · `elevenlabs-api-key` · `twilio-account-sid` ·
+     `twilio-auth-token`
+
+     **THE TWILIO PAIR IS THE COFOUNDER'S UK ACCOUNT** (owner, 2026-08-25), so
+     staging's were deliberately NOT copied. The pair must belong to whichever
+     account owns the UK number: `var.twilio_sms_from`'s comment records why for
+     outbound, and the same holds for the signature the webhook validates. **Two
+     questions for the cofounder are on the critical path** — does that account
+     already hold a UK number, and is it personal or company? A shared personal
+     login is the audit-trail problem this file already records for
+     `admin@vetratd.com`, and it is cheaper to fix before it is load-bearing.
+
+     **The chicken-and-egg is now recorded rather than a trap:** the secrets do
+     not exist until Terraform makes them, so a value can never be pushed before
+     the first apply. Target the secrets, fill them, then apply the rest.
+
+  2. **U3 — `terraform apply`.** Expect **two** first-apply failures, both
+     documented and both fixed by re-applying:
+     `google_project_service_identity.sql` racing its IAM grant, and the
+     `allUsers` invoker on `uk-prod/voice` racing the per-project Domain
+     Restricted Sharing exception created in the same apply (~15 min to reach
+     IAM, and nothing in the graph orders them).
+
+     **It also spins a new `voice-us-staging` revision** — `DEEPGRAM_REGION=us`
+     is added to it. Behaviourally a no-op (that was already the default, and
+     us-staging runs `hipaa`, which uses Google STT), but it is a redeploy of
+     the live receptionist, so do not do it mid-test-call.
+
+  3. **U5 — the Twilio webhook, and READ THE URL FROM THE RIGHT OUTPUT.**
+     `terraform output cloud_run_services` now carries **`twilio_webhook_base`**
+     alongside `uri`. **They are different hostnames and both resolve.** Paste
+     `uri` and every call 403s including the genuine ones. Voice webhook is
+     `<twilio_webhook_base>/twilio/voice`.
+
+**WHAT CLAUDE CAN DO UNATTENDED ONCE U3 HAS LANDED:** U4 is one command —
+`gcloud run jobs execute vetra-migrate-uk-prod --region=europe-west2
+--project=vetra-uk-prod-c3a3bd` — and `--init-if-empty` is already the job's
+default argument, so an empty instance gets `schema.sql` as its baseline. U6's
+instruments (`c7-restore-parity`, `c8-rls-proof`, `c4-latency-report`) are in
+image `voice:61294bd`, which is what this plan deploys.
+
+**ONE SETTING IN THIS PLAN IS UNVERIFIED ANYWHERE IN THE ESTATE:**
+`point_in_time_recovery_enabled = true` on a **`db-g1-small`**. It follows from
+`has_prod`, and no existing instance demonstrates the combination — staging is
+`db-g1-small` with PITR off, and there has never been a prod instance. Expected
+to work; if the API refuses it, the choices are dropping PITR for the pilot or
+raising `cloud_sql_tier.prod`. **Read the apply output rather than assuming.**
+
+**COST, once applied:** ~$80–90/month. Cloud SQL `db-g1-small` in europe-west2
+~$30, the **warm** `voice-uk-prod` (C-11: `min_instances = 1`, `cpu_idle =
+false`) ~$45–55, logging ~$5, KMS and five secrets under $1. The dashboard API
+scales to zero. **`us-prod` remains unbuilt and unbilled.**
+
+---
+
+**⚠ THE AGENDA CHANGED ON 2026-08-25 AND THIS BLOCK IS THE SECOND VERSION.**
+It said "build production", meaning US production. **Do not.** A UK clinic and
+UK business came onto the radar the same day, and building US production starts
+a ~$98.62/month meter on the lane that may not be first. **Read Lane U before
+deciding anything**, and read the Twilio pricing standing fact that sits behind
+it: HIPAA on Twilio is **$2,000/month**, which is a US-only cost that GDPR does
+not impose.
+
+**THE DECISION IS MADE: UK. GO TO LANE U AND START AT U1.** The demand signal is
+UK — someone has demo'd the product and given advice — against a US list that is
+real and static. **The owner chose to build ahead of a signed customer,
+knowingly, and the NHS-vs-private question will not be answered first.** Neither
+is re-litigated; both are recorded at the top of Lane U with the reasoning.
+
+**U1 IS NOT THE TFVARS EDIT IT LOOKS LIKE.** `enable_prod_databases` is one
+global bool, so flipping it builds the US prod database too — ~$197/month for
+one wanted instance — and building UK *staging* instead does not dodge it,
+because `stack_projects` merges `uk-staging` into the `us-staging` PROJECT whose
+instance is in **us-central1**. Make the flag granular first.
+
+**IF US STILL WINS, the old agenda applies:** both prod projects are still empty —
+zero Cloud Run, zero Cloud SQL, re-verified 2026-08-25. **D3 says
+`pg_dump`/`pg_restore` and presumes a target that has never existed**, so
+nothing from D3 onward can start. Everything else in Lane D is short and mostly
+the owner's own actions.
+
+Expect two things, both from this file's own track record: it starts a
+**~$98.62/month** meter, and **every first start in this project has needed
+debugging** — staging took seven defects between "deployed" and "answers the
+phone". Budget one session for the build and one for what it surfaces. Doing it
+now rather than on cutover day is the entire argument for sequencing it early.
+
+**Settle the US-ONLY question in the same session.** Lane C says "per region"
+four times and `enable_uk_resources = false`, so C2/C3/C4/D5 cannot complete as
+written. The recommendation at Lane D stands: finish US-only, leave
+`vetra-uk-prod` dormant, make UK its own customer-triggered lane. **That is not
+reopening the prod US/UK split** — only WHEN the UK half gets built.
+
+---
+
+**LANE C IS 6 OF 10 — C2, C4, C5b, C6, C7 and C8 are DONE.**
+
+  - **C7 done 2026-08-25: 13/13, restore wall clock 341 s**, instance deleted
+    and deletion verified. That is the §164.308(a)(7) evidence, and the recovery
+    time nobody had measured.
+  - **C8 done: both layers proven where the PHI is** — 58 passed, 0 failed
+    against Cloud SQL. One residual, recorded: the routing-table GRANT question
+    is answered on local PG16 and NOT on Cloud SQL.
+  - **C4 done off two real calls:** `voice_to_voice_ms` p50 **3,140** against
+    A0's 2,980 (+5%) and against the covered lane's own 4,084 (**−23%**). Zero
+    turns with no reply out of 15, against A0's 12 of 84.
+  - **C2 done for US.** The reschedule succeeded against real UUIDs;
+    `text_channel_tool_call` fired live and `outbound_sanitized` caught it
+    before the caller heard anything.
+
+**What is left, and neither is a code problem:** **C3** needs ≥5 concurrent
+callers and the allowlist holds 2 — decide HOW to test it. **C5** needs Twilio
+funded. **C1** needs an owner spend decision, ~48 min, and touches nothing else.
+
+---
+
+**⚠ THE DATE THAT SUSPENDS EVERYTHING: 2026-11-18.**
+
+The free trial ends and **projects are SUSPENDED unless full billing is active**.
+`vetra-us-staging` has already been suspended once and it took the receptionist
+down. **Activating full billing PRESERVES the remaining credit** — Google's own
+wording — so there is no reason to wait.
+
+The credit itself runs out sooner: ~$180/mo steady state against ~$180 left
+after the migration is about **one month**, so expect real money from roughly
+mid-to-late October.
+
+**Both alarms now reach a human**, fixed 2026-08-25: `nithin.dodla@vetratd.com`
+is a Monitoring notification channel on both budgets. **It is PROVEN, not
+configured** — Google's suspension-lifted notice arrived there. Neither IAM
+route worked and both refusals were controls working: that address is not a
+Google account, and a consumer Gmail is refused by Domain Restricted Sharing.
+
+**Loose end, low priority:** a third budget, `$200 Monthly Budget Alert`, is
+unmanaged, duplicates the $250 one, and still notifies only the unread mailbox.
+Adopt it into Terraform or delete it.
+
+---
+
+**⚠ STILL PARKED, DO NOT PICK UP UNASKED:** O25 (`record_sms_consent` fires
+without the disclosure — it did so again on a real call 2026-08-25, the second
+time), the nine-times spelling livelock, the not-found/not-yours identity
+conflation, reschedule's missing confirm-before-write, and the routing-table
+grant. **O25's real deadline is toll-free verification, not D7.**
+
+**And one intermittent recorded rather than fixed:** `tests/session.test.js`'s
+turn-14 block fails under heavy CPU load, with a VARYING sub-test. It implies
+two TTS turns from one `onTurnEnd`, which is either a fragile assertion or a
+duplicate-turn product defect — reindexing the test would hide the second
+possibility permanently. See its standing fact before touching it.
+
+---
+
+**THE OWNER'S QUEUE, in leverage order:**
+
+1. **Activate full billing** before November. Preserves credit, removes the
+   suspension cliff.
+2. **Fund Twilio ($0.00).** Unblocks C5, toll-free verification, and O25's real
+   deadline in one action.
+3. **Twilio's BAA — O5, open since 2026-08-21.** The sub-processor register
+   reframed this: Twilio is the ONE non-Google party that touches PHI, so it is
+   a hard gate on any real patient call rather than a vendor-queue item. Longest
+   lead time in the plan.
+4. **Decide when production gets built** — gates D3 onward.
+5. C1 spend · the repo-private decision · O31 · whether any PRODUCTION tenant has
+   `sms_followup_enabled` on.
+
+---
+
+### Session 11 left this — read before picking anything up
+
+**Everything below was done with staging suspended, so NONE of it has run on
+GCP.** The suites are the only evidence there is, and they are stated as such.
+
+**O25 — the caller-SMS consent gate. DONE, and the design survived contact.**
+Migration 037 `sms_consents`, one row per ANSWER (a "no" supersedes a "yes" by
+being newer, so revocation is an INSERT and there is no UPDATE path). The gate
+is `sendCallerSms` and it fails closed in every direction. The tool is
+`record_sms_consent` in a new core pack.
+
+**The trap in the design, which a prompt alone could not have fixed:** the
+confirmation text is sent the instant a booking succeeds, but the natural way a
+receptionist talks is *"you're all set for Tuesday — would you like a text
+confirmation?"*, which puts the consent AFTER the send. With a gate and nothing
+else, that text is refused for every caller forever and the feature is dead
+while looking configured. So a refused text is **held in process for five
+minutes and released when consent lands**. The prompt also tells the model to
+ask first; the hold is what makes it work when the model does not.
+
+**O32 — DONE, and the finding is that the ledger was describing a gap that had
+already closed.** `services/db.js` still said per-turn writes sat outside
+`withTenant` BY DESIGN and that the fix was owed to B2. All of it had stopped
+being true: the live-call scoping fix wrapped every per-turn write in
+`scopedWrite` because FORCE RLS REFUSES an unscoped write, and the audit row
+came along for free. The cost O32 priced at "three statements on a 2,611 ms
+path" is not on that path at all — those writes are fire-and-forget. **A sweep
+of every call site of every PHI-classified function found exactly one still
+unscoped: the degraded voicemail file.** Extracted to `lib/degradedVoicemail.js`
+so a test can run it as `vetra_app`.
+
+**O31 — RECORDED, NOT IMPLEMENTED, and it is the owner's decision.** See the
+row in the compliance table. Short version: there is no token-lifetime knob.
+
+**D7 — the Supabase client is gone from the repo.** Both scripts ported, the
+package removed from both `package.json` files, and
+`tests/supabaseGone.test.js` asserts both facts so it stays gone.
+
+**Compliance drafts, in `docs/compliance/`:** the breach runbook (three clocks,
+not the one that was written down), access authorisation and termination, and
+workforce training. All three marked DRAFT, all three list what counsel must
+confirm, and all three end with "this has never been exercised".
+
+**WHAT TO PICK UP:**
+
+1. ~~**The suspension.**~~ **LIFTED 2026-08-23** — see the box at the top of this
+   file, including the two things its lifting does NOT tell you.
+2. **Nothing in O25 has been exercised on a real call, and there are now THREE
+   reasons a test run today would fail — each of them below the gate, each of
+   them looking exactly like "the gate is broken".** The contract in this file
+   says a green suite says the parts are right, not that the door opens.
+
+   **(a) Staging is not running the code.** The live revision is `voice:7cea364`
+   from 2026-08-22 14:01; none of session 11's commits is an ancestor of it.
+   There is no consent tool on that service to call.
+
+   **(b) `sms_consents` does not exist on the staging database.** Migration 037
+   has only ever run against the local dev PG16. The migrate job runs the
+   migrations that are IN THE IMAGE, so this is fixed by the same rebuild — but
+   **the order is load-bearing**: run the migration job BEFORE the new image
+   serves. Deploy first and `exportCallerData` returns null while
+   `eraseCallerData` throws, because both now read that table — **the two DSR
+   endpoints, so this is the first change where getting the order wrong breaks a
+   statutory right rather than a feature.**
+
+   **(c) `TWILIO_SMS_FROM` is unset on staging**, so `sendSms` drops every
+   message with `twilio_sms_from_missing` one layer below the gate.
+
+   **(a) and the images half of (b) are DONE, 2026-08-23:** `voice:d02cdc8` and
+   `dashboard:d02cdc8` are built and verified by inspecting the images, and both
+   tags are pinned in tfvars. What is left needs the owner, and the order is not
+   negotiable because the migrate job and the voice service move together:
+
+   ~~1-3~~ **DONE 2026-08-23, owner directing**, in exactly that order:
+   `-target` the migrate job → execute it (**four** migrations applied, not one —
+   see Standing facts) → full apply. `1 imported, 3 added, 1 changed, 0
+   destroyed`. Both services Ready.
+
+   1. ~~Set `TWILIO_SMS_FROM` (Secret Manager)~~ — **WRITTEN 2026-08-23, not a
+      Secret Manager change and never was.** `var.twilio_sms_from` is wired in
+      `cloud-run.tf` and set to `+18176326969` for `us-staging`. One apply away.
+   2. **The channel CANNOT be proved yet** and this is the honest blocker:
+      Twilio shows that number as `Messaging disabled — Complete A2P
+      registration`, and the account balance is $0.00. **Do not register the
+      local number to get past this** — it is a long code, so that means 10DLC,
+      which O23a deferred for reasons that still hold. Buy a toll-free number
+      into `vetratd_staging` and file toll-free verification.
+   3. **What CAN be proved today, and it is most of O25.** The gate's job ends
+      at "call `sendSms`"; delivery is A2P's. So after the apply: call staging
+      from `+14699338887`, say yes, then check three places —
+      `sms_consents` has a row with the number, call id, script and version;
+      the logs show the gate OPENED rather than `sms_followup_blocked_no_consent`;
+      and Twilio's message log shows an **attempted** message. A 30034 there is
+      **the gate working**. No attempt at all is the gate failing.
+   4. Once toll-free verification lands, repeat and confirm a text actually
+      arrives.
+3. **Confirm no PRODUCTION tenant has `sms_followup_enabled` set.** This branch
+   could not reach the production Supabase to check — **and note the reason is
+   that production still runs on Supabase, NOT that staging was suspended; the
+   two are unrelated and an earlier draft of this line conflated them.**
+   If one has it on, their caller texts stop until somebody says yes on a call.
+   That is the correct behaviour and it is still a behaviour change the owner
+   should know about before it happens.
+
+---
+
+**Session A is DONE and PROVEN BY A REAL CALL (2026-08-22).** `voice-us-staging`
+runs `DEPLOYMENT_MODE=hipaa` and answers the phone: Google STT v2, Google TTS,
+Vertex, no Deepgram / ElevenLabs / Gemini-API credential anywhere in the
+project. A caller booked and rescheduled an appointment on it.
+
+**THE WHOLE DASHBOARD PATH IS NOW WRITTEN, and three of its four pieces were
+missing rather than broken.** Written 2026-08-22, none of it applied:
+
+| piece | state |
+|---|---|
+| backend image | **BUILT.** In Artifact Registry, four guards passing |
+| backend can reach the database | **FIXED.** It never could — see Standing facts |
+| backend Cloud Run service | written, plans as 1 to add |
+| SPA build + publish | written, builds and verifies; publish needs one IAM grant |
+
+**PLAN RUN 2026-08-23, untargeted, full refresh, no `-refresh=false`:**
+`1 to import, 4 to add, 1 to change, 0 to destroy`, no errors.
+
+| Action | Resource |
+|---|---|
+| add | `google_cloud_run_v2_service.dashboard["us-staging/dashboard-api"]` |
+| add | `google_cloud_run_v2_service_iam_member.dashboard_public_invoker` (`allUsers`) |
+| add | `google_project_service.this["shared/essentialcontacts.googleapis.com"]` |
+| add | `google_storage_bucket_iam_member.spa_publisher` (`vetra-deployer`, bucket-scoped `objectAdmin`) |
+| import | `google_essential_contacts_contact.org["nithin.dodla@vetratd.com"]` |
+| change | `voice-us-staging` — **the documented `min_instance_count = 0` phantom only** |
+
+**Zero destroys**, which is the difference from the session-9 plan whose four
+destroys were all Secret Manager. The `allUsers` grant will succeed: the
+per-project DRS exception on `vetra-us-staging` is `allowAll: true` (see
+Standing facts). And `dashboard:latest` currently resolves to the newest
+dashboard build, which **does** contain the Cloud SQL connector — verified by
+inspecting the image, not by reading its tag, because the tag said otherwise
+and the tag was wrong.
+
+**WHAT REMAINS IS ONE APPLY AND A REBUILD, in this order:**
+
+1. Apply. Three things: the dashboard Cloud Run service, the bucket-scoped
+   `objectAdmin` for `vetra-deployer`, and the Essential Contacts adoption.
+2. `gcloud builds submit AI-phone-dashboard/frontend --config=cloudbuild.frontend.yaml`
+   with `_API_URL` and `_FIREBASE_API_KEY` — the publish step is what the IAM
+   grant unblocks.
+3. Set `dashboard_image_tag` in tfvars to the built SHA. It defaults to `latest`,
+   which is the trap that cost three failed deploys.
+
+**~~NONE OF IT CAN BE VERIFIED UNTIL THE SUSPENSION CLEARS.~~ THE SUSPENSION
+LIFTED 2026-08-23, so this is unblocked** — staging holds the only database
+(production is healthy and has none, because C-12 defers it to D3) and staging
+answers again. **What still blocks a plan is ADC, not the suspension:** the org's
+reauth window closed, and a refreshed `gcloud auth login` does NOT refresh
+`application-default login`, which is the only one Terraform reads. Historical
+note kept because it explains the plans recorded above: while the project was
+suspended even a TARGETED plan failed on refresh, because the service depends on
+a secret in it, and `-refresh=false` is what produced those numbers — **so re-plan
+WITHOUT `-refresh=false` before applying any of it, since those plans were
+computed against state rather than reality.** **Expect the first real start to
+need debugging**; this file's history is unkind to unverified deploys.
+
+Previously: **B3 is the next session, and it is the last Lane B item that is not
+deliberately deferred.** What else remains: **B1 ②** (bcrypt import spike) is
+blocked on a real Supabase export, which is the owner's credentials; **B2
+production** is deferred by C-12; **B4 prod voice + dashboard** is deferred
+behind D3 and an unbuilt image; **B5** is built and switched off pending DNS.
+
+### What Session A leaves behind
+
+**One product defect, and it is Google's rather than ours:** STT accuracy on a
+caller's NAME. Across one live call Google returned *niton / nithan / Nathan*
+and never "Nithin". Deepgram scored 0.091 WER on the same case and captured the
+spelling correctly. **Keyterm boosting cannot fix this** — the phrase set
+carries the BUSINESS's terms, and a caller's name is unknowable in advance. A
+spelling-mode phrase set (the alphabet, boosted, while a spell-out is expected)
+is the obvious first idea and is untested.
+
+**C5's weight changed and the owner should know before spending on it.** It was
+filed as a blind listen about how the bot SOUNDS. Live measurement makes it the
+biggest single latency lever in the stack: `tts_ttfb_ms` p50 **92 ms → 1,408 ms**
+against A0, which is most of the +1,104 ms on `voice_to_voice_ms`. The
+`us-standard` question is no longer "is ElevenLabs prettier" but "is it worth
+~1.3 seconds a turn".
+
+**Do not re-litigate the vendor split.** Selection is by `effectiveTier`
+(deployment mode, tightened by tenant flag) and never by country. US production
+is `hipaa` for EVERY tenant on it, medical or not. A UK tenant flagged `hipaa`
+would get Google too; the ratchet only tightens. STT is *selected* by tier; TTS
+is not — ElevenLabs THROWS at construction in `hipaa` mode and the code falls
+back to Google TTS. Cartesia is an A/B candidate, not a wired provider.
+
+### Reading the database by hand
+
+Cloud SQL Studio in the console, as `postgres` with the password from Secret
+Manager. **It will show you EMPTY TABLES and that is not data loss** — FORCE
+row-level security binds `postgres` like everyone else. Scope first:
+
+```sql
+SELECT set_config('app.business_id', '<business uuid>', false);
+SELECT * FROM businesses;
+```
+
+`npm run stt:ab`, `scripts/db-inspect.js` and `scripts/seed-staging.js` all run
+inside the VPC through the migration job and are staging-guarded.
+
+### Owner items, in the order they matter
+
+1. **Railway's `TWILIO_VALIDATE_SIGNATURE`.** The broken `import * as twilio` is
+   on `main` and on `f285351` without the try/catch, so it would throw a 500 per
+   call. The live receptionist works, which points at validation being OFF —
+   meaning the production voice webhook accepts unsigned requests from anyone.
+   Neither outcome was created by this branch. **Do not change Railway from
+   here; it is frozen until D7.**
+2. **The repo-private decision.** 26 commits exist only on this disk because a
+   push would publish commit messages describing live vulnerabilities.
+3. **C5**, now worth ~1.3 s/turn rather than an aesthetic preference.
+4. **The free-trial clock: ~2026-11-18.** Projects suspend if full billing is
+   not active.
+5. ~~**Set `TWILIO_SMS_FROM` on staging**~~ — **DONE 2026-08-23**, and it was
+   never a Secret Manager change. What remains on the SMS channel is **fund the
+   Twilio account ($0.00 balance)** and **file toll-free verification** — buy a
+   toll-free number into `vetratd_staging` first, and do NOT A2P-register
+   `+18176326969`, which is a local long code and therefore 10DLC (see O23a).
+6. **Ask Google what was actually detected.** The project is back, so the
+   appeal worked; the reply went to an unreadable mailbox, so the trigger is
+   still a guess. A suspension whose cause nobody found can recur on the same
+   terms. Same appeal thread, readable address in the *"Additional email for
+   notifications"* field.
+7. **Is `sms_followup_enabled` set for ANY production tenant?** One query. It
+   defaults to false (migration 017) and this branch cannot reach the production
+   Supabase to check. **The blocker is that production is still Supabase — it
+   was never the GCP suspension, which is now lifted anyway.** If any tenant has it on, their
+   caller text follow-ups stop at deploy until a caller says yes on a call —
+   correct behaviour, and still a behaviour change you should know about before
+   it happens rather than after.
+8. **O31 is a decision now, not a task.** Identity Platform has no token-lifetime
+   setting, verified against the live API. Pick one of: a session store (a write
+   per request, which you declined once), Firebase session cookies
+   (`accounts:createSessionCookie` takes `validDuration`), or describing
+   §164.312(a)(2)(iii) as partly satisfied and moving on.
+
+### ~~Session B — B3~~ — **DONE 2026-08-22, PROVEN BY A REAL LOGIN.**
+
+Identity Platform is live in `vetra-shared` (US only, no tenants, applied with
+the owner present), `supabaseClient.js` is deleted, and a real account signed in
+to the dashboard in a browser, reloaded, loaded its tenant and signed out.
+
+**What is next, in order:**
+
+1. ~~**The suspension**~~ — **LIFTED 2026-08-23**, staging serves again. Read the
+   box at the top for the two things its lifting does not tell you: the trigger
+   was never communicated, and `GET /` 200 is not "a caller can reach it".
+2. **B1(2), the user import**, and it is now a SECURITY precondition rather than
+   a convenience — see the escalation note below.
+3. **D-lane**, once staging is back.
+
+**~~B1(2) IS NO LONGER JUST AN IMPORT~~ — THE ESCALATION IS CLOSED, 2026-08-22,
+AND IT DID NOT NEED THE IMPORT.**
+
+The hole was: migration 034 resolved a tenant BY EMAIL and signup is open, so an
+address with a `users` row and no Identity Platform account could be claimed by
+a stranger who inherited that clinic. **Migration 036 closed it by re-keying the
+lookup onto `auth_uid`**, which a brand-new account cannot collide with.
+
+**It ran BEFORE the import, which was a change of plan and a better one.** Every
+path that ever created a `users` row set `users.id` from the auth provider — the
+pre-031 raw insert and 031/032 alike, verified in git history — so `users.id` IS
+the Supabase auth uid for every older row and the backfill needed no export and
+no credentials. The hole therefore never opened, instead of being closed in a
+race with the import.
+
+**Demonstrated against the live service, not argued.** A seeded staff row for
+`victim@vetratd.com` with no account, then a real signup with that address:
+
+```
+attacker signed up   -> 200, localId = C9gJ1NHCITQYQXFoB2Qm1yy4x0t2
+attacker GET /api/me -> 200 {"needsOnboarding":true}
+CLOSED: the attacker resolved to NO tenant
+```
+
+Pinned as a database test so it cannot regress.
+
+**What the import still owes, and it is now only one thing:** the PASSWORD
+HASHES. `scripts/import-users.js` is written, tested and waiting. Without a real
+export the fallback is to create accounts with no password and send everyone a
+reset link — which for one clinic may simply be the better trade than moving
+production password hashes onto a workstation. **That is a product decision, no
+longer a security one.**
+
+### Environment — get these wrong and you lose an hour each
+
+- `terraform` is NOT on PATH:
+  `/c/Users/nithi/AppData/Local/Microsoft/WinGet/Links/terraform.exe`
+- gcloud needs `CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd`
+- **TERRAFORM DOES NOT READ `CLOUDSDK_CONFIG`.** It needs
+  `GOOGLE_APPLICATION_CREDENTIALS=$HOME/.gcloud-vetratd/application_default_credentials.json`
+  or it runs as a PERSONAL account and reports it as a missing IAM binding on
+  the right project. Also `TF_DISABLE_PLUGIN_TLS=1`.
+- ADC expires on the org's reauth window (`invalid_rapt`). The fix is
+  interactive and only the owner can do it.
+- **Deploying: build via `cloudbuild.yaml`, then BUMP `image_tag` in
+  `terraform.tfvars` to the new commit SHA.** A floating `latest` cost three
+  failed deploys in one session where the container ran previous code, and every
+  failure looked like a real bug because it was — in old code.
+- `terraform plan` is NOT clean. A Cloud Run service at `min_instance_count = 0`
+  shows a permanent phantom `scaling` diff. Read the diff; do not trust an empty
+  one.
+
+### Hard stops — these need the owner present
+
+`terraform apply` · creating or deleting any GCP project · any billing link,
+unlink or budget change · anything touching Secret Manager or real credentials ·
+**`git push`, on any branch — the repo is public.**
+
+---
+
+## Standing facts — verified, do not re-derive
+
+| Fact | Verified | Consequence |
+|---|---|---|
+| `dev` is a **strict ancestor** of `origin/main` (4 behind, 0 ahead) | 2026-08-20 | **A9's "merge `origin/main`" is a fast-forward, not a merge.** Branch all new work off `origin/main`, never off `dev`. |
+| The friend's website overhaul is already on `origin/main` (`a0e40c3`) | 2026-08-20 | Nothing to pull in separately. We merge it, we do not touch it. |
+| Migrations 002–026 contain **zero** Supabase-specific SQL | 2026-08-20 | Local PG16 is a valid stand-in for Cloud SQL. This is what unblocks Lane A. |
+| ~~`services/supabase.js`: zero PostgREST nested selects~~ — **WRONG, corrected 2026-08-21.** There are **two**, at `services/supabase.js:351` and `:399`, both `.select("*, business_capabilities(*)")` in `lookupBusinessByPhone`. The rest of the fact holds: all 6 `.filter()` hits are `Array.prototype.filter`, and the single `.rpc()` (`create_appointment_if_available`) is a real Postgres function defined in migration 022 and present in the local PG16 build | 2026-08-20, corrected 2026-08-21 | **A3 is harder than "plain-SQL vocabulary only" implied.** Both embeds are on the **latency-critical pickup path** and exist to fetch capability rows in ONE round trip, because they decide which tools exist before turn one. They become a `LEFT JOIN` + `json_agg` — and `selectBusinessByExactPhone` also **catches the embed failing** on an un-migrated database and retries the plain select, so calls stay answerable during a partial deploy. A naive JOIN silently loses that fallback. **Read A3's 4h–2d variance from the top of the range.** |
+| `lib/callState.js` is 114 lines, 3 external readers, **no per-turn read** | 2026-08-20 | Memorystore adds **zero** per-turn latency. Design constraint: read once at `start`, write at call boundaries, **never per-turn**. |
+| 12 test files mock the DB — 6 at the module boundary, 6 at the client boundary | 2026-08-20 | Zero-assertion-edit applies to the **first 6 only**. The other 6 are expected rewrites. |
+| No Dockerfile, no CI, no IaC anywhere in the repo | 2026-08-19 | A7 / B0 build these from nothing. |
+| **TWO founders, not one.** Cofounder works on the website | 2026-08-20 | **Corrects a standing wrong assumption.** IAM least-privilege between principals is now a real driver of the six-project split, not a theoretical one — a website role never needs reach into `vetra-us-prod`. Also triggers unique-user-ID, workforce-training-×2, and access authorisation/termination requirements that only exist once more than one person can be granted or revoked. |
+| **`VetraTD/ai-phone-assistant` is a PUBLIC GitHub repo**, and `origin/main` already publishes three specs naming unauthenticated PHI endpoints **with file:line** and stating `BREVO_API_KEY` + the Google OAuth client secret are compromised. Those four routes (`server.js:550,562,596,622`) are **still unauthenticated on `origin/main`**, and `phone-numbers/buy` **spends money** | 2026-08-20 | **DO NOT PUSH the ledger branch** — it is strictly worse than what is already public. Owner is consulting the cofounder on making the repo private. Until decided, treat every path in the ledger as adversary-visible. **A1.5 should run ahead of A1.1** (the hard orderings permit this) |
+| Local tooling: **gcloud SDK 529.0.0** ✓, **Docker 28.0.4** ✓, **Terraform NOT installed**, no local `psql` | 2026-08-20 | Terraform to be installed for B0a. Docker covers A2's PG16 more cleanly than a local install. |
+| **The owner's personal project `physicianmessagingapp` is unreachable from the VetraTD identity** — verified 2026-08-20: `gcloud projects describe` as `admin@vetratd.com` returns **permission denied**; the VetraTD project list contains only `ultra-glyph-506120-v5`; and `physicianmessagingapp` has **no parent organization** (empty `parent.type`/`parent.id`) while the six projects live under `564252011558` | 2026-08-20 | Three independent protections: the API denies it, the two live on unconnected branches of the resource tree, and **Terraform only manages resources named in its config/state** — `terraform destroy` included. ~~**Caveat:** protections 1–2 hold only while running as the VetraTD identity, so `CLOUDSDK_CONFIG=~/.gcloud-vetratd` must be baked into how Terraform is invoked~~ — **CORRECTED 2026-08-21. `CLOUDSDK_CONFIG` DOES NOT STEER TERRAFORM AT ALL.** It relocates *gcloud's* config directory; the Google provider is Go and resolves ADC through the Go auth library, which reads `%APPDATA%\gcloudpplication_default_credentials.json` and ignores `CLOUDSDK_CONFIG` (that is a Python-library behaviour). The default ADC on this workstation is the **personal** account, whose own quota project is `physicianmessagingapp`. So **protections 1 and 2 were never in force during any Terraform run** — only protection 3 was, and it is the one that actually mattered: Terraform manages what is named in its config and state, and nothing here names that project. Nothing was at risk; the stated mechanism was not the one doing the work. **The real requirement is `GOOGLE_APPLICATION_CREDENTIALS=~/.gcloud-vetratd/application_default_credentials.json`**, which the Go library does honour and takes precedence over the well-known path. |
+| **Norton does TLS interception on this workstation.** `gcloud` needs `custom_ca_certs_file = C:\Users\nithi\gcloud-cacerts.pem` (94 certs); env carries `NODE_EXTRA_CA_CERTS=C:\ProgramData\Norton\Antivirus\wscert.pem` | 2026-08-20 | A fresh gcloud config fails with `CERTIFICATE_VERIFY_FAILED` until that property is set — it is **per-config**, which is why the isolated config needed its own copy. **Terraform's Google provider does NOT read gcloud's `custom_ca_certs_file`** — it needs `SSL_CERT_FILE` / `GOOGLE_CLOUD_TLS_ROOT_CA` pointed at the same bundle. Expect \"works in gcloud, fails in Terraform\" otherwise. **Local-only — nothing follows the code into Cloud Run.** Same root cause as Norton blocking live call tests. |
+| Org `vetratd.com` **created 2026-08-20 15:16:06**; `admin@vetratd.com` holds **Organization Admin**. Free trial: **$300, 90 days**. Signup auto-created `My First Project` / `ultra-glyph-506120-v5` | 2026-08-20 (screenshot) | **B0a unblocked.** Org-creation trigger was the **billing signup** — question resolved. Terraform still needs the **numeric Org ID** and the **Billing account ID**. |
+| Leaving the free trial **preserves remaining credit** — *"use any remaining credits, then pay only for what you use"* | 2026-08-20 (Google's banner) | Resolves a previously-flagged uncertainty. Activate early: free, and removes trial quota limits before B0a needs 6 projects. |
+| Google org for `vetratd.com` is **Cloud Identity Free, Active, no charges** after the owner cancelled an expired/suspended Workspace | 2026-08-20 (screenshot) | O1 satisfied. **Two open riders:** super-admin assignment unproven (O1b), and an **overdue balance on a declined card** on the shared payments profile (O2a). |
+| `vetratd.com` mail runs on **Microsoft**, not Google — `MX -> vetratd-com.mail.protection.outlook.com`, `v=spf1 include:spf.protection.outlook.com -all`. Domain already carries **three** `google-site-verification` TXT records | 2026-08-20 (public DNS) | **O1 is an audit, not a signup** — the domain is already claimed, and Google refuses a second Cloud Identity on a claimed domain. **Accepting any Gmail-activation prompt rewrites MX and kills the owner's real email.** Do not prune the three TXT records either; removing the wrong one un-verifies the domain. |
+| **`database/schema.sql` applies cleanly to stock PostgreSQL 16.15** — 12 tables, no errors, run not read | 2026-08-21 | The Supabase-independence assumption is now evidence. Local PG16 is a confirmed stand-in for Cloud SQL. |
+| **The migration sequence is NOT idempotent against the fully-migrated state.** `007_integrations.sql` is a bare `CREATE TABLE` and dies on "relation already exists" | 2026-08-21 | Correct behaviour, not a defect — schema.sql is a fresh install, the migrations move an existing database forward. **A trap at D3:** never run schema.sql and then the migrations. `npm run db:reset` records the baseline so a following `migrate` is a no-op. |
+| **Zero RLS policies exist.** `select count(*) from pg_policies` returns 0 across all eight tenant-scoped tables | 2026-08-21 | Tenant isolation today is app-layer discipline spread across 33 functions, with a service key underneath that bypasses RLS by design. This is what A2's 19 negative tests are red against. |
+| **Terraform's 403 `USER_PROJECT_DENIED` is an IDENTITY error, not an IAM error.** `admin@vetratd.com` holds `roles/owner` on both `ultra-glyph-506120-v5` and `vetra-shared-c3a3bd` — verified by `get-iam-policy` — while Terraform returned "Grant the caller the roles/serviceusage.serviceUsageConsumer role" for both | 2026-08-21 | The message names the right project and the wrong problem, and it names a *different* project depending on `bootstrap_project_id`, which reads as an ordering constraint between the two and is not. **Diagnostic: set `GOOGLE_APPLICATION_CREDENTIALS` and see whether the error CHANGES.** If it becomes an auth error, the 403 was the personal identity all along |
+| **The org enforces reauthentication. `oauth2: "invalid_grant" "reauth related error (invalid_rapt)"`** | 2026-08-21 | The ADC refresh token goes stale on a schedule and the remedy is **interactive** — `CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud auth application-default login`. **An unattended session cannot get past it, and that is the control working, not a defect.** Any session that plans or applies must budget for the owner being present for this one command. It is what stopped B0a's re-plan on 2026-08-21 |
+| **B0a's Terraform state is GONE.** Searched the whole workstation recursively: no `terraform.tfstate` anywhere. The six projects and three org policies it created are all still live | 2026-08-21 | The resources outlived Terraform's knowledge of them. **From empty state, `plan` proposes CREATING projects that already exist, and that apply dies on "already exists"** — a plan that reads as progress and is a dead end. Adopted with config-driven **`import` blocks** (`infra/terraform/imports.tf`) rather than `terraform import`, so the plan renders the adoption and writes nothing until the owner applies. **`project_id_suffix` is now pinned in tfvars** — a suffix living only in state means losing state renames every project, and a project ID is immutable |
+| **`gemini-3.6-flash` is served by Vertex `locations/eu` — but by NO single region.** `:countTokens` returns 200 at `locations/eu`, `locations/us` and `global`; **404 at us-central1, europe-west2 AND europe-west4.** Control: a bogus model name 404s everywhere, so a 200 means served | 2026-08-21 (live probe) | **B1 question 1 answered YES, plus a second finding nobody was looking for.** The two-region design assumed each lane would call a single-region Vertex endpoint. It cannot. **`VERTEX_LOCATION=us-central1` — the value in A8's own tests — would 404 at runtime**, surfacing at Lane C as a mysterious model failure. UK must pin `locations/eu`; `global` routes anywhere on earth and would void the residency claim outright |
+| **Organization Admin does NOT carry `logging.sinks.create` at the org node.** Neither do Folder Admin, Project Creator or Org Policy Admin — `admin@vetratd.com` holds all four and the first B0a apply still returned `Error 403: Permission 'logging.sinks.create' denied on organizations/564252011558/sinks/vetra-audit-eu` | 2026-08-21 (apply) | **This is the property that makes an org-node sink worth having, discovered by hitting it.** A principal with full control of a project cannot touch the trail recording what they did there, because the trail is administered one level up by a role nobody holds by default. Granted as **`roles/logging.configWriter`, deliberately NOT `roles/logging.admin`** — admin additionally grants `logging.logEntries.*` and the ability to DELETE log entries, which is the one capability an audit trail's administrator must not have |
+| **Terraform's quota project needs every API Terraform CALLS, not every API that project RUNS.** `user_project_override = true` routes each call through `bootstrap_project_id`, and Google requires the API enabled there even though the resource lands elsewhere | 2026-08-21, third occurrence | Fired three separate times — `orgpolicy`, then `billingbudgets`, then `sqladmin` — each as a 403 that names the quota project and reads as a permissions problem. Now a single list, `local.terraform_quota_apis`, deliberately a **superset** of what `vetra-shared` itself runs: `sqladmin` is there because Terraform creates a database in ANOTHER project. **Add to it when the module starts managing a new resource kind, before the apply** |
+| **`google_project_service_identity` races the IAM grant that uses it.** `Error 400: Service account service-<n>@gcp-sa-cloud-sql.iam.gserviceaccount.com does not exist` | 2026-08-21 (apply) | The ordering is right and the propagation is not — the agent is created but not yet visible to IAM. The message reads as a wrong email address and sends you hunting for a typo. **Re-apply; it is idempotent.** Deliberately not papered over with a `time_sleep`: a fixed delay is either too short on a bad day or wasted on every good one |
+| **HCL's `$$` is an escape, so `"$${var.x}"` renders the LITERAL text `${var.x}`** | 2026-08-21 | Cost an apply: a budget display name went out at 76 characters against a 60-character API limit, containing the variable reference as text. To put a literal `$` before a number, use `format()` or leave the `$` out |
+| **Identity Platform has NO data-residency control, and `gcp.resourceLocations` cannot reach it.** The `Config` resource exposes eighteen top-level fields and none sets a location; `smsRegionConfig` governs where an SMS code may be SENT, not where accounts are stored | 2026-08-21 (API reference, not marketing) | **The one place the two-region design cannot be enforced by the org policy.** It holds clinic STAFF logins — email, bcrypt hash, display name — so no PHI and no patient data, which is what keeps this manageable. But the UK claim changes shape: a disclosed transfer under Google's DPA, **not** enforced residency. Tenants remain worth using for isolation and per-tenant config; they buy nothing for residency |
+| **A Cloud SQL IAM user cannot apply a schema.** `permission denied for schema public` | 2026-08-21 (migration job) | Cloud SQL puts IAM users in `cloudsqliamuser`, which has no CREATE, and granting more needs a privileged connection that does not exist yet. **Migrations connect as the superuser with a password from Secret Manager; the runtime connects as an IAM principal with none.** Two identities, two privilege levels, and the powerful one never appears in a running service |
+| **`severity < INFO` also excludes DEFAULT(0), which is what unstructured container stdout is** | 2026-08-21 | C-8's own exclusion silently dropped every `console.log` from Cloud Run, so the first migration failure read as one line: `Container called exit(1)`. Structured logs via `lib/logger.js` set an explicit severity and were unaffected, which made it look like a logging outage rather than a filter. **Now `severity = "DEBUG"`.** Exactly the failure the variable's own comment warns about |
+| **Cloud Run pulls cross-project images as its SERVICE AGENT**, `service-<n>@serverless-robot-prod`, not as the runtime SA | 2026-08-21 | The runtime's `artifactregistry.reader` does nothing for the pull, which happens before the container exists. The direct cost of one shared registry serving four projects, and still the right trade |
+| **Cloud Build defaults to the COMPUTE service account, which cannot read its own source tarball** | 2026-08-21 | `403 ... does not have storage.objects.get access` naming a bucket the caller never created. Fixed by `--service-account=vetra-deployer` plus `roles/storage.objectViewer`. Also: with no `.gcloudignore`, gcloud falls back to `.gitignore` and uploaded **278.9 MiB / 705 files**; now 4.7 MiB / 169 |
+| **A `hipaa` process REFUSES TO BOOT with a Deepgram credential present** — verified on a real Cloud Run deploy, not in a test | 2026-08-21 | `FATAL non_covered_credential_present`. The compliance guard and the STT requirement are in direct conflict, and **that conflict is the migration's real blocker, not an infrastructure gap**: `server.js` exits without `DEEPGRAM_API_KEY` ("there is no fallback mode") and `bootChecks` exits WITH it in hipaa mode. The US production lane cannot serve a call either way until the BAA answers or Google STT v2 is built |
+| **Domain Restricted Sharing blocks `allUsers`, so a public Cloud Run service needs a scoped exception** | 2026-08-21 | `Error 400: One or more users named in the policy do not belong to a permitted customer`. Cloud Identity enables `constraints/iam.allowedPolicyMemberDomains` by default. Exception applied **per project, never at the org node**, so an outside grant in `vetra-shared` is still refused. Takes ~15 minutes to reach IAM. **The better answer is an HTTPS LB with a serverless NEG** — public LB, IAM-restricted service, constraint never relaxed. Needs a managed cert and a DNS change: B5's work |
+| **A floating `latest` tag cost THREE failed deploys in one session** | 2026-08-21 | Code changed, Terraform applied, container ran the previous build. Each failure was a real error from real old code, which is what made it convincing every time. **`image_tag` is now pinned to a commit SHA**; rebuild, then bump it. A floating tag also makes a revision nobody can reproduce |
+| **`twilio.validateRequest` THROWS on a malformed signature rather than returning false** | 2026-08-21 | It compares with `crypto.timingSafeEqual`, which requires equal-length buffers. The unhandled throw was a **500 where a 403 belonged** — distinguishable from a clean rejection, so the difference tells an attacker which guesses were well-formed, and anyone could generate unbounded 500s on a public endpoint with junk. Now wrapped; a throw is a rejection |
+| **`google_cloud_run_v2_service` drifts forever when `min_instance_count` is 0** | 2026-08-21 | The API omits the field at its default, the provider reads that as the value being gone, and every plan shows a `scaling` block wanting to disappear. Applying changes nothing; `null` does not help. **Deliberately NOT suppressed with `ignore_changes`** — that field IS C-11, the difference between a warm instance and a cold start on a caller and between $0 and ~$45/month, so hiding it to tidy a cosmetic diff is how a cost control stops being enforced. **Consequence: this module's plan is not clean while any service runs at min 0. Read the diff; do not trust an empty one.** Ceiling verified real on the live service: `maxScale=3`, `minScale=0` |
+| **A Cloud CDN backend bucket forces its objects public, dragging the DRS exception into whichever project holds the bucket** | 2026-08-21 | There is no service-account path for a GCS backend bucket. The SPA bucket lives in `vetra-shared`, so serving it means exempting the project that holds the build pipeline's credentials and the audit trail. Gated behind `enable_load_balancer` instead of accepted. **Firebase Hosting sidesteps it completely** and is also free |
+| **Google STT v2 ENDPOINTS ON RECEIVED SILENCE, not on wall-clock idle.** A probe that streamed 4.4s of speech and then stopped writing got NO final for six seconds; the final landed only when the stream closed. The same audio followed by mu-law silence frames — what Twilio actually sends — endpointed in ~700ms | 2026-08-22 (live probe) | **The single fact that makes this provider usable, and it inverts the obvious debugging instinct.** "No final arrives" reads as a broken integration and is actually a starved one. `session.js:2999` forwards every media frame ungated, so production behaves like the second probe — but any future optimisation that gates audio delivery on VAD to "save money on silence" turns the covered lane deaf, and the symptom will be a silent bot rather than an error |
+| **The final arrives AFTER the end-of-speech event, not before it.** Measured order is `interim … interim -> SPEECH_ACTIVITY_END -> is_final`, ~190ms apart. Deepgram is the opposite: `speech_final` rides ON the final that ends the turn | 2026-08-22 (live) | **A whole-call bug that unit tests could not find, because the tests would have encoded the same wrong assumption.** Flushing on the event flushes an EMPTY buffer; the transcript then waits for the NEXT utterance's event, so every turn is delivered one turn late and the assistant answers the previous question for the entire call. Caught only by running the shipping module through the real API in C5b: 17 of 18 utterances returned no final while interims and the end event both arrived normally. **A transcript-only comparison would have read this as "Google is terrible" rather than "our client is wrong"** |
+| **A v2 stream dies at 5 minutes of WALL CLOCK, not 5 minutes of audio.** `10 ABORTED: Max duration of 5 minutes reached for stream.` at 295.3s, with only ~188s of audio delivered | 2026-08-22 (live, 6-minute run) | Calls run to `CALL_MAX_DURATION_MINUTES` (default **30**), so a call crosses this **six times**. Deepgram has no such cap, so nothing in the existing reconnect logic anticipated it. **A rotation keyed to delivered-audio ms — the obvious reading of "5 minutes" — fires after the server has already killed the stream.** Rotation is on a wall-clock timer at 4 minutes, deferred to an utterance boundary so it cannot cut a caller off, with a 30s deadline so it cannot wait into the cap it exists to dodge |
+| **The SDK's public `streamingRecognize()` is unusable for v2.** Every attempt returned `INVALID_ARGUMENT: Invalid resource field value in the request` | 2026-08-22 | It derives its routing header from a request that does not exist yet when the duplex is created. `_streamingRecognize()` — underscore and all — is what Google's own v2 samples use. The failure mode is loud but names the wrong thing, and it is followed by 200+ `ERR_STREAM_DESTROYED` throws per second if writes are not guarded |
+| **There is NO API for the Speech data-logging tier.** The string "logging" does not occur ANYWHERE in the v1 or v2 Speech protos — not in the request, not in `RecognitionFeatures`, not on the `Recognizer`, not on the `Config` resource. Meanwhile the live Cloud Billing catalog confirms both SKUs are real: `Cloud Speech-to-Text Recognition` **$0.016/min** and `…Recognition (Logged)` **$0.012/min** | 2026-08-22 (shipped protos + live SKU catalog) | **"Assert the unlogged tier in code" cannot be done, and an `if` statement pretending otherwise would be a comment with extra steps.** The tier is a project-level program opt-in. The assertable control is CMEK: the v2 `Config` per location carries `kms_key_name`, it is readable, and `assertSttEncryption()` refuses to boot a covered deployment whose key is empty. **Owner control that no code can enforce: never accept Google's Data Logging Terms on these projects** |
+| **`speech.config.get` lives in EXACTLY ONE predefined role — `roles/speech.admin`.** Not in `speech.client`, not in `speech.editor` | 2026-08-22 (live IAM catalogue) | Would have been a self-inflicted outage found on deploy: the boot assertion reads the Config, and the obvious runtime role cannot. Granting admin instead hands the runtime `speech.config.update`, so **the process whose boot check enforces CMEK could switch CMEK off** — a control the controlled party can disable is not a control. Resolved with a custom role holding that one permission |
+| **The Terraform Google provider implements NO part of the Speech v2 API.** No `google_speech_config`, no recognizer resource (`hashicorp/terraform-provider-google#18878`, open) | 2026-08-22 | The one PATCH that points Speech at its CMEK key cannot be Terraform. The key ring, key, rotation, service agent and grant all can. **The gap is closed by the boot assertion, not by the script** (`npm run stt:cmek`): a step somebody has to remember is not a control, so forgetting produces a service that will not start rather than one quietly sending audio Google could retain under its own keys |
+| **`voice_activity_timeout.speech_end_timeout` is NOT Deepgram's `utterance_end_ms`.** It CLOSES THE STREAM after speech ends | 2026-08-22 (proto) | It is the field a porter reaches for by name and it would end the call's STT after the first utterance. Deliberately never set. Related: **`endpointing_sensitivity` has no measurable effect** — STANDARD/SHORT/SUPERSHORT measured 881 / 895 / 911 ms, inside the noise. **There is no millisecond endpointing knob at all**, so `STT_ENDPOINTING_MS` has no counterpart and was not faked with a local timer |
+| **`@google-cloud/speech` costs 694ms to import** — against 452ms for the whole Deepgram module — because it drags in gRPC | 2026-08-22 (measured) | At the top of the module every deployment paid it at boot, **including the UK lane that never calls Google.** At `min-instances = 0` (C-2) that is 694ms on a cold start and a cold start lands on a caller. Now loaded on first use; the covered lane still pays it at BOOT because `assertSttEncryption()` warms it before the port opens. **Residual, written down rather than discovered: a `hipaa` TENANT on a `standard` deployment pays it on the first call**, because boot cannot know that tenant exists without a query it does not make |
+| **A source-scanning test can pass on CRLF and fail on LF.** `tests/bootChecks.test.js` sliced a fixed 260-BYTE window after `twilio.validateRequest(` and asserted `next()` did not appear | 2026-08-22 | With CRLF the window stopped just short of the legitimate `next()` on the success path; with LF it ran past and **failed on correct code**. `.gitattributes` asks for LF in every working tree and CI is Linux, so **that test fails there today** and passed on this workstation only by accident of a stale checkout. Now reads the catch block itself. **Any test that slices source by byte count has this bug latent in it** |
+| **`import * as twilio from "twilio"` makes `twilio.validateRequest` UNDEFINED.** The package is CommonJS; Node's ESM interop puts only `default` on the namespace. The call threw a TypeError, and the try/catch added 2026-08-21 to turn a malformed signature into a clean 403 SWALLOWED it into `valid = false` | 2026-08-22 (first real phone call) | **The Twilio webhook rejected 100% of requests, including genuine ones, for the entire life of this deployment.** A defensive fix that was correct in intent converted a loud crash into a silent permanent rejection. Dates to `c4b963e`; present on `origin/main` and on `f285351`, the commit **Railway is frozen at** — where there is no try/catch, so it would surface as a **500** rather than a 403. **Owner: check Railway's `TWILIO_VALIDATE_SIGNATURE`**, which is the only thing that could be keeping the live receptionist working. Fixed here by extracting `lib/twilioSignature.js` with a default import |
+| **VITEST CANNOT SEE THAT BUG.** Vite transforms CJS interop itself, so inside the runner `import * as twilio` DOES expose `validateRequest`; under plain Node it does not | 2026-08-22 (sabotage) | Proven by trying it: reintroducing the namespace import in the module left **every behavioural test green**. So a unit suite structurally cannot catch this class of defect, and asserting the namespace shape from inside Vitest would assert Vite's behaviour rather than production's. The checks that work are a **Node subprocess** and a **source scan of both files**. **Any CJS dependency imported with `import * as` has this latent** — `lib/sentry.js` was checked and is fine (real ESM named exports) |
+| **THREE NEGATIVE TESTS PASSED WHILE THE POSITIVE PATH WAS DEAD.** B4's recorded evidence — "`POST /twilio/voice` 403 with no signature, a bogus one, or a valid-length wrong one" — was true, reproducible, and proved nothing | 2026-08-22 | **The single most transferable lesson in this file.** All three 403s are exactly what a validator that rejects EVERYTHING produces. Nothing asserted that a CORRECTLY signed request is ACCEPTED, and that is the only assertion that separates "correctly refuses bad input" from "refuses everything". It was cited as evidence twice — at B4 in session 8, and again in session 9's own post-apply verification. **A gate built only from negative cases cannot detect a subsystem that is entirely off** |
+| **The middleware could not be imported by a test, so it was "tested" by scanning its source as TEXT** | 2026-08-22 | That is why the above survived: the checks asserted a `try/catch` was PRESENT, which it was. Two of those scans were independently broken as well — one depended on **line endings** (passing on CRLF, failing on LF and so on Linux CI), and one matched **the comment explaining the bug** rather than the bug. **Untestable code produces tests that describe shape instead of behaviour.** The fix was to extract the logic, not to write a better scan |
+| **"Deployed and serving" was THREE layers away from "answers the phone".** The service was `Ready`, returning 200, in `hipaa` mode with CMEK verified — and a real call still failed | 2026-08-22 | The layers, each found only by trying the next one: **(1)** no Twilio number pointed at the GCP service at all (~~the staging subaccount owns zero numbers; all three numbers live on the parent account and point at Railway~~ — **true then, STALE by 2026-08-23: `vetratd_staging` owns `+18176326969`, SMS/MMS/Voice, with its voice webhook already pointing at `voice-us-staging`**); **(2)** signature validation rejected 100% of requests; **(3)** the database had schema and no rows, so the webhook correctly refused to impersonate a generic office and sent the caller to voicemail **without ever opening the media stream**. **Every health check that passed was honest and none of them touched the path a caller takes.** `GET /` 200 says the process is up, not that anyone can call it |
+| **`gcloud run jobs execute --args` cannot carry a code payload.** It splits on commas, then on whatever custom delimiter you choose if that character appears in the payload — `^\|^` broke on `\|\|`, `^@^` broke on an email address — and truncates a long payload regardless | 2026-08-22 | Four attempts, each failing on the transport rather than the logic, which is the signal that the approach is wrong rather than the increment. **The fix was a committed `scripts/seed-staging.js` in the image**, run as an ordinary arg. Also useful: Node's `-e` injects a wrapper for referenced globals, so declaring `const crypto = require('crypto')` collides with it |
+| **A brand-new tenant CANNOT be INSERTed while RLS is on, and that is by design.** `businesses`' WITH CHECK is `id = app_current_business_id()`; a new business is not the current tenant and no tenant is set — creating one is what establishes the scope | 2026-08-22 | Migration 031 already solved this with the `app_create_business_for_user` SECURITY DEFINER function, and the migration's own header explains why a "allow writes when app.business_id is unset" policy would be worse. **Anything that creates a tenant must go through that function**; only writes AFTER creation can be ordinary tenant-scoped statements |
+| **BOTH of migration 029's bootstrap functions are defeated by its own `FORCE ROW LEVEL SECURITY`, on Cloud SQL specifically.** `SECURITY DEFINER` runs as the function's OWNER, which clears ORDINARY row security — but FORCE applies to the owner too, and only `BYPASSRLS` escapes. Cloud SQL's `postgres` is a `cloudsqlsuperuser` with `rolbypassrls = false` | 2026-08-22 (reproduced on real PG, both directions) | **The WRITE half — `app_create_business_for_user` — meant no business could be created at all: the dashboard's entire signup path. Fixed in migration 032.** The READ half — `app_lookup_business_by_phone` — means **the receptionist cannot resolve a dialled number to a tenant, so EVERY call is answered as "unrouted"**, which is exactly what staging does today. **Still open.** Proof, same function, same call, no tenant scope: owner WITHOUT bypassrls returns **0 rows**, owner WITH bypassrls returns **1**. |
+| **The local dev database CANNOT reproduce either defect, and every RLS test to date passed because of it.** Local `vetra` is a superuser with `rolbypassrls = true`, and it owns the functions, so `SECURITY DEFINER` sails past every policy | 2026-08-22 | `tests/db/rlsAppRole.test.js` already warns that RLS is "inert for the application" locally and works around it with an unprivileged `vetra_app` ROLE — but the FUNCTIONS are still owned by the superuser, so the bootstrap path was never exercised honestly. **Six new tests passed against the broken function before the owner was reassigned.** Any test touching a SECURITY DEFINER function must reassign it to a NOSUPERUSER NOBYPASSRLS role AND assert that ownership, or it proves nothing. `tests/db/onboardingBootstrap.test.js` does both |
+| **`getReplyStreaming` demanded an API key that a Vertex deployment must not have.** It checked `GEMINI_API_KEY` BEFORE calling `getClient()`, the factory that knows about Vertex | 2026-08-22 (live call) | The voice pipeline's ONLY LLM entry point. On Vertex there is no API key by design — AI Studio is not BAA-covered — so a correctly configured covered deployment threw on EVERY turn, two in a row tripped `FALLBACK_FAILURE_THRESHOLD`, and the caller got "technical difficulties" then the take-a-message script. **A8 removed the same unconditional requirement from `server.js` and did not reach this copy.** Invisible off Cloud Run because the eval harness and every local run have the key set. Removing it exposed a second hole the tests caught: `getClient` built a client with `apiKey: undefined` and never checked, so a no-backend deployment would have degraded silently |
+| **The Vertex SDK derives the WRONG HOSTNAME for the `us`/`eu` multi-regions.** `@google/genai` builds `{location}-aiplatform.googleapis.com`; the multi-regions are served by the global host with the location in the path | 2026-08-22 (live, then measured) | `us-aiplatform.googleapis.com` → **404**, `aiplatform.googleapis.com` → **200**, `us-central1-aiplatform.googleapis.com` → 404. Surfaced as `400 INVALID_ARGUMENT "Invalid hostname: us-aiplatform.googleapis.com"` on every turn. **This COMPLETES B1's finding rather than contradicting it:** learning that no single region serves `gemini-3.6-flash` is what forced the multi-region value, and nobody had established that the multi-region value also needs a different HOST. Both facts are required for one working call. **A pre-flight probe passed because the hostname was typed by hand** — it proved the model existed, not that the service could reach it. Overridden only for multi-regions; a single region keeps the SDK's host or traffic leaves the pinned region |
+| **Migration 033 — the READ bootstrap was defeated by FORCE RLS, so no dialled number could find its tenant.** Every call took the unrouted path and got voicemail | 2026-08-22 | Same root cause as 032, opposite direction, and the textbook fix was UNAVAILABLE: `postgres` on Cloud SQL is `rolsuper=false, rolbypassrls=false`, and the only role with BYPASSRLS is Google's own `cloudsqladmin` — measured, not assumed. So the design had to stop needing a bypass. `business_directory(phone_number -> business_id)` carries the one fact needed to break the deadlock, has NO row-level security, and is granted to NOBODY: only the SECURITY DEFINER function reads it, so a table without RLS is not a cross-tenant window. **Verified in production conditions afterwards: the lookup went from 0 rows to 1 with no tenant scope.** The backfill stands FORCE down for its own statement, because the migration role owns `businesses` and FORCE binds it too — a plain SELECT would have backfilled NOTHING while reporting success |
+| **Voice-path writes and capability DEFERRED EFFECTS both escaped their tenant scope** | 2026-08-22 (live) | Two separate places, one class. **Per-turn writes** in `session.js` (both transcripts, the fallback transcript, the customer request, `markCallTransferred`) were never wrapped — the pickup context load was, and everything added since was not. **Capability effects** run AFTER `executeToolCallGuarded`'s scope has closed, so they inherit nothing: `record_customer_request` returned `success=true`, the model told the caller their message was taken, and the row was never written. Scope opened by the capability tightly around its own write, NOT around the dispatch — the writes are floating promises the dispatcher never awaits, so a scope there would commit and release its connection mid-write. **Misdiagnosed once:** the absence of `db_unscoped_fallback` proves nothing, because the unscoped branch of `ctx?.businessId ? … : …` logs nothing at all |
+| **THE TTS SWAP COSTS MORE THAN THE STT SWAP — 15× on time-to-first-byte** | 2026-08-22 (14 live turns vs A0) | `tts_ttfb_ms` p50 **92 ms → 1,408 ms**. ElevenLabs streams as it generates; Google TTS synthesises the whole clip first, and `hipaa` mode refuses ElevenLabs. Full stage comparison: `stt_endpoint_ms` 620→1,120 (+500), `stt_tail_ms` 381→2 (−379), `llm_ttfb_ms` 1,704→1,922 (+218), **`tts_ttfb_ms` 92→1,408 (+1,316)**, `voice_to_voice_ms` 2,980→**4,084**. **C5 was filed as an aesthetic question about how the bot SOUNDS. It is worth ~1.3 s per turn and nobody had measured it.** Caveat: A0 ran on Railway through carrier hops and this is Cloud Run, so end-to-end is not perfectly comparable — but `tts_ttfb_ms` is a server-side stage and 92 vs 1,408 is not an artefact |
+| **C5b PREDICTED THE LIVE FAILURE ALMOST VERBATIM** | 2026-08-22 | C5b's worst Google case was `name_spelling`, output `"My name is Nathan. That knee t. H. I n."` On a real handset, a real caller saying "Nithin, N-I-T-H-I-N" produced `"First name is Nathan knee? T h, i n"`, and across the call Google returned **niton / nithan / Nathan — never once correct**. **This confirms the mispronunciation is STT, not TTS:** the assistant faithfully speaks whatever text it is handed. It also validates C5b as an instrument — synthetic audio predicted the handset failure — which means Deepgram's advantage on that case (WER 0.091, correct spelling captured) is real rather than a synthetic-audio artefact. **The caller's own name is the one term STT boosting cannot help with**, because keyterms are the BUSINESS's terms and a caller's name cannot be known in advance |
+| **A test fixture can manufacture three "product bugs" in one call** | 2026-08-22 | The staging clinic was seeded open 24/7 → it offered a **Sunday** appointment, which read as a scheduling bug. Corrected to Mon–Fri 09:00–17:00 → the next call landed on a **Saturday**, booking correctly refused, and that read as a broken booking flow. `allowed_tasks` defaults to `["book_appointment"]` alone and the seed never set it → `cancel_appointment` and `reschedule_appointment` were never registered, so cancelling was impossible and "reschedule" became a second booking, which read as the assistant ignoring the caller. **Three of the reported faults across two calls were the fixture.** Now Mon–Sat 08:00–20:00 with Sunday closed, and all four task modules enabled: bookable on the day someone tests, with the closed path still exercisable |
+| **ALL THREE of migration 029's bootstrap paths were defeated by its own FORCE RLS, not two.** `app_lookup_user_by_email` — the AUTH bootstrap — had the identical defect 032 and 033 fixed for the write and phone paths | 2026-08-22, measured both directions on PG16 | It is how BOTH servers turn a verified login into the tenant it may act on, so on Cloud SQL **every authenticated request resolved to no business and returned 403 "No business linked to this user"** — a signed-in member of staff reaching an empty dashboard, and a failure that reads as an authorisation bug rather than a scoping one. Measured: with no tenant scope, owner WITHOUT bypassrls returns **0 rows**, owner WITH bypassrls returns **1**. Fixed by migration **034**, which is 033's shape one bootstrap along: `user_directory(email -> business_id)`, no RLS, granted to nobody, read only by the definer function which then adopts that tenant and reads `users` normally. **The pattern is now three-for-three: any SECURITY DEFINER function under FORCE RLS that must discover a tenant needs a scope-free routing table, because a BYPASSRLS owner is unavailable on Cloud SQL** |
+| **`database/schema.sql` IS the fresh-install path and NOTHING re-runs the migrations after it** — `db:reset` applies it and records every migration as already applied, and `--init-if-empty` does the same on an empty Cloud SQL instance | 2026-08-22 | A migration not folded back into schema.sql does not fail; it produces a database silently a version behind, on the path that matters most (**D3, the restore**). `tests/schema.test.js` derives tables/columns/indexes from the migration files as TEXT — it caught the new table and **cannot see a changed FUNCTION BODY**, which is exactly what 032, 033 and 034 are. A fresh install carrying 029's `app_lookup_user_by_email` authenticates nobody while every text check stays green. Closed by `tests/db/schemaParity.test.js`: builds a scratch database from schema.sql and diffs it against the migrated one — tables, columns, `pg_get_functiondef`, triggers, policies, grants. Sabotage-verified by reverting schema.sql to 029's body |
+| **An Identity Platform account id IS NOT A UUID**, and the coupling that hid it is gone | 2026-08-22 (live) | `app_create_business_for_user` took `p_user_id uuid` and the dashboard passed it the AUTH provider's id. That typechecked only because Supabase Auth issues uuids — nobody ever had to decide whether `users.id` and the auth account id were the same THING. Identity Platform issues 28 alphanumeric characters: `invalid input syntax for type uuid: "7Ziacgk6NkY3lKC6dXu3VthNO1Y2"`. **So B3 broke signup while login itself worked** — the half-migrated auth path, found by using the product, because every fixture used uuids and therefore agreed with the bug. Migration **035** adds `users.auth_uid text UNIQUE`; `users.id` goes back to being this system's own staff identifier, generated locally, written to the PHI audit trail, stable across a change of auth provider. **The duplicate guard had to move with it** — keyed on `users.id` it could never collide, because that id is now generated inside the function, so it would have been no guard at all while still looking like one |
+| **`securetoken@system.gserviceaccount.com` is ONE signer for EVERY Firebase and Identity Platform project on earth** | 2026-08-22 | So a token minted in a stranger's free project carries a **valid signature against the same keys we verify with**. The `iss`/`aud` checks are the only thing between that and a full session — not defence in depth, the whole defence. Also: `jsonwebtoken` **does not check `iat` at all** unless `maxAge` is set, which matters because `lib/auth/sessionAge.js` computes the §164.312(a)(2)(iii) ceiling FROM `iat` and treats a negative age as clock skew — a token issued ahead of the clock would never age out. Both now checked, with a 60s tolerance and a test that ordinary drift is still accepted |
+| **`import * as jwt from "jsonwebtoken"` exposes only `{ decode, default }` under real Node — `verify` is UNDEFINED** | 2026-08-22 (measured) | The twilio defect exactly, in a second package, and it would have made every token fail. `jwks-rsa`'s namespace *does* expose `JwksClient`, so the two CJS packages behave DIFFERENTLY under the same import form and neither is predictable from reading. Default imports throughout, a top-level guard that throws if `verify` goes missing, and Node-subprocess checks — Vite's own interop hides this class from the runner entirely. **Assume nothing about a CJS package's namespace shape; measure it in a subprocess** |
+| **`vetra-us-staging-c3a3bd` was SUSPENDED by Google**, project ACTIVE, billing enabled, billing account open — **LIFTED 2026-08-23, cause never communicated** | 2026-08-22, re-probed 2026-08-23 | `CONSUMER_SUSPENDED` on run, sqladmin, secretmanager and logging while `serviceusage` still answered. **An untargeted `terraform plan` cannot run at all** — it reads every resource in state. The root cause behind the root cause: **no Essential Contacts exist anywhere** and the billing account's only principal is `admin@vetratd.com`, **a mailbox nobody can read** (`vetratd.com` mail is on Microsoft 365). Every Google notice — suspension, security, and the free-trial expiry that also suspends projects — has been going nowhere the whole time |
+| **The dashboard backend's local `.env` pointed `DATABASE_URL` at the LIVE Supabase pooler** | 2026-08-22 | Anyone running the dashboard locally was reading and writing **production**, months after the data layer moved to Postgres, and `.env.example` had said `localhost:55432` the whole time. Repointed at local PG16 with the old value kept commented. It also produced a 500 that read as a code bug and was `self-signed certificate in certificate chain` from Supabase's TLS |
+| **Google applies SECURE-BY-DEFAULT `.managed.` org constraints that no Terraform of ours creates, and one of them silently blocks a fix** | 2026-08-22 | Ten org policies are set on `564252011558`; **three are B0w's and the rest arrived with the org.** `essentialcontacts.managed.allowedContactDomains` was applied at org creation with `allowedDomains = ['@vetratd.com']`, so adding a personal address as an Essential Contact fails with `Operation denied by org policy` — which reads as a Console bug and is a control working. **Expect this class again:** `iam.managed.disableServiceAccountKeyCreation`, `compute.managed.restrictProtocolForwardingCreationForTypes` and the rest are live and unread. `gcloud org-policies list --organization=` is the whole answer and takes one second |
+| **A suspended project's audit trail is still readable, because the org-node sinks export it somewhere else** | 2026-08-22 | Every API on `vetra-us-staging` returned `CONSUMER_SUSPENDED`, including logging — but B0w put the sinks at the ORG node writing into buckets in `vetra-shared`, so the history survived the suspension of the thing that produced it. **That is the property that made the sinks worth the `logging.configWriter` grant**, and it paid for itself here: it produced the evidence for the appeal (five principals, all ours or Google's own; zero service-account keys ever created). A project-local sink would have been suspended along with the project |
+| **Supabase's bcrypt hashes import into Identity Platform and the ORIGINAL password signs in** | 2026-08-22 (live) | **B1(2)'s whole question, answered YES: nobody has to reset a password at cutover.** GoTrue is Go and emits `$2a$`; Node emits `$2b$`; both were imported and both signed in. `passwordHash` is the bcrypt string's own bytes, base64url — no separate salt, no signer key, no rounds parameter, because bcrypt carries its own. A wrong password still 400s, asserted alongside so the acceptance is not inferred from the refusals |
+| **`accounts:batchCreate` RETURNS HTTP 200 ON PARTIAL FAILURE**, with a per-record `error[]` array carrying `index` and `message` | 2026-08-22 (live) | A script that checks the status code reports success and drops people, and the people it drop are the ones who cannot log in on Monday. Verified by sending three records and getting `200` with one error. **`scripts/import-users.js` treats the array as the result and the status code as a precondition** |
+| **`accounts:batchCreate` IGNORES `allow_duplicate_emails`, and a second run STEALS THE IDENTITY** | 2026-08-22 (live, both directions) | The Identity Platform config forbids duplicate emails; the bulk import creates them anyway, **silently, with no error** — that setting governs sign-up, not admin import. Two accounts on one address, and `signInWithPassword` then returns the **LAST-imported** one, three times out of three. So a careless re-run does not merely make a mess: it repoints every member of staff onto a different account id, reported as 200. **With the tenant lookup keyed on `auth_uid` that is every clinic losing access at once.** THE FIX IS ONE LINE OF DESIGN: **set `localId` explicitly** — measured, the same localId twice is ONE account, upserted. Letting the service assign it is what duplicates. `localId` is therefore required by the import script and never delegated |
+| **`users.id` IS the Supabase auth uid, for every row that predates Identity Platform** | 2026-08-22 (git history, all three write paths) | The pre-031 onboarding did `INSERT INTO users (id, email) VALUES ($1, $2)` with `$1 = req.authUser.id`; 031 and 032 pass the same argument as `p_user_id`. Only migration 035 separated them. **This is what let migration 036 close the tenant-claim escalation with NO Supabase export and no credentials** — `auth_uid` was derivable from a column we already had. It also collapses what the export is FOR: the email↔uid mapping is already ours, so the export buys exactly one thing, the password hashes, and that is a "do people reset their password at cutover" question rather than a security one |
+| **An email address is something a stranger can CHOOSE, so it must not key a tenant lookup while signup is open** | 2026-08-22 (demonstrated live) | Migration 034 resolved a tenant from the token's `email` claim. With open signup, an address holding a `users` row and NO identity-provider account could be claimed by anyone: they sign up, get a **genuinely valid** token, and the lookup hands them that clinic. Every layer behaves correctly and the tenant is still wrong. **Migration 036 re-keys onto `auth_uid`.** Proven by running the attack against the live service — a real signup on a seeded victim's address came back `needsOnboarding: true` rather than the clinic. **The general rule: a bootstrap lookup may only be keyed on something the CALLER CANNOT PICK** |
+| **A text-level guard that applies all CREATEs then all DROPs misreads any migration that REBUILDS a table** | 2026-08-22 | `tests/schema.test.js` parsed each migration's creates and drops in two separate loops, so migration 036 — which drops `user_directory` and immediately recreates it re-keyed — was read as deleting it, and the guard then reported schema.sql as wrongly containing a dropped table. **The opposite of the truth, from a guard whose whole job is to be believed.** Fixed by walking the statements in the order they appear. Latent since the guard was written; nothing had rebuilt a table before |
+| **`node --check` DOES NOT RESOLVE IMPORTS**, so the build guard that claimed to catch a forgotten `COPY` never could | 2026-08-22 (proven both ways) | `cloudbuild.yaml`'s smoke step said it "parses server.js and every module it would load at import time" and therefore catches "a file the Dockerfile forgot to COPY". It syntax-checks the ONE file it is handed and nothing else — verified by pointing it at a file requiring a module that does not exist, which it passes. **The guard described the right risk and covered none of it.** Both configs now IMPORT the entry point, which loads the whole tree; safe because each guards its listener (`require.main === module` in the dashboard, `NODE_ENV !== "test"` in the voice server). **Sabotage-verified in Cloud Build, not argued:** a Dockerfile made to drop `src/routes` turned a passing build into `BUILD FAILURE ... build step 1`, which `--check` would have waved through |
+| **The dashboard backend COULD NEVER HAVE REACHED A GCP DATABASE**, and building its image did not change that | 2026-08-22 | It understood only `DATABASE_URL` — a connection string with a host and a password — and Cloud SQL here is **private-IP only with no password**, because B2 created no `google_sql_user` (a password in a resource is a password in state). **There was no connection string that would have worked.** The image would have built, deployed, started and had nothing to talk to. Fixed with a third CommonJS twin of an ESM module (`cloudSqlPool.js`, after `sessionAge.js` and `idToken.js`) plus an `init()` that server.js awaits BEFORE the port opens — the pool cannot be built at module load because the connector fetches ephemeral certificates first. **Found by READING the db module before writing Terraform that assumed it worked**, which is the cheaper of the two ways to find it |
+| **Cloud Build runs a step in `/workspace`, NOT the image's WORKDIR**, so a bare `require()` in a verification step resolves against a directory with no `node_modules` | 2026-08-22 | Cost two failed builds including a `--no-cache` rebuild, chasing a dependency that was in the image the whole time: `Cannot find module '@google-cloud/cloud-sql-connector'` reads as a missing dependency and is a missing working directory. **Require by ABSOLUTE path in a build step**, or through a file inside the image, which also exercises the real resolution path. It is why the `smoke-load` step worked throughout — it already used one |
+| **The dashboard was never even UPLOADED to Cloud Build.** `.gcloudignore` excludes `AI-phone-dashboard` outright | 2026-08-22 | So "cloudbuild.yaml does not build the dashboard image" was the symptom and not the cause — a build step added to that config would have failed on a Dockerfile it could not find. Submitted as its own source root instead (`gcloud builds submit AI-phone-dashboard/backend --config=cloudbuild.dashboard.yaml`), which keeps the voice image's tarball from carrying a dashboard it does not use, and keeps the two `image_tag`s independent so a dashboard change does not mint a new voice tag |
+| **`infra/terraform/terraform.tfvars` IS GITIGNORED, so every pin in it lives on ONE DISK and is invisible to review** | 2026-08-23 | Correct — it holds real org and billing ids — and it has a cost nobody had priced: **`dashboard_image_tag` was never set for its entire life**, because `terraform.tfvars.example` did not mention it, so nothing ever prompted anyone to set it and it silently used its `latest` default. The example file is the ONLY tracked description of what the real one must contain, which makes an omission there a permanent, invisible default rather than a documentation gap. Both tags are now in the example with the build commands and the migrate-job ordering warning. **The general rule: anything required in the ignored file must appear in the tracked example, or it will eventually be unset and nobody will be able to see that from the repository** |
+| **`roles/storage.objectAdmin` DOES NOT GRANT `storage.buckets.get`, so it cannot publish with `gcloud storage rsync`** | 2026-08-23 (measured, after failing on it twice) | `loadbalancer.tf`'s own comment names the first publish failure as *"does not have storage.buckets.get access"* — and then grants `objectAdmin`, whose permission list contains `storage.objects.list` and **no `storage.buckets.*` at all**. **The recorded fix never addressed the recorded symptom**, and the second attempt failed with the byte-identical error months later, because the grant had been written, believed, and never exercised. `rsync` reads the bucket's own metadata before it touches an object, so object permissions alone can never be enough. Fixed by adding **`roles/storage.legacyBucketReader`** alongside — the narrowest predefined role carrying `storage.buckets.get`, and it deliberately carries neither `buckets.update` nor `buckets.setIamPolicy`, so the property the original comment cared about still holds: the deployer manages OBJECTS and cannot rewrite the bucket's policy. ("legacy" is Google's ACL-era naming, not a deprecation.) **A permission named in a comment is not a permission granted by the role beneath it** |
+| **BOTH PRODUCTION PROJECTS ARE EMPTY — everything that exists is staging** | 2026-08-23 (`gcloud run services list` + `sql instances list`, both prod projects) | Zero Cloud Run services and zero Cloud SQL instances in `vetra-us-prod` AND `vetra-uk-prod`. This is C-12 working as designed (~$98.62/month deferred), and it has a consequence Lane D does not state: **D3 says `pg_dump` / `pg_restore` and presumes a target instance that has never been created.** Building production is an unlisted step inside the cutover, and a cost decision rather than a task. **The related scoping question nobody has answered: Lane C says "per region" four times and `enable_uk_resources = false`**, so C2/C3/C4/D5 cannot complete as written. Recommendation recorded at Lane D: finish US-only, leave `vetra-uk-prod` dormant, make UK its own customer-triggered lane. **This does not reopen the prod US/UK split**, which stays non-negotiable — only when the UK half gets built |
+| **The SPA is PUBLISHED and NOT REACHABLE, and those are different milestones** | 2026-08-23 | 28 objects in `vetra-dashboard-c3a3bd`, and the bundle is correctly built: the staging API URL is in the `App` and `Contact` chunks, the Identity Platform auth domain is in `Login`, and the `localhost:3001` fallback appears nowhere. **But the bucket is not public and `enable_load_balancer` is false**, so nothing serves it. That is the deliberate C-cost gate, not an oversight — and the ledger already records the better answer: a CDN backend bucket forces its objects public and drags the Domain Restricted Sharing exception into the project holding the audit trail, whereas **Firebase Hosting sidesteps it completely and is free**. **Choosing between them is an owner decision and the last thing standing between a deployed dashboard and a usable one** |
+| ~~**`npm run eval`'s "36/37 hard" IS NOT A STABLE NUMBER**~~ — **now MEASURED, 2026-08-23: the band is 35–37, and the comparison METHOD is worse than the metric** | 2026-08-23 (5 full runs + 20 pairwise comparisons) | Five full runs of identical code at `temperature: 0.4` scored **37, 36, 35, 36, 36** — hard pass **35–37 of 37, mean 36.0, spread 2**; the advisory judge **29–33, spread 4**. **Three scenarios carry the entire band** and 34 never failed once: `reschedule-two-appointments` 3/5, `details-accumulate` 1/5, `no-invented-appointment` 1/5. **The recorded gate “34/37 or worse is a regression” sits one point below a floor that noise already reaches**, so it is simultaneously too loose to detect a one-scenario regression and close enough to the band to fire on nothing. **AND THE BIGGER FINDING IS ABOUT THE INSTRUMENT, NOT THE SUITE:** the same five runs fed to `eval:compare` as all 20 ordered pairs produce **17 “DOES NOT MEET THE MERGE GATE” verdicts — 85% false alarms on code that did not change** (12 of them citing a hard regression, 5 judge-only). A 1-vs-1 diff cannot answer “did anything regress” about a non-deterministic suite, however carefully it is written. **Replaced by `scripts/eval-band.js`** — per-scenario failure counts across N runs per arm and a one-sided Fisher exact test on each 2×2 — sabotage-verified in both directions, with the detection limit measured rather than claimed (3-of-5 is p=0.083 and NOT significant at n=5). **Also standing and invisible to the exit code: `impatient-booker`, `long-call-memory` and `reschedule-two-appointments` fail the advisory judge in 5 runs out of 5.** That is not noise, it is three permanent failures nobody was looking at, because the judge never sets the exit code |
+| **THREE CONSECUTIVE FAILURES LOOKED DETERMINISTIC AND WERE A COIN LANDING HEADS THREE TIMES** | 2026-08-23 | `reschedule-two-appointments` failed 3/3, which was reported as "consistent, not variance". Extending the same command to 7 runs produced passes on runs 4, 5 and 7. **The conclusion was wrong and only the extra runs revealed it.** At `temperature: 0.4` three samples is not evidence of determinism, and the instinct to stop once a run of results agrees is exactly what produced it. Related in kind to the three negative signature tests that agreed for months while the subsystem was entirely off |
+| **The live receptionist runs `thinkingBudget: 0`, so PROMPT CONTENT COMPETES FOR A BUDGET THAT IS ZERO** | 2026-08-23 (`services/gemini.js:1353`) | The eval harness uses the same setting, so its results transfer rather than testing a harsher condition. **The consequence is a real design constraint nobody had written down:** every tool declaration and every guardrail line added to the prompt is taken out of a model with no reasoning headroom at all, on turns capped at 200 output tokens. Adding "one more small thing" to the prompt is not free, and the scenarios it costs are the borderline ones — disambiguating two appointments, remembering a name |
+| **The sms_consent pack MAY cost one borderline eval scenario, at p≈0.27 — recorded as open, deliberately not acted on** | 2026-08-23 (14 targeted runs) | `reschedule-two-appointments` passed **3/7 with** the pack registered and **6/7 without** it. Consistent direction, not significant at n=7, and the scenario is flaky in both arms. **NOT reverted, for three reasons:** the pack has zero functional effect today (`sms_followup_enabled` is false on every tenant, so it sends nothing and blocks nothing — its whole footprint is one tool declaration and one guardrail line); reverting reopens O25, the only live PHI exposure, to chase p=0.27; and the suite cannot currently answer the question. **The real fix if it proves out is conditional registration** — the pack contributing NOTHING when SMS is off. That was the first draft, rejected by the core-pack contract; on reflection the contract is being applied as a PROXY, since it exists so a prompt never names an unregistered tool and this pack's prompt is gated on the same flag as its tool, making a phantom tool impossible either way. **Revisit the day SMS goes live** — which is also the day the footprint is justified |
+| **Staging's database is private-IP only, so there is NO path to it from a workstation — every hand-edit has to become a committed script** | 2026-08-23 | `ipv4Enabled: false`, one address `10.20.32.3`, private network only. So "flip one boolean on the staging clinic" has exactly two routes: Cloud SQL Studio in a browser (remembering that `businesses` is under FORCE row-level security, where an unscoped UPDATE matches zero rows and reports success), or a script inside the image run through the migrate job. **And the job route is not free**: its image is pinned by `image_tag`, which also drives the voice SERVICE, so adding a script means a rebuild whose apply spins a new voice revision. Flipping a flag mid-test would redeploy the thing under test. **`scripts/seed-staging.js` now takes `SEED_SMS_FOLLOWUP`** so the next person does not have to choose between those two. The general rule this is the second instance of — the first was the `--args` payload trap — **anything you would do by hand against this database has to be a committed script, because there is no hand to do it with** |
+| **The DSR endpoints are UNREACHABLE on staging: the voice service has no `IDENTITY_PLATFORM_PROJECT_ID`** | 2026-08-23 (its own boot notice) | `[boot] notice auth_not_configured: ... no access token can be verified, so every authenticated API route returns 401`. The dashboard backend HAS it (`vetra-shared-c3a3bd`); the voice service never did. **The Art. 15 export and Art. 17 erasure routes live on the VOICE server** (`server.js` ~728/783/798), so on staging they answer 401 to everyone and cannot be exercised at all — which means O25's additions to `exportCallerData`/`eraseCallerData`, and O28's erasure-reaches-Twilio work before them, have no verification path there. **Calls are completely unaffected**, which is why this has been invisible: the phone works, and the statutory endpoints behind it do not. Fixing it is mirroring the dashboard's env block into `cloud-run.tf`, plus deciding deliberately that the voice server's staff routes verify tokens issued by `vetra-shared` — a one-line change with a design question attached, so it is recorded rather than improvised |
+| **`Voice enabled` and `Messaging disabled` are INDEPENDENT per Twilio number, and voice working tells you nothing about SMS** | 2026-08-23 (Twilio console) | `+18176326969` on the `vetratd_staging` subaccount lists capabilities SMS / MMS / Voice, has a voice webhook pointing at `voice-us-staging`, and shows **Traffic Status: ✓ Voice enabled, ❌ Messaging disabled — Complete A2P registration**, on the same row. **Capability and traffic status are different fields**: the number CAN do SMS and is not PERMITTED to. Unregistered sends fail with **30034**, and the account balance is **$0.00** besides, so there are two independent blockers. The receptionist has been answering real calls on this number the whole time, which is exactly why nobody noticed the messaging half was off — **the working half of a number says nothing about the other half** |
+| **Registering THIS number would be 10DLC, which O23a deliberately deferred** | 2026-08-23 | `+18176326969` is a LOCAL long code, so "complete A2P registration" means a 10DLC brand + campaign. O23a already reasoned that out on 2026-08-21 and the reasoning is unchanged by the number existing: a **sole-proprietor brand cannot be converted** to Standard, so registering now is throwaway vetting to be redone after the LLC, and it caps at ~1 campaign / 1 number / ~1,000 msg-day on T-Mobile, which cannot reach clinic #2. **Toll-free verification remains the near-term path** — no TCR brand, no EIN, no entity, one form. **Do not register the local number to unblock a test** |
+| **`TWILIO_SMS_FROM` was in NO Terraform at all — not a secret, not an env var** | 2026-08-23 | It was described in this file as a Secret Manager change and a hard stop for that reason. **Wrong on both counts**: a phone number is not a credential, `smtp_config` is the existing precedent for non-secret config in tfvars, and the variable simply did not exist, so nothing was reaching the container to be unset. Now `var.twilio_sms_from`, a map keyed by STACK — per stack because each stack authenticates as a different Twilio account and **outbound SMS requires the `From` to belong to the authenticating account**, so a production number on staging fails 21606 and reads as a bad number rather than a wrong account |
+| **STAGING'S DATABASE WAS THREE MIGRATIONS BEHIND, INCLUDING THE ONE THIS FILE CALLS A CLOSED SECURITY ESCALATION** | 2026-08-23 (the migrate job's own output) | Executing the job applied **034, 035, 036 AND 037** — not the one migration that was expected. So until this run, `vetra-us-staging` had migration **033** as its head: `app_lookup_user_by_email` in its original FORCE-RLS-defeated form, no `users.auth_uid`, and **no migration 036** — the re-key that closed the tenant-claim escalation, which the O-item and the session-10 entry both describe as closed. **It was closed in the repository and in the local dev database, and never on the deployed one.** The mechanism: migrations only reach a database when the job RUNS, the job runs what is in its IMAGE, and its image is pinned by `image_tag` — so a migration can be written, tested, folded into schema.sql, marked done, and still be absent everywhere that matters. **"Migration written" and "migration applied" are different facts and this file had been treating them as one.** Check with `--args=scripts/migrate.js,--status` before believing either |
+| **The dashboard's DATABASE path is still unproven, and an open port is not the proof it looks like** | 2026-08-23 | `dashboard-api-us-staging` is Ready, `/health` returns 200 and `/api/me` returns 401. That last one proves the auth middleware runs, and `server.js` awaits `db.init()` before `listen()` and `process.exit(1)`s if it rejects — so the open port DOES prove the Cloud SQL connector obtained ephemeral certificates. **But `init()` only constructs the pool; it runs no query.** So nothing has yet executed a statement against Cloud SQL from that service, and the first one could still fail on a grant, a database name, or an IAM principal. **This is `GET /` 200 one level down** — the same shape as the finding that "deployed and serving" was three layers from "answers the phone". The cheapest real proof is one authenticated request, which needs a staff sign-in and therefore the SPA published |
+| **The MIGRATE JOB's image is Terraform-managed off the same `image_tag` as the service, so one apply moves both — and updating a job does not RUN it** | 2026-08-23 (visible only once `image_tag` was bumped) | Before the bump the plan showed one change; after it, two: `google_cloud_run_v2_job.migrate` and `google_cloud_run_v2_service.this` both step from `voice:7cea364` to `voice:d02cdc8`. **The failure mode is a whole-plan apply**: the service begins serving code that reads `sms_consents` while the job that would have created it sits updated and unexecuted. `exportCallerData` then returns null and `eraseCallerData` THROWS — it rethrows inside a scope, so the route 500s — which is **a data-subject right broken by a deploy ordering, not a feature**. It also means the migrate job was pinned to an image with 36 migrations, so executing it before the bump would have applied nothing new and looked like success. **Sequence: `terraform apply -target='google_cloud_run_v2_job.migrate["us-staging/vetra_us_staging"]'` → `gcloud run jobs execute vetra-migrate-us-staging --region=us-central1 --project=vetra-us-staging-c3a3bd` → full `terraform apply`.** Each of the three is a hard stop that needs the owner |
+| **An image TAG in this registry is a hand-typed `_TAG` substitution, not a git ref, and reasoning from it gives the WRONG ANSWER** | 2026-08-23 (checked the tag, concluded wrong, then checked the image) | `dashboard:latest` resolves to a digest tagged `9486233`, and `git merge-base --is-ancestor 3a0a1e5 9486233` says the connector fix is NOT in that commit — which reads as "the built image predates the fix that lets the dashboard reach a database at all". **That inference was wrong.** Cloud Build builds from an uploaded SOURCE TARBALL — the working tree at submit time — so `_TAG` labels the build, not its contents; the same digest also carries the tag `connector` from a build ten minutes earlier. **Settled by inspecting the image**, which contains `src/db/cloudSqlPool.js` and `node_modules/@google-cloud/cloud-sql-connector`. **Two lessons, and the second is the one that generalises:** a tag here cannot be trusted to describe content, and `docker run --entrypoint sh <digest> -c 'ls ...'` answers in seconds what an apply would have answered in a broken revision |
+| **STAGING RUNS PRE-SESSION-11 CODE, so nothing built this session is deployed anywhere** | 2026-08-23 | The live revision is `voice:7cea364` = *"fix(db-inspect): calls has started_at, not created_at"*, 2026-08-22 14:01, and **none of `dd5659f` / `297891c` / `4994b3b` / `8d97a1f` is an ancestor of it.** So the consent gate, the consent tool, the voicemail scoping fix and the Supabase removal are all local-only. **Consequence with teeth: `database/037_sms_consent.sql` has been applied ONLY to the local dev PG16.** The migration job runs the migrations that are IN THE IMAGE, so a deploy of new code without a migration run first leaves `sms_consents` missing — at which point `exportCallerData` returns null and `eraseCallerData` THROWS (it rethrows inside a scope, so the route 500s). **Migration before image, always, and this is the first change where skipping it breaks a data-subject right rather than a feature** |
+| **`iam.allowedPolicyMemberDomains` is relaxed to `allowAll: true` on `vetra-us-staging`** | 2026-08-23 (read) | Applied 2026-08-22T02:17. It is the per-project Domain Restricted Sharing exception the standing fact above predicted would be needed, and its existence is why the pending plan's `allUsers` invoker grant on the dashboard API will succeed rather than failing with *"One or more users named in the policy do not belong to a permitted customer"*. **Worth re-reading before assuming the same on any other project** — the exception is deliberately per-project and `vetra-shared` does not have it |
+| **The suspension lifted on its own timetable, and nobody told us** | 2026-08-23 (re-probed) | Every API that returned `CONSUMER_SUSPENDED` answers again — Cloud Run `Ready: True`, Cloud SQL RUNNABLE, Secret Manager, Logging — and the covered configuration came back intact rather than reset: `DEPLOYMENT_MODE=hipaa`, Google STT v2, CMEK verified, on image `voice:7cea364`. **The restoration is the ONLY evidence the appeal succeeded**, because Google's reply went to the mailbox nobody reads. **So the trigger is still unknown**, which means the heuristic that fired can fire again on the same terms and nothing has been learned that would stop it. **A cause you never found is not a cause you fixed.** The one useful residual: the project came back rather than being deleted, so "do not rebuild under a new project id" was the right call to have made |
+| **`TWILIO_SMS_FROM` IS UNSET ON STAGING, and it sits one layer BELOW the O25 consent gate** | 2026-08-23 (boot log) | `[boot] notice sms_channel_off` says it plainly, and this is exactly the class of thing that boot notice exists for. `sendSms` returns early with `twilio_sms_from_missing` before Twilio is called, so **the O25 end-to-end test — flip `sms_followup_enabled`, dial, wait for the text — cannot pass on staging today**, and it would fail in the shape of the thing being tested: consent recorded, row written, no text, reading as "the gate is broken". The consent tool itself is unaffected; it never touches Twilio. **Verify the CHANNEL works before testing the GATE on it.** Setting it is a Secret Manager change: hard stop |
+| **The org has TEN policies, THREE are ours, and only THREE carry `.managed.` — this file's own "nine other `.managed.` constraints" was wrong** | 2026-08-22 (`gcloud org-policies list`) | Ours (B0w, org node): `iam.disableServiceAccountKeyCreation`, `compute.skipDefaultNetworkCreation`, `compute.requireShieldedVm`. Arrived with the org: `iam.allowedPolicyMemberDomains` (allowedValues is the CUSTOMER ID `C02qjjwtt`, not a domain), `storage.uniformBucketLevelAccess`, `iam.automaticIamGrantsForDefaultServiceAccounts`, `iam.disableServiceAccountKeyUpload`, plus the three `.managed.` ones. **A wrong count in this file is worse than no count** — it would have sent the next session hunting for six constraints that do not exist |
+| **`iam.automaticIamGrantsForDefaultServiceAccounts` is enforced, and it is the root cause of a trap that has fired THREE times** | 2026-08-22 (read, then matched against the history) | Default service accounts get **no automatic Editor grant**. So the Compute default SA has no roles at all — which is exactly why "Cloud Build defaults to the COMPUTE service account, which cannot read its own source tarball" keeps happening, and why `--service-account=vetra-deployer` is not a workaround but the only correct answer. **It was recorded three times as a Cloud Build quirk and it is an org policy nobody had read.** Also live and unread until now: **`iam.disableServiceAccountKeyUpload`**, which closes the half of the keyless design our own policy does not — an externally generated key cannot be uploaded either. The appeal's "zero service-account keys" evidence is therefore org-enforced from creation, not merely observed |
+| **`compute.managed.restrictProtocolForwardingCreationForTypes` allows `INTERNAL` only** | 2026-08-22 | Unverified against B5 and worth checking BEFORE that apply rather than during it: an external HTTPS load balancer's forwarding rule is a load-balancing rule rather than Compute "protocol forwarding", so it is *expected* to be unaffected — but the constraint is live, it is not ours, and discovering otherwise mid-apply is the expensive way. `storage.uniformBucketLevelAccess` is also enforced, which means the SPA bucket can never be made public by object ACL; public means an IAM binding, which is what collides with Domain Restricted Sharing |
+| **O31 IS IMPOSSIBLE AS WRITTEN. Identity Platform's `Config` has 18 fields and NONE is a token lifetime** | 2026-08-22 (live GET **and** the v2 discovery document) | The live resource returns **15** top-level fields; the schema declares **18** (`passwordPolicyConfig`, `recaptchaConfig` and `autodeleteAnonymousUsers` are simply unset here, which is why the two numbers differ and why neither alone is the answer). Searched the whole v2 admin schema set for `ttl`, `lifetime`, `sessionCookie`, `expiresIn`, `tokenExpir`: **absent everywhere.** The ID-token lifetime is fixed and not configurable through this API. **So O31 cannot be closed by "shorten the token TTL at the auth backend", and §164.312(a)(2)(iii) stays PARTLY satisfied.** The one concrete alternative found while checking: identitytoolkit **v1** has `accounts:createSessionCookie`, whose request takes `validDuration` alongside `idToken` and `tenantId` — so Firebase session cookies really are a settable-duration option, at the cost of a server-side session concept the dashboard does not have today |
+| **No inbound SMS route exists anywhere in this repo, and two of three templates promised one** | 2026-08-22 | "Reply to this number if you need to change it" and "Reply here" — sent to patients, about their own appointments, from a line nobody answers. Worse in a second way: the text is sent from the single global `TWILIO_SMS_FROM`, **not** from the number the caller dialled, so "this number" was wrong even as a description. Fixed by removing the promise and pointing at the phone line that IS answered, pinned by a test that fails if the word comes back. **The route itself is a feature and is still unbuilt** — and it is also where STOP/HELP handling would live if Twilio's own opt-out were ever not enough |
+| **A refused text has to be HELD, or a consent gate kills the feature it is protecting** | 2026-08-22 (design, caught before shipping) | The confirmation SMS is sent the moment a booking succeeds; a receptionist naturally offers the text AFTER confirming the booking. Gate-only, that text is refused for **every caller forever**, silently, and the feature looks configured. Instructing the model to ask first is necessary and not sufficient — a prompt is a request, never a guarantee. So `sendCallerSms` holds a blocked message for 5 minutes, keyed on tenant + normalised number, and `record_sms_consent`'s DEFERRED effect releases it. **The deferral is the correctness argument, not a convenience:** `execute` runs inside an open transaction, so releasing from there would put a text on a handset before the consent row committed, and a rollback after that means a patient texted with no record that they agreed |
+| **"Core packs register their tools regardless of configuration" is a real contract and it caught a first draft** | 2026-08-22 | The sms_consent pack initially registered its tool only when the tenant had SMS on. `tests/capabilityRegistry.test.js` failed it. The contract exists because a prompt naming an unregistered tool is the phantom-tool bug `messages.js` was made core to kill. **The fix is transfer.js's shape: register always, refuse at execution.** That then raised a second question worth having — a model that can SEE a tool called `record_sms_consent` might offer a text on a line that sends none — so the prompt now says outright that texting is unavailable when it is. **That closes a hole PREDATING the tool:** nothing had ever stopped the model improvising "I'll text you that" on any call |
+| **A capability pack's guardrail must carry its own `- ` bullet** | 2026-08-22 | `services/gemini.js` concatenates `fragments.guardrails` verbatim into a bulleted list and adds nothing. A fragment without the prefix renders flush against the list above it. Cosmetic, invisible in every test, and caught only because the prompt snapshots are byte-exact — which is what they are for |
+| **An unscoped read under FORCE RLS returns ZERO ROWS, so a naive Supabase port reports "nothing found" and looks fine** | 2026-08-22 (both remaining scripts) | `scripts/verify-capabilities.js` would have said "business_capabilities not readable, go run migration 020" against a database where 020 ran months ago; `scripts/test-buy-number.js` would have said "there are no businesses" against a database full of them. **Neither would ever show it on this workstation**, because local `vetra` is a superuser with BYPASSRLS. The fixes ask questions row-level security does not apply to: the CATALOG (`to_regclass`, `pg_class.relrowsecurity`) for "has the migration run", and on zero rows a diagnostic (`relforcerowsecurity`, `rolbypassrls`, `current_setting('app.business_id')`) for "which zero is this". **"I cannot see any businesses" and "there are no businesses" are different facts** |
+| **`tests/envInventory.test.js` fails in BOTH directions, and the second one is the useful one** | 2026-08-22 | Removing the Supabase client left `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` in `.env.example` reading nothing, and the suite failed on "documented but never read: setting these does nothing". It also caught a `process.env.USER` added to a script's error message — an undocumented variable nobody deploying could know to set. Both correct. `SUPABASE_TIMEOUT_MS` survives only because `services/db.js` still honours it as a fallback name for `DB_TIMEOUT_MS` |
+| **`firebase-tools` KEEPS ITS OWN CREDENTIAL STORE AND IT OUTRANKS `GOOGLE_APPLICATION_CREDENTIALS`** | 2026-08-23 (measured, via --debug) | The store `firebase login` writes (`%APPDATA%/configstore/firebase-tools.json`) was signed in as the **personal Gmail account**, so `firebase deploy` authenticated as the wrong identity and failed with *"Failed to get Firebase project vetra-shared-c3a3bd. Please make sure the project exists and your account has permission to access it"* — which reads as a missing project and is a wrong signer. **Only `--debug` names the real cause:** `> authorizing via signed-in user (nithinjd06@gmail.com)`. **This is the THIRD credential system on this workstation** after gcloud's config directory and ADC, and the SECOND time a tool has silently run as the personal identity — the first was Terraform and `CLOUDSDK_CONFIG`. **Fixed by removing the CLI from the path entirely:** `deploy-hosting.js` calls the Hosting REST API with a token resolved explicitly (HOSTING_TOKEN, then the metadata server, then gcloud), so there is no store to be signed into and no identity to guess at |
+| **CLOUD RUN URLS HERE ARE THE OPAQUE-HASH FORM, AND `cloudbuild.frontend.yaml` SAID OTHERWISE IN WRITING** | 2026-08-23 | The file claimed the URL was *"deterministic in the current format — https://SERVICE-PROJECTNUMBER.REGION.run.app — which is what lets this be built BEFORE the service exists"*. Both live services are `https://<service>-7aaa2qfltq-uc.a.run.app`; the hash belongs to the PROJECT and the project number (536266051432) appears nowhere. ~~Google issues one form or the other per project and does not let you choose.~~ **WRONG, corrected 2026-08-25: it issues BOTH.** The live service's `run.googleapis.com/urls` annotation lists `https://voice-us-staging-536266051432.us-central1.run.app` AND `https://voice-us-staging-7aaa2qfltq-uc.a.run.app`, and both serve the same revision. `status.url` — which is what `google_cloud_run_v2_service.uri` and the console return — is the **hash**; `BASE_URL` in the container is the **project-number** form, which is what `cloud-run.tf` composes. **The half that matters is the Twilio signature:** it is an HMAC over the exact URL string, `server.js:283` rebuilds it as `BASE_URL + req.originalUrl`, and a webhook configured with the hash form 403s every request including genuine ones — the failure this file already records once, from a validator that refused everything. The staging webhook must therefore be on the project-number form today, which is inferable rather than assumed: signature validation is ON (`TWILIO_VALIDATE_SIGNATURE` is unset on the live revision, and unset means on) and a real call succeeded on 2026-08-25. `cloud_run_services` now emits `twilio_webhook_base` so U5 cannot pick the wrong one. **A bundle built on that guess compiles, deploys, passes its own verify step and calls a hostname that does not resolve.** I reasoned FROM that comment to conclude the published bundle pointed at a dead host — then inspected the bundle, which carries the correct URL. **The comment was wrong, not the bundle: the image-tag lesson generalises to comments, and the fix is the same — read the artefact** |
+| **A Firebase Hosting HEADER glob matches the REQUEST path, and the SPA rewrite runs AFTERWARDS** | 2026-08-23 (measured on the live site) | A `Cache-Control: no-cache` rule on `/index.html` never sees `/settings`, so every client route came back `max-age=3600` while serving index.html's bytes. A browser then holds a stale index for an hour and asks for content-hashed asset filenames that no longer exist — **exactly the failure the bucket's cache split was built to prevent, reintroduced by the rewrite**. Fixed with a `**` no-cache rule that `/assets/**` and `/fonts/**` override. **The override order was verified by request rather than assumed**, because "which glob wins" is not something the config file states |
+| **`gcloud run jobs execute --update-env-vars` is EXECUTION-SCOPED, not a job mutation** | 2026-08-23 (checked after running it) | Worth knowing because the opposite would be quietly expensive: if `SEED_SMS_FOLLOWUP=true` stuck to the job definition, every later migration run would re-seed with caller SMS enabled, and Terraform would carry a drift nobody put there. `jobs describe` afterwards shows no `SEED_*` on the job at all. **So the seed flag is safe to pass ad hoc**, and that is a fact rather than a hope |
+| **THE DASHBOARD BACKEND WRITES NO PHI-ACCESS AUDIT RECORD, AND THE GUARD THAT WOULD CATCH IT CANNOT SEE IT** | 2026-08-23 (live, both halves) | `grep -rn "recordPhiAccess\|phi_access\|phiAccess" AI-phone-dashboard/backend/src/` returns **nothing**, and its `withTenantHandler`/`db.withTenant` carry no audit hook. Confirmed against the deployment: 15 authenticated tenant-scoped API calls produced **zero** `phi_access` entries in Cloud Logging, while `voice-us-staging` emits them normally. **O29 audits the AUTOMATED path — the receptionist writing transcripts. The dashboard is the only place a HUMAN reads a transcript, an appointment or a caller's number, and §164.312(b) exists principally to detect inappropriate access BY WORKFORCE MEMBERS**, so the coverage is the wrong way round. **And `tests/phiAuditCoverage.test.js` reads only `services/db.js` and contains zero references to `AI-phone-dashboard`** — correct about its subject, structurally blind to the other half of the system. Same shape as `check:credentials` pointing at an empty project and `envInventory` not covering the dashboard's variables: **three guards in one session that were right about the wrong half** |
+| **CROSS-TENANT REFUSALS COME FROM DIFFERENT LAYERS ON DIFFERENT ENDPOINTS, AND THE STATUS CODE IS WHICH** | 2026-08-23 (live, 15/15) | `GET /api/businesses/<other>` returns **404** — row-level security filtered the row before the handler ran, so `settings.js`'s explicit "Do not leak other businesses" **403 branch is unreachable in practice on Cloud SQL**. `PUT /api/knowledge/<other's row>` is 404 whichever tenant the attacker claims. But `/api/business/<other>/capabilities` and `/api/knowledge?businessId=<other>` return **403** — the app-layer comparison firing. **Both layers are demonstrably live and neither covers everything**, which is precisely what C8 asks and what a pass/fail check would have hidden. **The probe's positive controls caught a hole in the probe itself on its first run:** the cross-tenant knowledge check "passed" with a 403 while the OWNING tenant could not read its own rows either, because those routes require `businessId` in the request. **The negative-only-test trap reproducing inside the script written to avoid it** |
+| **`npm test` IS NOT ENVIRONMENT-INDEPENDENT — it fails when `DATABASE_URL` is set** | 2026-08-23 (reproduced on HEAD with all local work stashed) | `tests/toolTimeout.test.js` returns `expected 'UNAVAILABLE' to be 'TIMEOUT'` with `DATABASE_URL` present and passes without it. **It matters because the documented workflow SETS that variable** — `npm run test:db` requires it — so running the two gates in one shell turns the root suite red for a reason that has nothing to do with the change under test, and the obvious conclusion is "I broke something". It cost exactly that misreading once. **Run the root gate in a shell with `DATABASE_URL` UNSET**, and treat a lone `toolTimeout` failure as this until proven otherwise. Not fixed: the mechanism is a hung-dependency fixture reaching a real database check and failing fast instead of timing out, which is in the live voice tool path, and it is pre-existing rather than anything the migration introduced |
+| **A RESCHEDULE SENDS NO CALLER TEXT, so the consent question is correctly never asked on one** | 2026-08-23 (live call `CAe2ffb5e850cc7560df2f8b9a3e08c373`, traced to the branch) | The first O25 test call rescheduled an appointment and the assistant never offered a text, which reads exactly like the consent gate being broken. **It is not.** `capabilities/appointments.js` `onEffect` handles `type: "changed"` — what BOTH cancel and reschedule emit (line 1784) — and **`return`s before the `sendCallerSms` block**, which only `type: "booked"` (line 1594, `bookAppointment`) reaches. So a reschedule prepares no text, there is nothing to gate, and the prompt agrees in its own words: *"Ask it BEFORE you book an appointment or record a message, not after."* The tool list for the call confirms it end to end — `set_call_intent`, `get_caller_appointments_from_db`, `check_appointment_availability`, `reschedule_appointment_db`, `end_call`, and **no `record_sms_consent` and no `sendCallerSms` attempt anywhere in the logs**. The transcript also shows the assistant never PROMISED a text, which is the guardrail working rather than silence. **THE ONLY PATHS THAT SEND A CALLER TEXT ARE `book_appointment` (`appointment_confirmation`) AND the message/quote/voicemail paths (`message_received`).** Test O25 on one of those. **And a product question falls out of it, recorded rather than acted on: a patient who RESCHEDULES is arguably the one who most wants written confirmation of the new time, and today they get nothing.** That is a product decision with a consent question attached, not a bug |
+| **`record_sms_consent` CAN BE FIRED WITHOUT THE QUESTION EVER BEING ASKED, AND IT WRITES A ROW SAYING IT WAS** | 2026-08-24 (live call `CA8c5ab5021c73a9eb3b223650e2467c5e`, transcript + row + tool trace) | **The second O25 test call booked an appointment and the assistant never asked about a text — but `record_sms_consent` fired anyway** and wrote `granted:false` with `script` set to the full disclosure. Zero assistant turns on that call contain "text confirmation", "send you a text" or "message and data rates". **What the caller actually said immediately before it was "no d as in dog"** — correcting the spelling of *Doe*. The model heard a "no" and recorded a declined SMS consent for a question nobody asked. **THE MECHANISM: `execute` validates `smsFollowupEnabled`, that the caller ID is E.164, and that the INSERT succeeded — and NOTHING about whether the disclosure was spoken.** It writes `script: SMS_CONSENT_SCRIPT` unconditionally, so the row asserts the caller was read words they never heard. The field is honestly labelled in O25 as "the disclosure we REQUIRED, not a recording of what the model said" — which means the row is evidence of a POLICY, never of an EVENT, and that is thin for the one artifact whose entire job is to prove a caller agreed. **THE DANGEROUS DIRECTION IS THE MIRROR IMAGE, and it is the same bug:** a stray "yes" produces `granted:true`, the gate OPENS, and a text carrying the caller's name and appointment goes to a number that never consented — which is precisely the disclosure O25 exists to prevent. A false "no" is merely fail-safe; a false "yes" is the breach. **Second-order:** revocation is INSERT-only and newest-wins, so a phantom decline sticks until some future call records a yes. **A prompt cannot fix this** — the protocol already says "ask it in these words" and the model skipped step 1 while doing step 2, which is the ledger's own standing rule that a prompt is a request and never a guarantee. The disclosure has to become something the SYSTEM utters, not something the model is trusted to have uttered. **Owner decision, not improvised** |
+| **THE SMTP SMOKE TEST PASSES, AND IT ANSWERS A DIFFERENT QUESTION THAN THE ONE IT WAS WRITTEN FOR** | 2026-08-24 (run, plus a credential-free probe of the M365 endpoint) | `scripts/smtp-smoke.js` exists to settle whether **Microsoft 365** will accept SMTP AUTH before D2 makes it urgent. It passed — against **Gmail**, because `.env` AND `infra/terraform/terraform.tfvars` both configure `smtp.gmail.com` as `nithinjd06@gmail.com`. **Nothing in this repo or in tfvars is configured for M365 at all**, so the D2 unknown is untouched and there is no vetratd.com credential here to test with (a hard stop). Also: **`npm run smtp-smoke` DOES NOT EXIST** — there is no such npm script; it is `node scripts/smtp-smoke.js <recipient>`. What WAS established without credentials: `smtp.office365.com:587` still advertises **`AUTH LOGIN XOAUTH2`** after STARTTLS, so basic SMTP AUTH is not switched off at the service, and the remaining unknown is per-tenant/per-mailbox — which only an authenticated attempt or the Exchange admin centre can answer. **Not a finding about email content:** `services/notifications.js` is deliberately link-only and carries no PHI in body or subject, so relaying through Gmail is a deliverability and workforce-offboarding problem (D1-mail already records it) rather than a HIPAA one |
+| **`eval/run.js` REFUSED TO START THE ONE BACKEND C1 EXISTS TO MEASURE — the FOURTH instance of this shape** | 2026-08-24 | `main()` opened with `if (!process.env.GEMINI_API_KEY) refuse`. A Vertex deployment has NO API KEY BY DESIGN, so C1's Vertex arm could not be started at all — while the guard had **no effect whatsoever on which backend a started run uses**, because `getClient()` checks `VERTEX_ENABLED` first. A pure false blocker. The third instance lived in `getReplyStreaming`, above its own call to `getClient`, and threw on every turn of a correctly configured covered deployment; the comment above the surviving check inside `getClient` already names it and says why that decision belongs there and nowhere else. Replaced by `preflightBackend()`, which ASKS `getClient()` rather than re-deriving its rules. **The TEST lesson is the transferable part: seven unit tests around the new function ALL STAYED GREEN when the old guard was put back into `main()`** — they proved the function and not that the entry point called it, which is this file's recurring shape of a guard correct about its subject and blind to the half that matters. Two subprocess tests running the real CLI with an impossible `--filter` catch it: that stops at "No scenarios matched", which is after the backend decision and before any model call, so it costs nothing. **`DOTENV_CONFIG_PATH` must point at an empty file** or the repo's own `.env` supplies the key and the test proves nothing — which is what it did on the first attempt |
+| **C1 IS BLOCKED ON ADC REAUTH, AN OWNER-ONLY ACTION, AND NO SPEND DECISION CHANGES THAT** | 2026-08-24 | `gcloud auth application-default print-access-token` returns *"Reauthentication failed. cannot prompt during non-interactive execution."* The org's reauth window has expired again. So C1's Vertex arm cannot run today regardless of the cost call, and the question to put to the owner is not "may I spend" but "will you clear the reauth". **Cost, measured rather than guessed:** one full run is 200 receptionist turns + ~37 judge calls in ~286 s at concurrency 2, so 5 runs per arm is **2,000 turns + ~370 judge calls, ~48 minutes** |
+| **`impatient-booker` FAILS ITS JUDGE 5/5 BECAUSE THE FIXTURE NEVER PRODUCES AN IMPATIENT CALLER — and the judge has no way to say so** | 2026-08-24 (5 recorded runs + the judge schema) | The rubric asks *"Did the receptionist stay polite and efficient with an impatient caller?"* Every recorded run is a **four-turn, entirely polite booking** — *"Hi. I'd like to book an appointment."* … *"Yes, please."* The persona says "brusque, short answers", but the GOAL instructs cooperation ("answer only what's asked, confirm briefly") and a hard assert caps the call at 6 turns, so the receptionist is efficient enough that impatience never has a trigger. **The judge is behaving exactly as instructed** — its prompt says *"Judge ONLY what the transcript shows — do not assume unstated good behavior"* — and its schema is **`enum: ["pass", "fail"]` with no "not applicable"**, so an unanswerable question scores as a receptionist failure. **NOT a product bug.** Two defects and both are in the instrument: a rubric asking about a condition the fixture cannot produce, and a judge with no verdict for "the transcript cannot answer this". **PARKED at the owner's direction** |
+| **`long-call-memory` HIDES A REAL LIVELOCK: the model asked "could you spell your last name?" NINE TIMES IN NINE CONSECUTIVE TURNS, and every hard assert stayed green** | 2026-08-24 (5 runs; 9, 2, 1, 9, 1 asks) | Two separate things, and the second is the one that matters. **(a)** The rubric *"Did the receptionist avoid re-asking for any information the caller had already provided?"* contradicts a DELIBERATE guardrail — `capabilities/appointments.js:803` requires confirming the spelling of the name once before the first booking read-back, added because a misheard name was written into a booking, and this file separately records that a caller's own name is the one term STT boosting cannot help with. The scenario's own comments even script turn 20 to answer that prompt. So a correctly behaving model still fails the rubric. **(b) But in 2 of 5 runs the model asked NINE times**, appending the same question to nine unrelated answers, while the scripted caller — who cannot deviate — never answered it. The guardrail says *"Ask this at most once … if they … just answer with something else, proceed … never ask them to spell it a second time"*, which is precisely the case that occurred. **The mechanism:** each unanswerable small-talk question routes into the message-taking flow, whose step 1 (`capabilities/messages.js:68`) is *"Name: ask for it, then confirm the spelling once — unless you already confirmed it earlier in this call"*; the caller never spells, so "already confirmed" is never true, so the step restarts every turn. **"At most once" is a prompt request with no counter behind it** — this file's own standing rule that a prompt is a request and never a guarantee. **`hardPass=true` on all five runs**, and the judge named the repetition only once. Fixing it needs a real turn counter, not another prompt line. **PARKED at the owner's direction** |
+| **`reschedule-two-appointments` WAS NEVER FLAKY — THE FIXTURE SEEDED IDS THAT ARE NOT UUIDs, AND THE MODEL INVENTED UUIDs TO MATCH THE DECLARATION** | 2026-08-24 (5 runs per arm, measured) | This file has recorded that scenario as one of three carrying the entire 35–37 noise band, and separately as *"a coin landing heads three times"*. **It was the fixture.** `appointments.id` is `uuid PRIMARY KEY DEFAULT gen_random_uuid()`, both tool declarations describe the parameter as **"UUID of the appointment"** (`capabilities/appointments.js:241`, `:263`), and the fixture seeded `"appt-keep"` / `"appt-move"`. So the model was told the argument was a UUID, handed something that was not one, and **synthesised** one: across five runs it passed `apt_2`, **`apt-22222222-2222-2222-2222-222222222222`**, `apt-2`, `apt_wed_aug26`, and once the literal string **`"Wednesday, August 26, 2026 at 2:00 PM"`**. It succeeded only on the two runs where it happened to use the real id. Re-seeded with real UUIDs: **hard pass 2/5 → 5/5, first appointment_id correct 1/5 → 5/5, zero inventions.** **THE STATISTICAL LESSON IS WORTH AS MUCH AS THE FIX:** through `scripts/eval-band.js`, hard pass 3/5 → 0/5 failed is **p=0.0833, NOT significant** — exactly the n=5 detection limit that script documents — while the mechanism metric, first-id-invented 4/5 → 0/5, is **p=0.0238 and IS significant**. The aggregate could not detect at n=5 what the direct measure could, so **choosing the statistic closest to the mechanism bought the significance that more runs would otherwise have cost.** Also learned: **`eval-band.js` only tests for the candidate being WORSE**, so measuring an improvement means swapping the arms. **Eleven other scenarios seed non-UUID ids and none is exposed today** — checked rather than assumed: the trap needs the model to choose among MULTIPLE appointments; `20-cancel-identity` seeds one (so the pack auto-selects it) and asserts the row actually left the store, and `27-third-party-privacy` never passes an id at all |
+| **AN INVENTED APPOINTMENT ID IS REPORTED TO THE CALLER AS AN IDENTITY FAILURE THEY DID NOT COMMIT** | 2026-08-24 | Independent of the fixture above, and it survives fixing it. `appointmentBelongsToCaller(null, …)` returns false for a row that DOES NOT EXIST exactly as it does for a row belonging to somebody else, so a hallucinated `appointment_id` produces `IDENTITY_MISMATCH_MESSAGE` — *"I can only make changes to appointments booked under your number. Let me take a message instead."* The appointment IS under their number; the model made up an id. The assistant then degrades to taking a message and attempting a transfer, which is what the recorded live "reschedule dead-air" looks like from the caller's side. **"Not found" and "not yours" are different facts and the code conflates them.** And the hallucination is NOT only a fixture artefact: `services/gemini.js:818`'s own comment records the model *"recit[ing] an id that was not in the database"* on a REAL call, where ids are real uuids — the mitigation applied then was a prompt line, and the eval shows a prompt line did not hold. **Separately, that scenario's 5/5 ADVISORY failure is its own real gap:** THREE places omit reschedule from confirm-before-write — `services/gemini.js:827` enumerates *"(booking, cancellation, message)"*, the EHR flow at `appointments.js:572` orders the tool call at step 7 and *"Confirm new details"* at step **8**, and the non-EHR branch has no new-time read-back at all. So an appointment moves without the caller confirming the new time — and this file already records that a reschedule sends no SMS either, so the patient is told nothing on any channel. **All PARKED at the owner's direction** |
+| **THE SCHEMA SAYS THE ROUTING TABLES ARE "NOT GRANTED TO vetra_app". THEY ARE GRANTED `arwd` — READ AND WRITE** | 2026-08-24 (measured on PG16 by `scripts/c8-rls-proof.js`; mechanism confirmed in `pg_default_acl`) | `business_directory` and `user_directory` deliberately carry NO row-level security, and the security argument written above each of them — twice, in the schema — IS the grant: *"NO row-level security, and NOT granted to vetra_app — only the SECURITY DEFINER function below reads it"*, therefore *"a table without RLS is not a cross-tenant window"*. Measured: `has_table_privilege('vetra_app', 'business_directory', 'SELECT')` is **true**, and the ACL on both is **`vetra_app=arwd/vetra`** — select, insert, update AND delete. **The mechanism:** each table carries `REVOKE ALL … FROM PUBLIC`, which does not touch a grant made directly to a NAMED role, and migration 029's `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vetra_app` grants every table created afterwards — which 033 and 034/036 both are. `pg_default_acl` shows `vetra_app=arwd/vetra` outright. **Consequence:** the role the runtime inherits can read a scope-free map of every tenant's dialled numbers and every user's account id, and can rewrite the rows that decide which tenant a caller and a login resolve to — the same tables whose own comments warn that a stale row *"sends a caller to the wrong tenant"* and *"would resolve somebody's login"* to the wrong one. **Not a live leak** — nothing but the definer functions queries them — so this is a defence-in-depth failure and a false claim in the design rather than an active breach. **The same shape as the `roles/storage.objectAdmin` finding: a permission named in a comment is not a permission granted by the role beneath it.** Whether Cloud SQL is affected is UNVERIFIED and is exactly what the script answers once it is in an image. **PARKED** |
+| **A SECURITY CHECK RUNNING AS THE APPLICATION ROLE CANNOT USE `information_schema` FOR CONSTRAINTS** | 2026-08-24 | `information_schema.constraint_column_usage` is restricted to constraints on tables the current user **OWNS**. `c8-rls-proof.js` runs as `vetra_app`, which owns nothing, so it returned an EMPTY SET and `call_transcripts` was reported as unseedable while its one foreign key sat right there in `pg_constraint`. **A privilege-filtered view answers "there are no constraints" rather than "you may not look", and those two read identically** — the same shape as an unscoped read under FORCE RLS returning zero rows. Use `pg_catalog` for anything a security check depends on |
+| **C7 IS NOT THE PRODUCTION BUILD, AND THIS FILE'S OWN RECOMMENDATION TO MAKE IT ONE WAS WRONG** | 2026-08-24 (re-derived at the owner's instruction, then verified against `gcloud`) | The recorded reasoning was that *"a restore test and a `pg_restore` into a new production instance are the same exercise, so doing them together costs one instance and one meter start instead of two."* **They are not the same exercise.** C7 restores a **Cloud SQL automated backup** — a managed, instance-level artefact — to prove the backup is good, which is what §164.308(a)(7)(ii)(D) asks for. D3 runs a **cross-vendor logical `pg_dump` from Supabase into `pg_restore`**, which proves the data moved. Different source, different mechanism, different claim: a successful D3 says nothing about whether a Cloud SQL backup restores. **And C7 does not need production at all.** It needs *an* instance with automated backups, and staging has been taking them since B2. Verified in `gcloud`: `sql backups restore` restores to a NEW instance when addressed by backup name, and `sql instances clone` creates an independent copy — **neither is a `terraform apply`**, so the hard stop this file attaches to C7 is avoidable, and a `db-g1-small` for an hour is roughly $0.04 rather than a cost decision. The parity check afterwards can run through the migrate job with `--update-env-vars=CLOUD_SQL_INSTANCE=<scratch>`, which this file already establishes is EXECUTION-SCOPED and therefore needs no rebuild and no apply. **So: C7 today against staging, cheap, owner present only for the spend and the delete. Build production immediately before D3 for the meter and first-start-debugging reasons, which are the real ones. Then repeat C7 against production's OWN backup once it has taken one — the strongest form of the evidence, and the only one genuinely about production.** What is still missing is the parity script itself |
+| **A SCRIPT WRITTEN TO RUN THROUGH THE MIGRATE JOB HAS TO BE ADDED IN TWO PLACES, AND NOTHING IN THE REPOSITORY CAN TELL YOU IT WAS NOT** | 2026-08-24 (found by building the image, after both scripts were committed, sabotage-verified and written into a runbook) | `scripts/c8-rls-proof.js` and `scripts/c7-restore-parity.js` were both **absent from the image they exist to run in**. The Dockerfile uses an explicit file list rather than `COPY . .` — deliberately, since that is what keeps `.env`, the test suite and `docs/` out of a production image, and it fails closed — so a new job entrypoint needs a `COPY` line. **It also needs a second edit: `.dockerignore` excludes `scripts` wholesale with one negation per shipped file**, so the COPY alone fails the build with `"/scripts/c7-restore-parity.js": not found`, which reads as a missing file in the repository rather than an excluded build context. **Nothing could have caught it:** these scripts are the only things in the image that nothing else imports, so no test references them and the existing `smoke` / `smoke-migrate` steps do not reach them. It would have surfaced as `Cannot find module` during a scheduled verification with the owner present. Closed by a `smoke-verifiers` build step that IMPORTS both — which also proves `lib/db/schemaFingerprint.js` arrived, since that one ships via `COPY lib` rather than by being named — and by guarding each script's `main()` behind `argv[1] === import.meta.url` so importing resolves the tree without touching a database. **Sabotage-verified against a real local build rather than argued: with one COPY removed the image BUILDS FINE and the new step exits 1 with `ERR_MODULE_NOT_FOUND`.** Also confirmed in the other direction, because a guard applied wrongly would make both scripts silently no-op, which is worse than the bug it fixes. **Local `docker build` needs `--secret id=cacert,src=$HOME/gcloud-cacerts.pem`** or `npm ci` dies on Norton's TLS interception |
+| **A TERRAFORM `validation` BLOCK IS NOT EVALUATED UNTIL SOMETHING REFERENCES THE VARIABLE, SO A VALIDATION TEST CAN PASS WHILE PROVING NOTHING** | 2026-08-24 (measured while sabotage-verifying `dashboard_url`) | The two new rules on `var.dashboard_url` were extracted into an isolated module and planned against four deliberately bad values. **All four came back ACCEPTED.** The module contained only the `variable` blocks, nothing referenced them, and Terraform evaluates a variable — and therefore its validations — lazily. Adding two `output` blocks that read the variables made all four refuse correctly. **The first run's result was indistinguishable from "the rules do not work" and from "the rules are perfect"**, which is the vacuous-pass shape this file keeps recording, this time inside the test written to avoid it. **Any isolated test of a Terraform validation must reference the variable, or it asserts nothing.** Also worth having: cross-variable validation (one variable's rule reading another) needs **Terraform >= 1.9**, which `versions.tf` already requires, and `terraform validate` needs `TF_DISABLE_PLUGIN_TLS=1` + `SSL_CERT_FILE` exported or it fails with *"Failed to load plugin schemas … Plugin did not respond"*, which reads as a corrupt provider and is Norton |
+| **`calls.latency_*` CAN BE SILENTLY ABSENT WHILE THE LOGS ARE COMPLETE, BECAUSE THE RING BUFFER IS PER-INSTANCE** | 2026-08-24 (read, while building C4's report) | `server.js` writes per-call latency by calling `getCallStats(callSid)` from the Twilio STATUS CALLBACK. That buffer is in-process (`lib/voice/metrics.js`, `_ringBuffer`), and the status callback is **a separate HTTP request** — with `min_instance_count = 0` and `maxScale = 3` it can be served by an instance that never handled the call, whose buffer is empty. `getCallStats` then returns null and no row is written, silently. **So the database is the wrong source for C4 and D5's "row counts match" should not be read as covering latency.** The right source is `recordTurnLatency`, which emits one structured `turn_latency` line PER TURN through `lib/logger.js`; the org-node sinks export it, and the sink filter is `severity = "DEBUG"` so INFO survives. `scripts/c4-latency-report.js` reads that. **The existing code is not wrong** — its own comment already notes the per-process limitation — but nothing had connected that limitation to C4 depending on it |
+| **`tests/session.test.js` TURN-14 BLOCK HAS A LOAD-SENSITIVE INTERMITTENT, AND THE CAUSE IS NOT ESTABLISHED — DO NOT 'FIX' IT BY REINDEXING** | 2026-08-25 (observed ~4 times, then 6 consecutive clean full-suite runs) | Seen under heavy machine load — a local `docker build` and the PG16 container competing for CPU — as `14b`/`14e` failing, **and the failing sub-test VARIED between runs**. The exact output: `14b` expected `"Hello, thanks for calling Test Biz."` (the greeting) as turn 1's `previousText` and received **`"Our hours are nine to five."`, which is turn 1's OWN reply.** For a TTS turn to carry turn 1's text as its `previousText`, that turn must be **turn 2** — so the pipeline produced TWO TTS turns from a single `onTurnEnd`, and the assertion's `H.ttsTurns[H.ttsTurns.length - 1]` picked the second. **THAT LEAVES TWO CANDIDATE CAUSES AND THEY POINT OPPOSITE WAYS:** either the test is fragile — 16 assertions in that file read `[length - 1]` where an explicit index belongs — or **the voice pipeline emitted a DUPLICATE TTS turn under load**, which would be a product defect on the live call path, and for which this repository already has precedent (`capabilities/appointments.js:1122` documents a duplicate-fire path where the owner gets two booking alerts and the caller two confirmations). **Reindexing the test to `[1]` would permanently hide the second possibility** — a test edited to stop failing that also stopped checking, which is the failure shape this file keeps paying for. Left untouched deliberately. **Reproducing it needs load**: run the full suite with a container build going. Two corrections recorded with it, both mine: I attributed it to a test file added the same session on the strength of an UNCONTROLLED comparison (the two arms ran at different machine loads), and I called it deterministic off 2 of 2 — the same mistake this file records about `reschedule-two-appointments` at 3/3 |
+
+| **C4 IS DONE, MEASURED OFF TWO REAL CALLS, AND THE COVERED LANE IS WITHIN 5% OF RAILWAY END-TO-END** | 2026-08-25 (15 turns, 2 calls, `scripts/c4-latency-report.js`) | `voice_to_voice_ms` p50 **3,140 ms** against A0's 2,980 (+5%) — and against the covered lane's own 2026-08-22 figure of 4,084 that is **−23%**, so the deployed stack has materially improved rather than drifted. `true_v2v_ms` p95 **5,953 vs 9,556, −38%**. **Turns with no reply: 0 of 15, against A0's 12 of 84 (14.3%)** — the defect this file calls the thing a clinic notices first did not occur once, though 15 turns is a small sample and it is not being declared fixed. Two stages remain above A0 and both are the known covered-vendor cost, unchanged in shape: `stt_endpoint_ms` 620 → 1,100 (+77%) and `tts_ttfb_ms` 92 → 1,285 (+1297%). **The report itself needed two fixes found only by running it for real**, both in spawning gcloud on Windows: `execFileSync("gcloud")` gives a bare ENOENT because gcloud is a `.cmd` shim, and naming `gcloud.cmd` then gives EINVAL because Node 22 refuses to spawn `.cmd` without a shell (CVE-2024-27980) |
+| **TWO LIVE CALLS, 2026-08-25: THE RESCHEDULE WORKED, THE TEXT-CHANNEL BUG FIRED, AND THE SANITISER CAUGHT IT** | 2026-08-25 (revision `voice-us-staging-00022-rhj`, `voice:78c0019`) | **(1) `reschedule_appointment_db` returned SUCCESS** — no invented id, no `IDENTITY_MISMATCH`. Against real UUIDs the flow behaves, which **supports the fixture hypothesis**: the eval's id-invention came from seeding non-UUID ids, not from a live defect. The not-found/not-yours conflation stays parked and unproven in production. **(2) `text_channel_tool_call` FIRED** — `check_appointment_availability`, `shape: bare_namespaced`, `parseOk: false`. The model wrote its tool call as SPEECH, which is the recorded root cause behind both the "API" leak and the reschedule dead-air. **(3) And `outbound_sanitized` caught it before the caller heard it:** original `"variable: {available:true,requested_at:One moment while I check that for you..."`, and what went down the line was the clean sentence. **The bug is live and the mitigation holds** — the owner reported nothing wrong. **(4) `record_sms_consent` fired again with no disclosure asked**, the second real call to do so; O25 remains parked and still cannot deliver (Messaging disabled, A2P, $0.00 balance). **(5) 47 `phi_access` entries** across the two calls, correctly split by actor and action — §164.312(b) working on real traffic rather than in a test. **(6) The caller's name came back wrong again**, which is C5b's measured Google STT finding and not new |
+| **C8'S RLS LAYER IS PROVEN ON CLOUD SQL: 58 PASSED, 0 FAILED — AND THE ROUTING-TABLE GRANT QUESTION IS STILL OPEN THERE** | 2026-08-25 (`voice:61294bd`, execution `vetra-migrate-us-staging-fgxp2`) | Every one of the 11 policy-carrying tables passed the full four-way check against the real database — OWN READ as the positive control FIRST, then CROSS READ, UNSCOPED READ and CROSS WRITE. **Nothing persisted: one transaction, always rolled back**, confirmed by the two seeded tenants leaving no trace. The run also re-confirmed `postgres` on Cloud SQL as `superuser=false, bypassrls=false`. **THE RESIDUAL, and it is the half that found a defect locally:** `business_directory` and `user_directory` were reported **NOT EXERCISED**, because that check asks whether *vetra_app* is refused and `postgres` owns those tables. So the finding that they are granted `arwd` to `vetra_app` — which contradicts the schema's own comment twice over — **is proven on local PG16 and remains UNVERIFIED on Cloud SQL.** Answering it needs a run as `vetra_app`, which needs `postgres` to be a member of that role, which it is not: `SET ROLE vetra_app` returns 42501. That is a deliberate privilege boundary rather than an oversight, so closing this means either a `GRANT vetra_app TO postgres` (weakens the boundary) or a separate connection as the runtime IAM principal (which IS a member). **Owner decision, not improvised** |
+| **C7 IS DONE: A CLOUD SQL BACKUP RESTORES, AND THE DRIFT INDEPENDENTLY CONFIRMED THE DAY'S CALL ACTIVITY** | 2026-08-25 (backup `1787562000000` of 2026-08-24 09:00, restored and compared, execution `vetra-migrate-us-staging-fr6bl`) | **13/13 passed, exit(0), restore wall clock 341 s** — which is the recovery-time number §164.308(a)(7) wants beside "it worked" and which nobody had ever measured. Schema identical across 15 tables, 140 columns, 11 functions, 4 triggers, 14 policies and 57 grants; migration head 037 on both; 8 tenants on both; **every FORCE-RLS table came back still forced**, which is the check a row-count comparison would have called a total success either way. CMEK verified identical on the restored instance — an instance property invisible to SQL, so it has to be asked of gcloud while the instance still exists. **THE DRIFT IS THE PRETTIEST PART:** 51 rows, all in the legal direction, and itemised as `calls` −2, `appointments` −1, `sms_consents` −1, `phi_access_log` −47 — **exactly the two live calls made that morning**, whose 47 `phi_access` entries had been counted independently from Cloud Logging an hour earlier. Two unrelated instruments agreeing is worth more than either alone. **Instance deleted and the deletion VERIFIED by listing** — `sql instances list` shows only `vetra-us-staging`. **Two traps found doing it, both now corrected in the runbook:** a backup ID can only restore into an instance that ALREADY EXISTS (the name form is needed for a new one, and these backups have no name), and **`--edition=ENTERPRISE` is now required** because gcloud defaults new instances to ENTERPRISE_PLUS, which rejects `db-g1-small` outright. **Also worth knowing: a restored instance keeps the SOURCE's postgres `system_identifier`**, so identity had to be established from the postmaster start time — the script carries four discriminators for exactly this reason |
+| **TWILIO HIPAA IS PRICED, AND IT IS $2,000/MONTH — A COMPLIANCE ACCESS FEE ROUGHLY 11× THE ENTIRE GCP STEADY STATE** | 2026-08-25 (Twilio sales, written reply to O5) | **Security Edition: the greater of $7,500/month or 16% of usage. STANDALONE HIPAA ACCOUNT: $2,000/month.** Against a US steady state of ~$180/mo and expected usage of maybe 400–1,200 minutes for one clinic — call it $20–60 of actual traffic — this is a fixed fee for the right to be covered, not a usage price. **It sets a floor on the business model:** at $300/clinic/month it takes ~7 clinics to cover the phone vendor alone, before GCP and before anyone's time. **The spec predicted this exactly** — *"Twilio Security Edition pricing is prohibitive · High, unpriced · Quote in week 1; Telnyx quote as leverage. If it breaks the model, move all tenants — and get written confirmation that Telnyx covers bidirectional media streaming first"* — so the contingency is live rather than new. **GOOD NEWS IN THE SAME REPLY, and it is not small:** Media Streams IS HIPAA-eligible, so the core architecture is covered; toll-free messaging IS BAA-covered, so O25's toll-free path is viable; the legal entity can change from individual to LLC later with the **BAA following the account**, so the LLC-timing decision is unaffected; and regional media edges (IE1) exist, so the UK residency story works. Execution is **1–2 weeks** once an order form and BAA are signed. **UNANSWERED AND WORTH ASKING: is $2,000 per ACCOUNT or per SUBACCOUNT?** There is a parent plus `vetratd_staging` |
+
+| **THE TELEPHONY-VENDOR DECISION HAS TO HAPPEN BEFORE D4, NOT AFTER — OR IT BECOMES A SECOND MIGRATION** | 2026-08-25 (sequencing, derived) | D4 repoints Twilio webhooks and D7 cancels the old stack. If $2,000/month drives a switch to another carrier, discovering that AFTER cutover means migrating telephony a second time, on a live product. **So the alternative quotes are now on the critical path even though the BAA itself is not** — the migration can reach D7 on synthetic data and the owner's own calls without any BAA at all. What the BAA gates is the FIRST REAL PATIENT CALL, alongside the LLC, the clinic BAA and cyber liability. **The make-or-break question for any alternative is technical, not commercial, and the spec already names it: written confirmation that BIDIRECTIONAL MEDIA STREAMING is covered under their BAA.** `<Stream>` appears 5 times in this codebase and the product does not exist without it; price is irrelevant if that answer is no |
+
+| **TWILIO HOLDS RECORDINGS WITH UNLIMITED DEFAULT RETENTION, AND THE RETENTION SCHEDULE DRAFTED THE SAME DAY DID NOT COVER VENDOR-SIDE DATA** | 2026-08-25 | `<Record>` is live — on the **degraded-mode voicemail path**, so it fires when the AI pipeline fails rather than on every call, which keeps the volume low and the sensitivity high. Twilio's reply: *"Default retention is unlimited unless you set a policy."* So every degraded voicemail ever captured is still there. **The retention schedule written earlier that day covers `call_transcripts`, `calls`, `appointments` and the rest and says NOTHING about data held by a sub-processor** — a hole in a document meant for counsel, found by a vendor email rather than by review. Encryption is available at **$0.015/min** for recordings, which at this volume is negligible. **AND A CONCRETE PRE-BAA TASK NOBODY HAD LISTED:** Twilio recommends purging non-compliant historical data — test recordings and Debugger logs from months of development — BEFORE HIPAA is enabled, because the BAA does not reach backwards |
+
+| **⚠ PREMISE CHANGE 2026-08-25: A UK CLINIC AND UK BUSINESS ARE ON THE RADAR, WHICH INVERTS THIS FILE'S US-ONLY RECOMMENDATION** | 2026-08-25 (owner, volunteered) | Recorded as a POSSIBLE premise change rather than a decision — the owner said "might" and "potentially". **But it inverts the standing Lane D recommendation to finish US-only and leave `vetra-uk-prod` dormant**, and it is the second time scope-changing context has arrived casually, which is already a recorded pattern. **WHY UK-FIRST WOULD BE MATERIALLY CHEAPER AND FASTER, and every clause is already established elsewhere in this file:** GDPR has **no covered-products concept**, so an Art. 28 DPA suffices and **the $2,000/month HIPAA fee does not apply at all**; the UK lane **keeps Deepgram + ElevenLabs**, which is the stack that has been serving production for months and is better tested than the covered path; **ElevenLabs streams at 92 ms TTFB against Google TTS's 1,408 ms**, so C5's ~1.3 s/turn penalty simply disappears; there is no A2P 10DLC or toll-free verification maze; `locations/eu` is confirmed to serve `gemini-3.6-flash`; and **the cofounder is UK**. **WHAT IT WOULD COST:** a stack that has never been built (`enable_uk_resources = false`), UK GDPR paperwork, and the standing caveat that **Identity Platform has no residency control** — staff logins are a disclosed transfer under Google's DPA, which must be worded that way and not as residency. **DO NOT BUILD US PRODUCTION UNTIL THIS IS SETTLED** — it starts a ~$98.62/month meter on the lane that may not be first |
+| **`enable_uk_resources = true` PLANNED A DESTROY OF THE STAGING CLOUD SQL INSTANCE, AND THE TRIGGER WAS A DESCRIPTION STRING** | 2026-08-25 (`terraform plan`, read before applying) | The edit this file instructed at U1. Turning the bool on activates `uk-staging` as well as `uk-prod`; `uk-staging` is merged into the `us-staging` PROJECT by `stack_projects`; `network.tf` builds the VPC's `description` from `local.stacks_by_regional_project`, which is derived from ACTIVE stacks; and `description` **forces replacement** on `google_compute_network`. Everything anchored to the network id goes with it — the `VPC_PEERING` global address, the `google_service_networking_connection`, and finally `google_sql_database_instance.this["us-staging"]`. **`77 to add, 3 to change, 5 to destroy`, and one of the five is the only database in the estate**: 8 tenants, migration head 037, `phi_access_log`, and the data C7's parity run was measured against. **`deletion_protection` is keyed to `has_prod`, so on staging it is false** — correct by design, and it means both of this module's proudly-documented guards would have stood aside. Fixed by making `enable_uk_resources` a LIST OF STACK KEYS; `["uk-prod"]` re-plans as `46 add, 2 change, 0 destroy`. **The transferable part: the size of a `must be replaced` is not proportional to the diff that caused it.** A cosmetic string on one resource replaced a database four edges away, and the only place it was visible was plan output nobody is obliged to read line by line. **Follow every `must be replaced` to what depends on it.** |
+| **BOTH C-1 AND C-12 WERE SINGLE GLOBAL BOOLS IN A DESIGN WHOSE ENTIRE POINT IS THAT THE LANES ARE INDEPENDENT** | 2026-08-25 | `enable_prod_databases` created the prod database in EVERY prod project (`!has_prod || the_bool`), so Lane U's one wanted instance came with `us-prod`'s — ~$197/month for one database. `enable_uk_resources` turned on both UK stacks together, with the consequence above. **The six-project split exists so the lanes can be built, billed and credentialed separately, and two booleans re-coupled them.** Both are now lists — of project keys and of stack keys respectively — each defaulting to `[]`, which is exactly the old `false`. **Each carries a validation that REFUSES an unknown key**, because the failure mode of a list filter is silence: `["uk_prod"]` would plan zero UK resources and read as "it already exists". Sabotage-verified eight ways in an isolated module, with the ACCEPTED arm included to prove the module was not vacuous — see the `dashboard_url` fact for why an isolated validation test that references nothing accepts everything. **Look for the third instance:** any `enable_*` bool consumed by a `for` filter over a multi-lane map has this shape. |
+| **`DEEPGRAM_REGION` IS READ BY THE CODE, DOCUMENTED IN `.env.example`, COVERED BY A TEST — AND SET BY NO TERRAFORM ANYWHERE** | 2026-08-25 (grep of `infra/terraform/*.tf`, then sabotage-verified against the plan) | `lib/voice/sttDeepgram.js:132` defaults it to `"us"`, so the UK production service — **the entire point of Lane U** — would have streamed every caller's audio to `wss://api.deepgram.com`, processed in the United States, while the lane's whole justification is EU residency under an Art. 28 DPA. **Nothing would have surfaced it.** Calls connect, transcripts come back, latency looks right; the only symptom is a false compliance claim. This file listed it under "What is ALREADY BUILT for UK — more than expected" as *"derives itself: `lane == "uk" ? "eu" : "us"`"*, which is a description of `VERTEX_LOCATION`, the env var immediately beside it in `cloud-run.tf`. The module's own docstring says the value is *"set per Cloud Run service in B4"*; **B4 set `STT_LOCATION`, `VERTEX_LOCATION` and `DEEPGRAM_API_KEY`, and not this one.** `tests/deepgramRegion.test.js` passes and always would have: it proves `deepgramEnvironment()` returns the EU host **when the variable is `"eu"`** — the function, never that anything sets it. **The fourth instance of green tests around a function nothing calls correctly**, after `eval/run.js`'s guard, `phiAuditCoverage` not covering the dashboard, and `check:credentials` pointing at an empty project. Fixed in `cloud-run.tf`; sabotage-verified by deleting the env block and re-planning — `DEEPGRAM_REGION` occurrences drop to **0** while `DEEPGRAM_API_KEY` stays at 1, which is precisely the state that would have shipped: **the credential present and the endpoint wrong.** |
+| **A CLOUD RUN SERVICE HERE ANSWERS ON TWO HOSTNAMES, AND `uri` RETURNS THE ONE TWILIO MUST NOT HAVE** | 2026-08-25 (`run.googleapis.com/urls` on the live service) | Both `voice-us-staging-536266051432.us-central1.run.app` (project-number) and `voice-us-staging-7aaa2qfltq-uc.a.run.app` (opaque hash) serve the same revision. `google_cloud_run_v2_service.uri` and the console show the **hash**; `BASE_URL` inside the container is the **project-number** form, because that is the one Terraform can compose before the service exists. The Twilio signature is an HMAC over the FULL URL and `server.js` rebuilds it from `BASE_URL`, so pasting `uri` into the webhook produces **403 on every request, including genuine ones** — indistinguishable from a wrong auth token, and the exact failure shape this file records from `import * as twilio`. `cloud_run_services` now emits **`twilio_webhook_base`** beside `uri` with the reason attached. **Two hostnames that both resolve is worse than one that does not: there is no 404 to tell you.** |
+| **A NEW PROJECT NEEDS FIVE SECRET VALUES, NOT THE TWO LANE U LISTS — AND THEY CANNOT BE PUSHED BEFORE THE FIRST APPLY** | 2026-08-25 (`terraform output secrets_awaiting_values`) | U2 reads *"Deepgram + ElevenLabs keys into Secret Manager · Both secrets are already declared; only the values are missing."* True of the `us-staging` PROJECT, which already holds valued `twilio-auth-token`, `twilio-account-sid` and `smtp-password` from the US lane. **`vetra-uk-prod-c3a3bd` holds none of them** — `runtime_secrets` marks those three `lanes = ["us","uk"]`, so all five are created there and all five are empty. Cloud Run **refuses a revision referencing a secret with no version**, so `google_cloud_run_v2_service.this["uk-prod/voice"]` fails at create. **And the ordering is circular as written:** the secrets do not exist until the apply creates them, so the sequence is `terraform apply -target='google_secret_manager_secret.runtime'` -> add five versions -> full apply. Same shape as the migrate-job ordering. **The Twilio pair must belong to the account that will own the UK number**, for the same reason `twilio_sms_from` is keyed per stack. |
+| **THE UK PROD VOICE SERVICE HAS NO CALLER ALLOWLIST, BECAUSE THE ALLOWLIST IS KEYED TO `env == "staging"`** | 2026-08-25 (read from the plan) | `CALLER_ALLOWLIST` is wired only for staging stacks, which is correct for production and worth stating out loud because **Lane U's `uk-prod` is being built as a DEMO rather than for production traffic.** Anyone who learns the number reaches the receptionist — a valid Twilio signature is what dialling produces. That is the intended behaviour for a sales asset a lead is meant to ring, and it is a different posture from every service currently running in this estate. Recorded rather than changed. |
+| **THE UK IS NOT IN `in:eu-locations`, SO THE ENTIRE UK LANE WAS FORBIDDEN FROM BEING BUILT IN LONDON** | 2026-08-25 (the first apply that ever created anything in a UK project; then measured against the effective policy) | `Constraint constraints/gcp.resourceLocations violated for [orgpolicy:projects/693741698596] attempting to create a secret in [europe-west2]`. **`in:eu-locations` is Google's value group for the EUROPEAN UNION and `europe-west2` is LONDON. The UK left the EU.** Measured rather than reasoned: the effective policy on `uk-prod` expands to **66 values, 36 of them `europe-west*`, and NOTHING matching `west2` appears anywhere** — what is allowed is europe-west1/3/4/8/9/10/12 (Belgium, Frankfurt, Netherlands, Milan, Paris, Berlin, Turin), every one an EU member state. **This blocked EVERY regional resource in the lane, not just the secret the apply reached first:** Cloud SQL, Cloud Run, the KMS key ring and the subnet would each have been refused in turn. **Latent since B0w wrote the org policies** and structurally unreachable while `enable_uk_resources` was off, so no amount of planning would have surfaced it — `terraform plan` does not evaluate org policy. **Owner chose to keep London and widen** (`in:europe-west2-locations`, which adds the region and its three zones and nothing else) rather than move to europe-west1, which would have needed no policy change and cost ~10 ms: moving turns *"your data is in London"* into *"your data is in Belgium, which the UK recognises as adequate"*, and the UK residency claim is what makes this lane a sales asset. This file already carries one claim downgraded to a disclosed transfer (Identity Platform); a second voluntary downgrade to save a one-line edit is a poor trade. **The general lesson: a value group is a POLITICAL boundary with a geographical-sounding name, and `eu` stopped meaning `europe` in 2020.** |
+| **AND ONE LEVEL DOWN, THE SAME TRAP: CLOUD SQL BACKUPS WENT TO THE `eu` MULTI-REGION, WHICH IS ALSO EU-ONLY** | 2026-08-25 | `sql.tf` set `backup_configuration.location` to `startswith(region, "europe") ? "eu" : "us"`. So even after London was permitted, a London instance's backups would have landed in the EU multi-region — **outside the UK, and a backup is a full copy of the same PHI.** The instance would have satisfied a residency claim its own backups quietly broke. Now pinned to the instance's own region. **The trade is stated rather than hidden:** a multi-region backup survives one region failing and a regional one does not, which is an availability choice — and it is the same one C-5 already makes for the instance itself (ZONAL, on the reasoning that §164.308(a)(7) asks for backup and recovery rather than uptime). Buying multi-region durability for the backups of a zonal instance protects the copy better than the original. **Also changes `us-staging` in place**, `us` -> `us-central1`, a single-field patch on a live instance with no jurisdictional consequence either way. |
+| **`gcp.resourceLocations` IS ENFORCED PER SERVICE, AND CLOUD LOGGING IS NOT ONE OF THEM** | 2026-08-25 (found while chasing the Brexit finding) | **Two log buckets already sit in `europe-west2` inside `vetra-shared`** — a project whose location set has never permitted europe-west2, before or after today's widening of it. They were created despite the policy, not because of it. So the sentence this file and `locals.tf` both carry — *"they are the enforcement behind the entire two-region design: creating a resource in the wrong continent is an API rejection rather than a code review"* — is true of the services the constraint covers and **silently false everywhere else.** The gap fails OPEN and emits nothing. Benign here (the buckets are where we wanted them anyway, and `logging.tf` targets `var.uk_region` deliberately), and it is the same shape as `check:credentials` pointing at an empty project and `phiAuditCoverage` not reading the dashboard: **a control that is correct about its subject and blind to the rest, where the blindness is invisible from inside.** |
+| **AN ORG POLICY CHANGE IS NOT EFFECTIVE WHEN THE API SAYS IT IS — AND TERRAFORM WILL HAPPILY APPLY BOTH HALVES IN ONE RUN** | 2026-08-25 (three attempts) | The apply that widened the three `gcp.resourceLocations` policies reported **`Modifications complete after 0s`** for all three and then failed to create five secrets in the very project it had just widened, with the byte-identical constraint error. Reading the policy back showed `europe-west2` plus all three zones already in the effective expansion — **so the policy READ is consistent long before the ENFORCEMENT is**, and the read is not evidence. This is the same ~15-minute propagation this file records for the Domain Restricted Sharing exception, in a second constraint, and it means **any plan that both changes an org policy and creates a resource that policy governs cannot succeed in one apply** — Terraform's graph orders them correctly and the ordering is not the problem. Deliberately handled by retrying rather than a `time_sleep`, for the reason already recorded for the Cloud SQL service-agent race: a fixed delay is either too short on a bad day or wasted on every good one. |
+| **THREE MODULE-LOAD `twilio()` CONSTRUCTIONS MEAN A MALFORMED `TWILIO_ACCOUNT_SID` CRASH-LOOPS THE WHOLE VOICE SERVER BEFORE ANY BOOT CHECK RUNS** | 2026-08-25 (hit it on the first UK apply, then proved both directions in a Node subprocess) | `services/notifications.js:56`, `services/twilioNumbers.js:10` and `services/twilioRecordings.js:25` each call `twilio(SID, TOKEN)` at MODULE LOAD. The SDK's `setAccountSid` throws unless the value `startsWith("AC")` — no length check, just the prefix — so a bad SID is an uncaught throw during ESM import. **`lib/bootChecks.js` never runs, the port never opens, and Cloud Run reports `The user-provided container failed to start and listen on the port`**, which reads as a networking or timeout problem. The one legible line is nine frames down a stack trace. The boot-check system exists precisely to turn misconfiguration into a readable notice and this route bypasses it entirely. `lib/voice/session.js:1971` constructs one INSIDE a function and is therefore fine. **Found by pushing a placeholder after checking `bootChecks.js` and `server.js` for format validation and finding none — the right question asked at the wrong layer.** PARKED: the fix is lazy construction, it is not on the U-path, and the real credential makes it moot. |
+| **THE TWO-HOSTNAME FINDING REPRODUCED ON A BRAND-NEW SERVICE, WHICH SETTLES IT** | 2026-08-25 (`voice-uk-prod`, minutes old) | `status.url` / `.uri` returns `https://voice-uk-prod-qhzniq36wa-nw.a.run.app`; the container's own `BASE_URL` and the webhook URL it prints at boot are `https://voice-uk-prod-693741698596.europe-west2.run.app`. **Both forms, on a service created today**, so this is not a legacy artefact of the older projects — Cloud Run issues both, always. The Twilio signature is an HMAC over the exact URL and `server.js` rebuilds it from `BASE_URL`, so `terraform output cloud_run_services` now labels them `twilio_webhook_base` and `uri (DO NOT USE)`. |
+| **PITR RUNS ON A SHARED-CORE `db-g1-small`, AND THE UK PILOT IS THEREFORE FULLY BACKED UP AT ~$30/mo** | 2026-08-25 (`sql instances describe`, post-create) | Recorded as the one unverified setting in the U1 plan, because staging is `db-g1-small` with PITR OFF and no production instance had ever existed, so nothing in the estate demonstrated the combination. It works: `pointInTimeRecoveryEnabled: True`, `transactionLogRetentionDays: 7`, `location: europe-west2`, `availabilityType: ZONAL`, CMEK bound to `vetra-sql-uk-prod`. **So the pilot tier is not a compliance compromise** — §164.308(a)(7)'s backup half is satisfied at pilot cost, and the tier can be raised later with a restart rather than a migration. |
+| **A STALE `gcloud auth` PYTHON CHILD HELD localhost:8085 AND MADE EVERY LATER LOGIN FAIL AS A CSRF WARNING** | 2026-08-25 (netstat, after three failed attempts) | `gcloud auth login` and `application-default login` redirect the browser to `http://localhost:8085/` and listen there. A first attempt that was backgrounded on a 120-second timeout **returned exit 1 while its bundled-Python child survived and kept LISTENING**. Every subsequent attempt's browser callback was therefore answered by the DEAD flow, whose `state` differs, producing `(mismatching_state) CSRF Warning! State not equal in request and response` — an error that blames the browser and names nothing real. `netstat -ano | grep 8085` showed `LISTENING PID 38836`, a gcloud python started at the exact minute of the abandoned attempt; killing it made the next login succeed immediately. **The general rule: an OAuth loopback failure is a PORT question before it is a credential question**, and any auth command run under a timeout can orphan the listener that the retry then collides with. Do not run interactive auth through a harness that will background it. |
+| **PRODUCTION SUPABASE IS SEVERAL MIGRATIONS BEHIND, AND ONE OF THE MISSING TABLES IS THE AUDIT TRAIL** | 2026-08-25 (PostgREST probe of all 13 tables) | Present: `businesses`, `business_capabilities`, `calls`, `appointments`, `call_transcripts`, `customer_requests`, `users`, `integrations`. **ABSENT: `knowledge_base`, `sms_consents`, `phi_access_log`, `business_directory`, `user_directory`.** `businesses` carries **32 columns** against the repo's schema — no `locale` (025), no `compliance_tier` (028). So the live production database predates migrations 025, 028, 029, 033/034, 036 and 037. **The consequence with teeth: `phi_access_log` does not exist in production, so the §164.312(b) audit trail this file has been building and testing covers the GCP lane and NOTHING that is serving patients today.** That is an argument for the migration rather than a defect in it, and it belongs in the D3 checklist: a `pg_dump` of this database restores a schema five migrations old, and `--init-if-empty` will NOT fix it because the database is not empty. |
+| **`businesses.timezone` HAS NO DATABASE CONSTRAINT — ONLY THE DASHBOARD API VALIDATES IT** | 2026-08-25 (found by a rollback test that assumed the opposite) | `pg_constraint` on `businesses` carries exactly two CHECKs — `locale` and `compliance_tier` — and nothing for `timezone`. A test written to prove `import-tenant.js` rolls back on a bad write used `timezone: "Not/AZone"` and **the row inserted successfully**. The dashboard's `ALLOWED_TIMEZONES` list is the only gate, and any direct-to-database path — this import, Cloud SQL Studio, a future D3 restore — bypasses it entirely. The damage would surface far from the cause: wrong opening hours, mis-phrased dates, `isBusinessOpen()` comparing against a zone that does not exist. Now validated in the script against the real IANA database via `Intl.DateTimeFormat`, with four real zones asserted to still pass so the guard cannot be a blocker in disguise. **The test was wrong and the schema was the finding.** |
+| **NO PRODUCTION TENANT HAS `sms_followup_enabled` — OWNER ITEM #7, OPEN SINCE SESSION 11, CLOSED BY ONE QUERY** | 2026-08-25 | All nine production businesses return `sms_followup_enabled = false`. **So deploying O25's consent gate changes nobody's behaviour**, and the worry recorded three times in this file — that a tenant's caller texts would stop until somebody said yes on a call — does not arise. It stayed open only because earlier sessions could not reach the production Supabase; the credentials were in `.env` the whole time. **Worth remembering the shape: a question parked as "needs the owner" for four sessions was answerable from this workstation.** |
+| **THE SUSPENSION RECURRED, IT IS SCOPED TO THE OWNER RATHER THAN THE WORKLOAD, AND THE EVIDENCE STORE WENT DOWN WITH IT** | 2026-08-25 (email + console banner + per-project probe) | Four projects suspended within hours of the UK stack going live: `vetra-uk-prod`, `vetra-shared`, `vetra-us-prod`, `ultra-glyph-506120-v5`. **Two of them are EMPTY**, which is what made a billing cause look likely — and the billing account is **Active, $0 spend**, so it is not billing. The banner settles the mechanism: *"detected for multiple projects **you own**"*. **An AUP action attaches to the OWNER and sweeps their projects, so an empty project's suspension says nothing about that project.** `vetra-us-staging` was spared, which means the sweep is not even complete across one owner's estate. **THE EXPENSIVE PART: the org-node log sinks write into buckets in `vetra-shared`, and `vetra-shared` is suspended**, so the audit evidence that carried the 2026-08-22 appeal is unreachable precisely when it is needed. This file recorded that org-node sinks *"survived the suspension of the thing that produced them"* — true then, because the sink's HOST was healthy; **the property is not that sinks are safe, it is that the sink's host must not be in the same blast radius, and this time it was.** A sink host that is also the shared services project is a single point of failure for incident evidence. **And "repeated" appears again:** Google states prior notices were sent, Essential Contacts now resolves to a proven address, so the mailbox should be searched for a warning — a warning received and ignored is a different appeal from one that went nowhere. |
+| First clinic: **Excel Cardiac Care PLLC**, Texas, **ONE** covered entity across two sites (Keller 76244, Decatur 76234). Runs **athenahealth** for everything. Medicare + Medicaid. 8–5 M–F, closed weekends | 2026-08-20 | **One BAA, one `businesses` row**, location as an attribute. Not CA → no CIPA, no AB 3030. Cardiology only → 42 CFR Part 2 near-certainly `n/a`. After-hours + lunch + multi-site routing is the product. |
+
+---
+
+## Non-negotiable contracts
+
+These survive every schedule pressure. If one is about to be waived, stop and escalate instead.
+
+- **Zero-assertion-edit (A3).** After the data-layer rewrite the root suite is green with **zero
+  edited assertions** in the 6 module-boundary mocks. A failing assertion there means the
+  **adapter** is wrong. Fix the adapter, never the test.
+- **Negative tests must fail first (A2).** Cross-tenant negative tests are written *before* the
+  data-layer rewrite and must demonstrably **FAIL** against the current service-key client. A
+  negative test that passes on day one is testing nothing.
+- **Never push while a probe is running.** A push is a deploy is a restart. A prior probe returned
+  zero turns from twelve calls because a docs commit landed 52 seconds before it dialled.
+- **Never certify concurrency from a single call.** ≥5 concurrent, per region, both regions
+  independently.
+- **A gate built only from negative cases is not a gate.** Three tests proving a webhook refuses
+  bad signatures passed for months while it refused GOOD ones too — the subsystem was entirely off
+  and every recorded 403 was consistent with that. **Every guard needs at least one test that the
+  allowed path is ALLOWED.** Refusal is only meaningful next to a demonstrated acceptance.
+- **Code that cannot be imported by a test will be "tested" by reading its source, and a source
+  scan describes shape rather than behaviour.** When the only available check is a text match,
+  that is the signal to extract the logic, not to write a cleverer regex.
+- **Silent failure is a defect class, not a nuisance.** Any subsystem disabled by missing config
+  must announce itself loudly at boot. Two live features looked working and were not.
+- **NOTHING REACHES RAILWAY.** `main` is Railway's auto-deploy branch, so **never merge or push
+  to `main`.** All Lane A work accumulates on branches and ships to **GCP**, never to Railway.
+  Railway's code is frozen at `f285351` until D7 turns it off. **While the repo is public, push
+  nothing at all** — a branch push publishes a commit message explaining a vulnerability that is
+  still live on `main`.
+- **A green suite says the parts are right, not that the door opens.** B3 shipped with the
+  root suite at 2,189, the backend at 111, the frontend at 29 and `vite build` clean — and the
+  login button did nothing, because the submit handler shadowed its own import and called
+  itself. Before calling any user-facing change done, **use it**: press the button, dial the
+  number, sign in. Three separate defects in B3 were found that way and none by a test.
+- **Any migration that changes a function BODY must be folded into `database/schema.sql` in
+  the same commit**, and the text-level guard cannot check that for you — `pg_get_functiondef`
+  can, and `tests/db/schemaParity.test.js` now does. schema.sql is the fresh-install and
+  restore path; a body left behind there is a D3 that comes back a version old and silent.
+- **The hard line.** No real patient call until **LLC + clinic BAA + cyber liability** all exist.
+  One gate, not three. Everything before it runs on synthetic data and the owner's own phone.
+
+---
+
+## Hard orderings
+
+Only four. Everything else in Lane A is order-insensitive and can be reshuffled around a blocked item.
+
+1. **A0 before everything.** A baseline captured after the first change is worthless.
+2. **A1.1 before A1.2/A1.3.** Deleting a leak path is faster than fixing one and carries no risk
+   of a subtle bug.
+3. **A3 before A5.** DSR endpoints are built on the new data layer.
+4. **B0 apply before B1–B5**, and **B1 runs first** once projects exist.
+
+---
+
+## Lane A — application code · no GCP dependency
+
+Branch plan: **A1 ships on its own branch off `origin/main` and merges to `main` early**, decoupled
+from the migration — those are live defects whose value does not depend on GCP happening. A2–A10
+go on `feat/gcp-lane-a`.
+
+| # | Work | Status | Gate | Evidence |
+|---|---|---|---|---|
+| **A0** | Latency + eval baseline before any change | `done` | Baseline p50 and eval aggregate recorded below | **DONE 2026-08-20.** Probe `run-2026-08-20T19-06-18-056Z` 12/12, probe p50 **2,611 ms** / p95 **7,793 ms**. Eval ×2: hard **37/37** then **36/37**, judge 31/37 both. Reports: `eval/results/2026-08-20T19-33-53-623Z.json`, `...T19-38-58-991Z.json`. Full table + findings below |
+| **A1.1** | **DELETE** Google Calendar sync (worker, write path, `routes/calendar.js`, OAuth flow, `services/calendarSync.js`). **Keep** `calendar_connections` + migration 021 columns | `done` — branch only | No code path can write to a Google Calendar. No dead calendar UI in the dashboard | **`feat/gcp-lane-a` @ `05af949`.** 1,009 deletions / 109 insertions. Route module, sync service, the 90s `setInterval` worker, `CalendarSection.jsx`, its App.jsx state, 27 i18n strings. Gate is `calendarRemoved.test.js`, **12 assertions all watched failing first**: five routes 404, both modules absent from disk, `server.js` free of the word calendar, no file under `src/` naming the Calendar API, its OAuth scope, `GOOGLE_CLIENT_SECRET`, `calendar_connections` or `oauth_states`. Dashboard backend 8/82, frontend 4/17 + clean `vite build`, root 83/1707 unchanged |
+| **A1.2** | Notifications — boot-time config assertion (`sendEmail:111`, `sendSms:131` currently return silently) | `done` — branch only | Server refuses to boot silent-broken | **`39d472e`.** New `lib/bootChecks.js`. **FATAL** (refuses to boot): `smtp_half_configured`, `sms_from_without_client`, `sms_from_not_e164`, `notifications_forced_on_with_no_channel`. **ANNOUNCE** (boots, says so loudly): the per-channel and off states. Where that line sits is the design decision and it is stated in the file — FATAL is configuration with no reading in which the operator got what they asked for. **`TWILIO_ACCOUNT_SID`+`TOKEN` without `TWILIO_SMS_FROM` is announced, never fatal, because those are also the VOICE credentials** and refusing there takes the receptionist off the air to protect a notification. Second half in `services/notifications.js`: a drop the boot check cannot see (it depends on per-tenant rows) logs `notification_dropped` carrying neither recipient nor subject. The real `.env` boots clean with zero findings |
+| **A1.3** | Notifications — link-only content (formatters `:173-237`, subjects `:256`/`:297`, Brevo digest `appointments.js:101-159`) | `done` — branch only | No PHI in any body or subject. **Email leaves HIPAA scope — no Brevo BAA ever needed** | **`abce612`.** Every owner message is business name + event kind + link. Gone from bodies AND subjects: patient name, phone, appointment time, notes, message text, the AI summary. The Brevo digest is now `count(*)` — **not selecting the columns is the point**; a query that never fetches a name cannot send one, and a test asserts the SQL itself. Tests are written as a PROPERTY: each notification rendered with PHI sentinels, none may appear anywhere. **New env `DASHBOARD_URL`, deliberately no default** — a hardcoded fallback is how a link quietly starts pointing somewhere wrong. Unset is announced at boot |
+| **A1.4** | Error-tracker allowlist at the `captureException` boundary (`lib/sentry.js:21-23`, `notifications.js:364`) | `done` — branch only | No PHI-typed field reaches the error tracker | **`e269193`.** Allowlist of 7 correlation keys: callSid, requestId, businessId, context, table, op, kind. **Allowlist, not denylist** — a denylist is wrong in the silent direction, since the first time a new PHI-bearing key is passed it ships. Dropped keys are reported by NAME under `dropped_context`: a field name is not PHI, and a thin event must not read as a complete one. Tag values capped at 256 chars. Three call sites in `notifications.js` also stopped producing `to`/`subject`/`toNumber`, so the boundary stays a backstop rather than the only guard |
+| **A1.5** | Close the four business-scoped routes | `done` — **branch only, NOT merged** | **`fix/a1-5-unauth-endpoints` @ `0836165`.** 2 deleted (zero callers), 2 guarded by `requireBusinessAccess` (401 anon / 403 cross-tenant). Root cause: `numberAPI.js` **always** sent `Authorization: Bearer`; the server never read it. 13 new tests, each branch watched to fail. **Zero assertion edits** in `phone-numbers-api.test.js`. Full suite **83 files / 1707 tests green**. Voice path untouched — `/twilio/*` byte-identical, `services/supabase.js` purely additive, boot verified | Unauthenticated request returns 401 — never data, never a purchase. Tests in the shape of `tests/callersRoute.test.js` | |
+| **A1.6** | Block tenant webhooks in `hipaa` mode without a recorded downstream BAA (`integrations/webhook.js:89-96`) | `done` — branch only | `hipaa` mode cannot dispatch a webhook without a recorded BAA | **`61a99b2`.** Migration **027** adds `integrations.baa_recorded_at` + `baa_reference` — on `integrations`, not `businesses`, because the agreement is with THAT endpoint's operator, so one tenant can have a covered webhook and an uncovered one. No backfill: every row NULL, which is the correct direction to fail. New `lib/deploymentMode.js`, deliberately minimal so **A6 builds on it rather than around it**. Unset defaults to `standard`; a SET-but-unrecognised value is **refused at boot**, because `DEPLOYMENT_MODE=hippa` would run as standard with every protection off while reading as though it enabled them. The refusal sits **before the DNS lookup** — a blocked request must not resolve the hostname either. Model-facing `error` is caller-neutral; the diagnosis goes to `reason` and a log line, neither of which anything speaks aloud |
+| **A1.7** | Log scrubbing (`lib/logger.js:63-79`; leaks at `session.js:2714`, `server.js:327`) | `done` — branch only | **CI check fails the build** when a PHI-typed field can reach a logger or error tracker | **`302be9f`.** `tests/logPhiLint.test.js` scans every `log.*` and `captureException` call in the repo. **The ledger named 2 leak sites; the lint found 13.** New `lib/phiFields.js` is one list with two consumers — the lint, and a runtime redactor in `lib/logger.js` for what a source scan cannot see (spreads, computed keys). Judgement calls stated in code: `callSid` and `businessPhone` stay; `message` is deliberately NOT listed or every `catch` gets redacted; `requireBusinessAccess` now logs `userId` not `email`; `server.js:372` keeps `recordingUrl` as a **known exception**, because that log is the only place an unrouted voicemail exists. Also fixed a pre-existing crash — a cyclic fields object threw out of `log.info` |
+| **A2** | Local PG16 + a migration runner + `schema_migrations`, import 002–027 as-is. Fix stale `schema.sql:7,16` header. **Cross-tenant negative tests written first** | `done` — branch only | Negative tests demonstrably **FAIL** against the current service-key client | **`f094f9b`.** `infra/docker-compose.dev.yml` runs PG16.15 on port **55432**, so a developer's system Postgres need not be stopped — a migration aimed at the wrong database fails in the way that matters, which is that it succeeds. **`node-pg-migrate` deliberately NOT used**, reasons in `scripts/migrate.js`: adopting it means rewriting 26 files whose whole value is being a faithful record, down-migrations would be fiction, and **checksums** are the feature this repo needs and it lacks. **19 negative tests, all RED**, which is the contract. They assert SQL rather than the data layer so they keep meaning the same thing after A3. Also assert **FORCE** row security, not just ENABLE — without FORCE the table owner is exempt, and the owner is who a naive connection string connects as — that a cross-tenant UPDATE affects 0 rows, and that a connection with NO tenant set sees nothing rather than everything. Behind `vitest.db.config.js`, skipping when `DATABASE_URL` is unset. New scripts: `db:up/down/migrate/status/reset`, `test:db` |
+| **A3** | `services/supabase.js` → `services/db.js` on `pg` | `done` — branch only | **Root suite green, ZERO assertion edits** in the module-boundary mocks | **`1a9ad88`.** 33 data functions + `close()`, every signature and return shape unchanged. **Contract met:** all 9 module-boundary mocks pass with only their `vi.mock` target retargeted. The ~250 lines of pure code (task model, `applyCapabilityRows`, `loadConfig`) were **SPLICED byte-identically** by a build script rather than retyped — retyping is how a transcription slip becomes a behaviour change invisible in a 1,200-line diff. The two PostgREST embeds became a correlated subquery + `json_agg`, keeping the ONE round trip on the pickup path **and** the fallback for an un-migrated database that a naive JOIN would silently lose. `statement_timeout` replaces the fetch timeout and is strictly better: an aborted fetch abandons the response, Postgres cancels the statement. **The database corrected me** — the status guard's `IS DISTINCT FROM` was justified with a NULL case that `calls.status NOT NULL` makes unreachable; the operator stays, the comment now says why, and a test pins the constraint. The 5 client-boundary files were the expected rewrites, split by what each can honestly answer: query shape against a `pg` mock, and the **clobber race against real Postgres** (the old mock simulated Postgres UPDATE semantics in JavaScript, which proved things about the mock) |
+| **A4** | `callState` → store interface + in-memory adapter + **multi-process local test** | `done` — branch only | Status handler on a *different* process produces the summary, fires the missed-call notification, tags spam correctly | **`330cb8d`.** The shared slice is **three fields** — `dbCallId`, `businessId`, `sawCallerFinal` — because three is what `/twilio/status` reads. Sharing the history or the step would mean a write on a TURN boundary, and the property that makes this free is that nothing is written per turn (A0: 2,611 ms p50, LLM already 42% of it). `sawCallerFinal` is a **latch**, published only on the false→true transition. The gate runs **two real OS processes** sharing a file, because state that looks shared while it is really the same Map is exactly what a single-process test cannot see; the reader asserts it has no local state before reading. A negative test puts a fake WebSocket, an audio queue and a full history on local state and asserts none of it reaches the store. **Sabotaged `writeShared` to a no-op and watched 6 of 12 fail** before trusting it |
+| **A5** | GDPR DSR caller-level export + erasure + admin path (needs A3) | `done` — branch only | Export returns every PHI-bearing row for a caller; erasure leaves none | **`f30ec96`.** `GET /api/businesses/:id/callers/:phone/export` and `DELETE .../:phone`, both behind `requireBusinessAccess`, both asserting 401/403 happen **before** the database is touched — a 403 issued after the delete would pass a status-code assertion and still have destroyed another clinic's transcripts. **The phone match is the whole feature:** last ten digits, one shared rule, because the same number is stored four different ways. The fixture spells the subject's number four ways and **sabotaging the matcher to exact equality fails 4 cases including "leaves no trace"** — i.e. erasure would have silently left PHI behind. Erasure keeps the non-identifying skeleton (transcripts deleted; calls/appointments/requests nulled) in ONE transaction. **HIPAA-vs-GDPR retention tension flagged for O18 counsel, deliberately not decided in code** |
+| **A6** | `DEPLOYMENT_MODE` guard, `businesses.compliance_tier`, boot credential assertion, per-call tripwire, mode-aware TTS fail-closed | `done` — branch only | `hipaa` mode cannot construct a non-covered vendor client **including with the breaker open** | **`3cfed0a`.** **This row said `todo` with an empty Evidence cell until 2026-08-21 — it was already done, and session log row 5 says so. Corrected by reading the commit and the code, not the table.** Migration **028** adds `businesses.compliance_tier`; `lib/compliance.js` holds `assertVendorAllowed`, `effectiveTier` and `nonCoveredCredentialsPresent`. The guard sits at CLIENT CONSTRUCTION, not provider selection — the TTS layer alone has three ways to change provider (a per-business column, a `forceFallback` argument, and a circuit breaker that flips mid-call), so a guard in any one of them is a guard with three doors beside it. That is what makes the gate's "including with the breaker open" satisfiable. `effectiveTier()` takes the STRICTER of deployment and tenant, because a tenant row is data and a `standard` row must not be able to relax a `hipaa` deployment. |
+| **A7** | Dockerfiles ×2 (root ESM, dashboard backend CommonJS) | `done` — branch only | Both images `docker build` + `docker run` and serve locally | **`2fc7a27`.** voice **520MB** (`GET /` → 200), dashboard **356MB** (`GET /health` → 200), both as user `node`, no devDependencies, no `.env`, no tests. Root image names every directory it copies rather than `COPY . .` — an exclusion list fails open. Caught by checking rather than assuming: the dashboard image **did** ship `src/__tests__`; now excluded and removed. **NORTON REACHES INSIDE DOCKER** — `npm ci` failed with "Exit handler never called!", which is really `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; reproduces on a bare `npm install express`. Fixed with a BuildKit **secret mount** so Cloud Build passes nothing and no cert is baked in |
+| **A8** | Vertex: `services/gemini.js:132` → `{ vertexai: true, project, location }` + ADC. Port `geminiCache.js` (`cachedContent` is **mutually exclusive with `systemInstruction` and `tools`**) | `done` — branch only, **UNVERIFIED by construction** | **Code only — cannot be verified before C1** | **`d71b170`.** **New finding, and it is a compliance boundary:** the API-key path is the **Gemini Developer API (AI Studio), which is NOT a Google Cloud service and so is NOT covered by the GCP BAA.** An uncovered LLM call carries the caller's entire utterance — the largest single disclosure available in the stack. `hipaa` mode now refuses it at construction. Vertex takes **no API key** (ADC). **Explicit opt-in via `VERTEX_ENABLED`**, not inferred from `GOOGLE_CLOUD_PROJECT`, which Cloud Run injects automatically — otherwise deploying would silently switch backends. Refuses rather than falls back on a half-configured Vertex. **`geminiCache.js` needed no port** — it already puts tools INTO the cache; a test now pins that. No Vertex call has been made from this code |
+| **A9** | Fast-forward `origin/main`. CORS allow-lists (`server.js:91-99`, dashboard `:27-39`), drop `VERCEL_URL` fallback, self-host Google Fonts | `done` — branch only | Suite green; no external font request in the built bundle | **`7a75539`.** Fonts self-hosted: 10 woff2, 316KB, same-origin. Gate met by grepping `dist/` after a real `vite build`. `scripts/fetch-fonts.sh` regenerates and documents the trap — **Google serves a different stylesheet per User-Agent**, and curl's default gets legacy formats. CORS: **the Vercel preview domain is removed from the defaults** — D7 cancels the account and a released `*.vercel.app` subdomain can be claimed by anyone, which would hand a stranger a cross-origin foothold against an authenticated session; localhost is now dev-only; and both servers read **one** variable name (`CORS_ORIGINS` — the voice server read `CORS_ORIGIN`, a silent D1-class drift). **Two items were already done:** `VERCEL_URL` died with A1.1's calendar deletion, and the `origin/main` fast-forward is a no-op (verified by `git merge-base --is-ancestor`) |
+| **A10** | Delete `lib/mediaStream.js` (1,079 lines) + the `PIPELINE_V2` hatch | `done` — branch only | Suite green | **`0a1533f`.** 1,085 lines plus the opt-out and stale comments across six files. The hatch was the risk: the pipelines had stopped being comparable (v2 has the LLM turn timeout, take-message fallback, per-business voice, ElevenLabs streaming, multilingual STT, utterance cache, VAD barge-in), so `PIPELINE_V2=false` in an incident would have been a **second, worse incident in code nobody had exercised** — every measurement in this ledger runs through v2. **A rollback path that is never tested is not a rollback path;** the real one is repointing the Twilio webhooks. The test now asserts `PIPELINE_V2=false` is **inert**, so a stale value in a deployment is a no-op rather than a crash |
+
+**Lane A budget: 8–10 days.** A3 carried the variance as predicted. **LANE A IS COMPLETE** — A1.1–A1.7, A2–A10, all on `feat/gcp-lane-a`, stacked on `fix/a1-5-unauth-endpoints` off `origin/main`. **Nothing pushed, nothing merged, Railway untouched.**
+
+| Suite | Command | State (2026-08-21, session 7) |
+|---|---|---|
+| root | `npx vitest run` | **101 files / 1974 tests green** (was 93 / 1921) |
+| dashboard backend | `cd AI-phone-dashboard/backend && npx vitest run` | **10 / 99 green** (was 9 / 92) |
+| dashboard frontend | `cd AI-phone-dashboard/frontend && npx vitest run` | **5 / 29 green** (was 4 / 17), `vite build` clean |
+| cutoff sim | `npm run sim:cutoff` | 2 / 2 green |
+| database | `npm run test:db` (needs `DATABASE_URL`) | **7 files / 93 green** (was 5 / 64). A2's 19 negative tests went green when RLS landed — that was the definition of done for it |
+
+> **The 19 red are the contract, not a regression.** "A negative test that passes on day one is testing nothing." They fail because `pg_policies` is still empty and there is no `vetra_app` role. **Whoever does RLS turns them green — that is the definition of done for it.**
+
+### A0 preconditions — confirmed 2026-08-20
+
+- ElevenLabs quota: **86,000 characters** (a probe run costs ~15k → ~5 runs available)
+- No-push window: **confirmed by owner** for the duration of the probe
+- Railway deploy: **live and answering**
+
+### A0 baseline — record here, never overwrite
+
+Run: `latency-runs/run-2026-08-20T19-06-18-056Z` · 12 calls · 84 server turns · 72 clean probe
+turns · `--script diagnostic` · bootId stable (no deploy mid-run).
+
+| Metric | Value | Captured |
+|---|---|---|
+| **Voice-to-voice p50 (probe)** | **2,611 ms** | 2026-08-20 |
+| **Voice-to-voice p95 (probe)** | **7,793 ms** | 2026-08-20 |
+| Server `true_v2v_ms` p50 / p95 / max | 4,022 / 9,556 / 10,628 ms | 2026-08-20 |
+| Server `voice_to_voice_ms` p50 / p95 | 2,980 / 4,444 ms | 2026-08-20 |
+| `llm_ttfb_ms` p50 / p95 | **1,704 / 3,581 ms — 42% of the turn, the dominant stage** | 2026-08-20 |
+| `llm_tool_ms` p50 / p95 | 1,515 / 3,077 ms | 2026-08-20 |
+| `llm_reply_after_tool_ms` p50 / p95 | 1,216 / 2,015 ms | 2026-08-20 |
+| `stt_endpoint_ms` p50 / p95 | 620 / 5,686 ms | 2026-08-20 |
+| `stt_tail_ms` p50 / p95 | 381 / 2,504 ms | 2026-08-20 |
+| `tts_ttfb_ms` p50 / p95 | 92 / 286 ms — **TTS is not a latency problem** | 2026-08-20 |
+| Turns timed out, no reply | **12 of 84 (14%)** | 2026-08-20 |
+| Prompt-cache hit rate | 0% over 72 turns (expected: `GEMINI_EXPLICIT_CACHE` off) | 2026-08-20 |
+| `npm run eval` run 1 aggregate | **hard 37/37** · judge 31/37 · turn p50 1,876 ms / p95 2,794 ms · 191 turns · 0 MAX_TOKENS · 291 s | 2026-08-20 |
+| `npm run eval` run 2 aggregate | **hard 36/37** · judge 31/37 · turn p50 1,892 ms / p95 2,724 ms · 197 turns · 0 MAX_TOKENS · 303 s | 2026-08-20 |
+| **Eval noise band (from the 2-run delta)** | **1 hard scenario.** 36/37 post-migration is noise; **34/37 or worse is a real regression** | 2026-08-20 |
+| Prior reference figure (2026-08, for context only) | ~3,062 ms p50 | pre-existing |
+
+**Hold attribution** (and see finding 4 — the `stt_endpoint_ms` conclusion in the last sentence here is **WRONG**, corrected 2026-08-21) — `partial_digits` 22 holds / 33,000 ms · `trailing_conjunction` 12 / 24,000 ms ·
+`post_barge_settle` 14 / 6,587 ms · `no_terminal_punctuation` 3 / 1,500 ms · `terminal_punctuation`
+43 / 0 ms. The `stt_endpoint_ms` p95 blowout is these deliberate holds, not endpointing config.
+
+### A0 findings — read before comparing anything at C4
+
+1. **Never compare probe-side against server-side.** `probe − server true_v2v = −1,411 ms`, which is
+   impossible for a clock measured *past* both carrier hops. It is a population artifact: server
+   percentiles cover 84 turns, probe percentiles cover 72 (12 barge-in + 12 timed-out excluded).
+   **C4 compares probe-to-probe and server-to-server. Never across.**
+2. **`llm_ttfb_ms` is the dominant stage at 42% of the turn.** A8 moves Gemini API → Vertex, which
+   changes exactly this number in either direction. It is now the single most important thing C1/C4
+   must measure. This is precisely why A0 existed.
+3. **The report's own "Next" says run a Groq comparison. Do not.** Model changes are explicitly out
+   of scope. The recommendation is the report's pre-written mapping firing on the data; the scope
+   decision outranks it.
+4. ~~**12 timed-out turns (14%) is a quality signal, not a latency one.** Not diagnosed here.~~
+   **DIAGNOSED 2026-08-21 from this recorded run. It is not 14% of turns and it is not a
+   quality signal — it is ONE scripted case, and it is a latency one.**
+
+   All 12 timeouts land on `partial_digits` (script index 3) or `digits_continuation` (index 4).
+   **Zero on the other six labels, in any of the 12 calls.** The server recorded **84** turns
+   against the probe's **96** (12 × 8) — a difference of exactly 12, one per call, because the two
+   halves of the phone number produce exactly ONE reply, never two.
+
+   **The real number is 7.9 seconds, not "no reply".** In the 4 calls where the reply beat the
+   probe's 8,000 ms cutoff it arrived at **7,793 / 7,799 / 7,861 / 7,934 ms**. In the other 8 it
+   arrived just after. One behaviour, sitting on the measurement threshold; 8 fell one side and 4
+   the other. Every other script line's WORST case is ≤ 5,134 ms.
+
+   **The dominant stage is `stt_endpoint_ms` ≈ 5,630 ms, and it fires on those two turns only.**
+   Every other turn in the retained sample is 400–1,030 ms. Configured endpointing is 300 ms and
+   `utterance_end_ms` is 1,000 ms, so **neither window explains it** — Deepgram is simply not
+   declaring a trailing digit sequence finished. `smart_format: true` and `numerals: true` are both
+   set (`lib/voice/sttStream.js:152,154`), which is the obvious first hypothesis and is untested.
+
+   **This corrects the hold-attribution note below.** The holds are NOT the `stt_endpoint_ms`
+   blowout: they appear in `stt_tail_ms`, whose values are exactly the configured hold durations
+   (0 / 1500 / 2500 / 3000). `MAX_TOTAL_HOLD_MS` is 3,000 ms, so the hold chain cannot account for
+   7.9 s and never did.
+
+   **Why it matters more than the 14% framing suggested:** reading out a phone number is the single
+   most common thing a caller does to a receptionist, and pausing mid-number costs them ~8 seconds
+   of silence. ANALYSIS ONLY — no fix attempted, owner's call.
+5. **Never compare the eval turn latency to the probe voice latency.** Eval turn p50 is ~1,880 ms
+   through `lib/harness/textSession.js` — no audio, no carrier, no TTS. Probe p50 is 2,611 ms of
+   real voice. They measure different things and the gap is not "overhead to optimise".
+6. **`quotes-notes` is a flaky scenario, established here, not a migration regression.** Passed run
+   1, failed run 2 on `toolCalled(record_quote_request)` — the receptionist looped asking the caller
+   to spell a name it already had and never recorded the request. It also fired `set_call_intent`
+   three times in one call. Pre-existing behavioural weakness; **out of scope for the migration**,
+   but it is now on the record so it cannot be misread as damage at C4.
+
+---
+
+## C5b results — Deepgram vs Google STT v2, 2026-08-22
+
+`npm run stt:ab -- --repeat 2` · 18 utterances × 2 passes × 2 providers · report
+`eval/results/stt-ab-2026-08-22T06-05-53-055Z.json`.
+
+| | Deepgram | Google STT v2 | delta |
+|---|---|---|---|
+| `stt_ms` p50 — representative script | **196 ms** | **1,075 ms** | **+879 ms** |
+| `stt_ms` p95 — representative script | 231 ms | 1,214 ms | +983 ms |
+| `stt_ms` p50 — diagnostic script | 288 ms | 1,193 ms | +905 ms |
+| **`stt_ms` p95 — diagnostic script** | **7,968 ms** | **1,409 ms** | **−6,559 ms** |
+| WER (normalised) — representative | **0.0000** | 0.0308 | +3.1 pts |
+| WER (normalised) — diagnostic | **0.1304** | 0.1522 | +2.2 pts |
+| WER (raw, no number normalisation) | 0.1250 / 0.2174 | 0.1406 / 0.3261 | |
+| Utterances with no final at all | 0 / 36 | 0 / 36 | — |
+
+**Google is slower on every ordinary turn and enormously faster on the one that
+matters most.** The +880ms is consistent and boring; it is a real regression
+against a 2,611ms voice-to-voice p50 and there is no knob to tune it away
+(there is no millisecond endpointing setting — see Standing facts). The
+−6.8 seconds is `digits_continuation`: **7,959 ms on Deepgram against 1,200 ms
+on Google.** That is A0 finding 4, the case where a caller pauses in the middle
+of reading their phone number, which A0 called "the single most common thing a
+caller does to a receptionist". It was diagnosed as Deepgram simply not
+declaring a trailing digit sequence finished, and it is the whole of Deepgram's
+p95.
+
+**The accuracy answer is closer than the totals suggest, and the totals are
+flattered by two non-errors.** Both providers drop the "uh" in
+`trailing_lead_in` (arguably correct) and Google renders "ten" as "10:00" in
+`rep_confirm` (formatting). Discount those and there is exactly one substantive
+error each — and they are different failures:
+
+- **Deepgram loses a phone number.** `partial_digits`: "My number is five five
+  five, two" → **"My number is"**. The digits are simply gone, and the
+  continuation then costs 7.9 seconds.
+- **Google mangles a spelled-out name.** `name_spelling`: "My name is Nithin.
+  That's N, I, T, H, I, N." → **"My name is Nathan. That knee t. H. I n."**
+  Wrong name, wrong spelling. For a clinic receptionist that is the worse of
+  the two, and it is the case to re-test on real handset audio.
+
+**Caveats, and they are load-bearing:**
+
+- The audio is **synthetic and clean** (Google TTS `en-US-Chirp3-HD-Charon`).
+  Absolute WER is optimistic for BOTH; a real handset adds noise, accents and a
+  codec. The comparison is fair because the input is byte-identical.
+- **It was synthesized by Google TTS, which may flatter Google STT.** Read the
+  Google column as a floor, not a margin.
+- `stt_ms` here is **not comparable to A0's `stt_endpoint_ms` p50 of 620 ms**.
+  A0 measured through two carrier hops on real calls; this measures a local
+  socket. Compare the two columns to each other, never either to A0.
+- Three utterances produced a final BEFORE their audio ended (Deepgram on
+  `trailing_lead_in` and `partial_digits`, Google on nothing after the harness
+  fix). Those are reported as 0 ms and flagged in the JSON rather than silently
+  clamped.
+
+**What this settles and what it does not.** It settles the HIPAA lane: the
+question there was never "which", only "how much worse", and the answer is
++880ms per turn with a large tail improvement — acceptable. It does NOT settle
+`us-standard`: Deepgram is genuinely better on the median and genuinely worse
+on the tail, so the lane's case now rests on which of those a clinic notices,
+and C5's TTS half is still unrun.
+
+---
+
+## ~~UNASSIGNED WORK~~ — CLOSED 2026-08-22. The HIPAA lane can hear.
+
+**`DEPLOYMENT_MODE=hipaa` had no speech-to-text.** A6 refused Deepgram at client
+construction, correctly — no BAA covers it — and nothing replaced it:
+`@google-cloud/speech` was not a dependency, `lib/voice/sttStream.js` was
+Deepgram-only, and no Lane A/B/C/D item built Google STT v2. The decision log
+said "BAA-lane STT is Google STT v2 … reversible behind the `sttStream.js`
+seam" and then no item ever picked it up.
+
+**Built 2026-08-22.** `lib/voice/sttGoogle.js` behind the existing seam;
+`sttStream.js` is now a selector that chooses by compliance tier;
+`sttDeepgram.js` holds the unchanged Deepgram implementation for the UK lane.
+The boot contradiction is gone: `checkSttConfig` asks the mode-shaped question
+(`standard` needs `DEEPGRAM_API_KEY`, `hipaa` needs `GOOGLE_CLOUD_PROJECT`) and
+`server.js` no longer demands a credential a covered process is forbidden to
+hold.
+
+**The boot matrix, run rather than reasoned** (2026-08-22, `assertBootConfig`
+against five environments):
+
+| Configuration | Result |
+|---|---|
+| `hipaa` + `GOOGLE_CLOUD_PROJECT`, **no Deepgram key** | **BOOTS** — the configuration that was impossible before |
+| `hipaa` + a Deepgram key present | REFUSES · `non_covered_credential_present` |
+| `hipaa` with no `GOOGLE_CLOUD_PROJECT` | REFUSES · `stt_not_configured` |
+| `hipaa` + `STT_LOCATION=global` | REFUSES · `stt_location_global` |
+| `standard` with no STT configured at all | REFUSES · `stt_not_configured` |
+
+One row boots and four refuse, each for its own reason. Before this session the
+first row was unreachable: **no value of the environment satisfied both
+`server.js` and `checkCoveredVendors` at once.** The boot also now announces
+which vendor will hear the caller, on every boot, in both modes — that is
+derived from the tier rather than configured, so it has to be visible without
+reading the routing code.
+
+> **THE DEEPGRAM BAA QUESTION IS DEAD, AND NOT BECAUSE IT WAS ANSWERED.** It was
+> never answered. It stopped mattering: the covered lane no longer needs
+> Deepgram for anything, so a late "yes" would change what the UK lane MAY use
+> and nothing about what a US project may HOLD. `lib/credentialBoundary.js` now
+> rules on Deepgram rather than recording an absence, and `secrets.tf` makes it
+> `lanes = ["uk"]` — the same shape ElevenLabs has always had.
+>
+> **A0 finding 4's digit-endpointing case transferred and INVERTED.** It was the
+> reason to be worried about swapping providers: Deepgram takes ~5,630ms to
+> declare a trailing digit sequence finished, which is the single most common
+> thing a caller does. Google endpoints the same clip in **891ms**. See C5b.
+
+**What is NOT closed, and needs the owner:** the flip is written and unapplied.
+`terraform plan` shows `DEPLOYMENT_MODE "standard" -> "hipaa"` on
+`voice-us-staging`, plus **4 destroys in Secret Manager** (the Deepgram secret
+and its IAM binding in both US projects). Secret Manager is a hard stop. Until
+it is applied, `npm run check:credentials` **fails against `vetra-us-prod`, and
+it is right to** — verified live 2026-08-22: the project really does hold
+`deepgram-api-key`, so the boundary is violated right now and the gate says so.
+
+---
+
+## The six projects — and why six
+
+GCP projects are **siblings under the org, never nested**. There is no such thing as a sub-project.
+`My First Project` is a seventh sibling and a bootstrap artifact, not a parent.
+
+```
+Organization  vetratd.com  (564252011558)
+├── My First Project   ← bootstrap only; delete after B0a
+├── vetra-us-prod      ← US HIPAA prod: voice-us Cloud Run, Cloud SQL, Memorystore (us-central1)
+├── vetra-us-staging
+├── vetra-uk-prod      ← UK GDPR prod: voice-uk (europe-west2)
+├── vetra-uk-staging
+├── vetra-shared       ← Identity Platform, Artifact Registry, Cloud Build. No PHI
+└── vetra-logging      ← log sink
+```
+
+> ### SIX IS THE TARGET. FOUR IS WHAT IS BILLED — 2026-08-21
+>
+> The billing account caps at **5 linked projects** and the bootstrap project holds one, leaving
+> **4**. O2d (quota increase) is still open. Rather than defer the UK stack or buy support, the six
+> collapse to four **by merging only projects the section above already calls "No PHI"**:
+>
+> ```
+> vetra-us-prod-c3a3bd     US prod   · us-central1   · NO ElevenLabs key
+> vetra-uk-prod-c3a3bd     UK prod   · europe-west2  · ElevenLabs + Deepgram
+> vetra-us-staging-c3a3bd  staging   · BOTH regions  · display name "Vetra Staging - US and UK"
+> vetra-shared-c3a3bd      Identity Platform, Artifact Registry, Cloud Build, AND log sinks
+> ```
+>
+> **The prod split is NOT negotiable and was never on the table.** `voice-us` holding no ElevenLabs
+> key is the credential boundary this whole section exists to justify. Cloud SQL instances and
+> Identity Platform tenants also cannot be moved between projects, so a prod merge would be close to
+> permanent. Only staging and logging merged — both hold no PHI, and both undo cheaply.
+>
+> **`vetra-uk-staging-c3a3bd` and `vetra-logging-c3a3bd` still EXIST, unbilled.** Do not delete them.
+> An unbilled project costs nothing and does not touch the billing quota, so they are the restore
+> path: relink, do not recreate. Their existence is also the marker that this shape is temporary.
+>
+> **Restore order when a slot frees** (quota granted, or the bootstrap project deleted per O2e):
+> 1. `vetra-logging` out of shared — sink configuration only, cheapest
+> 2. `vetra-uk-staging` out of the merged staging
+>
+> **Compensating controls — these are the price of the merge, not optional extras:**
+>
+> | Con | Control | When |
+> |---|---|---|
+> | Log sink shares a project with Cloud Build's deploy credentials | Aggregated sink at the **org node**, not in the project, so a `vetra-shared` compromise cannot remove the sink itself | B-provisioning |
+> | Same | **Bucket Lock** the destination. Retention **400 days**, matched to the retention schedule — never 6 years, which is the Security Rule's rule for *documentation*, not logs | after sinks exist — **irreversible, do it last** |
+> | Same | Cloud Build's SA gets Artifact Registry push + Cloud Run deploy. **Not** `storage.admin` on the log bucket | B-provisioning |
+> | Bucket Lock would make a scrubber regression create **undeletable PHI**, unerasable under GDPR | **Sever it:** lock only Cloud **Audit** Logs (Google-generated, structurally free of app PHI fields). Application `log.*` output goes to a separate UNLOCKED sink with ordinary retention | B-provisioning |
+> | Merged staging cannot rehearse the credential boundary — it holds both credential sets | CI check that lists `vetra-us-prod` secrets and **fails the deploy** if an ElevenLabs secret exists. Same shape as A1.7's PHI lint. Plus an IAM deny on that secret for the `voice-us` SA | B-provisioning |
+> | Merged staging cannot be region-pinned, so "no real caller data in staging" is only a rule | Staging never receives production Twilio credentials — probe/test numbers only — backed by a boot-time refusal for any caller number outside the test allowlist (A1.2's announce-loudly principle) | B-provisioning |
+> | Terraform would be edited twice, 6→4 then 4→6 | Root module takes a **map of stack → project**, not four hardcoded module blocks. Then 4→6 is a tfvars edit | **B0w, before the module is finished — cheap now, expensive later** |
+>
+> **Verified 2026-08-21 before committing to this:** all six projects were empty (2 default services
+> on the billed ones, 0 on the unbilled) so nothing was at risk; `constraints/gcp.resourceLocations`
+> is **not set anywhere**, so nothing blocked a two-region staging project — and residency is
+> therefore a deployment convention today, not an enforced constraint. When it is applied, pin
+> per-project: us-prod → us-central1, uk-prod → europe-west2, staging → both.
+>
+> **Unlink freed a slot immediately** — done as two unlink/link pairs with verification between, so
+> the worst case was a no-op rather than being stranded below 5.
+>
+> **This unblocks Lane B PROVISIONING ONLY.** It did not touch the reason the US stack could not
+> answer a call — `DEPLOYMENT_MODE=hipaa` had no speech-to-text — which was built separately on
+> 2026-08-22. See the closed UNASSIGNED WORK section.
+
+**Why not one project:** the project is the IAM, quota and *credential* boundary. It is what makes
+the spec's core safety property structural rather than aspirational — `voice-us` holds no ElevenLabs
+key, so a misconfiguration yields voicemail, not a reportable disclosure. One project would make that
+a matter of discipline.
+
+> **Expected, not a problem:** Google's payments-profile type (individual vs business) cannot be
+> changed after creation. At LLC handover, create a fresh billing account with a business profile and
+> relink the six projects — one Terraform edit. **The BAA is per-organization and survives the swap.**
+
+---
+
+## Terraform inputs — confirmed, not inferred
+
+These are the concrete values `B0w`'s root module takes. Both verified 2026-08-20 by reading the
+resource hierarchy / billing page directly.
+
+| Input | Value | Verified |
+|---|---|---|
+| **Organization ID** | `564252011558` (`vetratd.com`) | Manage Resources, org node |
+| **Billing account ID** | `01C71E-7C0893-377AE9` | Billing console |
+| Bootstrap project (temporary, **do not delete** — see O2e) | `ultra-glyph-506120-v5` / project number `307972246794` | Project Settings |
+
+> These are **identifiers, not credentials** — they grant nothing on their own. They still assume
+> this repository stays **private**; scrub them if that ever changes.
+
+---
+
+## Cost controls — decide these DURING provisioning, not after
+
+Added 2026-08-21. The spec's cost claim was always about **BAA fees** — Supabase $949 + Railway
+$1,000 + Vercel $370 + Sentry $80 = **$2,399/mo** to make today's vendors contractable, against
+$0 for Google's BAA. It was never a claim that GCP infrastructure undercuts a free-tier Railway.
+Provisioned naively both regions land at **$375-620/mo**, which is a real bill arriving before any
+clinic pays. These bring it to roughly **$200/mo with zero compliance cost**, and every one of them
+is cheap now and annoying to unwind later.
+
+| # | Cut | Saves/mo | Where |
+|---|---|---|---|
+| C-1 | **Do not provision UK *resources* until a UK clinic signs.** The PROJECT stays — that is settled and not reopened. An empty project costs $0. Provision UK, run C's live-call gate against it, `terraform destroy` the UK resources, keep the state. Proven and not idling; a clinic signing is an `apply` | $150-250 | B2/B4 |
+| C-2 | **Staging Cloud Run at `min-instances=0`.** `min-instances=1` + CPU-always-allocated exists so a cold start never lands on a caller. Nobody is on the phone with staging. Warm it before a probe run or discard turn 1 — A0's methodology already discards | $80-130 | B4 |
+| C-3 | **Postgres instead of Memorystore for `callState`.** A4 established the shared slice is THREE fields written at call boundaries with **zero per-turn reads** — that finding is what made Memorystore latency-free, and it is equally what makes Memorystore unnecessary. A table handles it. A4 built the swappable store interface exactly so this could be decided here. Costs ~10-30ms at a boundary against a 2,611ms p50, and the pickup path already hits Postgres for capability rows. Fits B2-rls's "wrap a unit of work, never a call" — boundaries are separate units of work | **$74.46/mo measured, up to $148 avoided** | **DECIDED 2026-08-21 — Postgres. Encoded, not just recorded.** Priced off the Cloud Billing Catalog API rather than memory (service `5AF5-2C11-D467`, Basic M1, 1 GiB): us-central1 $0.049/GiB-hr → **$35.77/mo**, europe-west2 $0.053 → **$38.69/mo**, prod pair **$74.46**. Standard/HA M1 would be $112.42, and a merged-staging instance adds $35.77. Postgres marginal cost **$0.00** — a 3-column table on an instance the pickup path already queries. **Two arguments the estimate did not have, both pointing the same way:** Memorystore BASIC has no replica and no persistence, so a node restart loses every in-flight call's state (Redis is not even the more durable option here); and the only READ in the interface is `/twilio/status`'s, which runs *after the caller has hung up*, so its latency is invisible to them. Enforced by ABSENCE — `redis.googleapis.com` is out of the API list and `roles/redis.editor` out of the runtime roles, both with tripwires in `tests/infra/costControls.test.js`. **What would flip it:** connection-pool pressure on the instance also serving the pickup-path capability read. Negligible at 5 concurrent; re-measure at scale |
+| C-4 | **Staging shares one Cloud SQL instance**, two databases. Merged staging already cannot be region-pinned, so this costs nothing still held | $25-35 | B2 |
+| C-5 | **No HA (regional) Cloud SQL at launch.** Regional roughly doubles the instance cost. **HA is NOT a HIPAA requirement** — §164.308(a)(7) asks for a backup plan, a disaster recovery plan and emergency mode operation, all satisfied by PITR + backups + the restore test C already gates on. HA is an availability choice; buy it when downtime costs more than the instance | $50-70 | B2 |
+| C-6 | **Direct VPC egress, never Serverless VPC Access connectors.** Already B2's stated preference — recording the reason: a connector is VM-backed at ~$30-40/mo EACH, so four of them is $120-160/mo for something Direct VPC egress does at no fixed cost | $120-160 avoided | B2 |
+| C-7 | **Turn `GEMINI_EXPLICIT_CACHE` ON.** `services/geminiCache.js` (336 lines) landed 2026-08-04 and is gated OFF. **A0 measured a 0% prompt-cache hit rate over 72 turns.** Cached input tokens bill far below fresh ones, and `llm_ttfb_ms` is 42% of the turn — this is the rare line that cuts cost AND latency, on code already written. Constraint carried over from the spec: `cachedContent` is mutually exclusive with `systemInstruction` AND `tools` | usage-dependent, likely large | **A8/B1 — verify on Vertex** |
+| C-8 | **Log exclusion filters + short application-log retention.** First 50GB/mo of ingestion is free, then $0.50/GB; a per-turn-logging voice app can pass that. Exclude noise at ingestion rather than storing it. Cloud **Audit** Logs are separately free for 400 days — do not conflate the two streams (see the Bucket Lock decision) | $0-20 | B-provisioning |
+| C-9 | **Short recording/transcript retention, and an Artifact Registry cleanup policy.** Retention is the rare axis where cheaper IS more compliant — HIPAA minimum-necessary and GDPR storage-limitation both push the same direction, and the ledger already warns against long transcript retention | small, compounding | B-provisioning |
+| C-11 | **Only the VOICE service needs `min-instances=1`.** B4 provisions Cloud Run ×4 warm. The reason warm instances exist is that a cold start lands on a caller mid-call — that is `voice-us`, not the dashboard backend, where nobody is holding a phone waiting for a settings page. Check in B4 which of the four actually need it | $45-70 | B4 |
+| C-12 | **Do not run the PRODUCTION database during the migration.** `vetra-us-prod`'s Cloud SQL instance serves nothing until D4 repoints the Twilio webhooks. Priced off the real SKU catalog (us-central1 Postgres zonal: **$0.0413/vCPU-hr**, **$0.007/GiB-hr**), `db-custom-2-7680` is **(2 × 0.0413 + 7.5 × 0.007) × 730 = $98.62/month** — roughly a THIRD of the entire trial credit, for 3-6 weeks, to hold zero rows. Same argument as C-1 and as moving the VPC connectors out of B0w. `var.enable_prod_databases`, default false; flip it at D3 when there is a dump to restore | **$98.62** | **B2, done 2026-08-21** |
+| C-10 | **Committed use discounts: NOT yet.** 20-40% off for a 1-3 year commit, against a workload whose shape is unknown. Revisit after ~3 months of real traffic | later | post-D7 |
+
+**Not worth optimising:** internet egress. mulaw 8kHz is ~0.48 MB/min per direction, so a 3-minute
+call is ~3 MB and 10,000 calls/month is ~30 GB ≈ $3.60. Ignore it.
+
+**Unit economics for context:** ~$0.14/call US, ~$0.17/call UK at 3 minutes (Twilio ~$0.014/min +
+STT + TTS + LLM). A clinic at 500 calls/month is ~$75/month variable. Two or three paying clinics
+cover the infrastructure outright.
+
+### Runway — and the hard date nobody had written down
+
+**Steady state after C-1..C-11, US provisioned and `vetra-uk-prod` empty: ~$145-245/mo**, call it
+~$180. Rebuilt from scratch rather than subtracted, so nothing double-counts.
+
+**The free trial is $300 over 90 days from 2026-08-20 — it expires ~2026-11-18.**
+
+| | |
+|---|---|
+| GCP consumption, now → D7 (3-6 weeks, resources appearing as B2/B4 create them) | **$130-260 — covered by the credit, $0 out of pocket** |
+| Current stack, still running until the one-week warm hold ends | $25-90/mo, ~$75-270 total |
+| Same window provisioned NAIVELY at ~$500/mo | **credit gone in ~18 days, real money mid-Lane-C** |
+
+**That last row is the actual argument for C-1..C-6.** They are not an optimisation pass — they are
+what keeps the migration itself free.
+
+**RISK, and it is a hard deadline: when the trial ends, projects are SUSPENDED unless full billing
+is active.** O2d has been treated as a quota nuisance; it is also the thing standing between
+2026-11-18 and a suspended production stack. If vendor replies (Twilio Edition, Deepgram BAA) stall
+Lane C past that date, this fires during or after cutover. **Activate full billing well before
+November, independent of whether the quota ever rises.**
+
+**~~Set a billing budget alert on `01C71E-7C0893-377AE9` before Lane B provisions anything.~~ DONE 2026-08-21, in Terraform (`budget.tf`, `9edae5d`)** — a monthly $250 alarm and a **$300 custom-period budget over the trial's own window (2026-08-20 to 2026-11-18)**, because a MONTHLY budget never fires on the runway problem: $180/month against a $250 ceiling is silent right up until the projects suspend. **AND A BUDGET ALREADY EXISTED that this file did not know about** — `$200 Monthly Budget Alert`, unmanaged by Terraform, presumably created at signup. **There are now THREE budgets and two of them are monthly**, which is duplicate mail rather than a risk; decide whether to import the $200 one or delete it. Original note: Free,
+two minutes, and it is the only thing that reports a `min-instances=1` nobody meant to create while
+it quietly burns the credit. Sessions are being run unattended; this is the guardrail for that.
+
+**Watch the ElevenLabs quota too** — 86,000 characters, ~15k per probe run, A0 spent one. Lane C's
+latency comparison needs runs from the same budget, and running dry stalls a gate.
+
+---
+
+## Lane B — GCP · gated on Owner Day 1 · overlaps Lane A
+
+| # | Work | Status | Gate | Evidence |
+|---|---|---|---|---|
+| **B0w** | Terraform root module | `done` — **reworked 2026-08-21 for the 4-project shape** | `terraform init` + `validate` pass, `fmt` clean | **`feat/gcp-lane-b-terraform` @ `81aeb9a`.** 14 files, ~1,085 lines. 6 projects, per-project `gcp.resourceLocations` (`in:us-locations` / `in:eu-locations`), 3 org-node policies, VPC + peering range per stack, keyless runtime SAs, Artifact Registry, scoped Cloud Build deployer, **two regional** audit log buckets, TF state bucket in `vetra-shared`. Per-founder IAM present; `shared_only_principals` empty (O20 `n/a`). **REWORKED 2026-08-21 on `feat/gcp-lane-b-terraform`, 5 commits, nothing applied:** `2503257` stack→project map — six STACKS derived onto four PROJECTS by `var.stack_projects`, so 6→4 and 4→6 are both a tfvars edit; a merged project takes the UNION of its stacks' locations, APIs and PHI flag; `us-prod`/`uk-prod` sharing is refused by a **validation**, not a comment; **one VPC per PROJECT, one subnet per STACK** — per-stack VPCs silently broke C-4, because a Cloud SQL instance peers to exactly one network and merged staging could not then have had a shared instance; `billing_project` repointed to `vetra-shared`; `project_id_suffix` pinned; `imports.tf` added. `79cb172` org-node log sinks. `dd017b6` cost controls C-1..C-11. `85e691d` credential-boundary CI gate + 6 sabotage-verified tripwires. `2b6675f` the ADC identity trap. `terraform init`/`validate`/`fmt` clean; root suite **84 files / 1728 tests green** |
+| **B0a** | **Apply** the root module | **`done` — APPLIED 2026-08-21** | `terraform plan` applies clean to both staging stacks | **PARTIALLY APPLIED 2026-08-21.** Plan was 182 resources, 0 destroy, all free. **Created: 3 org policies + all 6 projects.** `vetra-us-prod-c3a3bd` (`514057905520`), `vetra-us-staging-c3a3bd` (`536266051432`), `vetra-uk-staging-c3a3bd` (`938787502504`), `vetra-logging-c3a3bd` (`889006362583`) are **billed**; `vetra-uk-prod-c3a3bd` and `vetra-shared-c3a3bd` exist **unbilled**. **SUPERSEDED 2026-08-21 — the billed set is now `vetra-us-prod`, `vetra-uk-prod`, `vetra-us-staging` (merged, both regions) and `vetra-shared`; `vetra-uk-staging` and `vetra-logging` were unlinked and are dormant. See "SIX IS THE TARGET. FOUR IS WHAT IS BILLED". The re-apply targets FOUR projects, and the root module must take a map of stack → project before it is finished.** Everything else — 89 service enablements, 44 IAM bindings, 4 VPCs, buckets, registry — **not created**. Blocker verbatim: `Error 400: Precondition check failed. QuotaFailure: "Cloud billing quota exceeded"`. **A free-trial billing account caps at 5 linked projects**; `gcloud billing projects list` shows exactly 5. **This is O2d firing exactly as predicted.** ~~Local state at `infra/terraform/terraform.tfstate`~~ — **THAT STATE FILE IS GONE.** Searched the whole workstation 2026-08-21: no `terraform.tfstate` anywhere, while all six projects and three org policies are still live. Recovered by config-driven **`import` blocks** rather than `terraform import`, so the adoption renders in `plan` and is written only by the owner's apply; `adopt_existing_projects` / `adopt_existing_org_policies` in tfvars, **blank them once adopted** because Terraform errors on an import block targeting an address already in state. **RE-PLAN ATTEMPTED 2026-08-21 AND BLOCKED — not on quota, on AUTH.** Terraform returned `Error 403 ... roles/serviceusage.serviceUsageConsumer ... USER_PROJECT_DENIED` while `admin@vetratd.com` already held `roles/owner` on the named project: **`CLOUDSDK_CONFIG` does not steer Terraform**, so it was authenticating as the personal account. With `GOOGLE_APPLICATION_CREDENTIALS` pointed at the VetraTD ADC the error changed to `invalid_grant / reauth related error (invalid_rapt)` — the org's reauthentication window, which needs an **interactive** `gcloud auth application-default login` the owner must run. Both facts are now in Standing facts and in `infra/terraform/README.md`. **PLAN RAN CLEAN 2026-08-21 after the owner ran the interactive login: `Plan: 7 to import, 127 to add, 4 to change, 0 to destroy.` NOT APPLIED.** Imports = 3 org-node policies + 4 projects. Changes = those 4 projects, **labels and display names only, `billing_account` unchanged on all four, no replacements**. Adds = 63 service enablements, 24 IAM bindings, 4 per-project `gcp.resourceLocations`, 4 log buckets (400d audit / 30d app), 4 org sinks, 12 project log exclusions, 2 VPCs + 2 subnets + 2 peering ranges, 3 service accounts, registry, state bucket. **UK appears in none of those counts** — C-1's toggle is off, so `vetra-uk-prod` is created, labelled, location-pinned and empty, which is the point. **Two defects the plan caught that `validate` could not:** the shared project's display name was 43 chars against a 30-char limit (and `+` is not in the allowed charset), and adopting the projects would have flipped `deletion_policy` from the provider's PREVENT default to **DELETE**, putting *delete four GCP projects* one `terraform destroy` away — now `var.project_deletion_policy`, default **PREVENT** (`913006c`). **One unproven line:** `auto_create_network = true -> false` on all four. Verified against the live org that **no default network exists in any of them**, so the org policy did hold at creation and this is the provider reading its own request-time default back on import — but its apply behaviour is not proven — **it applied and left no drift.** **APPLIED 2026-08-21 in two rounds. 139 resources; `terraform plan -detailed-exitcode` returns 0.** Round 1: 130 of 134 operations succeeded, **all four org-node sinks failed** with `Permission 'logging.sinks.create' denied on organizations/564252011558`. **That failure is the design working** — `admin@vetratd.com` holds Organization Admin, Folder Admin, Project Creator and Org Policy Admin and NONE of them carry it, which is exactly why the sinks were moved off the projects: a principal with full control of a project cannot touch the trail recording what they did there. Round 2 adds `google_organization_iam_member.logging_config_writer` — **`roles/logging.configWriter`, NOT `logging.admin`**, which additionally grants `logging.logEntries.*` and the ability to DELETE log entries, the one capability an audit trail's administrator must not have. Not an escalation: Organization Admin already carries `resourcemanager.organizations.setIamPolicy`. **STATE IS NOW REMOTE — `gs://vetra-tfstate-c3a3bd/root`, 135 resources**, backend uncommented, migrated with `-force-copy`. That is the fix for what made this session necessary. `adopt_existing_*` emptied per their documented lifecycle; the import blocks stay, inert. Verified: two zero-drift plans (once on local state, once on GCS), `gcloud logging sinks list --organization` shows all four live with correct destinations and regions. `2e75abe` |
+| **B1** | **Runs first once projects exist.** ~~① `gemini-3.6-flash` on the Vertex **EU multi-region** endpoint~~ **① ANSWERED 2026-08-21 — YES, and it forces a config change.** ② Supabase→Firebase **bcrypt import spike** | **② ANSWERED 2026-08-22 — YES, no forced password resets.** The spike is done and `scripts/import-users.js` is written and tested; what remains is running it against a real export, which needs the owner's Supabase service key. **AND IT IS A SECURITY PRECONDITION, not a convenience — see B3** | Model responds (or the UK model choice changes *here*, ~day 3, not week 4). Hashes import without forced resets | **② DONE 2026-08-22, against the live service rather than the docs.** Supabase bcrypt (`$2a$`, Go) and Node bcrypt (`$2b$`) both import and sign in with the ORIGINAL password; `passwordHash` is the bcrypt string's bytes, base64url, no salt/signer/rounds; a wrong password still 400s. **We control `localId` and the token's `sub` comes back as exactly what we set**, which is what makes `users.auth_uid` backfillable. **Three cutover traps found by doing it:** `batchCreate` returns **200 on partial failure** with a per-record `error[]`; it **IGNORES `allow_duplicate_emails`** and silently creates a second account on an address that already has one, after which sign-in returns the LAST-imported id — so a careless re-run **silently repoints every member of staff**; and **setting `localId` explicitly is the fix**, because the same localId twice is one upserted account. `scripts/import-users.js` shipped: dry-run by default, refuses to write until every export row is accounted for, checks the error array rather than the status code, and reads the store back to prove one account per address with the id we asked for. Its `auth_uid` backfill stands FORCE row security down for its own statement — the fourth appearance of that trap — and the ONE test that can catch removing it runs the real function as a NON-BYPASSING OWNER. 28 tests, sabotage-verified. **Remaining: a real Supabase export (owner credentials) and migration 036.** ① earlier: **Read-only probe via `:countTokens` (free, no generation), bootstrap project as quota project.** `locations/eu` **200**, `locations/us` **200**, `global` **200**; **`us-central1` 404, `europe-west2` 404, `europe-west4` 404.** Control: `gemini-does-not-exist-9` 404s at both multi-regions, so a 200 means served. Same pattern for `gemini-3-flash-preview` and `gemini-2.5-flash`. **The UK model choice does NOT change — the ENDPOINT does.** Nobody had noticed this model is served ONLY by multi-region endpoints: `VERTEX_LOCATION=us-central1`, the value used in A8's own tests (`tests/vertexBackend.test.js`), would **404 at runtime** and would have surfaced at Lane C as a mysterious model failure. Set `VERTEX_LOCATION=us` for the US lane and **`eu` for the UK lane, never `global`** — `global` routes anywhere on earth and voids the residency claim. Probe cost $0. **Enabled `aiplatform.googleapis.com` on `ultra-glyph-506120-v5` to run it** (free, owner-approved in-session) |
+| **B2-rls** | **The app side of row-level security** | `done` — voice server AND dashboard | The exported data-layer functions work scoped, and return nothing unscoped | **`dd605d5` + `54521b1`.** Migration 029 gives the database the property; `withTenant` + AsyncLocalStorage carries the tenant to `q()` twenty frames down without touching any of A3's byte-identical signatures. Wired at four boundaries: `/twilio/status` (using the businessId A4 put in the shared store), session pickup, `executeToolCallGuarded`, and the four authenticated routes. **The rule, and it will get broken by someone: wrap a UNIT OF WORK, never a CALL** — this holds a connection and an open transaction, and a phone call is minutes. **DASHBOARD DONE 2026-08-21 (`833a869`).** `src/db/index.js` now exports `{ query, withTenant, pool }` instead of the Pool, and because every route does `pool.query(...)` and nothing opens a transaction, **all 48 call sites kept working unedited**. `withTenantHandler` wraps the HANDLER, not `next()` — `next()` returns before the handler finishes, so the middleware-shaped version commits mid-request and every query after that runs unscoped on a connection already back in the pool. **A SECOND BOOTSTRAP PROBLEM 029 DOES NOT COVER:** `POST /api/onboarding/create-business` does three writes before a tenant exists and all three violate WITH CHECK under FORCE RLS — signup was simply broken and nothing had noticed, because these routes had never been run against a database where RLS applies. Migration **031** adds `app_create_business_for_user`, one statement instead of three, and it refuses a second business for an account that already has one (the old route did not check, so calling it twice orphaned a business and stranded the previous tenant's data). Also fixed: `ssl: {rejectUnauthorized:false}` was unconditional — TLS verification OFF against the PHI database, and the reason nothing had ever run these routes locally. Gate: `tests/db/dashboardTenantScoping.test.js`, real app + real pool as `vetra_app`, 13 tests **watched failing first**, **sabotage-verified** by making `query()` ignore the scoped client (7 go red). |
+| **B2** | Cloud SQL PG16 + ~~Memorystore ×2~~ (**C-3: no Memorystore**) — private IP, CMEK, PITR. Swap A4's adapter for Memorystore. **Also creates the Cloud Run VPC route** — prefer **Direct VPC egress** over a Serverless VPC Access connector (no per-instance charge). The reserved peering range and service-networking connection already exist from B0w | **`done` for STAGING 2026-08-21; production deferred by C-12** | Schema diffed against Supabase, identical, both regions | **APPLIED 2026-08-21 (`9edae5d`), staging only. `vetra-us-staging` RUNNABLE.** POSTGRES_16, db-g1-small, ZONAL (C-5), **CMEK** (`diskEncryptionConfiguration.kmsKeyName` verified against our key), **private IP only** — `ipv4Enabled: false`, one PRIVATE address `10.20.32.3`, which lands inside the `10.20.32.0/19` peering range B0w reserved, so B2 was a database task and not a networking project as intended. `sslMode: ENCRYPTED_ONLY`, backups on, PITR off for staging, `log_connections` on. Zero drift. **`log_min_duration_statement` deliberately NOT set** — statement logging on this schema would put patient names and phone numbers into Cloud Logging as query parameters, which is A1.7's leak arriving through a channel the lint cannot see. **No `google_sql_user`** — a password in a resource is a password in state, and state is now a versioned GCS bucket; users are B4/D2 from Secret Manager. **PRODUCTION DEFERRED BY C-12** (below): `vetra-us-prod` is $98.62/month for a database serving nothing until D4. **This defers the production half of this gate to D3**, where `pg_restore` creates the data the diff would compare. Committed cost: **~$27/month**. **SCHEMA APPLIED 2026-08-21 (`fa7fd34`) — 12 tables, 30 migrations baselined, `vetra_app` granted to the runtime identity, verified idempotent on a second run.** The instance is private-IP only, so this needed compute INSIDE the VPC: `cloudbuild.yaml` builds the image in Cloud Build (no Norton, so `npm ci` just works), and a **Cloud Run Job with Direct VPC egress** applies the schema. **TWO IDENTITIES:** the job RUNS AS the runtime SA but CONNECTS as the superuser — an IAM user cannot create in `public` and the first attempt failed with exactly `permission denied for schema public`, which is 029's NOSUPERUSER NOBYPASSRLS design working. One generated password in Secret Manager, per-secret IAM, read only by the job; its last act is `GRANT vetra_app TO <runtime>`, which is the answer to 029's own note that B2/B4 must "grant login with a real credential" — there is no credential. `--init-if-empty` added to the runner: schema.sql as baseline only when there are no application tables, then ordinary migration. Correct for a fresh instance AND for D3 after a restore. **Remaining for B2:** swapping A4's adapter, which C-3 makes a Postgres table |
+| **B3** | Identity Platform, **no tenants**, US only. 13 call sites / 7 files. Delete `supabaseClient.js` | **`done` 2026-08-22 — PROVEN BY A REAL LOGIN** | A real account signs in to the dashboard against Identity Platform, with `supabaseClient.js` deleted | **DONE AND VERIFIED IN A BROWSER, not by a passing suite.** Applied with the owner present (targeted, because the suspension blocks a full plan): `google_identity_platform_config` in `vetra-shared` — email/password only, `anonymous` and `phone_number` written out as disabled, `allow_tenants = false`, `allow_duplicate_emails = false`, `disabled_user_deletion = true`, request logging ON for §164.308(a)(5)(ii)(C) log-in monitoring. Read back from the live API rather than from state. Its own API key, **restricted to identitytoolkit** rather than the unrestricted one Identity Platform auto-creates. **Verification is `jsonwebtoken` + `jwks-rsa`, not `firebase-admin`** — local RS256 against Google's published keys, so an outage at Google no longer fails auth, and a revoked token stays valid until it expires (which is what the session-age ceiling exists for). Forged at every claim in `tests/idToken.test.js`, run against BOTH the ESM and CommonJS copies from one file. **THREE defects found by using it rather than testing it:** migration **034** (the auth bootstrap was defeated by FORCE RLS — 403 on every authenticated request); migration **035** (an Identity Platform id is not a uuid, so signup 500'd); and `Login.jsx`'s handler **shadowing its own import and calling itself**, which `vite build` and 2,189 green tests all missed. Two more gaps closed on the way: nothing in the backend's 99 tests ran the real `authMiddleware` (harness.js fakes it), and the malformed-header cases passed against the OLD sloppy parser because a non-JWT has no `iat` and the session-age branch 401'd anyway — right answer, wrong mechanism | **NOT STARTED, deliberately, and the reason is recorded rather than left as silence.** Two blockers. **(1) B1 ②, the bcrypt import spike, needs a REAL Supabase export** — real credentials, an owner-present hard stop, so it was not attempted. **(2) The residency answer landed while looking at this:** Identity Platform has no data-location control of any kind (see Standing facts), so initialising it and creating a UK tenant would put UK staff PII into a service whose location cannot be constrained. Harmless today — a tenant with no users stores nothing — but it is a posture decision the owner should make knowingly rather than find already made. `identitytoolkit.googleapis.com` IS enabled on `vetra-shared`; the config is **not** initialised (`CONFIGURATION_NOT_FOUND`, verified) |
+| **B4** | Cloud Run ×4 — `min-instances=1`, **CPU always allocated**, `timeout=3600`, concurrency 10–20. Secret Manager ×2 with rotation. Scheduler provisioned | **`done` for STAGING VOICE 2026-08-21**; prod + dashboard deferred | Services boot. **Any new background job uses Scheduler, never `setInterval`** | **DEPLOYED AND SERVING 2026-08-21 (`eb6a8f9`, `a23db6f`).** `voice-us-staging` on Cloud Run: secrets from Secret Manager, Cloud SQL over private IP with IAM auth, Direct VPC egress, min-instances 0 (C-2), image **pinned to a commit**. `GET /` 200; `POST /twilio/voice` 403 with no signature, a bogus one, or a valid-length wrong one. **THAT EVIDENCE WAS WORTHLESS AND IS CORRECTED 2026-08-22** — the validator rejected genuine Twilio requests too, so all three 403s were consistent with the subsystem being entirely off. **STAGING RAN `standard`, NOT `hipaa`, and that was the headline — REVERSED AND APPLIED 2026-08-22.** `voice-us-staging-00003-lxz` is `Ready: True` on image `2fe7da1` with `DEPLOYMENT_MODE=hipaa`, no Deepgram credential, CMEK verified at boot, `GET /` 200 and all three signature paths 403. The Deepgram secret is destroyed in both US projects and the credential boundary now holds. Original entry:  `terraform plan` now shows `DEPLOYMENT_MODE "standard" -> "hipaa"` on `voice-us-staging`; the apply needs the owner because it also destroys the Deepgram secret in both US projects. Original entry: **STAGING RUNS `standard`, NOT `hipaa`, and that is the headline.** The first deploy refused to boot: `FATAL non_covered_credential_present: DEEPGRAM_API_KEY is set in a DEPLOYMENT_MODE=hipaa process. Deepgram has no BAA.` **That was the guard working and it was UNASSIGNED WORK arriving exactly where it was predicted** — a US PRODUCTION service could not serve a call until the Deepgram BAA landed or Google STT v2 replaced it, and no configuration change altered that. **Google STT v2 replaced it, 2026-08-22.** The BAA never arrived and no longer matters. Staging is `standard` because it holds no patient data (rule + CALLER_ALLOWLIST); the tier that carries weight is production's, and production is blocked regardless. **Cost: staging no longer rehearses the hipaa vendor guard**, which is why the CI gate checks production directly. **Secrets pushed byte-exact** (40/34/32/19, no trailing newline) via `scripts/push-secrets.js`; the Twilio pair is a **subaccount**, verified by hash to differ from production. **DASHBOARD BACKEND IMAGE BUILT 2026-08-22, and the reason it never had been was not a missing build step.** `.gcloudignore` excludes `AI-phone-dashboard`, so the source had never been uploaded to Cloud Build at all. Now submitted as its own source root via `cloudbuild.dashboard.yaml`; image in Artifact Registry, four guards passing (module tree loads, Cloud SQL connector present, no test suite, no devDependencies). **AND THE IMAGE ALONE WAS NOT ENOUGH:** the backend understood only `DATABASE_URL` and Cloud SQL is private-IP with no password, so it could never have reached a GCP database — fixed with a CommonJS Cloud SQL connector twin and an `init()` awaited before the port opens. **Still deferred:** prod voice (no database until D3, C-12) and the dashboard Cloud Run SERVICE, which is Terraform not yet written |
+| **B5** | SPA → Cloud Storage + Cloud CDN + HTTPS LB. Port the `vercel.json` rewrite to an LB URL map | **`done` as built-not-switched-on 2026-08-21** | Dashboard loads, authenticates, reads and writes in both regions | **BUILT AND APPLIED 2026-08-21 (`2d43953`), forwarding rule deliberately OFF.** Split by COST: bucket, backend bucket + CDN policy, serverless NEG, URL map and certificate are all free to define; the **global forwarding rule is ~$18/month whether or not a request arrives**, so it waits behind `var.enable_load_balancer`. `vercel.json`'s single rewrite is ported as `not_found_page = index.html` — losing it means every deep link 404s, and only on refresh, so it survives casual testing. **A SECURITY GATE, not just a cost one:** a CDN backend bucket needs its objects readable by `allUsers`, and this bucket is in `vetra-shared` — so it would need the DRS exception extended to the project holding Cloud Build's deploy credentials and the audit trail's buckets, which org-policies.tf deliberately excludes. **Both the public binding and the exception are gated on the same toggle** rather than quietly widening that control. **Firebase Hosting would avoid it entirely** ($0, custom domain, cert and CDN included, no public bucket, no DRS exception) but cannot front Cloud Run for Twilio — decide at D-lane. **Gate NOT met and cannot be yet:** the dashboard BACKEND image is not built by `cloudbuild.yaml`, and a managed cert will not provision until DNS points at the LB IP. Both are owner/D-lane work |
+
+**Lane B budget: 4–5 days**, most of it overlapping Lane A.
+
+---
+
+## Lane C — convergence verification · **needs the owner** · 2–3 contiguous days
+
+The serialization point. No amount of speed in A or B moves it. Book it as a block, not as interruptions.
+
+| # | Verification | Status | Needs | Evidence |
+|---|---|---|---|---|
+| **C1** | Vertex live — **5 runs per mode**, compared with `node scripts/eval-band.js` | `todo` — **UNBLOCKED IN CODE 2026-08-24, STILL BLOCKED ON THE OWNER.** `eval/run.js` refused to start without `GEMINI_API_KEY`, so the Vertex arm — the whole point of C1 — could not be started at all; fixed and sabotage-verified (`307e85b`). **What remains is ADC reauth, which only the owner can clear**, not a spend decision: `print-access-token` returns `Reauthentication failed`. Measured cost when it runs: 2,000 receptionist turns + ~370 judge calls, ~48 min. Previously **RESIZED 2026-08-23 off a measured band. The old method is retired, not adjusted.** | Real money (~10 runs, ~50 min) | **THE BAND IS MEASURED. Five full runs of IDENTICAL code scored 37, 36, 35, 36, 36 — hard pass ranges 35–37, mean 36.0, spread 2.** The judge is worse: 29–33, spread 4. **So `36/37` was never a number, it was a mode**, and this file's recorded gate of “34/37 or worse is a regression” sits ONE point under a floor that noise already reaches. **Three scenarios carry all of it**: `reschedule-two-appointments` 3/5, `details-accumulate` 1/5, `no-invented-appointment` 1/5. The other 34 never failed once. **AND THE METHOD WAS MEASURED TOO, which is the finding.** Feeding those five runs to `eval:compare` as all 20 ordered pairs: **17 of 20 report “DOES NOT MEET THE MERGE GATE” — an 85% false-alarm rate against code that did not change.** 12 of 20 report a hard regression; the other 5 are judge-only. C1 as written would therefore have declared a Vertex regression on the overwhelming majority of runs where Vertex was perfect, and nothing would distinguish that from a true one. **The aggregate is simply the wrong statistic** — it is a sum over 37 scenarios of which 34 are deterministic, so it moves for reasons unrelated to the change under test. **`scripts/eval-band.js` replaces it**: per-scenario failure counts across N runs per arm, one-sided Fisher exact on each 2×2, significance at p<0.05. Sabotage-verified BOTH directions — the 5 identical runs split into arms report nothing (exit 0); `name-recall` forced to fail in all 5 candidate runs reports `0/5 -> 5/5, p=0.0040` (exit 1). **The honest limit, verified rather than asserted: at n=5 a 3-of-5 regression scores p=0.083 and CANNOT be called significant** — it lands in a “look, do not act” list. A 4-1 split reaches p=0.024, a 5-0 split p=0.004. `tests/evalBand.test.js` pins the statistics against hand-computed hypergeometric values (11 tests), and one of those hand values was wrong on the first pass while the implementation was right |
+| **C2** | Live call **per region** against a dev Twilio number, before prod webhooks move | **`done` for US 2026-08-25** — two calls on `voice:78c0019`, book and reschedule, both completed. UK has no stack | Owner's phone | See the live-calls standing fact: the reschedule succeeded, `text_channel_tool_call` fired and the sanitiser caught it |
+| **C3** | **≥5 concurrent calls per region** — the callState proof. Watch audio-pump starvation, event-loop lag | `todo` | Owner + deployed Cloud Run | |
+| **C4** | Latency vs the **A0** baseline | **`done` 2026-08-25 — 15 turns across 2 real calls** | — | `node scripts/c4-latency-report.js --since <RFC3339>` reads the `turn_latency` lines the voice service already emits per turn, computes p50/p95 per stage, and diffs against `eval/a0-baseline.json` — the A0 numbers moved out of the markdown table above into data, with their provenance. **There had been NO path from the deployed stack to this comparison:** `latency-probe.js --report-only` re-renders a LOCAL run out of `latency-runs/` and cannot see Cloud Run. **It deliberately does NOT use the ring buffer behind `getCallStats()`** — the Twilio status callback that reads it is a separate HTTP request that can land on a different Cloud Run instance whose buffer is empty, so `calls.latency_*` can be silently absent while the logs are complete. **An empty query EXITS NON-ZERO and says the measurement failed**, because zero turns and zero regressions produce identical-looking summaries. End-to-end and per-stage are reported separately, since A0 ran on Railway through carrier hops. Also prints the covered-lane reference (2026-08-22) because "has the deployed stack moved" is usually the better question, and counts turns with no reply against A0's 12-of-84 |
+| **C5** | Blind TTS A/B at **8 kHz mulaw over a handset** (`scripts/voice-ab.js`, never once listened to) | `todo` | **Owner's ears** | |
+| **C5b** | **STT A/B: Deepgram vs Google STT v2.** Word-error rate AND `stt_ms` on the SAME recorded audio | **`done` 2026-08-22** | `eval/results/stt-ab-2026-08-22T06-05-53-055Z.json` — 2 passes, 36 utterances per provider | **RUN. See "C5b results" below.** Headline: **Google is ~880ms slower on the median turn and 6.8 SECONDS faster on the worst one.** Accuracy goes to Deepgram by ~3 points on realistic speech (WER 0.000 vs 0.031) — but its worst case is LOSING A PHONE NUMBER, and Google's is mangling a spelled-out name. **The answer to "how much worse, and is it acceptable" is: worse on the median, better on the tail, and acceptable.** `npm run eval` could NOT do this job — `eval/run.js` drives `lib/harness/textSession.js`, which has no audio in it at all — so `npm run stt:ab` was built |
+| **C6** | Deployment isolation — `voice-us` holds no non-covered credential, **including breaker-open**, which must reach voicemail | **`done` for the credential half, 2026-08-23, against the LIVE covered project. Breaker half: already covered, and I nearly broke it** | Deployed stack | **Checked where the PHI actually is, which is not where the guard was looking.** `npm run check:credentials` with no arguments resolves to **`vetra-us-prod`** — a project with zero Cloud Run services and zero Cloud SQL instances — so its "Boundary holds" was a true statement about an empty project. That is **deliberate, not a bug**: the script's own comment says `*-staging` holds both credential sets by design under the 4-project merge. **But that premise expired** — `voice-us-staging` runs `DEPLOYMENT_MODE=hipaa`, and a hipaa process refuses to boot with a Deepgram key, so staging is de facto covered and was out of the guard's scope. **Run explicitly, it passes: `--project vetra-us-staging-c3a3bd` -> 4 secrets, 0 forbidden.** Cloud Run env on the live revision carries no `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY` or `GEMINI_API_KEY`; Secret Manager holds only `cloudsql-postgres-password-us-staging`, `smtp-password`, `twilio-account-sid`, `twilio-auth-token`. **Sabotage-verified, so the pass is not vacuous:** `findForbiddenSecrets` on the real names returns `[]`, and returns the right vendor for `deepgram-api-key`, `elevenlabs-api-key`, `gemini-api-key`, `DEEPGRAM_API_KEY` and `my-elevenlabs-key-backup` — case and embedded forms included. **THE GUARD'S RESIDUAL, written down rather than fixed: it reads Secret Manager NAMES only.** A credential set as a plain Cloud Run env var is invisible to it. The enforcement that actually covers that is the BOOT check, which has fired on a real deploy. **AND A CORRECTION TO MY OWN FINDING:** I found `resolveVoice` is compliance-unaware — it only checks `voiceProvider === "google"`, so a covered deployment still SELECTS ElevenLabs every turn and relies on the constructor throwing — and started to add a selection-layer guard. **`tests/complianceMode.test.js`'s own header argues the opposite and is right:** "a guard placed at provider SELECTION is a guard with three doors beside it" — a `voice_provider` column, a `forceFallback` argument, and a breaker that flips providers mid-call — "these tests exercise the constructor directly, in every breaker state, because that is where the guard actually is and the point is that no state can route around it." **Reverted; the single chokepoint is the correct design.** The residual worth knowing: on the covered lane the ttsHealth breaker is driven by a COMPLIANCE refusal rather than a vendor outage, which is permanent and knowable at config time |
+| **C7** | Restore test into a scratch instance. Evidence for §164.308(a)(7). Once, documented | **`done` 2026-08-25 — 13/13 PASSED, exit(0). Restore wall clock 341 s.** Backup `1787562000000` (2026-08-24 09:00) restored into a scratch instance, compared, instance deleted and deletion VERIFIED. No `terraform apply`, total cost a few cents | — | **CORRECTED.** A restore test needs a target, and the previous conclusion was that this meant building production. It does not. C7 restores a **Cloud SQL automated backup** to prove the backup is good (§164.308(a)(7)(ii)(D)); D3 runs a **cross-vendor logical `pg_dump`/`pg_restore` from Supabase**, which proves the data moved. Different mechanism, different claim — D3 succeeding says nothing about whether a Cloud SQL backup restores. Staging has been taking automated backups since B2, and `gcloud sql backups restore` (by backup name) and `gcloud sql instances clone` both create a NEW instance **without a `terraform apply`**, so the hard stop is avoidable and a `db-g1-small` for an hour is ~$0.04. The parity check runs through the migrate job with `--update-env-vars=CLOUD_SQL_INSTANCE=<scratch>`, which this file already establishes is EXECUTION-SCOPED — no rebuild, no apply, so preparing it does NOT redeploy the thing under test. **Still missing: the parity script itself.** Repeat against production's own backup once production exists — that is the strongest form of the evidence. Superseded: A restore test needs a TARGET, and there is no scratch instance. Creating one is a `google_sql_database_instance` — **`terraform apply`, a hard stop — and it starts a meter.** There is also no path to staging's Cloud SQL from this workstation (private IP only), so even the verification queries afterwards have to be a committed script run through the migrate job, whose image is pinned by `image_tag` — which also drives the VOICE service, so preparing it redeploys the thing under test. **Nothing about C7 is doable unattended.** Sequence when the owner is present: create the scratch instance -> restore the latest automated backup into it -> run a committed parity script -> record row counts per table and the wall-clock -> DELETE the instance so the meter stops. Recording it as blocked rather than half-doing it |
+| **C8** | Cross-tenant isolation at **both** app and RLS layers + PHI-access audit logging (§164.312(b)) | **`done` 2026-08-25 — BOTH LAYERS PROVEN WHERE THE PHI IS.** App layer 15/15 live (2026-08-23). **RLS layer: 58 passed, 0 failed, exit(0) against `vetra-us-staging`'s Cloud SQL** on `voice:61294bd`, execution `vetra-migrate-us-staging-fgxp2`. Audit logging live and producing 47 entries across two real calls. **One residual, stated rather than buried:** the routing-table GRANT question is still unanswered on Cloud SQL | | Deployed stack | **RLS HALF, 2026-08-24 — `scripts/c8-rls-proof.js`.** A committed script rather than a test, because staging's Cloud SQL is private-IP only and there is no hand to run a statement by. It **refuses to run before establishing that it can prove anything**: `SET LOCAL ROLE vetra_app`, then abort unless the effective role is neither superuser nor `rolbypassrls` — locally `vetra` is both, which is why six RLS tests once passed against a function completely defeated on Cloud SQL. The table list, the required columns and the CHECK-allowed values all come from `pg_catalog`, so a new tenant-scoped table cannot go untested while the report still claims coverage. Every refusal is paired with the positive control FIRST — OWN READ must find the row before CROSS READ, UNSCOPED READ and CROSS WRITE mean anything, and if it fails they are reported UNPROVEN. A permission error is reported as a GRANT refusal and never as isolation. Everything runs in ONE transaction that always ends in ROLLBACK, so nothing survives even a crash — verified: zero rows left behind. **Local: 58 passed, and 2 failures that are the finding — `business_directory` and `user_directory` are granted `arwd` to `vetra_app` while the schema says twice that they are not, which voids the entire argument for those tables having no RLS.** Sabotage-verified five ways: remove the SET ROLE (preflight fails and aborts); force the preflight to pass (every CROSS READ then FAILS with B's row visible, which is what proves the checks are not vacuous); drop a policy (FAIL, not a note); `NO FORCE` (FAIL); revoke SELECT (reported as GRANT, not isolation). **APP HALF, 2026-08-23:** `scripts/c8-tenant-isolation.js` drives the real HTTPS API with two real Identity Platform accounts and two real tenants, because "isolated locally" and "isolated where the PHI is" have already been different facts once — six RLS tests passed on local PG16 against a function completely defeated on Cloud SQL. **Every refusal is paired with a positive control, and the control EARNED ITS KEEP ON THE FIRST RUN:** the cross-tenant knowledge check "passed" with a 403 while tenant B could not read its OWN rows either — the knowledge routes take `businessId` in the body/query and 403 when it is absent. **The negative-only-test hole reproduced itself inside the script written to avoid it**, and only the positive control caught it. Fixed: A now attacks by PASSING B's id, in both spellings. **WHICH LAYER REFUSED, which is the actual C8 question:** `GET /api/businesses/<B>` returns **404, not 403** — RLS filtered the row before the handler saw it, so `settings.js`'s explicit "Do not leak other businesses" 403 branch is **unreachable in practice on Cloud SQL**. `PUT /api/knowledge/<B's row>` is 404 both when A claims its own tenant and when it claims B's. Meanwhile `/api/business/<B>/capabilities` and `/api/knowledge?businessId=<B>` return **403** — the app-layer comparison firing. **Both layers are demonstrably live, on different endpoints.** Writes are checked by their EFFECT, not their status: after A's attempts, B re-reads and its name and knowledge row are unchanged. No token and a junk token are both 401. **THE GAP, and it is the §164.312(b) half: THE DASHBOARD BACKEND EMITS NO PHI-ACCESS AUDIT RECORD AT ALL.** `grep -rn "recordPhiAccess\|phi_access\|phiAccess" AI-phone-dashboard/backend/src/` returns NOTHING, and its `withTenantHandler`/`db.withTenant` carry no audit hook. Confirmed live: 15 authenticated tenant-scoped API calls produced **zero** `phi_access` entries in Cloud Logging, while the VOICE service emits them normally (three `write` events at 2026-08-23T18:29 for tenant `ac2c14b8`). **So the coverage is exactly the wrong way round.** O29 audits the AUTOMATED path — the receptionist writing transcripts. The DASHBOARD is the only place a human being reads a transcript, an appointment or a caller's number, and §164.312(b) exists principally to detect inappropriate access BY WORKFORCE MEMBERS. **And the guard that keeps this honest cannot see it:** `tests/phiAuditCoverage.test.js` reads only `services/db.js` and contains zero references to `AI-phone-dashboard` — correct about its subject, blind to the other half of the system. **CLOSED IN CODE later the same day, and — CORRECTED 2026-08-24 — ALREADY DEPLOYED.** This row said "not yet deployed" and the session-close summary above said the opposite; git settles it: `9c44c8a`, which adds `phiAudit.js`, IS an ancestor of `ff52ea4`, and `phi_access_log` comes from migration **030**, far below staging's head of 037. So the dashboard's §164.312(b) logging has been live since the 2026-08-23 apply and needs no deploy of its own. Classified BY ROUTE, because the dashboard has no data layer to classify by — and the route is also exactly the unit of work `withTenantHandler` already wraps. Four PHI routes: `GET /api/calls`, `GET /api/calls/:id` (the richest read in the product — call, full transcript, appointments and messages in one request), `GET /api/appointments`, and `POST /api/appointments/email` as **`export` rather than `read`**, because it is the only dashboard route that moves PHI out of the system. Analytics deliberately NOT classified: COUNT and SUM with no subject, the same line that exempts `countScheduledOverlapping` on the voice side. **`phiAuditRoutes.test.js` walks the REAL express router stack** and fails the build on any tenant-scoped route that is neither classified nor named not-PHI — in both directions, plus a route named twice, plus a guard-the-guard assertion that the walk found anything at all, because a silently-empty walk would pass vacuously and that is the failure shape this entire session kept finding. Four sabotages, four catches. **THREE THINGS THE TESTS CAUGHT THAT I HAD WRITTEN WRONG:** (1) I claimed the rollback means an unauditable access never happened — **it does not**, because `res.json()` runs INSIDE the transaction, so the disclosure has already left the process before the INSERT; a test raced it and lost. A rollback undoes the database work and cannot un-send a response; the stdout copy in `finally` is what actually covers it. (2) `row_count` was the length of `resource_ids`, so a list of twenty appointments recorded as **0** — **a wrong number in an audit trail is worse than an absent one, because it is believed**; now observed from the response via a thunk, since the count is not known when `withTenant` is called. (3) `operations` was empty, so a row could not say WHICH endpoint was used. **Still open by decision:** buffering the response until after COMMIT would close the disclosure-precedes-audit gap properly and is a much larger change to every handler. **Needs a dashboard rebuild + `dashboard_image_tag` bump + apply before any of it runs where the PHI is** |
+| **C9** | `npm run sim:cutoff` after any turn-taking-adjacent change | `todo` | — | |
+
+---
+
+### The pending deploy — ONE image, ONE apply, no migration
+
+**Scoped by diffing the image trees against what is running, not by memory. It
+is smaller than this file said an hour earlier**, which claimed both images and
+both tag bumps.
+
+**What actually changed since `ff52ea4`, which is what both services run:**
+
+```
+.dockerignore                  9 +      the two negations without which the COPYs fail
+Dockerfile                    12 +      the two COPYs
+lib/db/schemaFingerprint.js  106 +      extracted, shared with tests/db/schemaParity
+scripts/c7-restore-parity.js 470 +      new
+scripts/c8-rls-proof.js      649 +      new
+scripts/migrate.js             8 +-     `async function connect` -> `export async function connect`
+```
+
+`git diff --stat ff52ea4..HEAD -- AI-phone-dashboard/` is **EMPTY**. So:
+
+  - **The dashboard image does NOT need rebuilding and `dashboard_image_tag`
+    stays at `ff52ea4`.** The dashboard's `DASHBOARD_URL` arrives as a Cloud Run
+    environment variable from Terraform; `routes/appointments.js`, which reads
+    it, last changed in `833a869` and is already in the running image.
+  - **No migration runs.** Head is 037 on both the repo and staging, nothing new
+    was added, and `phi_access_log` is migration 030. **The standing
+    "migration before image, always" rule does not bind here** — it exists so a
+    service never begins reading a table the job has not created yet, and this
+    deploy adds no table and no query. Say that out loud rather than skipping
+    the rule silently.
+  - **The only behavioural change to the voice SERVICE is one env var.** The two
+    new scripts are job entrypoints; nothing imports them at boot. The
+    `migrate.js` diff is a comment and an `export` keyword — verified by reading
+    the diff, because "inert" is exactly the kind of claim that is wrong once.
+
+**The sequence:**
+
+```bash
+export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
+P=vetra-us-staging-c3a3bd
+TAG=$(git rev-parse --short HEAD)     # e6d17c6 at time of writing
+
+# 1. Build the voice image. --service-account is required; this is the sixth
+#    occurrence, and the org policy that causes it is in Standing facts.
+gcloud builds submit --config=cloudbuild.yaml \
+  --substitutions=_TAG=$TAG --service-account=vetra-deployer --project=$P
+
+#    The build now runs `smoke-verifiers`, which IMPORTS both new scripts inside
+#    the image. If a COPY or a .dockerignore negation is missing the build FAILS
+#    here rather than in front of you during C7.
+
+# 2. Verify by INSPECTING the image, never by reading the tag — a _TAG here is a
+#    hand-typed substitution and reasoning from one has already given the wrong
+#    answer once.
+docker run --rm --entrypoint sh \
+  us-central1-docker.pkg.dev/vetra-shared-c3a3bd/vetra/voice:$TAG \
+  -c 'ls /app/scripts/'
+#    Expect: c7-restore-parity.js c8-rls-proof.js db-inspect.js migrate.js seed-staging.js
+
+# 3. Pin it, then apply. image_tag drives the voice SERVICE and the MIGRATE JOB
+#    together, which is normally the hazard — here it is what we want, because
+#    the job is the thing that needs the new scripts.
+#    Edit infra/terraform/terraform.tfvars:  image_tag = "<TAG>"
+terraform plan -out=deploy.tfplan     # READ IT. Expect: the two Cloud Run
+                                      # services changing (DASHBOARD_URL), the
+                                      # job changing (image), and the documented
+                                      # min_instance_count phantom.
+terraform apply deploy.tfplan
+```
+
+**Afterwards, three things become true and each is worth confirming rather than
+assuming:**
+
+  - `[boot] notice dashboard_url_missing` is **GONE** from the voice service's
+    log. That is the control confirming itself, the same way `sms_channel_off`
+    and `auth_not_configured` did.
+  - **C8's RLS half is runnable:** `gcloud run jobs execute
+    vetra-migrate-us-staging --args=scripts/c8-rls-proof.js --region=us-central1
+    --project=$P --wait`. It writes nothing — one transaction, always rolled
+    back. **Expect the two `business_directory` / `user_directory` failures**;
+    the open question is whether Cloud SQL grants `vetra_app` `arwd` on them the
+    way local PG16 does.
+  - **C7 is runnable**, per its own runbook below.
+
+---
+
+### C7 runbook — the whole thing, ~10 minutes, owner present
+
+**Why this is not a cost decision.** A `db-g1-small` is ~$0.037/hour. The
+instance lives for the length of one restore plus one script. Delete it and the
+meter stops.
+
+**⚠ CORRECTED 2026-08-24: THERE IS ONE APPLY, AND IT IS NOT THE ONE THIS FILE
+WARNED ABOUT.** Creating and deleting the scratch instance genuinely needs no
+Terraform — that part stands. But the parity script has to BE in the image the
+job runs, and the job's image is pinned by `image_tag`. So step 0 is a rebuild,
+an `image_tag` bump and an apply, and that apply moves the VOICE SERVICE too.
+
+**Do not spend that apply on C7 alone.** The same deploy is what
+`scripts/c8-rls-proof.js` needs to run where the PHI is, and what C8's
+dashboard-side PHI-access audit logging needs in order to run at all. **One
+deploy closes the packaging half of C7 and both open halves of C8.** Sequence it
+once, deliberately, with the migrate-job ordering rule this file already
+records: `-target` the job, execute it, then apply the rest.
+
+```bash
+export CLOUDSDK_CONFIG=$HOME/.gcloud-vetratd
+P=vetra-us-staging-c3a3bd
+SRC=vetra-us-staging
+SCRATCH=vetra-c7-restore-probe
+
+# 1. Pick a backup. Note its ID and its windowStartTime — the timestamp is what
+#    explains the row drift the script reports later.
+gcloud sql backups list --instance=$SRC --project=$P
+
+# 2. CORRECTED 2026-08-25, this step was WRONG and would have wasted a session.
+#    A backup ID can only restore into an instance that ALREADY EXISTS. The
+#    "restore to a new instance" form needs a backup NAME, and the backups on
+#    this instance have no name — `--format='value(name)'` returns empty, only
+#    ids. So it is two steps, and creating the instance first is also what lets
+#    it be given the private network the migrate job needs.
+#
+#    --edition=ENTERPRISE is REQUIRED and is not the default any more: gcloud
+#    now defaults new instances to ENTERPRISE_PLUS, which rejects db-g1-small
+#    with `Invalid Tier (db-g1-small) for (ENTERPRISE_PLUS) Edition`. Terraform
+#    pins ENTERPRISE (sql.tf), so the CLI default has drifted away from the
+#    fleet — worth knowing before D3 builds production by hand for any reason.
+gcloud sql instances create $SCRATCH --project=$P \
+  --edition=ENTERPRISE --database-version=POSTGRES_16 --tier=db-g1-small \
+  --region=us-central1 --availability-type=ZONAL \
+  --storage-size=10 --storage-type=SSD \
+  --network=projects/$P/global/networks/vetra-us-staging --no-assign-ip \
+  --disk-encryption-key=projects/$P/locations/us-central1/keyRings/vetra-sql-us-staging/cryptoKeys/vetra-sql-us-staging \
+  --no-backup --quiet
+
+gcloud sql backups restore <BACKUP_ID> \
+  --restore-instance=$SCRATCH --backup-instance=$SRC \
+  --project=$P --quiet          # ~341 s measured 2026-08-25
+
+# 3. Compare. --update-env-vars is EXECUTION-SCOPED (verified 2026-08-23), so
+#    this leaves no drift on the job and the next migration run is unaffected.
+gcloud run jobs execute vetra-migrate-us-staging \
+  --args=scripts/c7-restore-parity.js \
+  --update-env-vars=C7_RESTORED_INSTANCE=$P:us-central1:$SCRATCH \
+  --region=us-central1 --project=$P --wait
+
+# 4. Read the EVIDENCE LINE at the end of the log and paste it into this file.
+#    "Once, documented" is half the requirement and the log is the document.
+
+# 5. STOP THE METER. Do this even if the test failed.
+gcloud sql instances delete $SCRATCH --project=$P
+```
+
+**Three things to check while you are there, because they are free once the
+instance exists and cannot be checked any other way:**
+
+  - **CMEK on the restored instance.** The script cannot see it — it is an
+    instance property, not a SQL one. `gcloud sql instances describe $SCRATCH
+    --format='value(diskEncryptionConfiguration.kmsKeyName)'` must name our key,
+    not be empty. A restore that silently drops CMEK is a restore that produced
+    an uncovered copy.
+  - **Wall clock.** How long step 2 took is the number §164.308(a)(7) actually
+    wants alongside "it worked" — a recovery time nobody has measured is not a
+    contingency plan.
+  - **Whether the restore needed the migrations.** It should not: a backup
+    carries the schema at its own point in time. The script's migration-head
+    check answers this, and a mismatch means the backup predates a migration.
+
+**What the script will NOT tell you, stated so the pass is not read as more
+than it is:** it counts rows only for tenants reachable through
+`business_directory` or `user_directory`, and it says so in its own output when
+`pg_class` estimates more businesses than it enumerated. A tenant with neither a
+dialled number nor a staff account is not counted.
+
+**Then repeat it against production's own backup once production exists.** That
+is the strongest form of this evidence and the only version that is genuinely
+about production — but it is a repeat of a proven procedure rather than a first
+attempt, which is the entire point of doing it on staging first.
+
+---
+
+## What "done" means — read this before answering "are we finished yet"
+
+Asked twice in one session, which means this file was not answering it.
+
+**D7 is the end of the MIGRATION.** At that point the receptionist runs on GCP,
+Twilio points at Cloud Run, and Railway/Supabase/Vercel/Sentry are cancelled.
+Lane C will have proven ≥5 concurrent calls per region, latency against the A0
+baseline, tenant isolation, deployment isolation and a restore.
+
+**D7 is NOT the end of the product.** Three things sit outside it, and two of
+them are the ones a clinic would actually notice:
+
+| Gap | Why it matters after D7 |
+|---|---|
+| **athenahealth is not integrated** | The clinic runs athenahealth *for everything*. Appointments the receptionist books land in **Vetra's own `appointments` table, not in athenahealth**, so staff would have to re-key every one. Fine for a pilot; not the product being sold. v2, and the partner application is deferred until after Lane C so the security review can describe the GCP stack. |
+| **14% of turns time out with no reply** | A0 measured 12 of 84. It predates the migration, it is recorded so it cannot be misattributed to it, and **the migration does not fix it.** It is the thing a clinic notices first, ahead of any infrastructure. Needs its own diagnosis. |
+| **The hard line** | No real patient call until **LLC + clinic BAA + cyber liability**. So "test it like a real customer" after D7 means the owner, their own phone, and synthetic data — a full rehearsal, not a live patient. |
+
+Also outstanding after D7 and not blocking it: the compliance paperwork pile,
+O21/O22, and whatever Block 1 has not closed.
+
+---
+
+## Lane D — cutover · 1–2 days
+
+> **⚠ THERE IS NO PRODUCTION TO CUT OVER TO. Verified 2026-08-23:** `vetra-us-prod`
+> and `vetra-uk-prod` both list **zero Cloud Run services and zero Cloud SQL
+> instances**. Everything that exists is staging.
+>
+> That is C-12 working as designed — production databases were deferred to save
+> ~$98.62/month — but it means **this table has an unlisted step inside it**. D3
+> says `pg_dump` / `pg_restore`, which presumes a target instance; there is
+> none. Something has to BUILD production first, and that is a cost decision
+> rather than a task. Sequence it immediately before D3 so the meter starts as
+> late as possible, and expect the first production start to need debugging for
+> the same reason every first start in this file has.
+>
+> **AND A SCOPING DECISION THE OWNER HAS NOT MADE.** Lane C says "per region"
+> four times (C2, C3, C4, D5) and `enable_uk_resources = false`, so the UK stack
+> does not exist and those verifications cannot complete as written.
+>
+> **Recommended: finish the migration US-ONLY.** The first clinic is Texas,
+> there is no UK customer, and the UK lane exists for GDPR customers who do not
+> yet exist. `vetra-uk-prod` stays dormant and unbilled — the posture
+> `vetra-uk-staging` is already in. Redefine D7 as *"the US receptionist runs on
+> GCP and Railway is cancelled"* and make UK its own lane triggered by a UK
+> customer. **This is not the prod US/UK split being reopened** — that split
+> stays non-negotiable; this is only about WHEN the UK half gets built.
+
+| # | Step | Status | Evidence |
+|---|---|---|---|
+| **D1-mail** | **Email configuration, which is wrong in two different ways today** | `todo` — **and a THIRD thing is now fixed: `DASHBOARD_URL` was never set anywhere** (`595761c`), so every owner notification has said "open the dashboard" while naming none. Wired on both services, pending the same deploy | **① The root SMTP credentials are a PERSONAL GMAIL** — `SMTP_USER=nithinjd06@gmail.com`, and `SMTP_FROM_EMAIL` the same. Owner notifications currently send *from a personal address*, not `@vetratd.com`: a 500/day cap, tied to one individual's account (an offboarding and workforce-access problem now that there are two founders), and it makes the `vetratd.com` SPF/DMARC setup irrelevant because the From is `gmail.com`. **② The dashboard backend has NO SMTP config at all** — the contact form and the digest return 503 "not configured" until it is set. A licensed M365 mailbox on `vetratd.com` exists (owner confirmed 2026-08-21); it is the destination for both |
+| **D1** | Reconcile the env drift | `done` for the code half, **`todo` for the deployed half** | Code and `.env.example` agree, enforced | **`18bce76`.** **The original count was wrong.** "95 vs 81" grepped `process.env.NAME` only, and this codebase reads env THREE ways — that, an injected `env.NAME` object, and `envInt("NAME")` via **four separate local copies** of the same helper. Real numbers: **118 in code, 83 documented.** 23 were invisible, including `DEEPGRAM_REGION` (residency), `VERTEX_ENABLED` and `GOOGLE_CLOUD_PROJECT` (which company processes patient speech). `tests/envInventory.test.js` now fails the build in BOTH directions — undocumented, and documented-but-dead. 37 documented, 5 genuinely dead removed (3 others that looked dead were live via `envInt`). **REMAINING, and it cannot be done from a workstation: reconciling against the DEPLOYED environments.** Railway's and Vercel's actual values are not visible from here; that half belongs at B4 when the real values go into Secret Manager. Also surfaced: `AI-phone-dashboard/backend` has **no `.env.example` at all** |
+| **D2** | Secrets → Secret Manager with rotation | `todo` | **Both compromised secrets are now MOOT — neither needs rotating, because nothing reads either one.** `BREVO_API_KEY`: Brevo deleted 2026-08-21, both call sites moved to SMTP (`250c1f5`). The Google OAuth client secret: A1.1 deleted the only OAuth flow. **The action for both is to DELETE the credential at the vendor, not rotate it.** What Secret Manager still has to hold: SMTP, Twilio, Deepgram, ElevenLabs, Gemini/Vertex, the database password, and `vetra_app`'s login — migration 029 creates that role NOLOGIN precisely so its password does not live in git |
+| **D3** | `pg_dump` / `pg_restore` per region | `todo` | |
+| **D4** | Repoint Twilio webhooks | `todo` | |
+| **D5** | Live call end to end per region; **row counts match per table** | `todo` | |
+| **D6** | **Warm hold one week** with Railway intact | `todo` | |
+| **D7** | Cancel Railway, Supabase, Vercel, Sentry | `todo` | |
+
+### Answers to the owner's two questions — 2026-08-23
+
+**1. "Does finishing US-only reopen the prod US/UK split?" — NO, and the two are
+about different things.**
+
+The split is about **WHERE a given tenant's data lives**: a UK tenant's PHI and
+call audio never sit in a US region, and a US covered tenant's never sit in an
+EU one. That is a residency guarantee and it is non-negotiable — it is the
+reason there are two production projects at all, and nothing here touches it.
+
+The US-only recommendation is about **WHEN the UK half gets BUILT**. Those are
+independent: `vetra-uk-prod` staying empty asserts nothing about where a UK
+tenant's data would live, because there is no UK tenant. The guarantee is a
+property of the design and of `gcp.resourceLocations`, not of whether an
+instance is running. **Building an empty UK stack today would not strengthen the
+residency claim by one inch; it would only start a second meter.**
+
+The one place the claim is genuinely weaker and it is unrelated to this:
+**Identity Platform has no residency control at all**, so UK STAFF LOGINS are a
+disclosed transfer under Google's DPA rather than enforced residency. That is
+recorded in Standing facts and is the sentence that has to be true in the UK
+customer's DPA — it does not change whether UK infrastructure is built now.
+
+**2. "When does production get built? It starts the meter before any traffic."**
+
+**Immediately before D3, and D3 should BE the build.** Reasoning, not precedent:
+
+- **Nothing before D3 needs it.** Every C-lane verification runs against
+  staging, which is the only stack holding a database. Building production
+  earlier buys no verification and costs ~$98.62/month from the day it exists.
+- **D3 is the first step that cannot proceed without it** — `pg_restore` needs a
+  target.
+- **The meter then runs for the length of D4 through D6**, which is dominated by
+  D6's deliberate one-week warm hold with Railway intact. So the unavoidable
+  cost of building at the last possible moment is roughly **8-9 days**, or about
+  **$25-30**. Building a month early costs ~$98 more and buys nothing.
+
+**AND THE RECOMMENDATION THAT SAVES A SECOND INSTANCE: make C7 the production
+build.** C7 needs a restore into a scratch instance as §164.308(a)(7) evidence.
+D3 needs a restore into a new production instance. **These are the same
+exercise.** Create the production instance, restore staging's dump into it, and
+record the row counts and wall-clock — that is C7's evidence AND D3's work, on
+one instance, with one meter start.
+
+Two caveats, stated rather than buried:
+
+- **A failed restore then leaves production half-built.** Acceptable, and only
+  because there is no production traffic yet and rollback is repointing Twilio
+  at Railway — the same one-way-door analysis that already governs Lane D.
+- **This file's history is unkind to first starts.** Every single one has needed
+  debugging. So budget the production build as a debugging session that happens
+  to produce a restore record, not as a step that takes an afternoon. Doing it
+  immediately before D4 rather than during it is what keeps that debugging off
+  the cutover's critical path.
+
+**What it does NOT change:** production stays deferred until that moment (C-12
+holds), and `vetra-uk-prod` stays dormant and unbilled.
+
+---
+
+**Rollback at any point: repoint Twilio webhooks back at Railway.** No live tenants, no divergent
+data, no one-way door.
+
+---
+
+## Lane U — UK · **DECIDED 2026-08-25. BUILD IT. START AT U1.** · opened 2026-08-25
+
+> **THE OWNER DECIDED TO BUILD AHEAD OF A SIGNED CUSTOMER, KNOWINGLY.** The
+> recommendation was to gate this on a first verbal commit, the same trigger LLC
+> formation uses. That was raised, considered and overridden — **do not re-litigate
+> it in the next session.**
+>
+> **The argument for building anyway is real: the stack is a SALES ASSET.** A UK
+> lead who can ring a UK number and hear ElevenLabs at 92 ms is a far better demo
+> than a US stack at 1,408 ms, and ~$75–95/month is defensible as marketing spend.
+> One person has already demo'd the product and given advice; there are a friend's
+> dad and several more leads behind them.
+>
+> **ALSO SETTLED: the NHS-vs-private question will not be answered before the
+> build, and does not block it.** It changes U7's paperwork — DSPT and DTAC if
+> NHS — and not the infrastructure. Build first, find out later.
+
+### The structural point: THIS IS NOT A MIGRATION
+
+Lane D exists to move an EXISTING production — `pg_dump` Supabase, restore it,
+repoint Twilio, warm-hold a week, cancel the old stack. **A new UK clinic has
+none of that.** Empty database, new number, nothing to cut over from.
+
+**So D3, D4, D6 and D7 do not apply at all.** Railway keeps serving the US
+family clinic, untouched. Lane U is a greenfield deploy of infrastructure that
+is already written and has now been applied cleanly three times.
+
+That is the difference between "4–5 sessions plus a one-week hold" and roughly
+three sessions.
+
+### Why UK is cheaper as well as faster — every clause verified, not assumed
+
+| | US (covered) | UK (GDPR) |
+|---|---|---|
+| Twilio compliance | **$2,000/mo** standalone HIPAA | **$0** — standard Art. 28 DPA |
+| STT | Google STT v2, forced | **Deepgram**, EU endpoint |
+| TTS | Google, `tts_ttfb_ms` p50 **1,408 ms** | **ElevenLabs, 92 ms** |
+| SMS | A2P 10DLC / toll-free verification | no equivalent maze |
+| Code path | `hipaa` — 7 defects between "deployed" and "answers the phone" | `standard` — the path already serving production |
+
+**C5 resolves itself.** That gate is a blind TTS A/B worth ~1.3 s/turn, and it
+exists only because `hipaa` mode refuses ElevenLabs. On this lane it does not
+arise.
+
+### What is ALREADY BUILT for UK — more than expected, checked 2026-08-25
+
+  - **`DEPLOYMENT_MODE` derives itself:** `lane == "us" ? "hipaa" : "standard"`
+    (`cloud-run.tf`). UK gets `standard`, so Deepgram and ElevenLabs are
+    permitted with **no code change**.
+  - ~~**`DEEPGRAM_REGION` derives itself:** `lane == "uk" ? "eu" : "us"`~~ —
+    **WRONG, corrected 2026-08-25 by grepping the Terraform. IT WAS SET
+    NOWHERE.** `sttDeepgram.js` reads it and defaults to `"us"`, so the UK
+    service would have sent every caller's audio to Deepgram's **US** endpoint
+    with nothing to show for it — calls fine, transcripts fine, residency claim
+    false. The sentence above describes `VERTEX_LOCATION`, the env var beside
+    it. `tests/deepgramRegion.test.js` passes either way: it tests the
+    FUNCTION, not that anything sets the variable. **Now wired at U1, and
+    sabotage-verified against the plan.** Read it as a warning about the rest
+    of this list rather than as one corrected line.
+  - **`VERTEX_LOCATION` derives itself** to `eu`, and B1 confirmed by live probe
+    that `locations/eu` serves `gemini-3.6-flash`.
+  - **`uk-prod` and `uk-staging` stacks are fully defined** in `locals.tf` with
+    `region = var.uk_region` (europe-west2) and `locations = eu_locations`.
+  - **`deepgram-api-key` and `elevenlabs-api-key` already exist in
+    `secrets.tf`**, annotated UK-ONLY.
+  - **`vetra-uk-prod-c3a3bd` exists and is empty.**
+  - **Shared and therefore free:** Identity Platform, the dashboard, every
+    migration, RLS, PHI-access audit logging, the eval harness, and all three
+    verification scripts (`c7-restore-parity`, `c8-rls-proof`,
+    `c4-latency-report`).
+
+**The UK lane needs no application code changes at all.** The work is config,
+credentials, and verification.
+
+### Cost — derived, not estimated
+
+`sql.tf` carries the arithmetic for the prod tier `db-custom-2-7680`:
+
+```
+(2 vCPU x $0.0413/hr  +  7.5 GB x $0.007/hr) x 730 hrs  =  $98.62 / month
+```
+
+That is ONE instance, and it is sized for real multi-tenant traffic. A single
+pilot clinic does not need it — `us-staging` runs the identical schema on
+`db-g1-small`.
+
+| Shape | Cloud SQL | All in, incl. keeping `us-staging` |
+|---|---|---|
+| **Pilot: `db-g1-small`** | ~$27 | **~$75–95/mo** |
+| Prod tier as configured | $98.62 | ~$145–165/mo |
+
+**Recommendation: build at `db-g1-small` and resize when traffic justifies it** —
+resizing Cloud SQL is a restart, not a migration. **Caveat:** `cloud_sql_tier`
+is keyed `prod`/`staging`, not per stack, so lowering `prod` also lowers it for
+US prod whenever that is built. Harmless while US prod does not exist; write it
+down so nobody inherits a pilot-sized production database by accident.
+
+### The phases
+
+| # | Step | Needs | Notes |
+|---|---|---|---|
+| **U1** | ~~Make `enable_prod_databases` granular, then `enable_uk_resources = true`~~ **DONE 2026-08-25, `d54002e`. BOTH FLAGS WERE BOOLS AND THE SECOND ONE PLANNED A DESTROY.** | — | **`enable_prod_databases` is now a list of PROJECT keys** (`["uk-prod"]`) and **`enable_uk_resources` is now a list of STACK keys** (`["uk-prod"]`). The second change was not on the brief and was not optional: `= true` also activates `uk-staging`, which is merged into the `us-staging` PROJECT, which changes that project's VPC `description`, which **forces the network to be replaced**, which cascades into replacing `google_sql_database_instance.this["us-staging"]` — `77 add / 3 change / **5 destroy**`, one of them the only database in the estate, with no deletion protection on staging to stop it. `["uk-prod"]` plans **`46 add, 2 change, 0 destroy`** and both changes are the `min_instance_count` phantom. Also fixed here because U6 could never have caught it: **`DEEPGRAM_REGION` was set by no Terraform at all.** Plan saved at `infra/terraform/u1.tfplan` — **re-plan before applying**, a saved plan goes stale with state |
+| **U2** | **FIVE secret values in `vetra-uk-prod-c3a3bd`, and it cannot happen before a partial apply** | **Owner — hard stop** | ~~Both secrets are already declared; only the values are missing~~ — **that is true of `us-staging` and WRONG for a new project.** `uk-prod` holds no runtime secret at all: `deepgram-api-key`, `elevenlabs-api-key`, `smtp-password`, `twilio-account-sid`, `twilio-auth-token`. Cloud Run **refuses a revision referencing a secret with no version**, so the voice service fails at create without them. The secrets do not exist until Terraform makes them, so: `terraform apply -target='google_secret_manager_secret.runtime'` -> add five versions -> full apply. **The Twilio pair must be the account that will own the UK number.** `terraform output secrets_awaiting_values` is the checklist |
+| **U3** | ~~`terraform apply`~~ **DONE 2026-08-25.** `Apply complete! 3 added, 3 changed, 1 destroyed` on the retry; the destroy was the TAINTED voice service being replaced after its own failed create, not a resource that ever served | Creates the UK VPC, Cloud SQL in europe-west2, both Cloud Run services, the migrate job. **Expect TWO first-apply failures, both documented and both fixed by re-applying:** `google_project_service_identity.sql` racing its IAM grant, and the `allUsers` invoker on `uk-prod/voice` racing the per-project Domain Restricted Sharing exception created in the same apply (~15 min to reach IAM, and nothing in the graph orders them). **It also spins a new `voice-us-staging` revision** — `DEEPGRAM_REGION=us` is added to it, a behavioural no-op that is still a redeploy of the live receptionist, so not mid-test-call. **One setting is unverified anywhere in this estate: `point_in_time_recovery_enabled = true` on a `db-g1-small`.** Read the apply output. **AND EXPECT A THIRD RE-APPLY REASON: an org policy change is not enforced when the API says it is** — U1b's widening reported `Modifications complete after 0s`, read back correctly, and still refused resources in the project it had just widened. Same ~15 min as the DRS exception. |
+| **U1b** | **Widen `gcp.resourceLocations` for the UK lane — `in:eu-locations` DOES NOT CONTAIN LONDON** | **APPLIED 2026-08-25** | Not on the original plan and not optional: the first apply into a UK project was refused outright. `in:eu-locations` is the EUROPEAN UNION and `europe-west2` is London. Blocked Cloud SQL, Cloud Run, KMS and the subnet equally — the secret was just first in the graph. `uk_locations = ["in:eu-locations", "in:europe-west2-locations"]`, applied to the uk stacks and to `shared`/`logging` (which already put their EU log buckets at `var.uk_region`). Cloud SQL backups pinned to the instance region in the same change, because the `eu` multi-region is EU-only too. **The three org policies are APPLIED. The five secrets are not** — enforcement lags the policy read by ~15 min, so they need a retry, not a fix |
+| **U4** | ~~Migrate job~~ **DONE 2026-08-25.** Empty database -> schema.sql baseline -> `applied: 36, pending: none`, confirmed with `--status` rather than believed | Builds the schema from scratch on an empty instance. C7 has now proven that exact path works. |
+| **U5** | UK Twilio number, webhook at the UK voice service, media edge **IE1** | Owner | Twilio confirmed regional media edges 2026-08-25, so call audio stays in Europe. **⚠ TAKE THE URL FROM `twilio_webhook_base`, NOT FROM `uri`.** A Cloud Run service here answers on two hostnames and `uri` returns the wrong one; the signature is an HMAC over the exact URL, so the wrong one 403s every call including genuine ones. Webhook is `<twilio_webhook_base>/twilio/voice`. |
+| **U6** | **HALF DONE 2026-08-25: C8 passes 58/58 on the UK database**, positive controls first, transaction rolled back. **C7 CANNOT RUN YET — the instance is hours old and has taken no automated backup** (window is 09:00 UTC); run it tomorrow. C2 and C4 need a number, so they wait on U5 | Owner's phone | `c8-rls-proof` and `c7-restore-parity` run through the migrate job; `c4-latency-report` runs from a workstation; C2 is a phone call. **C5 does not arise.** |
+| **U7** | GDPR paperwork | Owner + counsel | Sub-processor register and retention schedule are DRAFTED. DPIA, Art. 30 and the clinic DPA are not. |
+
+### U1–U7 IS NOT "READY". What each milestone actually buys
+
+Asked directly 2026-08-25 and worth writing down, because the infrastructure is
+the part that looks like progress and is not the part a clinic judges.
+
+| Milestone | What you have |
+|---|---|
+| **U1–U4** | A UK stack that boots. One session, probably. |
+| **U1–U6** | **Demo-ready.** A UK number a lead can ring, on the fast voice stack. This is the sales asset. |
+| **+ a quality pass** | **Pilot-ready.** See below — the parked defects are the gap, not the infrastructure. |
+| **+ U7 + an integration** | Something a clinic keeps using after the pilot. |
+
+**THREE THINGS SIT OUTSIDE U1–U7, and this file already says D7 is not the end
+of the product:**
+
+  1. **The parked defects, and one is caller-facing.** The **spelling livelock**
+     asked "could you spell your last name?" **nine times in nine consecutive
+     turns**, in 2 of 5 runs, with every hard assert green. That is the one a
+     patient notices. Then O25 (fired unasked on two real calls), the
+     not-found/not-yours conflation, reschedule's missing confirm-before-write,
+     and the routing-table grant.
+  2. **The 14% no-reply rate.** A0 measured 12 of 84 turns timing out with no
+     reply. It predates the migration and the migration does not fix it. The
+     2026-08-25 calls showed **0 of 15**, which is encouraging and is not a
+     sample.
+  3. **No practice-management integration.** Appointments land in Vetra's own
+     table, so staff re-key every booking. The US version of this is
+     athenahealth; **the UK equivalent is UNKNOWN — Dentally, SOE/Exact, EMIS,
+     SystmOne? — and it may be what decides whether a clinic keeps you after the
+     pilot.** Ask early.
+
+**Recommended order:** build the stack (it is the sales asset), then a quality
+pass led by the spelling livelock, then the PMS question.
+
+### What does NOT carry over from the US lane
+
+Stated so nobody re-does work that has no purpose here:
+
+  - **The $2,000/month Twilio HIPAA fee**, and the BAA negotiation behind it
+  - **Toll-free verification and 10DLC** — and with them, O25's deadline
+  - **C6's credential boundary in its US form.** It INVERTS: Deepgram and
+    ElevenLabs are the correct vendors here, and `checkCoveredVendors` only
+    refuses them in `hipaa` mode
+  - **Google STT v2, CMEK on Speech, `assertSttEncryption`** — all HIPAA
+    machinery
+  - **The LLC as a HIPAA prerequisite.** Liability may still argue for an
+    entity; the BAA no longer does
+
+### Open questions — the first one can double the estimate
+
+  - **NHS or PRIVATE?** The single biggest unknown. NHS brings DSPT and DTAC,
+    which is a materially heavier lift than a private dental practice or private
+    GP. **Ask before planning anything else.**
+  - **ICO registration.** UK controllers and processors generally must register
+    and pay the data protection fee. Cheap, easy to forget, embarrassing to miss.
+  - **Art. 27 UK representative.** A US entity processing UK patient data may
+    need one. The UK cofounder may resolve it — a solicitor's five minutes.
+  - **Where does ElevenLabs process audio?** Deepgram's EU endpoint is wired and
+    tested; ElevenLabs' residency is UNVERIFIED and belongs in the DPIA before
+    it is claimed.
+  - **Identity Platform still has no residency control.** Staff logins are a
+    DISCLOSED TRANSFER under Google's DPA. It must be worded that way and never
+    as residency — that fact is unchanged and it is the one place the two-region
+    design cannot be enforced.
+  - **`uk-staging` is merged into the `us-staging` PROJECT** (`stack_projects`).
+    Fine while it holds synthetic data; decide deliberately before any real UK
+    data touches it.
+
+---
+
+## Owner track
+
+### Day 1 — gates Lane B only. Lane A does not wait.
+
+> **Two bootstrap steps were discovered by running the apply, not by reading documentation.** ① The quota project needs Terraform's own APIs enabled ON IT — `orgpolicy`, `cloudresourcemanager`, `cloudbilling`, `iam`, `iamcredentials`, `compute`, `servicenetworking`, `artifactregistry` — even though the resources land elsewhere. **Done.** It fails as a 403 SERVICE_DISABLED naming the bootstrap project, which reads as a permissions problem and is not. ② The billing quota, see O2d. Both are now in `infra/terraform/README.md` (`43effaa`).
+
+> **New trap, recorded in `versions.tf`:** the provider's `billing_project` IS the bootstrap project, so **O3c's deletion of `My First Project` breaks every future Terraform run.** Repoint at `vetra-shared-c3a3bd` and re-plan BEFORE deleting, not after.
+
+**Step-by-step runbook for all 17 items** (console paths, email templates, gotchas, evidence to
+record): <https://claude.ai/code/artifact/3cb492c1-924a-4546-a4d3-524a7be0d61a> — published
+2026-08-20. Execution order there is 1–17; the O-numbers below are the identifiers, not the order.
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| O1 | Cloud Identity on `vetratd.com` | `done` | **2026-08-20, screenshot.** Expired/suspended Workspace **cancelled** by owner; org now on **Cloud Identity Free · Active · Free edition (no charges) · 50 licenses**. Domain already Google-verified (3 TXT records). MX untouched — still Microsoft |
+| **O1b** | Confirm the owner is assigned Super Admin | `done` | **Proven by action 2026-08-20** — the CDPA and the HIPAA amendment were both accepted as `admin@vetratd.com`, which is super-admin-only |
+| **O2b** | `vetratd.com` Organization resource exists | `done` | **Created 2026-08-20 15:16:06** — console toast: *"Created vetratd.com organization and granted admin@vetratd.com the organization admin role"*. **Trigger was the billing signup**, which answers the open question. **B0a's blocking precondition is cleared.** Still needed: the **numeric Org ID** as a Terraform input |
+| **O2c** | **Never click "Set Up Foundation"** (Google's Cloud Setup wizard) | `todo` | It builds a folder hierarchy, org policies, networks and logging sinks — **the same resources `B0w` builds**. Running both produces duplicated, conflicting resources to untangle before `terraform apply` is clean. The button sits on the console landing page |
+| **O2d** | **Activate the full account** (leave the free trial) | `todo` — **NO LONGER BLOCKING B0a** (the 4-project layout routed around it), still open and still worth closing | **The predicted failure happened.** B0a created six projects and the last two could not attach to billing: `QuotaFailure: "Cloud billing quota exceeded"` on `01C71E-7C0893-377AE9`. A free-trial account caps at **5 linked projects** and the bootstrap project holds one of the five. Google's own banner confirms remaining credit carries over, so this costs nothing. If activating does not raise the cap, the fallback is the quota form: <https://support.google.com/code/contact/billing_quota_increase>. **FOUND 2026-08-21, and it probably explains the silence: the quota request was submitted while authenticated as `nithinjd06@gmail.com`, which holds ZERO roles on `01C71E-7C0893-377AE9` — verified by `gcloud billing accounts get-iam-policy`, whose only binding is `user:admin@vetratd.com` / `roles/billing.admin`. Putting admin@vetratd.com in the form's email field does not help; the form carries the authenticated identity, and Google verifies the requester against the billing account before granting. Resubmit signed in as `admin@vetratd.com`. Duplicate requests are fine; an unverifiable one is not.** **Not viable:** unlinking `My First Project` frees only 1 of the 2 slots needed and it is Terraform's own quota project. After the quota rises, one `terraform apply` finishes the job |
+| **O2g-a** | Isolated gcloud config dir **created and verified** at `~/.gcloud-vetratd` | `done` | Claude, 2026-08-20. `CLOUDSDK_CONFIG=~/.gcloud-vetratd` reports *No credentialed accounts*; default config still shows `nithinjd06@gmail.com`. **Isolation proven, not assumed** |
+| **O2g** | ADC login in the isolated config | `done` | **2026-08-20, verified by a real API call.** ADC at `~/.gcloud-vetratd/application_default_credentials.json`, `quota_project_id=ultra-glyph-506120-v5`; `gcloud projects list` succeeds. **Personal ADC untouched** (`quota_project_id=physicianmessagingapp`). Two gcloud identities on one machine, neither aware of the other |
+| ~~O2g-old~~ | *(instructions, kept)* — owner runs, as two self-contained lines: `CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud auth login admin@vetratd.com` then `CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud auth application-default login` | `todo` — **last owner GCP step** | **Env-var prefix per command, not `export &&`** — a first attempt separated the export from the command and the login landed in the default config. No harm done (ADC untouched, `quota_project_id` still `physicianmessagingapp`); default active account restored to `nithinjd06@gmail.com`. | Currently authed as `nithinjd06@gmail.com` (personal); `gcloud organizations list` returns **0 items** — **would have failed B0a with a confusing permissions error.** ADC is a **single global file**, so a naive `application-default login` would hijack the owner's other personal project. `CLOUDSDK_CONFIG` isolates accounts *and* ADC into one directory. `gcloud config configurations` does **not** work here — it shares one ADC file. Verify: `gcloud organizations list` returns `564252011558` |
+| **O2h** | **Do NOT rename `My First Project`** | `n/a` — decided | Project **ID is immutable** (`ultra-glyph-506120-v5`); only the display name changes, so renaming yields a "vetratd" project with a gibberish ID. Its junk name is load-bearing: it stops anyone mistaking a bootstrap artifact for real infrastructure |
+| **O2i** | Org-level roles for B0a | `done` | **Verified then fixed 2026-08-20.** `admin@vetratd.com` held **only** `roles/resourcemanager.organizationAdmin` — the predicted trap, confirmed. Granted `roles/resourcemanager.projectCreator`, `roles/orgpolicy.policyAdmin`, `roles/resourcemanager.folderAdmin`. Billing was already correct (`roles/billing.admin` on `01C71E-7C0893-377AE9`, account OPEN). Org customer ID `C02qjjwtt` |
+| ~~O2i-old~~ | *(original prediction, kept)* Google's auto-granted **Organization Administrator** manages org IAM and **does not** include project creation, billing linkage, or org-policy admin — likely need `roles/resourcemanager.projectCreator`, `roles/billing.user`, `roles/orgpolicy.policyAdmin` | `todo` | **Classic half-failed-apply trap:** projects create, then billing association or the EU location constraint dies on a permission error, leaving half-built infra. **Claude reads the actual bindings after O2g and hands over the exact list** — do not guess at role names |
+| **B0-boot** | **One deliberate hand-created resource: a GCS bucket for Terraform state** | `n/a` — **the module creates it**, and two OTHER bootstrap steps were needed instead | Unavoidable chicken-and-egg — Terraform needs state storage before it can create anything. **With two founders, remote state stops being optional**: local state would mean the cofounder cannot run Terraform without corrupting it. Explicitly the *only* exception to "Terraform owns everything" |
+| **O20** | Cofounder gets their own `@vetratd.com` Cloud Identity account | `n/a` — **conditional** | **Owner's call 2026-08-20: the cofounder does not access Google Cloud.** Correct on that basis — unique user identification only binds people who access the system. **The condition is load-bearing:** it becomes `todo` the moment the cofounder needs any GCP access, because the alternative (sharing `admin@vetratd.com`) makes audit logs unattributable and fails §164.312(a)(2)(i) **and** §164.312(b) together. Free and 2 minutes if it ever flips |
+| **O21** | Write **access authorisation + termination procedures** | `drafted` | **2026-08-22 (`322d3e7`), `docs/compliance/access-authorisation-and-termination.md`.** §164.308(a)(3)(ii)(B) and (C) plus (a)(4)(ii)(B) and (C). The load-bearing part is the **systems table**, because a termination procedure is exactly as complete as the list it works from — and the row most likely to be missed is the **dashboard**, the only one that is not Google IAM and the only one where "the account exists" and "the account reaches a tenant" are different facts since migration 036. Two limits stated rather than smoothed: **rotating what a leaver could READ** is the step that closes what they already know and the one people skip; and **termination is not instantaneous** — suspending the account stops the next refresh but a live token runs to its ceiling, which is O31. Restates O20's standing decision (the cofounder has no GCP access) as a control with a trigger attached. **Never exercised.** |
+| **O22** | Workforce training scoped to **two people, job-specific** | `drafted` | **2026-08-22 (`322d3e7`), `docs/compliance/workforce-training.md`.** **Texas HB 300 §181.101 is the binding half, not HIPAA**: 90 days from hire, every two years, **job-specific**, signed attestation — and job-specific is exactly what makes one deck for two people insufficient. A common module, an owner module (production access, tenant isolation, "the audit trail records you too", the two-lane credential boundary, the consent gate) and a cofounder module (no GCP access is a control not an oversight; the repo is public; the website must not collect PHI). With a trigger: **the day the cofounder gets any GCP access they take the owner module first**, before the access is granted. Counsel (O18) to confirm whether §181.101 reaches a founder rather than an employee, the attestation form, and whether the two-year cycle runs from hire or last completion. **Nobody has been trained; the record starts empty.** |
+| **O4c** | **Cloud-console** EU Data Protection Law certification | `done` | **Certified by owner 2026-08-20.** |
+| ~~O4c-why~~ | *(rationale, kept)* | `done` | **Owner's billing address is US** (stated 2026-08-20), so both conditions hold: subject to UK GDPR via the `voice-uk` stack, AND billing address outside Europe/ME/Africa. Applies the CDPA's Standard Contractual Clauses — the correct transfer mechanism for a US-billed controller processing UK data. **This also retroactively validates O4b**, which had been flagged as questionable on a mistaken UK-billing assumption |
+| **O2e** | **HOLD — do NOT delete `My First Project`** (`ultra-glyph-506120-v5`, project number `307972246794`) until after B0a and after the BAA is re-verified | `blocked` — by design | O3b is accepted *in a project*, and this is the only project that exists. Docs say acceptance is account-level, but **deleting the project the BAA was accepted in is not worth testing against HIPAA coverage.** Keep parked; delete only once B0a's real projects exist and the BAA still reads accepted |
+| **O2f** | Org-visibility contradiction resolved | `done` | **Manage Resources 2026-08-20** shows `vetratd.com` / `564252011558` with `My First Project` **nested under it**. The picker's *All* tab was stale propagation; the Access Transparency message was a **red herring** (that feature needs a paid support tier, not org membership). Resolved by reading the hierarchy, not either indirect signal |
+| **O2a** | Clear the overdue Google balance before attempting O2 | `done` | **Cleared by owner 2026-08-20.** |
+| O2 | Cloud Billing account created | `done` | **2026-08-20**, free-trial signup as `admin@vetratd.com`. **$300 / 90 days.** **Billing account ID still to be recorded** — it is a Terraform input |
+| **O3a** | **Google Workspace / Cloud Identity** HIPAA Business Associate Amendment | `done` | Accepted by `admin@vetratd.com` 2026-08-20, screenshot. **Covers Workspace + Cloud Identity ONLY — covers none of the GCP services that touch PHI** |
+| **O3c** | **Re-verify the GCP BAA still reads accepted after B0a**, then delete `My First Project` | `todo` — Claude | No per-project BAA is needed: Google's guidance is that opting in within one project covers the account, and the spec notes the BAA is **per-organization** (it survives even the LLC billing-account swap). Verified rather than assumed — hence the O2e hold |
+| **O3b** | **GOOGLE CLOUD PLATFORM BAA** | `done` | **Reviewed and accepted 2026-08-20 by `admin@vetratd.com`**, Cloud console → IAM & Admin → Privacy & Security → Legal & Compliance. Same page also confirms the **CDPA** accepted. Screenshot. |
+| ~~O3b-how~~ | *(mechanism, kept for the record)* | `done` | **MECHANISM RESOLVED 2026-08-20:** self-serve, no sales call. **Cloud console → IAM & Admin → with a project selected → "Google Cloud Platform HIPAA Business Associate Addendum" → Review and Accept.** Accepting in **one** project covers the account; covers all in-scope GCP products incl. Cloud Run. Services Agreement prerequisite already met via Cloud ToS |
+| O4 | **Google Cloud DPA** accepted | `done` | **Cloud Data Processing Addendum** accepted by `admin@vetratd.com` 2026-08-20, screenshot. The CDPA is Google's unified DPA and **does** cover GCP |
+| **O4b** | EU Data Protection Law certification | `done` | Certified 2026-08-20, screenshot. Not previously tracked; needed for the UK lane |
+| O5 | **Twilio US** — Security Edition quote + BAA. **Ask flat fee vs per-minute explicitly.** Longest lead time in the plan | `wip` | **Support ticket filed 2026-08-21; Twilio redirected to a sales form, submitted.** Form choices: Product Interest **"Voice AI & Conversational AI"** — the only voice option offered, there is no "Programmable Voice" — and "Build your own solution by using Twilio APIs". **Known routing risk:** "Voice AI" points at Twilio's AI-products team, who do not necessarily own Security Edition, so **the BAA ask has to lead the first reply** or the call gets spent on ConversationRelay. Say it in one sentence: Security Edition + signed BAA covering Programmable Voice, a second UK account with a DPA and media edge `ie1`, and flat fee vs per-minute |
+| O6 | **Twilio UK** account + DPA. Media edge `us1` / `ie1` set explicitly | `wip` | **A UK Twilio account EXISTS — the cofounder created it (owner, 2026-08-21).** Three things to verify before it counts: **① WHICH REGION.** Signing up while in the UK is not the same as creating an account in Twilio's **Ireland (IE1)** region, and a region cannot be changed after creation. A default signup lands in **US1**, in which case UK call media traverses US infrastructure no matter what the media edge is set to, and the account has to be recreated. Check the console region indicator / account settings. **② WHOSE ACCOUNT.** If it is in the cofounder's personal name, the DPA and any BAA contract with HIM, not with the business — and the numbers, billing and continuity go with him. Needs moving to a business account, which ties to the LLC. **③ UK number type.** UK geographic numbers require a UK address on file; a UK-resident cofounder is what makes that possible, and is presumably why the account exists |
+| O7 | Telnyx quote — **leverage only**, not a viable primary carrier | `todo` | |
+| O8 | Vertex **abuse-monitoring exception form** filed (invoiced billing deferred — likely needs a business) | `todo` | |
+| O9 | Vendor DPAs — Deepgram (+ `api.eu.deepgram.com` access), ElevenLabs, Twilio | `todo` | **Google is DONE** (CDPA, 2026-08-20). **Brevo is off the list** — deleted 2026-08-21. Three remain. **Deepgram is two separate asks and the second is the one people forget:** the DPA, AND explicit enablement of `api.eu.deepgram.com` on the account (GA since 2026-01-10, so an account flag rather than a feature request). Without it the UK stack sends audio to US infrastructure and the residency story collapses |
+| O10 | ICO registration, sole-trader tier | `todo` | |
+| O11 | Solicitor — UK Art. 27 representative vs UK subsidiary | `todo` | |
+| O12 | **athenahealth free developer/sandbox signup** (partner application deferred to after Lane C) | `todo` | |
+| O13 | **Clinic question 1: which US state?** CA triggers CIPA all-party consent + AB 3030 | `done` | **TEXAS.** Excel Cardiac Care PLLC, two sites: Keller 76244 + Decatur 76234 (DFW). **Not CA — CIPA and AB 3030 do not apply.** Texas one-party consent (Penal Code §16.02). Owner-answered 2026-08-20 |
+| O14 | **Clinic question 2: any substance-use treatment?** Triggers 42 CFR Part 2 | `wip` | Public service list is cardiology only — echo, stress, holter/event monitors, nuclear stress, pacemaker/ICD checks. No SUD service line. **42 CFR Part 2 almost certainly `n/a`** (Part 2 needs the program to hold itself out as SUD diagnosis/treatment/referral). Needs one yes/no from the clinic to close |
+| O15 | **Clinic question 3: what do they use for scheduling and records today?** Decides the entire v2 integration target | `done` | **athenahealth for everything.** Owner-answered 2026-08-20. The v2 bet is confirmed, not assumed |
+| O16 | Prod check: OAuth consent screen — **Testing or In production?** | `n/a` — **closed by A1.1** | Deleting Google Calendar sync deleted the only OAuth flow. There is no consent screen left to be in either state. **D2 changes with it:** `GOOGLE_CLIENT_SECRET` was down for rotation after the axios leak; nothing reads it now, so the action is to **delete the OAuth client**, not rotate its secret |
+| O17 | Prod check: is **migration 021** applied on prod? | `done` | **YES, applied.** Read-only PostgREST check 2026-08-20 against project ref `fkzubhompehjibobopqf`: `appointments.google_event_id` + `synced_at` -> HTTP 200; `calendar_connections` -> HTTP 200; **negative control** (`definitely_not_a_real_column_xyz`) -> `42703` / HTTP 400, so the 200s discriminate. Owner to confirm that ref is prod and not a staging copy |
+| **O18** | **US healthcare counsel** — Texas **HB 300** business-associate obligations + whether **TRAIGA** imposes an AI-disclosure duty on the call. **Distinct from O11** (that is a UK solicitor) | `todo` | |
+| **O19** | One email to the clinic closing **O14** (any substance-use treatment, yes/no) + athenahealth product/edition + existing integration contact | `todo` | |
+
+### Compliance gaps found 2026-08-21 — none of these were tracked
+
+| # | Gap | Why it matters | Owner |
+|---|---|---|---|
+| **O23** | **10DLC / A2P messaging registration** | Sending SMS to US numbers from a long code requires brand + campaign registration with The Campaign Registry. **Unregistered traffic is filtered or blocked by carriers**, silently — the caller SMS follow-ups would simply stop arriving with no error the code can see. A sole proprietor CAN register but on a throughput-limited campaign type, so this **interacts with the LLC decision**: an EIN gets a standard brand. Ask Twilio during O5 | Owner |
+| **O23a** | **Toll-free verification is the near-term path, and 10DLC is NOT needed yet** — worked 2026-08-21 | **A sole-proprietor brand cannot be converted to a Standard brand.** Registering one now means re-registering from scratch after the LLC, plus re-provisioning numbers — throwaway vetting. It also caps at 1 campaign / 1 number / ~1,000 msg-day on T-Mobile, so it cannot reach clinic #2. **Toll-Free Verification is a separate track: no TCR brand, no EIN, no entity — one form, days to ~2 weeks, higher throughput than SP 10DLC, multiple numbers.** Split the two audiences: **staff alerts** (`business.notification_phone`, 1-5 consented people per clinic who typed their own number into the dashboard) ship on toll-free now and could stay there forever; **patient follow-ups** (`sendCallerSms`) are what eventually forces 10DLC, and only for a product reason — texts should come from the clinic's own local number, which `businesses.phone_number` already gives every tenant. Unverified toll-free is blocked exactly like unregistered 10DLC, so verification is mandatory either way. **Submit it on the account being kept.** UK has no equivalent problem — alphanumeric sender IDs, no registration | Owner |
+| **O24** | **Two-party consent on INBOUND interstate calls** | The ledger concluded CIPA is `n/a` because the clinic is in Texas (one-party). That covers the CLINIC's location, not the CALLER's. **A patient dialling in from California, Illinois, Florida, Pennsylvania or Washington brings their state's all-party rule into scope**, and a Texas clinic takes calls from anywhere. Compounding it: `recordingDisclosureEnabled` **defaults to FALSE** (`services/db.js:307`), so by default nothing is announced. Cheapest fix is to make the disclosure unconditional rather than per-business — but that is a product decision and a legal one, so it goes to **O18 counsel** | Owner → O18 |
+| ~~**O25**~~ | **DONE 2026-08-22 (`dd5659f`, `297891c`). The template was NOT stripped; the consent was captured instead.** Migration **037** `sms_consents`: one row per ANSWER, carrying the caller's number, the call id, the timestamp, the exact disclosure and its version. A "no" is recorded too and the most recent row wins, so **revocation is an INSERT** — UPDATE is revoked and no UPDATE policy exists, because a consent record that can be edited afterwards is not evidence. DELETE **is** granted, unlike `phi_access_log`, because the row holds a phone number and an Art. 17 erasure has to reach it; the cost is that erasing a caller destroys the proof they consented to texts already sent, **flagged to counsel (O18) rather than decided in code**. The gate is `sendCallerSms` and it fails closed on every path — no tenant, no database, a failed lookup, an unscoped read that matched nothing — and deliberately does not distinguish them: "we could not establish consent" and "there is no consent" are the same decision. The asking is `capabilities/smsConsent.js`, one tool, one protocol, the disclosure held as a versioned constant so the prompt and the stored row cannot drift. **`script` is labelled honestly: it is the disclosure we REQUIRED, not a recording of what the model said** — a model paraphrases, and `call_transcripts` is the record of the words. **Both related defects fixed**: the templates no longer promise a reply nothing answers (pinned by a test), and `sms_templates` now carries a per-kind placeholder allowlist enforced in the dashboard AND again at send time, because the column is also writable by hand in SQL. **The allowlist is NOT a PHI detector and is not described as one** — no check can tell that "your chemotherapy appointment" discloses more than "your appointment", and a clinical-keyword denylist would be false confidence in the one message that leaves this system addressed to a patient. **Sabotage-verified three ways.** **STILL OWNER, and the order matters:** **(1) `TWILIO_SMS_FROM` IS UNSET ON STAGING** (found 2026-08-23 in the boot log's `sms_channel_off` notice), so `sendSms` drops every message with `twilio_sms_from_missing` **one layer BELOW this gate** — the obvious first test of O25 would record the consent, write the row, send nothing, and read as "the gate is broken". Set it and prove the channel BEFORE testing the gate on it; it is a Secret Manager change and a hard stop. **(2)** confirm no PRODUCTION tenant has `sms_followup_enabled` on — this branch cannot reach it because production is still **Supabase**, which is unrelated to the GCP suspension. **(3)** Twilio Programmable Messaging still has to be named in the BAA. **(4)** none of it has been exercised on a real call. | Claude, code |
+| ~~**O28**~~ | **DONE 2026-08-21 (`b829fd4`).** Erasure reaches Twilio. **The ORDER is the design:** read the pointers, delete at the vendor, then erase our rows — reversed, a Twilio failure after the rows were nulled destroys the only pointer to audio that still exists, and for these rows there is no second pointer because the degraded path creates no `calls` row to recover a SID from. The database erasure runs regardless (one vendor's outage must not refuse a statutory right), but the response is **200 complete / 502 partial** — **207 Multi-Status was rejected for being 2xx**, which every default `res.ok` check reads as success, the exact misread this prevents. A 404 from Twilio counts as SUCCESS so a retry converges; an unconfigured Twilio FAILS rather than reporting nothing to do. `tests/recordingPathLint.test.js` keeps "customer_requests.message is a complete index" true rather than assumed. **Found on the way: `eraseCallerData` used `pool.connect()` while the route had wrapped it in `withTenant`** — scope on one connection, erasure on another, so as `vetra_app` it matched zero rows and the route answered **200 `{erased: all zeros}`**. Watched failing ("expected +0 to be 1"). Sabotage-verified. | Claude, code |
+| ~~**O29**~~ | **DONE 2026-08-21 (`bb78637`).** Migration **030** `phi_access_log`, written at the `withTenant` boundary — ONE row per unit of work, not per statement (a statement has no subject and a pickup runs a dozen), on a connection already checked out, so no extra round trip on the 2,611 ms pickup path. Records who/what/when/which-tenant as **row ids, never PHI**; `recordPhiAccess` REFUSES a PHI-typed key on a whitelist rather than redacting it. **Two destinations answering different questions:** the table is queryable (GIN index on `resource_ids` answers "who accessed THIS record"), the stdout `phi_access` line is durable — B0w's `vetra-logging` sink, different IAM, writable and not erasable. The row rolls back with its transaction; the log line is emitted in `finally` and cannot, so an ATTEMPT survives. **Append-only with two locks proved INDEPENDENT** (029's ALTER DEFAULT PRIVILEGES had already granted UPDATE/DELETE on it before it existed, so 030 revokes them; there are also no UPDATE/DELETE policies). Sabotage-verified both ways. **The classification line is declared, not guessed:** an access reads, writes or destroys data ABOUT THE CALLER OR THEIR CARE — so `updateCallLatency` (system telemetry) and `countScheduledOverlapping` / `listScheduledBetween` (availability, no subject) are NOT accesses. `tests/phiAuditCoverage.test.js` fails in both directions plus a source scan that every classified function actually calls `noteAccess`. | Claude, code |
+| **O26** | **DRAFTED 2026-08-22 (`322d3e7`), `docs/compliance/incident-response-and-breach-notification.md`. Owner to adopt; counsel to confirm.** Three clocks in one table, and the 72 hours is not the shortest: **HIPAA** §164.410 to the covered entity, ≤60 days from **discovery**; **Texas** §521.053 from **determination**, and §521.053(c) distinguishes a person who MAINTAINS data from one who OWNS it — on that reading our Texas duty is to the clinic, which lines up with the HIPAA posture; **UK GDPR** Art. 33(2) to the controller "without undue delay", and their 72 hours starts when ours does, so in practice this one is hours. **The runbook therefore says treat 24 hours as the operative deadline** and use the statutory numbers to know what has already gone wrong. Scoping uses what actually exists: `phi_access_log`'s GIN index answers "who touched THIS record", the stdout copy in the `vetra-shared` buckets survives the suspension of the project that produced it, and the expected service-account-key count is **zero** because the org enforces both key CREATION and key UPLOAD policies. **Counsel (O18) must confirm** the maintains-vs-owns reading, the current AG trigger (30 days at 250+ Texas residents, amended 2023), what HB 300 adds, and whether the clinic BAA sets a shorter contractual deadline than 60 days — it commonly does, and it would then govern. | Claude drafted → owner adopts |
+| **O27** | **Twilio recording storage region and retention** | `server.js:359` handles a `RecordingUrl` on the degraded voicemail path, so Twilio DOES hold recorded caller audio. Where it is stored and for how long is unasked — and for the UK lane, where it is stored is a residency question, not a housekeeping one | Owner → O5 |
+| ~~**O30**~~ | **§164.312(a)(2)(iii) automatic logoff — DONE 2026-08-21 (`3a8ec2c`), and read what it does NOT do.** Client: `useIdleLogout` signs out after **15 min** idle, warns at 13 with a countdown and a "stay signed in" button. `mousemove` is deliberately NOT activity (a mouse resting on a trackpad edge is how this gets defeated in a real clinic) and neither is a tab backgrounding. Server: both servers reject a token whose `iat` is older than `SESSION_MAX_AGE_MINUTES` (default 30), answering a distinct `code: session_max_age` that the frontend refreshes-and-retries on once — without that, a 30-min ceiling would log a working clinic out mid-sentence, because Supabase refreshes near expiry rather than when somebody acts. **THE HONEST LIMIT:** the ceiling bounds ONE access token (the leaked-token window). It does **not** bound the refresh chain, which mints fresh `iat`s indefinitely and cannot be aged from a request. Closing that needs a session store (a write per request, which the owner declined) or a shortened token TTL at the auth backend — **that is B3's, and it is O31 below, not silently implied by this row.** | Claude, code |
+| **O31** | **THE TASK AS WRITTEN IS IMPOSSIBLE — established 2026-08-22 against the live API and the v2 discovery document, not inferred from documentation.** O31 said Identity Platform "makes the token lifetime configurable, which is what lets the ceiling be shortened to the idle window". **It does not.** The `Config` resource returns **15** top-level fields live and declares **18** in the schema (three are merely unset here, which is why the two counts differ and why quoting either alone is misleading), and **not one of them is a token lifetime, TTL, expiry or refresh setting**. Searching the whole v2 admin schema set for `ttl`, `lifetime`, `sessionCookie`, `expiresIn` and `tokenExpir` returns nothing. **So §164.312(a)(2)(iii) stays PARTLY satisfied and must be described that way to an auditor**: O30 ships a 15-minute client idle logoff and a `SESSION_MAX_AGE_MINUTES` ceiling that bounds ONE access token, and the refresh chain is still unbounded from a request. **THREE OPTIONS, and this is the owner's call, not a developer's:** **(a)** a server-side session store — a write per request, which the owner has already declined once; **(b)** **Firebase session cookies**, which is the one concrete finding this check produced: identitytoolkit **v1** `accounts:createSessionCookie` takes `validDuration` alongside `idToken` and `tenantId`, so a settable session duration genuinely exists — at the cost of a server-side session concept the dashboard does not have today; **(c)** describe the limit honestly in the policy set and accept "partly satisfied". **Do not spend a session implementing O31 as it is written.** | Owner decision |
+| ~~**O32**~~ | **DONE 2026-08-22 (`4994b3b`), and the finding is that this row and the comment implementing it had both gone stale.** It claimed per-turn PHI writes sit outside `withTenant` BY DESIGN, that an ungated alarm would fire every turn of every call, and that the fix was owed to B2. **All three had already stopped being true.** The live-call scoping fix wrapped every per-turn write in `lib/voice/session.js` (`scopedWrite`) in its own short unit of work, because under FORCE row-level security an unscoped write is REFUSED rather than merely unaudited — so the audit row came along for free, one per unit of work on a connection already checked out. **And the priced cost was wrong too:** "three extra statements on a path measured at 2,611 ms p50" is not on that path, because every one of those writes is fire-and-forget. A sweep of every call site of every PHI-classified function found **exactly one still unscoped: the degraded voicemail file** — and that is a DEFECT rather than an audit gap, because on Cloud SQL the INSERT is refused, `createCustomerRequest` returns null, and the route answers Twilio **200** with a real caller's voicemail nowhere. Extracted to `lib/degradedVoicemail.js` so a test can run it as `vetra_app` — it stayed last precisely because code reachable only through an Express handler gets "tested" by reading it. `tests/db/degradedVoicemail.test.js` also pins the failure itself: the identical INSERT with no scope, same role, is refused. Sabotage-verified. | Claude, done |
+
+---
+
+### Deferred by decision — do not start early
+
+| Item | Trigger |
+|---|---|
+| **LLC formation** | First **verbal** customer commit (not go-live). 1–5 business days; CA slower + $800/yr min franchise tax |
+| **Cyber liability binding** | After the LLC exists |
+| **Clinic BAA signature** | Day before go-live |
+| **athenahealth partner application** | After **Lane C**, so the security review describes the GCP stack |
+| **`us-standard` ElevenLabs lane** | First non-healthcare US customer. A third tfvars file, not a refactor |
+| **`browser_key_restrictions` on the Identity Platform web key** | **CLOSED 2026-08-24 as deliberately-not-done, the way O31 was.** Its stated precondition (a known dashboard domain) is now met, and working the reasoning through says no: `api_targets = identitytoolkit` already closes the threat this key was restricted for, a `Referer` is set by the client so the restriction deters casual reuse and not a script, and the list would have to include `localhost` — the same key is in the frontend's `.env` with no auth emulator, so both founders sign in against real Identity Platform locally. Include localhost and it is cosmetic; exclude it and local development breaks. **Trigger to revisit: wanting the honest version, which is TWO keys** — a referrer-restricted one that ships and an unrestricted dev one that never does. Also needs `…firebaseapp.com`, the configured `authDomain`, not just the `.web.app` origin |
+
+### Compliance paperwork — parallel, ~2–3 weeks, Claude drafts / owner adopts
+
+**Three of these are DRAFTED, 2026-08-22, in `docs/compliance/`** — all marked DRAFT, all
+listing what counsel must confirm, all ending with what has never been exercised:
+
+| Draft | Covers | Ledger |
+|---|---|---|
+| `incident-response-and-breach-notification.md` | the incident response plan **and** the breach runbook | **O26** |
+| `access-authorisation-and-termination.md` | §164.308(a)(3)(ii)(B)/(C), (a)(4)(ii)(B)/(C) | **O21** |
+| `workforce-training.md` | §164.308(a)(5) + TX HB 300 §181.101 | **O22** |
+| `sub-processor-register.md` | who processes PHI on our behalf, per lane; feeds the DPIA and Art. 30 | 2026-08-24 |
+| `retention-schedule.md` | how long each data class is kept, and what erasure actually reaches | 2026-08-24 |
+
+**"72-hour ICO breach runbook" was the wrong name for the thing on this list, and that
+was the whole of O26.** It is the UK clock and it was the only one written down; there
+are three, they start at different moments, and the 72 hours is not the shortest. The
+draft carries all three in one table.
+
+Still to draft: HHS SRA Tool risk analysis · **DPIA** · Art. 30 Records of Processing ·
+the wider policy set · contingency plan. ~~sub-processor register · retention schedule~~
+**both drafted 2026-08-24.**
+
+**TWO THINGS THE REGISTER SURFACED that were not being tracked as compliance items.**
+**(1) Twilio's BAA is not signed** — O5, `wip` since 2026-08-21 — and Twilio is the ONE
+non-Google sub-processor that touches PHI, since the caller's number and the audio both
+pass through it. Nothing in the Google relationship covers that, so it is a hard gate on
+carrying a real patient call and belongs on the same line as the LLC and cyber liability
+rather than in a vendor queue. **(2) Sentry is not out of scope**, as this file's
+"cancel at D7" framing implied: it receives errors with context filtered to seven
+non-identifying keys — a filter `lib/sentry.js` added *because* recipient addresses, a
+subject line naming a patient and caller numbers were previously being sent — and the
+residual is the exception MESSAGE, which no allow-list filters.
+
+**AND THE RETENTION SCHEDULE'S BLUNT FINDING: there is no retention job, so nothing
+expires and every transcript ever recorded is still in the database.** A schedule with
+no enforcement is a policy document. The 90-day transcript clock is the first thing to
+build, and the draft carries the three traps it will hit — a committed script through
+the migrate job, per-tenant scoping under FORCE RLS where an unscoped DELETE matches
+zero rows **and reports success**, and logging what was deleted, because a purge with no
+record is indistinguishable from one that never ran.
+Workforce training **records** start empty — the curriculum exists, the sessions have not
+happened.
+
+> Note: HIPAA's six-year retention applies to Security Rule **documentation**, not PHI. Do not
+> build long transcript retention.
+
+---
+
+## Open questions
+
+| Question | Owner | Blocks | Status |
+|---|---|---|---|
+| **Two founders with no entity is a general partnership by default in most US states** — joint and several personal liability. A fact for O18 counsel; **not** a reopening of the settled LLC-timing decision, which was reasoned about one person | Owner → O18 counsel | Possibly nothing. Counsel's call | open |
+| **The cofounder is UK-resident and works for the business — does that create a UK establishment under UK GDPR?** Establishment turns on stable arrangements and real exercise of activity, **not incorporation** | Solicitor, O11 | **O10 and O11 both hinge on this one fact and move in OPPOSITE directions.** UK establishment exists → Art. 27 rep probably NOT needed, ICO fee likely APPLIES. No UK establishment → Art. 27 rep REQUIRED, ICO fee generally does NOT apply | open — **US-established confirmed 2026-08-20** |
+| **Is a `us-standard` lane worth building at all, and what actually drives it — Deepgram or ElevenLabs?** | Owner + C5 + a new STT gate | ~$130/month and **the last billing slot** (4 of 5 used) | **open, and REWEIGHTED 2026-08-22 by live measurement.** The TTS half is now the BIGGER half and it is a latency question, not an aesthetic one: `tts_ttfb_ms` p50 went **92 ms → 1,408 ms** when the covered lane fell back from ElevenLabs to Google TTS, which is most of the +1,104 ms on `voice_to_voice_ms`. C5 was scoped as a blind listen about how the bot SOUNDS; it decides ~1.3 s per turn. **And the STT half now has live evidence too:** Google returned *niton / nithan / Nathan* for a caller's name and never the right one, where Deepgram scored 0.091 WER on the same case. Earlier framing: The STT half is measured and it does NOT give a clean verdict: Deepgram is ~880 ms faster on the median turn and **6.8 seconds slower on the worst one**, and their substantive errors differ in kind (Deepgram loses a phone number; Google mangles a spelled-out name). So the lane's case now rests on which of those a clinic actually notices, and the TTS half (C5) is still unrun. Original framing: The lane exists to give non-HIPAA US customers a better experience than the BAA-covered stack. Two separate claims sit underneath that and only one is being tested: **TTS** (ElevenLabs vs Google) is aesthetic and C5 covers it; **STT** (Deepgram vs Google STT v2) is FUNCTIONAL  — a mis-transcription books the wrong time or mishears a name, and STT latency sits inside the turn loop — and **nothing tests it today**. If Google's stack is indistinguishable on both, the lane has no purpose, every US customer runs covered, and the billing slot stays free |
+| Twilio Security Edition price — flat fee or per-minute? **The only unpriced line in the stack** | Owner | Economics of a `us-standard` lane; budget | open |
+| ~~Is `gemini-3.6-flash` served by the Vertex **EU multi-region** endpoint?~~ | Claude, **B1** | — | **CLOSED 2026-08-21 — YES.** `:countTokens` returns 200 at `locations/eu`. **And the answer came with a problem nobody had asked about: it is served by NO single region** — us-central1, europe-west2 and europe-west4 all 404. `VERTEX_LOCATION` must be `us` or `eu`, **never `global`** (routes worldwide, voids residency) and never a single region (404s). See the B1 row |
+| ~~Identity Platform data-location behaviour serving both stacks~~ | Claude, B3 | UK residency story | **CLOSED 2026-08-21 — THERE IS NO DATA-LOCATION CONTROL AT ALL.** Checked at the API level, not inferred from marketing: the Identity Platform `Config` resource has **eighteen** top-level fields and not one of them sets a location, region or residency. The only region-shaped field is `smsRegionConfig`, which controls **where an SMS verification code may be SENT**, not where accounts live. `gcp.resourceLocations` cannot constrain it either — Identity Platform is not a regional resource, so the org policy that enforces the whole two-region design simply does not apply to it. **See the consequence row below** |
+| **Given the above: UK staff accounts cannot be kept in the EU. Is Google's DPA + UK IDTA enough, and what must the DPIA SAY?** | Solicitor, O11 | The UK lane's staff logins. The DPIA and the Art. 30 record | **open, raised 2026-08-21.** Two things make this smaller than it first reads: Identity Platform holds **clinic STAFF logins, not patient records** — email, a bcrypt hash, display name — so no PHI and no patient data is involved; and a transfer to Google under its existing DPA is ordinary and lawful with the right paperwork. **What changes is the CLAIM.** The UK story can no longer say "UK personal data stays in the EU" without qualification, because for this one service it does not and cannot. It has to be written as a disclosed transfer with a lawful basis, not as enforced residency. Getting that wrong in a DPIA is worse than the transfer itself |
+| **Does Vertex's `eu` MULTI-REGION satisfy the UK residency commitment?** The two-region design assumed a europe-west2 endpoint; that endpoint does not serve this model, so `eu` is the only compliant option left. `eu` means "somewhere in the EU" — which after Brexit is not the UK | Claude → solicitor if it is not obvious | **The UK lane's LLM call, which carries the caller's entire utterance.** Also the DPIA wording | **open, raised 2026-08-21.** Note UK GDPR permits EU transfers (EU adequacy), so this is likely fine — but it is now a transfer that has to be *stated* rather than a residency claim that is *enforced* |
+| UK Art. 27 representative vs UK subsidiary | Solicitor | UK structure | open |
+| ~~**What EHR does the first clinic actually use?**~~ | Owner, O15 | — | **CLOSED 2026-08-20 — athenahealth.** The v2 integration target is confirmed |
+| **Texas HB 300** (Health & Safety Code ch. 181) obligations as a business associate — workforce training within 90 days of hire + every 2 years, job-specific | Solicitor / counsel | Compliance paperwork scope | open |
+| **TRAIGA** (Texas Responsible AI Governance Act) — does it impose an AI-disclosure duty on healthcare interactions, and does it land on the clinic, on VetraTD, or both? | Solicitor / counsel | Call-script opening line | open |
+| ~~Is the clinic a **single HIPAA covered entity across both sites**?~~ | Owner | — | **CLOSED 2026-08-20 — ONE covered entity.** One BAA, one `businesses` row. Keller vs Decatur is a *location* attribute inside one tenant, not two tenants |
+| Which **athenahealth product/edition** does the clinic run, and do they already have an API or integration contact there? | Owner, ask the clinic | Scope of the v2 integration; whether a partner intro shortcut exists | open |
+| Does Twilio sales require business details for the US Edition? | Owner, during O5 | Whether the LLC deferral holds | open |
+
+| **Does activating the full billing account raise the 5-project cap, or is the quota form also needed?** Google does not document the post-activation limit | Owner, O2d | **B0a, and therefore all of Lane B** | open — B0a is 4 of 6 projects billed, waiting on this |
+
+| **Will Microsoft 365 accept SMTP AUTH from the `vetratd.com` mailbox?** Modern tenants disable it per-mailbox by default, and MFA blocks basic credentials outright | Owner, before D2 | **D2, and the answer changes the vendor decision.** If SMTP AUTH is blocked: OAuth2 (XOAUTH2, which nodemailer supports) is the next option, and if tenant policy blocks that too the honest fallback is a transactional email provider — **which reopens the vendor question that deleting Brevo just closed.** Discovering this DURING cutover, with Twilio already repointed, is the worst possible timing. `scripts/smtp-smoke.js` answers it in one command; run it months early | open |
+
+### Watch weekly
+
+1. The Twilio Security Edition quote.
+1b. **C5, and it is now the most valuable unrun measurement in this file.** Live calls put `tts_ttfb_ms` at 92 ms (ElevenLabs, A0) against 1,408 ms (Google TTS, covered lane) — so C5 decides roughly 1.3 SECONDS PER TURN, not merely which voice is nicer. It needs 20 minutes and the owner's ears. Earlier framing: **C5, because it gates a $130/month decision. C5b IS DONE (2026-08-22) and did not settle it.** C5b measured the STT half: Deepgram is ~880 ms faster on the median turn and 6.8 seconds slower on the worst one, so neither vendor wins outright and the lane's case now depends on the TTS half. Original note: **C5 and C5b, because they gate a $130/month decision.** Neither has been run, and `us-standard` should not be built until at least one of them says the uncovered vendors are audibly or measurably better.
+2. ~~Vertex EU endpoint model availability.~~ **Answered 2026-08-21** — watch instead for `gemini-3.6-flash` becoming available in a SINGLE region, which is what would let the UK lane stop relying on the `eu` multi-region.
+3. The billing project quota, until B0a completes.
+4. **The free-trial clock — it expires ~2026-11-18 and projects SUSPEND if full billing is not
+   active by then.** This is a hard date, not a nuisance, and it is the same action as O2d.
+5. **Spend against the $300 credit.** Set the budget alert first; without one the first signal is
+   the credit being gone.
+7. **The ADC reauthentication window.** `invalid_rapt` will stop any unattended plan or apply, and the remedy is interactive. Budget for the owner being present.
+6. ~~The Deepgram BAA reply (asked 2026-08-21)~~ — **CLOSED 2026-08-22 WITHOUT AN ANSWER. Google STT v2 is built and C5b is run.** It was never answered and stopped mattering: the covered lane has its own STT, so a late yes would change what the UK lane MAY use and nothing about what a US project may HOLD. Deepgram is now a credential-boundary violation in a PHI project. Original note: ~~The Deepgram BAA reply (asked 2026-08-21)~~ — **no longer the critical path. Build Google STT v2 regardless** (the 2026-08-19 decision already said so). Priced from the live SKU catalog: Google STT unlogged **$0.016/min** vs Deepgram ~$0.0077/min — at 500 calls x 3 min that is $24 vs $12 a month, while a Deepgram BAA means an enterprise contract costing orders of magnitude more. **Never use Google's "Logged" tier ($0.012/min): logged means Google may retain the audio, which for PHI is the one thing you must not opt into.** A "yes" from Deepgram is a bonus, not a dependency — it would still leave a vendor relationship on the HIPAA critical path that can lapse. Deepgram stays for the UK lane either way. Original item — a no means building Google STT v2, which is the only
+   thing standing between Lane B finishing and the US stack being able to hear.
+
+---
+
+## Decision log — append only, newest last
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-08-19 | Two **regional** stacks (`voice-us` us-central1, `voice-uk` europe-west2) | Data residency + ~150–200 ms/leg transatlantic on a path already at ~3,062 ms p50 |
+| 2026-08-19 | UK stack **keeps** Deepgram + ElevenLabs | GDPR has no covered-products restriction; Art. 28 DPA suffices. Deepgram EU endpoint GA 2026-01-10 |
+| 2026-08-19 | BAA-lane STT is **Google STT v2** | Zero third-party AI BAAs to negotiate. Reversible behind the `sttStream.js` seam |
+| 2026-08-19 | US stack runs the **HIPAA config for every US tenant** initially | A `us-standard` lane is a third tfvars file when a customer justifies it |
+| 2026-08-19 | Control plane **shared**; everything moves to GCP; Railway/Supabase/Vercel/Sentry retired after a one-week warm hold | No patient data in the control plane; duplication buys nothing |
+| 2026-08-20 | Work re-sorted into **Lanes A/B/C/D** by dependency, not phase number | ~⅔ of the code needs no GCP project to exist. Timeline corrected 4 weeks → ~2–3 weeks |
+| 2026-08-22 | Staff auth verified with **`jsonwebtoken` + `jwks-rsa`**, not `firebase-admin` | The dashboard backend already declared both; the voice server is ESM and `firebase-admin` is CJS, which is a live trap in this repo. Verification is ~40 lines of documented claim checks, and the claim checks are the part tests can actually forge. `firebase-admin` would have been fewer lines and an untested dependency on the auth path |
+| 2026-08-22 | The frontend keeps the **`firebase/auth` SDK** rather than raw REST | Token refresh, persistence and expiry are exactly the machinery that fails silently when hand-rolled. ~50KB gzipped against reimplementing the refresh chain |
+| 2026-08-22 | `src/auth.js` is a **purpose-named seam, not a `supabase.auth` lookalike** | A shim would have preserved a dead vendor's shape — its session object, its `{data,error}` envelope — in a codebase that no longer contains it, and the next person would have had to learn a dead API to read the login screen |
+| 2026-08-22 | Self-serve signup stays **ON**, unchanged | Whether a HIPAA product should let a stranger create a tenant unattended is a real question and a PRODUCT one. A migration must not answer it by quietly changing behaviour. Written out in Terraform as `disabled_user_signup = false` so it reads as a decision |
+| 2026-08-22 | Identity Platform's API key is **ours and restricted to identitytoolkit**, not the unrestricted one it auto-creates | The key is public by design and ships in the bundle either way. The restriction bounds what someone who lifts it can spend the project's quota on — it cannot be turned on Vertex, Speech or Storage. Referrer restrictions deliberately deferred: there is no dashboard domain yet, and a guessed list either blocks the real one later or is widened until it means nothing |
+| 2026-08-20 | The five **PHI leak paths move to A1 — first**, ahead of all migration work | Live defects on `dev` today, need no GCP. Compliance floor moves earlier |
+| 2026-08-20 | Google Calendar sync **DELETED**, not fixed | Repair needs multi-week Google OAuth verification for a sensitive scope. Low value for clinics (they run a PM system). Deleting is faster **and** better for compliance |
+| 2026-08-20 | Notifications **KEPT** — config + content fixed | It is how an owner learns a call happened, and it already carries tests. Link-only content removes email from HIPAA scope entirely |
+| 2026-08-20 | **LLC deferred to first verbal customer commit** | Nothing in the migration or compliance build needs an entity. Settled — do not re-argue |
+| 2026-08-20 | athenahealth split into **two filings** | Filing now would submit a Railway/Supabase posture for a system being deleted in two weeks |
+| 2026-08-20 | `callState` risk **downgraded High → Medium** | 114 lines, 3 readers, **no per-turn read**. Memorystore adds zero per-turn latency |
+| 2026-08-20 | Top engineering risk is now **A3**, not `callState` | Supabase `.single()` throws on no-row; raw `pg` returns an empty array. Same class in `maybeSingle`, error shapes, `.update()` returns. Variance 4 h – 2 d |
+| 2026-08-20 | **A1 ships on its own branch and merges to `main` early**, decoupled from the migration | Live defects whose value does not depend on GCP happening. If the migration stalls on a Twilio quote, the worst exposures are already closed |
+| 2026-08-20 | Branch all new work off **`origin/main`**, never `dev` | `dev` is a strict ancestor of `origin/main`; the website overhaul is already on main |
+| 2026-08-20 | First clinic is **Texas, cardiology, athenahealth** — Excel Cardiac Care PLLC | Removes the two worst-case legal branches (CIPA all-party, 42 CFR Part 2) and **confirms the athenahealth v2 bet instead of assuming it**. New Texas-specific items replace them: HB 300, TRAIGA, CUBI |
+| 2026-08-20 | **Never build voiceprints, speaker ID, or diarization** | Texas CUBI (Bus. & Com. Code §503.001) names **voiceprint** a biometric identifier and requires informed consent to capture for a commercial purpose. Transcription is not a voiceprint; speaker ID would be. Staying out of scope is free today and expensive to undo |
+| 2026-08-20 | **Probe and `npm run eval` run serially, never concurrently** | Both paths can hit the same `GEMINI_API_KEY`. Concurrent rate-limit backoff would inflate `llm_ttfb_ms` on the deployed server and silently corrupt the A0 baseline |
+| 2026-08-20 | **Org existence is a hard precondition for B0a**, tracked as O2b | Discovered by actually opening the project picker rather than assuming Cloud Identity implied an org. Terraform's org policies and 6-project hierarchy have no parent without it. Would have surfaced as a confusing `terraform apply` failure at exactly the wrong moment |
+| 2026-08-20 | **Two separate Google BAAs. The Admin-console one is NOT the one we need.** O3 split into O3a (done, Workspace/Cloud Identity) and O3b (todo, Google Cloud Platform) | The Admin console amendment is titled "Google **Workspace/Cloud Identity** HIPAA Business Associate Amendment" and covers exactly that. **Every service that will touch PHI — Cloud Run, Cloud SQL, Memorystore, Vertex, STT/TTS — is Google Cloud Platform and is not covered by it.** Treating the console's green state as "BAA done" would have put PHI on an uncovered platform with a checkmark showing. O3b now sits downstream of O2, which makes **O2a (the overdue balance) critical path for the HIPAA posture**, not housekeeping |
+| 2026-08-20 | **Provision paid infrastructure as late as possible.** VPC connectors moved out of B0w into B2 | GCP bills most managed services for capacity that **exists**, not capacity **used** — an empty Cloud SQL instance costs the same as a busy one. B0w created 4 Serverless VPC Access connectors (real VM instances), starting a **~$70–80/month meter on the first apply** for infrastructure nothing used until B2. Moving them makes **B0a a free apply**, which changes what the owner is authorising. Preserve this property: the README states it as a rule, not a coincidence |
+| 2026-08-20 | **OWNER DECISION — nothing reaches Railway. REVERSES "A1 merges to `main` early".** Lane A ships to GCP only | Railway autodeploys from `main`. The running receptionist must keep working untouched until cutover. **Accepted consequence, raised once and not to be re-argued:** the A1.5 routes — including `POST phone-numbers/buy`, which spends money — stay unauthenticated on the live server for the migration's duration. Zero-cost mitigation: **make the repo private**, dropping exposure from "documented with file:line in a public spec" to "undiscovered". Upside: Railway's code is frozen at exactly the commit A0 was measured against, so **C4's comparison stays honest with no drift** |
+| 2026-08-20 | First clinic is **US-established** (US billing), operating US **and** UK; **cofounder is UK** | Sharpens O10/O11 into one crisp solicitor question instead of two vague ones — see Open Questions. Confirms O4b/O4c were correct |
+| 2026-08-21 | **A1 ships as one accumulating branch `feat/gcp-lane-a`, stacked on `fix/a1-5-unauth-endpoints`** | The owner's "nothing reaches Railway" reversed the early-merge plan, so there is no longer a reason to keep A1 separate from A2–A10. Stacking keeps every branch transitively off `origin/main` and removes a merge nobody is paid for. |
+| 2026-08-21 | **A1.2's fatal/announce line: FATAL only for configuration with no reading in which the operator got what they asked for** | The alternative — refuse on anything unconfigured — would have taken the receptionist off the air whenever `TWILIO_SMS_FROM` was unset, because `TWILIO_ACCOUNT_SID`/`AUTH_TOKEN` are ALSO the voice credentials and Twilio-for-calls-not-texts is an ordinary configuration. A dropped owner email is a defect; a phone that does not answer is an outage. Absent config is announced loudly instead. |
+| 2026-08-21 | **`node-pg-migrate` NOT adopted; a ~200-line runner instead** | Adopting it means renaming and re-marking 26 files whose entire value is being a faithful record; down-migrations would be fiction and an untested rollback is worse than none; and **checksums** — the feature this repo actually needs, since its live failure mode is drift between files and database — are not something node-pg-migrate does. Kept from the grown-up tools: transaction per migration, advisory lock, ordered append-only ledger. |
+| 2026-08-21 | **A PHI-typed field name is not allowed as a log key, whatever the value** | Decidable by name alone. `{ phone: !!collected }` is harmless and still rejected, because a lint that judges values has to evaluate them — and the fix, calling it `hasPhone`, makes the line clearer anyway. |
+| 2026-08-21 | **Brevo deleted; both senders moved to SMTP** | Neither carried PHI after A1.3, so this was an operational call rather than a compliance one — and the operational facts were damning. `vetratd.com` publishes `v=spf1 include:spf.protection.outlook.com -all`, has no Brevo DKIM selector, and sets `p=quarantine`: **Brevo mail sent as @vetratd.com failed both SPF and DKIM alignment, and the domain's own policy told receivers to junk it.** Removing it also deletes a compromised credential instead of rotating it, and collapses two email systems into one. Google Cloud has no first-party transactional email service, so there was nothing to migrate to — only something to consolidate onto |
+| 2026-08-21 | **The Gemini API-key path is NOT covered by the GCP BAA** | It is the Gemini Developer API (AI Studio), not a Google Cloud service, and the BAA covers Google Cloud services. An uncovered LLM call carries the caller's entire utterance — the largest single disclosure available in the stack. `hipaa` mode refuses it at construction. Found while doing A8; nothing in the spec or this ledger had said it. |
+| 2026-08-21 | **Vendor guards go at CLIENT CONSTRUCTION, never at provider selection** | The TTS layer alone has three ways to change provider — a per-business column, a `forceFallback` argument, and a circuit breaker that flips mid-call. A guard in any one of them is a guard with three doors beside it. This is what makes A6's gate ("including with the breaker open") satisfiable rather than aspirational. |
+| 2026-08-21 | **The compliance ratchet only tightens** | `effectiveTier()` takes the STRICTER of deployment and tenant. A tenant row is data, editable by anyone with dashboard access; if a `standard` row could relax a `hipaa` deployment, the stack's posture would be one UPDATE away from gone. |
+| 2026-08-21 | **The PIPELINE_V2 rollback hatch was deleted rather than kept** | The two pipelines had stopped being comparable, and every measurement in this ledger runs through v2. Falling back during an incident would have been a second, worse incident in unexercised code. A rollback path that is never tested is not a rollback path — the real one is repointing the Twilio webhooks. |
+| 2026-08-21 | **Erasure is not refused in `hipaa` mode; the tension is escalated instead** | UK GDPR gives a right to erasure, HIPAA gives none and retention obligations can point the other way (TX HB 300). Refusing in code would be a legal judgement made by a developer. Every erasure logs its counts so **O18 counsel** has an audit trail to apply a decision to. |
+| 2026-08-21 | **B0a's failure is O2d, not a Terraform defect. Do not work around it** | The two orphaned projects were untainted rather than recreated, because a recreate would collide with the 30-day ID hold on its own deletion. The right move is the owner raising the quota and one more apply — not renaming projects, not a second billing account, not deleting the BAA project early. |
+| 2026-08-21 | **A PHI access is one that reads, writes or destroys data ABOUT THE CALLER OR THEIR CARE** | Narrower than "touched a table containing PHI", wider than "returned a name". It is what makes the audit trail readable: `updateCallLatency` writes p50/p95 onto a `calls` row and is telemetry about the SYSTEM, and `countScheduledOverlapping` never selects an identity, so auditing either would add a row per call to a trail whose whole value is that a human can read it. An audit log nobody reads is the same as not having one. |
+| 2026-08-21 | **The audit trail REFUSES a PHI-typed key rather than redacting it** | lib/logger.js redacts because a log line is worth emitting with a hole in it. An audit row is not: this is the table designed to be retained longest and read by the most people, so redaction would make a leak survivable instead of impossible. Whitelist of allowed fields, not a PHI denylist, so a field nobody has thought of yet is refused too. |
+| 2026-08-21 | **The audit trail has TWO destinations because they answer different questions** | The table is queryable — "who accessed this patient's record" is a SQL question. The stdout line is durable — it lands in `vetra-logging` under different IAM, writable and not erasable, which is the only real answer to "a compromised project must not erase its own trail". They also fail differently on purpose: the row rolls back with its transaction, the log line cannot, so an ATTEMPTED access survives even when no committed record of it does. |
+| 2026-08-21 | **An Art. 17 erasure deletes at the VENDOR first, then in our database** | Reversed, a Twilio failure after the rows were nulled destroys the only pointer to audio that still exists — and for the degraded-voicemail rows there is no second pointer, because that path creates no `calls` row to recover a recording SID from. Ordering is the correctness argument, so a test asserts it rather than trusting the comment. |
+| 2026-08-21 | **A partial erasure answers 502, not 207 Multi-Status** | 207 is the semantically neat answer and it is 2xx — every default client `res.ok` check reads 2xx as success, which is precisely the misread this exists to prevent. The failure mode that matters is a member of staff ticking "erasure complete" off a green response. The body still reports what WAS erased so nobody re-runs blindly. |
+| 2026-08-21 | **The dashboard's tenant boundary wraps the HANDLER, never `next()`** | `next()` returns as soon as the next layer starts, so a middleware-shaped `withTenant(id, () => next())` COMMITS while the handler is still running and every query after that point runs unscoped on a connection already back in the pool. Committing on `res.on("finish")` instead holds a connection across response serialisation and cannot roll back a late error. |
+| 2026-08-21 | **The unaudited-access alarm is gated to `hipaa` mode** | Not a volume control: §164.312(b) binds the covered lane, and the ratchet A1.6/A6 established only tightens. It is also the difference between a signal and a permanent alarm — some PHI writes happen per TURN by design, so an ungated line would fire on every turn of every call forever, reporting intended behaviour as a fault. An alarm that is always on is one nobody reads. |
+| 2026-08-21 | **Automatic logoff ships with its limit written down** | The client idle timer is the control §164.312(a)(2)(iii) names. The server-side `iat` ceiling bounds ONE access token and does NOT bound the refresh chain — nothing visible from a request can age that. Claiming the pair is full inactivity enforcement would be the kind of overstatement an auditor finds; O31 records what finishing it takes. |
+| 2026-08-20 | The `text_channel_tool_calls` **regression gate is mis-specified** — it should gate on `text_channel_unrecovered` | A0 tripped it at 1. The counters prove the merged fix worked perfectly: `text_channel_reasks=1`, `text_channel_unrecovered=0`, `internal_term_leaks=0` — caught by the stripper, re-asked with `mode:"ANY"` pinned to the tool, tool ran, caller heard nothing. The gate's `means` string in `lib/probe/report.js:347` still describes the **pre-fix** world ("nothing ran and the caller heard it"). A gate that reports FAIL when a defence-in-depth mechanism works correctly trains you to ignore the gate |
+| 2026-08-21 | **This branch can never be pushed or merged — it carries ~250 MB of Terraform provider binaries** | `infra/terraform/.terraform/providers/.../terraform-provider-google-beta_v6.50.0_x5.exe` is **125.3 MB** and `...google_v6.50.0_x5.exe` is **119.2 MB**, both committed here. `feat/gcp-lane-b-terraform` has zero of them because it carries the `infra/terraform/.gitignore` that excludes them — so the near-miss recorded on 2026-08-21 was caught on one branch only. **GitHub rejects any file over 100 MB**, so this is not merely untidy: these commits are unpushable, and merging this branch into a working branch would make that branch unpushable too. The no-push rule on this branch now has two independent reasons. **Consequence for the ledger's home:** copy the docs forward to the working branch rather than merging, and if this branch ever needs to be pushed, the binaries must come out of its history first (filter-repo), not just be deleted in a new commit |
+| 2026-08-21 | **The CIPA risk is mis-stated in the spec, and the correction cuts both ways** | The spec calls all-party recording consent "a larger near-term US risk than HIPAA". Verified in code: **normal AI calls are NOT recorded.** There is no `record="true"` on the `<Connect><Stream>` anywhere. `<Record>` appears in exactly two places, both voicemail fallbacks — `buildDegradedVoicemailTwiml` and `buildUnroutedVoicemailTwiml` (`lib/twiml.js:82,142`) — and both are preceded by "leave your name, number, and a brief message after the tone", which is conventional and understood as consent. **So the recording-consent exposure is far smaller than the spec implies.** The correction's other half matters more: **not recording is not the same as not capturing.** Live caller audio is still streamed to our own server and to a third-party transcriber, and the active CIPA §631 litigation is about third-party session capture, not tape. That question is untouched by any of this and belongs to **O18 counsel**, framed correctly — ask about streaming audio to a vendor for real-time transcription, not about recording. Also noted: `recording_disclosure_enabled` (migration 005) and `sms_followup_enabled` (migration 017) BOTH default `false`, so nothing is announced and no caller is texted unless a business opted in. **Verify in the production database that no tenant has flipped `sms_followup_enabled`** — `sendCallerSms` is live code and TCPA is $500-1,500 per message |
+| 2026-08-21 | **Cost controls are a Lane B decision, not a post-D7 cleanup** | Provisioned naively the two regions land at $375-620/mo, arriving before any clinic pays. Every one of C-1..C-6 is a choice made WHILE provisioning and expensive to unwind after — a Memorystore instance, a regional Cloud SQL, a VPC connector and a `min-instances=1` staging service are all easier not to create than to remove. Recorded so the Lane B session treats them as part of the work rather than an optimisation pass nobody schedules. **None of them cost compliance:** HA is not a HIPAA requirement (§164.308(a)(7) asks for backup + DR + emergency mode, all gated by C's restore test), an unprovisioned UK project is still a project, and shorter retention is *more* compliant, not less. The one that is pure upside is **C-7** — `GEMINI_EXPLICIT_CACHE` is written, gated off, and A0 measured a **0% cache hit rate**; it cuts both cost and the stage that is 42% of the turn |
+| 2026-08-21 | **Six projects collapse to FOUR billed, rather than deferring the UK stack or buying support** | The billing cap is 5 and the bootstrap project holds one. Three options existed: defer UK (owner rejected — UK is a launch market, not a later one), buy Standard support to escalate the quota form (owner rejected), or merge. **Merging is the only one that costs nothing and unblocks Lane B the same day.** It was safe to choose because the merge touches ONLY the two projects this ledger already describes as holding no PHI — staging and logging. The prod split survives untouched, which is the point: `voice-us` holding no ElevenLabs key is the credential boundary, and Cloud SQL + Identity Platform cannot be moved between projects, so a prod merge would have been near-permanent. The two displaced projects are left **existing but unbilled** so restoring is a relink, not a rebuild. Full compensating-control table in "The six projects". **O2d stays OPEN** — this is a workaround, not a resolution. **AMENDS the 2026-08-21 entry "B0a's failure is O2d, not a Terraform defect. Do not work around it".** That entry ruled out project renaming, a second billing account, and deleting the BAA project early, and all three of those rulings STAND. What it assumed was that the only alternative to waiting was project churn. This is neither: no project is created, deleted, or re-IDed, and the 30-day ID hold is never touched. It reduces how many projects need billing at once by merging two no-PHI responsibilities into projects that already exist. The reason to amend rather than keep waiting is that the quota request was submitted from an identity with **no role on the billing account** (see O2d), so "wait for the owner to raise the quota" had no working clock attached to it |
+| 2026-08-21 | **Lock only Cloud Audit Logs, never application logs** | Bucket Lock is what recovers audit-trail integrity once the sink shares a project with Cloud Build's deploy credentials. But locking app logs would couple two subsystems that were independent: a regression in A1.7's scrubber (`lib/phiFields.js`) would then create **undeletable PHI**, unerasable under a GDPR Art. 17 request, in a bucket that cannot be unlocked. Splitting the streams severs the coupling instead of documenting it. Retention is **400 days** — the Security Rule's six years binds *documentation*, not logs, and this ledger already warns against long transcript retention |
+
+---
+| 2026-08-21 | **The root module takes a map of stack → project, and the DEFAULT is six** | The four-project shape is temporary, so it belongs in the gitignored tfvars, not in the module. The module's default expresses the design; the override expresses the constraint. Restoring is deleting two lines. Encoding four hardcoded project blocks would have meant rewriting the module twice — once now, once when a slot frees |
+| 2026-08-21 | **`us-prod` and `uk-prod` sharing a project is a VALIDATION, not a comment** | It is the credential boundary the whole split exists for, and Cloud SQL instances and Identity Platform tenants cannot be moved between projects afterwards, so the mistake would be close to permanent. A merge is a one-line tfvars edit made by someone under billing pressure; the refusal has to live where that edit is made |
+| 2026-08-21 | **One VPC per PROJECT, one subnet per STACK — not one VPC per stack** | Per-stack VPCs silently broke C-4. A Cloud SQL instance peers to exactly ONE network, so a merged staging project holding two unpeered VPCs cannot have one shared instance — the choice would have been two instances (C-4 undone) or peering the lanes together (a network path that would not exist if they had their own projects). A GCP VPC is global and its subnets regional, so the right shape was available all along, and it collapses back to one-per-stack at the restore with no edit |
+| 2026-08-21 | **Log sinks move to the ORG NODE, and the audit/application streams are severed BEFORE Bucket Lock is ever applied** | A project-level sink is administered by whoever administers the project, and after the merge the destination sits next to Cloud Build's deploy credentials. Severing the streams first is what makes the eventual lock survivable: Bucket Lock on a bucket receiving application output means one PHI-scrubber regression creates UNDELETABLE PHI — unerasable under GDPR Art. 17 and a permanent disclosure under HIPAA. **Nothing sets `locked` yet**, and a test asserts that, because Terraform will happily apply an irreversible retention policy from an unattended session |
+| 2026-08-21 | **C-2/C-4/C-5/C-11 are encoded as OUTPUTS that B2 and B4 consume, not as resources** | Creating Cloud SQL or Cloud Run here would start a meter weeks before the code that talks to them is ready, and would change what the owner is authorising when they type `apply` — B0a's defining property is that it is a free apply. But a decision that lives only in a ledger row gets re-litigated by whoever writes B2. `terraform output cloud_sql_plan` is B2's INPUT, so turning HA on becomes a diff a reviewer sees |
+| 2026-08-21 | **C-3 confirmed: Postgres, not Memorystore — and enforced by ABSENCE** | $74.46/mo measured off the real SKU catalog against $0.00 marginal for a 3-column table. The enforcement is `redis.googleapis.com` being out of the API list and `roles/redis.editor` out of the runtime roles: an API enabled "just in case" is how the instance gets created by someone who assumed the decision went the other way. Two tripwires guard both absences |
+| 2026-08-21 | **`terraform import` blocks, not the `terraform import` CLI** | The CLI writes state immediately from whatever session runs it and leaves nothing to review. An import block is declarative — `plan` renders the adoption and writes nothing, so the state change happens on an apply the OWNER runs, and it is in git. This matters more than usual here because the thing being recovered from is losing state in the first place |
+| 2026-08-21 | **`project_id_suffix` is pinned rather than random** | `random_id` existed so a first apply could not fail on a globally-taken name. That purpose is spent. What it left behind is worse: a project ID reproducible only from Terraform state, so losing state renames every project — and a project ID is immutable, so "rename" means "orphan" |
+| 2026-08-21 | **The credential-boundary check is US-lane ONLY, and that is the part that is easy to get backwards** | `uk-prod` KEEPS ElevenLabs and Deepgram (settled 2026-08-19 — GDPR has no covered-products restriction, an Art. 28 DPA suffices). The first draft selected every project key ending in `-prod` and would have failed every UK deploy for a correct configuration. A gate that fires on a correct config is a gate someone disables |
+| 2026-08-21 | **Deepgram is deliberately absent from the credential-boundary rules, with a test asserting the absence** | Its BAA was requested 2026-08-21 and no answer has come. A rule either way encodes a guess: failing would block deploys on an unanswered email, allowing would look like a decision somebody made. The absence is asserted so it is visible rather than forgotten |
+| 2026-08-21 | **"Could not check" fails the deploy** | The credential-boundary gate has three exit codes and the third is the design: 0 holds, 1 violated, **2 unverified — which also fails**. A missing gcloud or a dead credential must not render as "verified". Secret Manager being DISABLED is a genuine pass, not a skip, because if the API is off no secret of any name exists |
+
+| 2026-08-21 | **Projects are `deletion_policy = PREVENT`, not DELETE** | Adopting them would have flipped them off the provider's PREVENT default, putting *delete four GCP projects* one `terraform destroy` away — in a repo that lists project deletion as owner-present, and where a deleted project holds its ID for 30 days. The DELETE argument (a half-destroy orphans a project that then collides with its own recreate) is real and smaller. **This session is the counter-evidence: B0a's state vanished and every project survived it.** State is the fragile half; the projects are the durable half. C-1's "destroy the UK resources, keep the project" is a `-target`ed destroy and is unaffected |
+| 2026-08-21 | **`terraform validate` is not a gate. `terraform plan` is** | Everything in B0w's rework passed `validate`, `fmt` and 1,728 unit tests, and the plan still found two defects: a 43-character display name against a 30-character API limit, and the `deletion_policy` flip above. Neither is findable without talking to the API. **Do not treat a green validate as evidence in this ledger's Evidence column** |
+| 2026-08-21 | **Org-node logging is `roles/logging.configWriter`, never `roles/logging.admin`** | Both let you create the sinks. `logging.admin` also grants `logging.logEntries.*` — the ability to DELETE log entries. Handing that to the same principal that administers the audit trail defeats the reason the trail was moved to the org node. The narrower role does the job |
+| 2026-08-21 | **`global` is REFUSED as a Vertex location; a single region is only announced** | `global` returns 200, is the fastest endpoint to reach, and routes to whichever region has capacity anywhere on earth — it is exactly what someone picks when `us-central1` 404s and they need it working, and it silently voids the residency claim the two-project split exists to make true. That is A1.2's fatal case: the operator asked for a region-constrained deployment and would get worldwide routing. A single region is a plausible deliberate choice for some future model, so it logs `vertex_location_unproven` and proceeds |
+| 2026-08-21 | **A gate that breaks when an unrelated variable is tidied up is a gate that gets switched off** | The credential-boundary check resolved its project from `adopt_existing_projects` — the one variable whose documented lifecycle is "empty it after the adoption apply". Emptying it, in the same session, turned the gate into exit 2 on every run. It now composes the ID from `project_prefix` + `project_id_suffix`, immutable facts about the account. **Both of its defects were invisible to 26 unit tests and were found by running it for real** |
+| 2026-08-21 | **C-12: the PRODUCTION database is not created during the migration** | $98.62/month, priced off the real SKU catalog, for an instance that serves nothing until D4 repoints the Twilio webhooks  — roughly a third of the trial credit to hold zero rows for 3-6 weeks. Same reasoning as C-1 and as moving the VPC connectors out of B0w. **It defers the production half of B2's schema-diff gate to D3**, which is where `pg_restore` creates the data the diff would compare, and that is stated in the variable rather than left to be discovered |
+| 2026-08-21 | **Two budgets, not one, because the runaway and the runway are different failures** | A monthly budget catches a resource nobody meant to create. It NEVER catches the trial credit running out  — $180/month against a $250 ceiling is silent until the projects suspend. The second budget uses the trial's own custom period, so the alarm is tied to the date rather than to a rate |
+| 2026-08-21 | **`log_min_duration_statement` is deliberately unset on Cloud SQL** | Statement logging on this schema writes patient names and phone numbers into Cloud Logging as query parameters. That is exactly A1.7's leak class, arriving through a channel a source lint cannot see. The connection-level flags (`log_connections`, `log_disconnections`) give the §164.312(b) signal without the statement text |
+| 2026-08-21 | **No `google_sql_user` in Terraform, ever** | A password in a resource is a password in STATE, and state now lives in a versioned GCS bucket. Migration 029 makes `vetra_app` NOLOGIN precisely so its password does not live in git; putting it in state instead is the same mistake wearing a different hat |
+| 2026-08-21 | **Identity Platform is NOT initialised yet, even though nothing technically blocks it** | The residency finding arrived while investigating B3: there is no data-location control, so uk-prod's org policy cannot reach it and UK staff accounts cannot be pinned to the EU. An empty tenant stores nothing and is reversible, so this is not a safety stop — it is that the UK compliance CLAIM changes from "residency enforced" to "transfer disclosed", and that is the owner's call with a solicitor, not a default set by whoever ran the next apply |
+| 2026-08-21 | **Cloud SQL uses IAM database authentication; no database password will exist** | The app builds a pg.Pool from a DATABASE_URL, which means a password, which means Secret Manager, which is on the owner-present list. IAM auth removes the credential instead of storing it better: a short-lived token at connect time, revocation by removing a binding, and log_connections naming WHO connected rather than a shared vetra_app. It also takes a class of secret off B4's critical path. The flag is static — free to set on an empty staging database now, an outage later |
+| 2026-08-21 | **The UK lane migrates to GCP too. It does NOT stay on Railway/Supabase/Vercel** — and the reason is AUTH, not cost | Raised by the owner: GDPR needs no BAA, so is the old stack cheaper? **The money says yes and it does not matter.** With C-1..C-12 a lean UK prod stack is ~$80-90/mo (Cloud SQL db-g1-small London ~$28, warm voice Cloud Run ~$45-55, logging ~$5) against maybe $25-50 for a UK-only Railway. A $40-60/month delta. **B3 deletes `supabaseClient.js`. If the UK keeps Supabase Auth, that file lives forever and there are TWO authentication implementations, permanently** — every session fix, logout bug and token-expiry change done twice, or done once and forgotten in the other. Auth is where security bugs concentrate. Saving $50/month by forking the auth layer is not a trade worth making. Three consequences follow: **D7 can never complete** (its definition is cancelling Supabase/Railway/Vercel); **the expensive part is already paid** (A3 moved the data layer to plain `pg`, so UK-on-GCP is now mostly `enable_uk_resources = true`); and **no-BAA is not no-compliance** — GDPR still wants an Art. 28 DPA with Railway, Supabase and Vercel *individually*, plus Art. 30 records, 72-hour breach notification and DSR plumbing, which is not obviously less work than the one GCP DPA already held. **And the decision costs nothing today:** C-1 keeps `vetra-uk-prod` empty at $0 until a clinic signs, and a UK clinic at 500 calls/month is ~$75/month variable, so it roughly pays for its own stack. **The option deliberately rejected is the middle one** — two live architectures and two auth systems for zero customers. If a UK clinic never closes, the honest move is dropping the UK lane, not maintaining a second stack speculatively |
+| 2026-08-21 | **Vendor split confirmed per lane, and it is asymmetric on purpose** | US `hipaa`: Google STT v2, Google Cloud TTS, Vertex. UK `standard`: **Deepgram STT, ElevenLabs/Cartesia TTS**, Vertex. GDPR has no covered-products restriction and an Art. 28 DPA suffices, so the UK keeps the better-sounding, cheaper vendors; HIPAA has no such escape. **Google STT is a US-lane build only** — it is not a replacement for Deepgram, it is a second implementation behind the `sttStream.js` seam |
+| 2026-08-21 | **A single mixed-tenant deployment IS technically possible. It is refused anyway, and the reason is three doors** | Owner asked the natural question: HIPAA tenants get covered vendors, non-HIPAA tenants get Deepgram/ElevenLabs, everything still on Cloud Run — why is that not one deployment with a per-tenant switch? **It could be.** `effectiveTier(business)` already exists and `assertVendorAllowed()` already runs at client construction, so running the US deployment in `standard` mode with both credential sets present would work, cost ~$130/month less, and need no extra project. **What it trades is the property the whole split was built for.** A6 found the TTS layer alone has THREE ways to change provider — a per-business column, a `forceFallback` argument, and a circuit breaker that flips MID-CALL — so with the key in the process, safety depends on the tenant check being right in all three, forever, including one that fires automatically during a live call. Miss one and a patient's speech reaches a vendor with no BAA: a reportable disclosure. With the key absent, the worst case is voicemail. **The first customer is HIPAA (Excel Cardiac Care), so this would be taking that risk immediately rather than theoretically.** Recorded as a real option rather than pretending the architecture forbids it |
+| 2026-08-21 | **C5 does not gate `us-standard`. It gates half of it** | C5 is a blind TTS A/B — it answers whether ElevenLabs SOUNDS better than Google TTS through an 8 kHz mulaw handset, which is a real question because that bandwidth strips most of what makes premium TTS premium. It answers nothing about **Deepgram**, which is plausibly the bigger driver: STT accuracy is functional rather than aesthetic (a mis-transcription is a wrong booking) and STT latency is inside the turn loop. **C5b added** to cover it. Build `us-standard` only if one of the two comes back clearly better; a lane justified by an untested assumption costs $130/month and the last billing slot |
+| 2026-08-22 | **STT provider follows the COMPLIANCE TIER. There is no `STT_PROVIDER` variable, and that absence is the decision** | A provider flag is exactly the thing that gets copied between environments in a hurry, and the failure it produces is silent: a `hipaa` stack answering calls perfectly while streaming patient speech to a vendor with no BAA. The tier already exists as `effectiveTier(business)` — the stricter of deployment and tenant — so selection rides the ratchet that is already correct. A test asserts an env flag cannot put Deepgram back into a covered process. `assertVendorAllowed("deepgram")` stays inside the Deepgram constructor rather than moving up to the selector: **a refusal in a constructor cannot be routed around and a refusal in a routing function can** |
+| 2026-08-22 | **The unlogged-tier requirement cannot be met as stated, and CMEK is the honest substitute** | The ask was to assert Google STT's unlogged tier in code rather than in a comment. **There is no field.** "logging" does not occur anywhere in the v1 or v2 Speech protos, while the live billing catalog confirms both SKUs are real ($0.016 vs $0.012). An `if` statement over a value the API never exposes would be a comment with extra steps. **Owner chose CMEK** (2026-08-22): the v2 `Config` per location carries `kms_key_name`, `assertSttEncryption()` reads it before the port opens, and a covered deployment with no key **refuses to start**. Residual owner control that no code can enforce: **never accept Google's Data Logging Terms on these projects** |
+| 2026-08-22 | **The Deepgram BAA question is closed WITHOUT AN ANSWER, and the credential boundary now rules on it** | Asked 2026-08-21, never answered. It stopped being the critical path the moment the covered lane got its own STT: a late "yes" would change what the UK lane MAY use and nothing about what a US project may HOLD. So the deliberate absence in `lib/credentialBoundary.js` — recorded 2026-08-21 as "a rule either way encodes a guess" — is no longer honest, and Deepgram joins ElevenLabs as a forbidden credential in a PHI project. `secrets.tf` makes it `lanes = ["uk"]`. **Verified live: the gate now fails against `vetra-us-prod`, correctly, because that project really does hold the secret today** |
+| 2026-08-22 | **Staging goes back to `hipaa`, and the reason is that it is the only objective proof available** | Staging was dropped to `standard` on 2026-08-21 to get a service up at all, with the recorded cost that it stopped rehearsing the hipaa vendor guard. That cost is now unnecessary. More than that: **the flip is the migration's success condition.** Staging ran `standard` for exactly one reason — a hipaa process refuses to boot with a Deepgram credential present — so a `hipaa` staging service that boots and serves is proof the blocker is gone, in a way no passing test suite is |
+
+| 2026-08-25 | **C-1 and C-12 both become LISTS, and `enable_uk_resources` is scoped to `["uk-prod"]` rather than to the whole UK lane** | Two separate reasons, and the first is not the one that was asked for. **The asked-for one:** `enable_prod_databases` as a bool built the prod database in every prod project, so Lane U's one wanted instance dragged `us-prod`'s along at ~$197/month for one database. **The one found by planning it:** `enable_uk_resources = true` also activates `uk-staging`, which is MERGED into the `us-staging` project, which rewrites that project's VPC `description`, which forces `google_compute_network` to be replaced, which cascades into replacing the staging Cloud SQL instance — `5 to destroy`, on a database with no deletion protection because staging correctly has none. **The alternative considered and rejected was `ignore_changes = [description]`**: it would have kept uk-staging and papered over a real diff, which this file's own `min_instance_count` decision argues against, and it would not have touched the two reasons uk-staging is the wrong thing to want anyway — its DATABASE lands on the us-central1 instance (an instance belongs to a project), and its Cloud Run service sits in europe-west2 reaching across regions to it. **`uk-prod` is the only shape in this module with EU residency**, which is the entire point of Lane U. Both lists default to `[]` and both REFUSE an unknown key at plan time, because the failure mode of a list filter is silence. |
+| 2026-08-25 | **`DEEPGRAM_REGION` is set explicitly on BOTH lanes, not only on UK** | It had never been set by any Terraform, and `sttDeepgram.js` defaults it to `"us"` — so the UK service would have streamed to Deepgram's US endpoint while every test stayed green. The obvious minimal fix is a UK-only env block, which avoids touching `voice-us-staging` at all. **Rejected: the whole failure was an unset variable falling through to a default, and gating the fix on the lane recreates a version of that.** An explicit `us` documents the choice where the next person reads it, and it costs one no-op redeploy of a staging service — us-staging runs `hipaa`, which uses Google STT and holds no Deepgram credential at all, so the value it now carries changes nothing it does. |
+| 2026-08-25 | **`cloud_sql_tier.prod` drops to `db-g1-small` for the UK pilot, with the coupling written down rather than designed away** | `cloud_sql_tier` is keyed by ENVIRONMENT, not by stack, so lowering `prod` lowers it for US production whenever D3 builds that. Making it per-stack was the tidier change and was not made: it is a third granularity edit in one session on a module the owner is about to apply, and the coupling is harmless while `us-prod` has no instance. **It is recorded in tfvars, in the tracked example, and here**, with the instruction to raise it in the same edit that adds `us-prod` to `enable_prod_databases`. Resizing Cloud SQL is a restart, not a migration, so the pilot can grow into `db-custom-2-7680` without a data move. |
+
+| 2026-08-25 | **The UK lane STAYS IN LONDON and the org policy is widened, rather than moving to an EU region that was already permitted** | `in:eu-locations` excludes `europe-west2`, because it is Google's value group for the European Union and the UK left it. Two ways out. **Moving to `europe-west1` (Belgium) was the cheaper one** — a single tfvars line, no security-control edit at all, ~10 ms further from London, and lawful, since the UK holds adequacy regulations for the EEA. **Rejected because it silently downgrades the sentence you say to a clinic** from *"your data is in London"* to *"your data is in Belgium, which the UK recognises as adequate"* — and the UK residency story is the entire reason this lane is worth building before a customer signs. If the clinic turns out to be NHS, DSPT asks that question harder, and London is a shorter answer. This file already carries one claim that had to be downgraded to a disclosed transfer (Identity Platform has no residency control); taking a second voluntary downgrade to avoid a one-line edit is the wrong trade twice over. **And the widening is not a weakening:** `in:europe-west2-locations` adds one region and its three zones, the constraint still refuses America, and `in:eu-locations` was a B0w default chosen before anyone had thought about Brexit rather than a considered decision being overridden. **Backups pinned to the instance region in the same change**, because the `eu` multi-region has exactly the same problem one level down and a backup is a full copy of the same PHI. |
+
+## Deliberately out of scope
+
+`session.js` decomposition (3,105 lines — after, so the suite validates one change at a time) ·
+athenahealth integration (v2) · **rebuilding** Google Calendar sync (see the spec for the four
+conditions if it ever returns) · a `us-standard` ElevenLabs lane · per-tenant envelope encryption ·
+model changes · `Vetra-desktop` · rebuilding the marketing site (a friend owns it).
+
+---
+
+## Session log
+
+| # | Date | Branch | Did | Left for next |
+|---|---|---|---|---|
+| 14 | 2026-08-25 | `feat/gcp-lane-b-terraform` | **LANE C WENT 2 -> 6 OF 10, AND THEN THE TARGET MOVED.** Two applies landed. **C7 done: 13/13, restore wall clock 341 s**, scratch instance deleted and verified — and its drift itemised as `calls -2, appointments -1, sms_consents -1, phi_access_log -47`, **exactly the two live calls made that morning**, cross-validating an audit count taken independently from Cloud Logging. **C8 done: 58 passed, 0 failed against Cloud SQL**, after its preflight caught that `SET ROLE` was the means and not the requirement. **C4 done free off the call session** — v2v p50 3,140 vs A0's 2,980 and **-23% vs the covered lane**, 0 of 15 turns with no reply. **C2 done:** the reschedule succeeded against real UUIDs, supporting the fixture hypothesis, while `text_channel_tool_call` fired live and `outbound_sanitized` caught it. `DASHBOARD_URL` wired. **The cost alarm was found firing into a mailbox nobody opens**; both IAM fixes were refused by controls working correctly, so it now goes through a Monitoring channel to a PROVEN address. **THEN TWILIO PRICED HIPAA AT $2,000/MONTH** and a UK clinic came onto the radar, which inverts the US-only recommendation. | **BUILD UK. Lane U is written, costed and DECIDED** — start at U1, which is a Terraform design fix rather than a tfvars edit. Owner: Deepgram + ElevenLabs secrets, the apply, a UK Twilio number. **U1-U6 is demo-ready, not pilot-ready** — the spelling livelock, the 14% no-reply rate and the missing PMS integration are the gap. Still open: activate full billing before 2026-11-18, 175 unpushed commits on a public repo whose main still carries unauthenticated PHI endpoints. |
+| 13 | 2026-08-24 | `feat/gcp-lane-b-terraform` | **FOUR ITEMS CLOSED, NOTHING APPLIED TO GCP, AND TWO OF THIS FILE'S OWN CONCLUSIONS CORRECTED.** **(1) SMTP:** the smoke test passes — against **Gmail**, because nothing in the repo or tfvars is configured for M365 at all, so the D2 unknown it exists to answer is untouched; `npm run smtp-smoke` does not exist either. A credential-free probe shows `smtp.office365.com:587` still advertises `AUTH LOGIN`, so what is left is per-tenant and needs a credential (hard stop). **(2) C1 (`307e85b`):** `eval/run.js` refused to start without `GEMINI_API_KEY` — the FOURTH copy of a check placed above `getClient`, and a pure false blocker since it does not affect which backend runs. Fixed via `preflightBackend()`, which asks `getClient` instead of re-deriving it. **Seven unit tests stayed green when the old guard was restored to `main()`**, so two subprocess tests on the real CLI carry the actual proof. **C1 still cannot run: ADC reauth is expired and only the owner can clear it.** **(3) The three standing advisory failures, diagnosed — three different root causes.** `impatient-booker` is a rubric asking about a condition the fixture never produces, judged by a schema with no "not applicable". `long-call-memory` hides a **livelock: nine identical spelling requests in nine consecutive turns, in 2 of 5 runs, with every hard assert green**. `reschedule-two-appointments` was **never flaky** — the fixture seeded non-UUID ids against a declaration promising a UUID, so the model invented them (`apt-22222222-…`, and once a date string as an id); re-seeded, **2/5 → 5/5** (`a304906`). **(4) C8's RLS layer is a committed script** (`5dba36d`): 58 assertions, 11 of 11 tables, one transaction always rolled back, sabotage-verified five ways — **and it found that `business_directory` / `user_directory` are granted `arwd` to `vetra_app` while the schema states twice that they are not, which is the whole security argument for those tables having no RLS**. Gates green throughout: root 118/2283, test:db 178, sim:cutoff 2, dashboard 126 + 36. | **Two owner decisions: when production gets built, and ADC reauth for C1.** **C7 re-derived and the previous recommendation reversed** — it is NOT the production build, needs no apply, and can run against staging for pennies today; the missing piece is a parity script, which is the obvious next unattended task. Four findings PARKED at the owner's direction: the spelling livelock, the not-found/not-yours conflation, reschedule's missing confirm-before-write, and the routing-table grant. O25 remains parked. |
+| 11j | 2026-08-23 | `feat/gcp-lane-b-terraform` | **SESSION CLOSE: LANE B'S LAST CODE-SIDE PIECE IS DONE.** Rebuilt `voice:001bdfb` (verified by inspecting the image, not the tag), then ONE apply carrying both the new image and the voice service's `IDENTITY_PLATFORM_PROJECT_ID` — `0 added, 3 changed, 0 destroyed`. Checked first that the image carried no new migration, so the job/service ordering hazard did not apply. `voice-us-staging-00020-zgf` Ready, `GET /` 200, and **both `auth_not_configured` and `sms_channel_off` are gone from the boot notices** — two controls confirming themselves rather than being asserted. **The SPA is built and published**, 28 objects, with the staging API URL in the App/Contact chunks, the auth domain in Login, and no `localhost:3001` anywhere. **Publishing cost one more IAM finding**: `roles/storage.objectAdmin` does not grant `storage.buckets.get` — which `loadbalancer.tf`'s own comment names as the exact error the FIRST publish failed on, so the recorded fix had never addressed the recorded symptom and the second attempt failed identically. Fixed with `legacyBucketReader`, which still cannot rewrite the bucket policy. | **NOTHING SERVES THE SPA YET, and that is the top of the next session**: the bucket is private and `enable_load_balancer` is false. Cloud CDN + LB costs money and forces the DRS exception into the project holding the audit trail; **Firebase Hosting is free and sidesteps it**, and this file already favours it. Owner decision. **The first O25 test is still outstanding** but is now one job execution — `--args=scripts/seed-staging.js --update-env-vars=SEED_SMS_FOLLOWUP=true` — rather than hand-SQL against a FORCE-RLS table. **Parked with reasoning recorded:** the eval noise band, the pack's prompt footprint, the remaining compliance drafts. **Still unanswered: what Google detected.** |
+| 11g–i | 2026-08-23 | `feat/gcp-lane-b-terraform` | **APPLIED `TWILIO_SMS_FROM`, FIXED THE VOICE AUTH GAP, AND THEN THE FIRST O25 TEST CALL TURNED INTO AN INVESTIGATION.** The apply landed (`0 add, 2 change, 0 destroy`) and `sms_channel_off` cleared — but the same boot log carried `auth_not_configured`, meaning the voice service had NEVER had `IDENTITY_PLATFORM_PROJECT_ID`, so both DSR endpoints answered 401 to everybody. Invisible because calls are unaffected: the phone works and the statutory endpoints behind it do not. Fixed in config. **Then the test call asked no consent question**, and the audit trail settled why — `latestSmsConsent` never appears, so the flag was still false; not a cache (there is none, and the Gemini cache is content-addressed), most likely Cloud SQL Studio not carrying session state so `set_config` was gone when the UPDATE ran and FORCE RLS matched zero rows AND REPORTED SUCCESS. **The owner also reported worse call quality; the numbers said otherwise** (`voice_to_voice_ms` p50 3,757 vs the recorded 4,084), and `tts_fallback` turned out to mean "Google TTS rather than ElevenLabs", which in hipaa mode is the intended path. **Chasing it found something worse than a regression: the eval baseline is composition-unstable.** Two full runs both scored 36/37 with a different scenario failing each; the loser fails ~1-in-7 with this session's changes reverted. 16 targeted runs. **One correction made mid-investigation:** 3/3 failures were called "consistent, not variance" and seven runs showed passes on 4, 5 and 7. `scripts/seed-staging.js` gained `SEED_SMS_FOLLOWUP` because staging's database is private-IP only and there is no other way in. | **The sms_consent pack MAY cost one borderline eval scenario (3/7 vs 6/7, p≈0.27) — recorded, deliberately not reverted**, because it has zero functional effect while `sms_followup_enabled` is false everywhere and reverting reopens the only live PHI exposure to chase p=0.27. Revisit when SMS goes live; the fix if it proves out is conditional registration. **Newly written down: the live receptionist runs `thinkingBudget: 0`**, so every tool declaration and guardrail line is taken out of a model with no reasoning headroom — adding one more small thing to the prompt is not free. |
+| 11f | 2026-08-23 | `feat/gcp-lane-b-terraform` | **WIRED `TWILIO_SMS_FROM`, AND CORRECTED TWO THINGS THIS FILE HAD WRONG.** (1) It called setting that variable a Secret Manager change and a hard stop for that reason. **It was in no Terraform at all** — not a secret, not an env var, nothing reaching the container. A phone number is not a credential and `smtp_config` was the existing precedent. Now `var.twilio_sms_from`, a map keyed by STACK, because each stack authenticates as a different Twilio account and outbound SMS requires the `From` to belong to the authenticating one. (2) **The standing fact saying the staging subaccount owns zero numbers is stale** — `vetratd_staging` owns `+18176326969`, SMS/MMS/Voice, voice webhook already on `voice-us-staging`. Set for `us-staging`; validates; plans as `+ TWILIO_SMS_FROM` on the voice service, `0 add, 2 change, 0 destroy`. NOT APPLIED. | **THE CHANNEL IS BLOCKED AND NOT BY US: Traffic Status is `Messaging disabled — Complete A2P registration`, sitting beside `Voice enabled` on the same number.** Sends fail 30034; balance is $0.00 besides. **Do NOT register `+18176326969` to unblock a test** — it is a local long code, so that is 10DLC, and O23a deferred it because a sole-proprietor brand cannot convert to Standard and caps below what clinic #2 needs. Toll-free number into `vetratd_staging` + toll-free verification is the path. **Most of O25 is still provable today without a delivered text**: the gate's job ends at calling `sendSms`, so a row in `sms_consents` plus an ATTEMPTED message in Twilio's log (even a 30034) is the gate working, and no attempt at all is the gate failing. **Still unanswered: what Google actually detected.** |
+| 11e | 2026-08-23 | `feat/gcp-lane-b-terraform` | **APPLIED, OWNER DIRECTING. O25 IS ON STAGING AND THE DASHBOARD BACKEND SERVES FOR THE FIRST TIME.** Three steps, in the order the migrate-job finding demanded, each as a saved plan file so what ran was what was shown: `-target` the job (`1 add, 1 change` — `-target` pulled in the `essentialcontacts` API as a dependency, so it was never literally "the job only") → execute it → full apply, `1 imported, 3 added, 1 changed, 0 destroyed`. `voice-us-staging-00018-2xl` Ready on `voice:d02cdc8`, CMEK verified, `GET /` 200. `dashboard-api-us-staging-00001-lt9` Ready on `dashboard:d02cdc8`, `/health` 200, `/api/me` 401. Post-apply plan is `0 add, 2 change, 0 destroy` — both the documented `min_instance_count` phantom, one per service. `adopt_existing_contacts` blanked per its documented lifecycle. **THE JOB APPLIED FOUR MIGRATIONS, NOT ONE.** 034, 035, 036, 037 — so staging's head was 033, and **036, the migration this file has called a closed escalation since session 10, had never reached the deployed database.** Closed in the repo, closed locally, absent where it counted. | ~~**`TWILIO_SMS_FROM` is now the LAST thing between here and a testable O25** — Secret Manager, hard stop~~ — **wrong on both counts and corrected the same day: it was never a Secret Manager change, and it was applied in 11g**. Then prove the channel, then flip `sms_followup_enabled` and dial. **THE DASHBOARD'S DATABASE PATH IS UNPROVEN and should not be written up as working:** `db.init()` builds the pool and runs no query, so the open port proves only that the Cloud SQL connector got its certificates. No statement has been executed against Cloud SQL from that service; the first one can still fail on a grant or a principal. The cheapest proof is one authenticated request, which needs the SPA published. **Also still unpublished: the frontend** — CORS allows only `https://vetratd.com`, so nobody can reach this dashboard yet. **Still unanswered: what Google actually detected.** |
+| 11d | 2026-08-23 | `feat/gcp-lane-b-terraform` | **BOTH IMAGES BUILT AND VERIFIED BY CONTENT.** `voice:d02cdc8` (33s) and `dashboard:d02cdc8` (26s), both via `--service-account=vetra-deployer` — the fourth occurrence of that being required, and the org policy explaining why is now in Standing facts. **Verified by inspecting the images rather than reading the tags**, which is the rule this same day established the hard way: the voice image carries `database/037_sms_consent.sql` (37 migrations, was 36), `capabilities/smsConsent.js`, `lib/smsConsent.js`, `lib/degradedVoicemail.js`, two references to `latestSmsConsent` in the shipped `services/notifications.js`, and **no `@supabase` directory**; the dashboard image carries `sms_consent` in its generated capability schema, the placeholder allowlist in both `settingsValidation.js` and `constants.js`, the reserved tool name, and the Cloud SQL connector. **`dashboard_image_tag` had NEVER been set** — it was silently falling back to its `latest` default, the exact floating-tag trap its own variable description warns about. Both tags now pinned in tfvars. **The re-plan went from 1 change to 2, and the new one is the finding: the MIGRATE JOB's image is Terraform-managed off the same `image_tag`**, so a single apply moves the job and the service together while running neither. Local images pulled for verification were removed again. Nothing applied. | **THE APPLY IS NOW THREE STEPS AND THE ORDER IS NOT NEGOTIABLE** — `-target` the migrate job, `gcloud run jobs execute vetra-migrate-us-staging`, then the full apply. Doing it in one step serves code that reads `sms_consents` against a database where the unexecuted job has not created it, and `eraseCallerData` then 500s: **a data-subject right broken by deploy ordering.** All three steps plus `TWILIO_SMS_FROM` are hard stops. **Still unanswered: what Google actually detected.** |
+| 11c | 2026-08-23 | `feat/gcp-lane-b-terraform` | **FIRST UNTARGETED `terraform plan` SINCE THE SUSPENSION, with a real refresh rather than `-refresh=false`: `1 to import, 4 to add, 1 to change, 0 to destroy`.** No errors, no `CONSUMER_SUSPENDED`, and the single change is the documented `min_instance_count = 0` phantom — so a full refresh across every resource in state now succeeds, which is the practical confirmation the suspension is gone. The adds are exactly the written-but-unapplied dashboard path (service, `allUsers` invoker, the essentialcontacts API, the bucket-scoped `objectAdmin`) plus the Essential Contacts import. **Two pre-apply checks that would otherwise have been found by applying:** the per-project DRS exception on `vetra-us-staging` is `allowAll: true`, so the `allUsers` grant will not fail; and `dashboard:latest` resolves to a digest **whose tag says it predates the Cloud SQL connector fix and whose CONTENTS do not** — settled by inspecting the image rather than the tag, because Cloud Build builds from an uploaded source tarball and `_TAG` is a hand-typed label. **THE FINDING THAT MATTERS MOST: staging is running `voice:7cea364` from 2026-08-22 14:01, so NOTHING from session 11 is deployed and migration 037 has never touched the staging database.** Ledger only; nothing applied, nothing built. | **DEPLOY ORDER IS NOW LOAD-BEARING IN A NEW WAY: migration 037 BEFORE the new image serves.** `exportCallerData` and `eraseCallerData` both read `sms_consents` now — deploy first and export returns null while erasure THROWS and the route 500s. **This is the first change in this file's history where a wrong deploy order breaks a statutory right rather than a feature.** The O25 end-to-end test therefore needs four things before it can mean anything: the code deployed, the migration run, `TWILIO_SMS_FROM` set, and the channel proved on its own. **Still unanswered: what Google actually detected.** |
+| 12 | 2026-08-23 | `feat/gcp-lane-b-terraform` | **THE DASHBOARD IS SERVED.** Owner chose **Firebase Hosting** over the CDN + LB ($0 vs ~$18/mo, no DNS, and no `allUsers` binding on a bucket in the audit-trail project). **The Firebase project and its default Hosting site ALREADY EXISTED** — they arrived with Identity Platform at B3 — so nothing was created and there was no one-way "add Firebase" decision to make. `https://vetra-shared-c3a3bd.web.app/app` renders its sign-in page. **Three findings from pressing the button:** header globs match the REQUEST path so the SPA rewrite bypassed the no-cache rule and every client route came back `max-age=3600`; `firebase-tools` keeps its OWN credential store that outranks `GOOGLE_APPLICATION_CREDENTIALS` and was signed in as the **personal Gmail account** (third credential system on this box, second silent personal-identity run); and **the dashboard cannot call its API** because `dashboard_domains` is empty and the hosting origin is not vetratd.com — verified in a real browser, and invisible until sign-in because the login page makes no API call. **THE EVAL BAND IS MEASURED: 35-37 of 37 across five runs of identical code, mean 36.0** — `36/37` was a mode. **And the METHOD is the bigger finding: `eval:compare` reports a regression on 17 of 20 ordered pairs of those runs, an 85% false-alarm rate on unchanged code.** C1 retired rather than resized; `scripts/eval-band.js` does per-scenario Fisher exact across N runs per arm, sabotage-verified both directions, with its detection limit measured (3-of-5 is p=0.083 and NOT significant). **C6 credential half done against the project that actually runs PHI** — `check:credentials` resolves to `vetra-us-prod`, which is EMPTY; run against staging it passes, and the detector was sabotage-verified on five forbidden spellings. **C8 app layer 15/15 against the live deployment**, every refusal paired with a positive control — which caught a hole in the probe itself on run one. **O25's flag is set for real**, read back from the row. 5 commits. Suites: root **117 / 2274**, db **171**, sim 2, dashboard **122**, frontend **36**. | **ONE APPLY AND ONE PHONE CALL.** The apply carries `CORS_ORIGINS` (makes the dashboard usable), `roles/firebasehosting.admin` for `vetra-deployer` (the Cloud Build publish step **has never run** and 403s until it lands), and a `distinct()` fix that prevents a permanent phantom diff. **THE §164.312(b) GAP: the dashboard backend writes NO PHI-access audit record at all** — 15 authenticated calls, zero `phi_access` entries, while the voice service emits them normally. O29 audits the machine writing transcripts and not the human reading them, and `phiAuditCoverage.test.js` cannot see the dashboard. **NOT FIXED — where that boundary sits is a design decision.** **Three guards in one session were right about the wrong half**: `check:credentials` (empty project), `phiAuditCoverage` (voice only), `envInventory` (does not scan the dashboard's tree). **C7 CANNOT BE DONE UNATTENDED** — a restore needs a target instance, creating one is an apply and a meter; the brief's "none of these needs me" does not hold for it. **O25 checkpoint 1 was unverifiable** — `db-inspect.js` had no `sms_consents` query, found by pre-flight rather than after the call; added, and it needs a build + apply before the call can prove it. |
+| 11b | 2026-08-23 | `feat/gcp-lane-b-terraform` | **RE-PROBED THE SUSPENSION: IT IS LIFTED, AND THE COVERED CONFIGURATION SURVIVED IT.** Every API that returned `CONSUMER_SUSPENDED` answers — Cloud Run `Ready: True` on revision `voice-us-staging-00017-jhw`, Cloud SQL RUNNABLE, Secret Manager listing 4 secrets, Logging reading — plus billing `True` and `GET /` **200** from the public internet. A cold start triggered by that probe produced a fresh boot log at `14:39:41` showing `DEPLOYMENT_MODE=hipaa`, Google STT v2 in us-central1, CMEK verified, `db_backend`, on image `voice:7cea364` with `VERTEX_LOCATION=us`. Nothing was applied or changed. **The check itself was blocked first** by the org's reauth window — both gcloud's own credential and ADC had gone stale since session 11, which is the control working rather than a defect, and only the owner can clear it. **AND THE PROBE FOUND SOMETHING THE SUSPENSION WAS HIDING:** the same boot log announces `sms_channel_off` — **`TWILIO_SMS_FROM` is unset on staging**, so `sendSms` drops every message with `twilio_sms_from_missing` **one layer below the O25 consent gate shipped hours earlier**. The obvious first test of O25 (flip `sms_followup_enabled`, dial, wait for the text) would therefore have recorded the consent, written the row, sent nothing, and read as "the consent gate is broken". Ledger corrected so the next session sets the channel and proves it BEFORE testing the gate on it. | **THE APPEAL'S OUTCOME WAS NEVER COMMUNICATED — the restoration is the only evidence, and the TRIGGER IS STILL UNKNOWN.** Google's reply went to the mailbox nobody reads. A cause nobody found is not a cause anybody fixed, so the same heuristic can fire again on the same terms; ask on the appeal thread with a readable address in its own notifications field. **ADC was NOT refreshed** — the owner ran `gcloud auth login`, not `application-default login`, and Terraform reads only the latter, so an untargeted `terraform plan` is now unblocked by the suspension and still blocked by auth. Its output remains unknown. **`GET /` 200 is not "a caller can reach it"** — Twilio number routing and signature validation are the two layers that sat between serving and answering last time, and neither was re-verified. No commits to code; ledger only. |
+| 11 | 2026-08-22 | `feat/gcp-lane-b-terraform` | **THE ONLY LIVE PHI EXPOSURE IS CLOSED, AND CLOSING IT DID NOT COST THE FEATURE.** **O25** (`dd5659f`, `297891c`): migration **037** `sms_consents` + a gate at `sendCallerSms` + one tool the model calls in the call. The template was NOT stripped — 45 CFR 164.522(b) and TCPA express consent are the same event, so one question makes the name-and-appointment-time text lawful instead of making it useless. **Two related defects fixed the same day:** the templates promised "Reply to this number" and **no inbound SMS route exists anywhere in this repo** (and they send from the global `TWILIO_SMS_FROM`, not the dialled number, so the promise was wrong twice); and `sms_templates` was owner-writable with no guard, now a per-kind placeholder allowlist enforced in the dashboard AND at send time — **explicitly not a PHI detector**, because no check distinguishes "your chemotherapy appointment" from "your appointment" and pretending otherwise is false confidence in the worst possible place. **The design trap, caught before shipping:** the confirmation text is sent the instant a booking succeeds, but a receptionist naturally offers it AFTER booking — so a gate alone would have refused that text for every caller forever, silently, with the feature looking configured. A refused text is held 5 minutes and released by the consent tool's DEFERRED effect, deferred because releasing from inside `execute` would text a patient before the consent row committed. **O32** (`4994b3b`): the row and the comment implementing it were both stale — every per-turn write was already scoped, and the one genuinely unscoped PHI write left was the **degraded voicemail file**, which on Cloud SQL is a REFUSED insert answered to Twilio as 200. Extracted to `lib/degradedVoicemail.js` so a test can run it as `vetra_app`. **O31 checked and found IMPOSSIBLE as written** — Identity Platform's `Config` has 18 schema fields / 15 live and **none is a token lifetime**; the one real alternative found is `accounts:createSessionCookie`'s `validDuration`. **D7 is clean** (`8d97a1f`): both remaining Supabase scripts ported, package removed from both `package.json`s, and **both ports had the same latent RLS trap** — an unscoped read returns zero rows, so the naive version reports "nothing found" and looks fine, invisibly, because local `vetra` is a superuser. **Ten org policies read; only three are ours**, and the ledger's own "nine unread `.managed.`" was wrong. **O26 / O21 / O22 drafted** (`322d3e7`). 5 commits. Suites: root **116 files / 2263**, db **14 / 171**, `sim:cutoff` 2, dashboard backend **122**, frontend **36**. | **NOTHING RAN ON GCP — staging is still suspended, and that is still the top of this file.** **Nothing in O25 has been exercised on a real call**, and this file's own contract says a green suite says the parts are right, not that the door opens: switch `sms_followup_enabled` on for the staging clinic, dial it, and check the model asks the question in the words it was given and that the text arrives. **Owner: confirm no PRODUCTION tenant has `sms_followup_enabled` set** — this branch cannot reach production Supabase and staging is down; if one has it on, their caller texts stop until somebody says yes on a call, which is correct and is still a behaviour change worth knowing about first. **O31 is now a decision, not a task** — session store, Firebase session cookies, or describe the limit honestly. **A trap that has now fired three times has a root cause**: `iam.automaticIamGrantsForDefaultServiceAccounts` is enforced org-wide, which is why Cloud Build's default compute SA can never read its own source tarball. `tests/callersRoute.test.js` timed out once under a full concurrent run and passed on re-run — the known server.js cold-import flake, not new. |
+| 10 | 2026-08-22 | `feat/gcp-lane-b-terraform` | **B3 IS DONE AND A REAL PERSON CAN LOG IN.** Identity Platform initialised in `vetra-shared` (US only, no tenants, owner present for the apply, read back from the live API not from state), `supabaseClient.js` deleted, and the whole path exercised in a browser: sign in, reload — session survived — tenant resolved, dashboard rendered, sign out. **THE SUITES WERE NEVER THE PROBLEM AND THREE DEFECTS PROVE IT.** (1) **Migration 034** — `app_lookup_user_by_email`, the auth bootstrap, had the SAME FORCE-RLS defect 032 and 033 fixed, so on Cloud SQL every authenticated request 403'd with "No business linked to this user"; measured 1 row vs 0 rows by reassigning function ownership. (2) **Migration 035** — an Identity Platform account id is 28 alphanumeric characters, not a uuid, so `app_create_business_for_user(p_user_id uuid, ...)` **500'd on signup** while login worked; every fixture used uuids and therefore agreed with the bug. (3) **`Login.jsx`'s submit handler shadowed its own import and called itself** — `vite build` clean, 2,189 root tests green, and the button did nothing. **Two testing gaps closed on the way:** nothing in the backend's 99 tests ran the real `authMiddleware` (harness.js fakes it, correctly), and the malformed-header assertions passed against the OLD sloppy parser because a non-JWT has no `iat` so the session-age branch 401'd anyway — right answer, wrong mechanism. **`tests/db/schemaParity.test.js`** now builds a scratch database from `schema.sql` and diffs it against the migrated one including `pg_get_functiondef`, because the existing text-level guard structurally cannot see a changed function body — which is what 032/033/034 all are. Token verification is forged at every claim against BOTH the ESM and CJS copies from one file. **Every guard sabotage-verified, and three sabotages were NOT caught first time** and forced better tests. 6 commits. Suites: root **112 / 2190**, db **141**, backend **111**, frontend **36**, sim green, build clean. | **`vetra-us-staging-c3a3bd` IS SUSPENDED BY GOOGLE — owner action, and it is the top of the file now.** Not caused by this session; found because an untargeted `terraform plan` would not run. **The real defect underneath it: NO Essential Contacts exist anywhere and the billing account's only principal is `admin@vetratd.com`, a mailbox the owner cannot read** — so suspensions, security notices and the **free-trial expiry ~2026-11-18** have all been going nowhere. Console shows the reason without email; the appeal is a web form. **B1(2) is now a SECURITY precondition:** migration 034 resolves a tenant BY EMAIL and signup is open, so once real users are imported, any address with a `users` row and no Identity Platform account can be claimed by a stranger who inherits that clinic. Not live today. Migration 035's `users.auth_uid` is the fix — backfill it IN the import, make it NOT NULL, move the lookup onto it. Also: **the dashboard backend's local `.env` was pointed at the LIVE Supabase pooler** (repointed at local PG16), and `@supabase/supabase-js` survives in the ROOT package only because two dev scripts still use it as a data client — `scripts/verify-capabilities.js` and `scripts/test-buy-number.js`, A3 stragglers, **and both have a latent RLS trap if converted naively** (an unscoped read returns 0 rows and looks like an empty database). |
+| 9 | 2026-08-22 | `feat/gcp-lane-b-terraform` | **GOOGLE STT v2 BUILT — THE HIPAA LANE CAN HEAR.** `lib/voice/sttGoogle.js` behind the existing seam; `sttStream.js` became a SELECTOR keyed on compliance tier (no `STT_PROVIDER` variable, deliberately); `sttDeepgram.js` holds the unchanged Deepgram path for the UK. The boot contradiction is resolved: `checkSttConfig` asks the mode-shaped question and `server.js` stopped demanding a credential a covered process may not hold. **C5b RUN AND RECORDED** — the gate that did not exist two days ago. **Deepgram is now a credential-boundary violation in a PHI project**, and the live gate fails against `vetra-us-prod` because that project really does hold the secret. **THE FIRST REAL PHONE CALL FOUND A BUG NO TEST COULD.** Twilio signature validation rejected 100% of requests — `import * as twilio` made `validateRequest` undefined, and the try/catch added for malformed signatures swallowed the TypeError. The webhook had NEVER worked on this deployment, and B4's three 403s were consistent with that. Extracted to `lib/twilioSignature.js`, 11 tests, the first one positive. **Vitest structurally cannot see this bug** (Vite's own CJS interop hides it) — proven by sabotage, so the guards are a Node subprocess plus source scans. **Staging flipped to `hipaa` AND APPLIED, with the owner directing it** — three steps (keys, CMEK, service), `0 added, 2 changed, 4 destroyed`, and the service came back `Ready: True` and answering. **The success condition is met.** Suites: root **108 files / 2118 tests**, `sim:cutoff` green, `npm run eval` **36/37 hard** (A0 band: 34/37 or worse is a regression). 6 commits. | **THE ONE THING THAT MATTERS NEXT IS AN APPLY, AND IT NEEDS YOU.** 14 add / 1 change / 4 destroy; the 4 destroys are Secret Manager. **Four traps found by running the API, not reading docs**, and one was a whole-call bug caught ONLY because the C5b harness drove the shipping module: **Google sends the final AFTER the end-of-speech event** — the opposite of Deepgram — so the first implementation delivered every turn ONE TURN LATE, and 17 of 18 utterances returned no final while interims flowed normally. A transcript-only comparison would have read that as "Google is terrible" rather than "our client is wrong". Also found: it endpoints on RECEIVED SILENCE rather than idle time (a probe that stopped writing got nothing for 6 seconds); a stream dies at **5 minutes of WALL CLOCK** while calls run 30; the SDK's public `streamingRecognize()` is unusable; and **no API exists for the data-logging tier in either v1 or v2** — owner chose CMEK as the control that can actually fail. One unrelated latent defect fixed: a source-scanning test sliced a fixed BYTE window and **passes on CRLF, fails on LF**, so it fails on Linux CI today. |
+| 9b | 2026-08-22 | `feat/gcp-lane-b-terraform` | **THE PHONE RINGS AND THE RECEPTIONIST ANSWERS, IN `hipaa` MODE, ON GCP.** A real caller booked and rescheduled an appointment through Google STT v2, Google TTS and Vertex, with no uncovered credential in the project. Getting there took **seven further defects after the service was already "deployed and serving"**, every one of them older than this session's STT work: no number pointed at the service; Twilio signature validation rejected 100% of requests (`import * as twilio` making `validateRequest` undefined, swallowed by a try/catch); migration **032** — no tenant could be created; migration **033** — no dialled number could be resolved; the LLM demanded an API key Vertex forbids; the Vertex SDK derived an invalid hostname for the multi-region; and per-turn + capability writes escaped their tenant scope. **Live latency measured against A0** and the headline is not STT: `tts_ttfb_ms` 92→1,408 ms. **C5b validated as an instrument** — its synthetic `name_spelling` failure reproduced almost word for word on a real handset. 14 commits. | **THE REMAINING PRODUCT DEFECT IS STT ACCURACY ON A CALLER'S NAME, and it is Google's, not ours.** Across one call Google returned niton / nithan / Nathan and never "Nithin"; Deepgram scored 0.091 WER on the same case and captured the spelling. Keyterm boosting cannot help — it carries the BUSINESS's terms and a caller's name is unknowable in advance. **Three reported "product bugs" were the test fixture** (24/7 hours offering a Sunday; then Mon-Fri hours refusing a Saturday; `allowed_tasks` never enabling cancel/reschedule) — now Mon-Sat 08:00-20:00 with all four task modules. **Owner: C5 now gates ~1.3 s/turn, not just aesthetics; Railway's `TWILIO_VALIDATE_SIGNATURE`; the repo-private decision.** Root suite **110 files / ~2134**, db **111**, sim green |
+| 8 | 2026-08-21 | `feat/gcp-lane-b-terraform` (Lane A merged in) | **LANE B COMPLETE EXCEPT B3 AND B1(2).** B0a APPLIED (139 resources, remote state in GCS, zero drift). **B2 schema is in staging** — Cloud Build image, a Cloud Run Job with Direct VPC egress, 12 tables, 30 migrations baselined, `vetra_app` granted to the runtime identity, idempotent. **B4 deployed and serving** — secrets pushed byte-exact from a Twilio SUBACCOUNT, Cloud SQL over private IP with IAM auth, all three signature-rejection paths returning an identical 403 — **WHICH PROVED NOTHING, see 2026-08-22: the validator was rejecting everything**. **B5 built with its billing part switched off.** Cloud SQL now uses **IAM database authentication**, so no database password exists for the runtime. **The caller allowlist was written down as a compensating control and had never been built** — now built and sabotage-verified. **Nine traps found by deploying rather than reading**, all in Standing facts: `CLOUDSDK_CONFIG` does not steer Terraform; a floating `latest` tag cost THREE failed deploys; C-8's own `severity < INFO` exclusion hid the first migration failure because container stdout is DEFAULT severity; an IAM DB user cannot apply a schema; Cloud Run pulls cross-project images as its SERVICE AGENT; Cloud Build defaults to the compute SA; DRS blocks `allUsers`; `validateRequest` THROWS on a malformed signature (500 where 403 belonged); and `min_instance_count = 0` drifts forever. **Owner decisions recorded:** the UK migrates too (the reason is the auth fork, not cost); Identity Platform is US-only with NO tenants; `us-standard` is not built speculatively | **THE REMAINING BLOCKER IS NOT INFRASTRUCTURE.** The US `hipaa` lane has no BAA-covered STT: `server.js` exits without a Deepgram key, `bootChecks` exits with one in hipaa mode, and staging only runs because it was set to `standard`. **Session A: Google STT v2 + C5b. Session B: B3.** See "NEXT SESSION — start here" at the top of this file. **Owner:** C5 (20 minutes and your ears, gates a $130/month decision); the quota; DNS + a dashboard backend image before B5's LB is worth switching on. Suites: root **105 files / 2049 tests** |
+| 1 | 2026-08-20 | `chore/gcp-migration-ledger` | Committed the two-region spec + superseded banners on the 2026-08-02 specs. Opened this ledger. Verified `dev` is a strict ancestor of `origin/main`. Recorded A0 preconditions (86k ElevenLabs quota, no-push window confirmed, Railway live) | **A0 baseline** — the next action. Owner starts the Day 1 list in a separate session |
+| 3 | 2026-08-20 | `fix/a1-5-unauth-endpoints` + ledger | **A1.5 shipped to a branch** (`0836165`) — 4 routes closed, 13 tests, suite 83/1707 green, voice path provably untouched. **Completed the whole owner GCP track**: org `564252011558`, billing `01C71E-7C0893-377AE9`, GCP HIPAA BAA, CDPA, both EU certs, org roles granted, ADC isolated in `~/.gcloud-vetratd` and verified. Caught: the Workspace BAA does not cover GCP; no org existed; gcloud on the wrong account; the org-role gap; Norton TLS interception; **and that the repo is PUBLIC while publishing live vulns with file:line** | **B0w** — Terraform root module against the real org/billing IDs, with per-founder IAM. Owner: **repo-private decision**, then Block 1 |
+| 7 | 2026-08-21 | `feat/gcp-lane-b-terraform` | **B0w reworked for the 4-project shape; nothing applied.** Six STACKS now derive onto four PROJECTS via `var.stack_projects` (`2503257`), so 6→4 and 4→6 are both a tfvars edit. Org-node log sinks with audit/application severed (`79cb172`). Cost controls C-1..C-11 encoded (`dd017b6`). Credential-boundary CI gate (`85e691d`). **Four things were found by doing rather than reading:** (1) **B0a's Terraform state is GONE** — the projects are live and Terraform does not know them, so a plan from empty state proposes creating projects that already exist; adopted via `import` blocks. (2) **`CLOUDSDK_CONFIG` does not steer Terraform** — every run authenticates as the PERSONAL account, and it reports as a missing IAM binding on the right project. (3) **per-stack VPCs silently broke C-4** — a Cloud SQL instance peers to one network, so merged staging could not have had a shared instance. (4) **`gemini-3.6-flash` is served by NO single Vertex region** — `VERTEX_LOCATION=us-central1`, the value in A8's own tests, would 404 at runtime. **B1 q1 CLOSED: yes, `locations/eu` serves it.** C-3 priced off the real SKU catalog: **$74.46/mo**, Postgres confirmed. Root suite **84 files / 1728 green**; 6 gates sabotage-verified | **Cloud SQL IAM DATABASE AUTH applied (`6afeadb`)** — `cloudsql.iam_authentication=on`, two passwordless users, `roles/cloudsql.instanceUser` added. **B4 no longer needs a database password in Secret Manager.** **B3's open question CLOSED, and it is bad news worth having early:** Identity Platform has **no data-location control at all** — eighteen Config fields, none a region — so `gcp.resourceLocations` cannot reach it and UK staff logins cannot be kept in the EU. Staff accounts, not patient data, so a disclosed-transfer question rather than a PHI one, but the UK claim must be reworded. **Identity Platform deliberately NOT initialised** pending that call. Earlier: **B2 STAGING APPLIED (`9edae5d`) — `vetra-us-staging` RUNNABLE: POSTGRES_16, db-g1-small, ZONAL, CMEK verified against our key, `ipv4Enabled: false` with one PRIVATE address `10.20.32.3` inside B0w's reserved peering range, `ENCRYPTED_ONLY`, backups on, zero drift. ~$27/month committed.** **The ledger's own budget precondition is now met** — and a `$200 Monthly Budget Alert` turned out to already exist, unmanaged, which this file did not know. **C-12 added:** production databases off by default, $98.62/month saved, production's half of B2's gate moved to D3. **Three applies**, each on a different trap now documented: HCL's `$$` escape, the `service_identity` -> IAM propagation race, and the quota-project API list — which had fired three times and is now one list, `terraform_quota_apis`. **B1 ② (bcrypt import spike) NOT started: it needs a real Supabase export, which is real credentials and a hard stop.** Earlier the same session: **B0a APPLIED (`2e75abe`) — 139 resources, remote state, zero drift. Lane B provisioning is unblocked; B2-B5 no longer wait on anything in B0.** The org-node sinks failed round 1 because no role `admin@vetratd.com` holds carries `logging.sinks.create` at the org — which is the property that makes them worth having. **`VERTEX_LOCATION` fixed on `feat/gcp-lane-a` (`f25fc6d`)**: `global` refused at client construction, single regions announced, every `us-central1` fixture corrected, sabotage-verified, 101 files / 1984 tests green. **The credential gate was broken and only running it live showed it** — its project fallback read the variable this session emptied, and its tfvars parser built a RegExp in a template literal where a backslash-s collapses to a bare s; both failed SAFE. Now verified against `vetra-us-prod-c3a3bd`: 0 secrets, boundary holds. **NEXT: B2** (Cloud SQL from `terraform output cloud_sql_plan`, Direct VPC egress, no Redis) and **B3**. Owner: Deepgram BAA reply; the free-trial clock, ~2026-11-18. Was: ~~`terraform plan` BLOCKED on `invalid_rapt`~~ — **CLEARED in-session; plan ran clean, `7 import / 127 add / 4 change / 0 destroy`, nothing applied** (`913006c`). **NEXT: the adoption apply, owner present.** Then blank `adopt_existing_projects` and `adopt_existing_org_policies` (Terraform errors on an import block targeting an address already in state), then `terraform init -migrate-state` to the GCS bucket — which is the whole reason this session had to write `imports.tf`. Was: needs an interactive `CLOUDSDK_CONFIG=~/.gcloud-vetratd gcloud auth application-default login`, then re-plan with `GOOGLE_APPLICATION_CREDENTIALS` set. Then the **adoption apply** (owner present), then blank the two `adopt_existing_*` vars and migrate state to GCS. **A8's `VERTEX_LOCATION` needs changing to `us`/`eu` on `feat/gcp-lane-a`** — not done here, wrong branch. Owner: the quota, the Deepgram BAA reply |
+| 6 | 2026-08-21 | `feat/gcp-lane-a` | **RLS wired end to end** (`dd605d5`, `54521b1`) — migration 029 plus `withTenant`/AsyncLocalStorage at four boundaries, proven against real PG as the unprivileged role. **Brevo deleted** (`250c1f5`) after DNS showed its mail failed SPF+DKIM alignment under `p=quarantine` — it was going to junk. **Deepgram `mip_opt_out`** (`eb101fa`): every request this system ever made was opted INTO model training. **D1's code half** (`18bce76`) — and the original 95-vs-81 count was wrong, real numbers 118 and 83, because three access patterns exist and the old grep saw one. **Nine compliance gaps recorded that nobody was tracking** (O23–O29 plus the missing HIPAA STT): 10DLC, interstate two-party consent, PHI in caller SMS, three breach-notification clocks, Twilio recording retention, erasure not reaching Twilio, and **no PHI-access audit logging at all** | **Overnight, unblocked by the quota:** PHI-access audit logging (O29 — a REQUIRED §164.312(b) spec, assigned to nobody), erasure reaching Twilio recordings (O28), the dashboard's `withTenant` wiring (48 queries), and automatic logoff. **Owner: the quota, and the Twilio/Deepgram replies.** Suite baselines: root **1921**, db **64**, dashboard **92**, frontend **17**, sim **2** |
+| 5 | 2026-08-21 | `feat/gcp-lane-a` | **LANE A COMPLETE.** A3 the data-layer rewrite (`1a9ad88`), A4 call-state split (`330cb8d`), A5 GDPR DSR (`f30ec96`), A6 hipaa guard (`3cfed0a`), A7 Dockerfiles (`2fc7a27`), A8 Vertex (`d71b170`), A9 fonts + CORS (`7a75539`), A10 legacy pipeline deleted (`0a1533f`). Root suite **1707 → 1911**, green. **Four gates were sabotage-tested** rather than trusted on a first pass — A4's `writeShared`, A5's phone matcher, A6's vendor guard, and the exact-match case that showed erasure would have silently left PHI behind. **New finding: the Gemini API-key path is not BAA-covered.** Also: Norton breaks `npm ci` inside Docker; the dashboard image was shipping its own test suite; the Vercel preview domain was a permanent CORS entry on an account D7 cancels | **RLS** — turn A2's 19 red negative tests green (a `vetra_app` role + FORCE row security), and it is arguably C8's, not Lane A's. **Owner: raise the billing project quota, which unblocks ALL of Lane B.** Then B0a re-apply, then B1 |
+| 4 | 2026-08-21 | `feat/gcp-lane-a` + `feat/gcp-lane-b-terraform` | **ALL OF A1 CLOSED, plus A2.** A1.1 calendar deleted (`05af949`), A1.2 boot checks (`39d472e`), A1.3 link-only notifications (`abce612`), A1.4 error-tracker allowlist (`e269193`), A1.6 webhook BAA gate + migration 027 (`61a99b2`), A1.7 log lint + redaction (`302be9f`), A2 PG16 + migration runner + 19 red negative tests (`f094f9b`). Root suite **83/1707 -> 90/1849**, all green. **B0a run: 3 org policies + 6 projects created, then blocked** on the free-trial billing cap of 5 linked projects — O2d, exactly as predicted. Caught: **the ledger's "zero PostgREST nested selects" standing fact is wrong** (there are two, on the pickup path, which raises A3's estimate); the PHI lint found **13** leak sites where the ledger named 2; the migrations are **not** idempotent against schema.sql; **zero RLS policies exist**; and a near-miss where the A2 commit swept in `terraform.tfstate` + provider binaries, because `infra/terraform/.gitignore` lived only on the other branch | **A3** — the data-layer rewrite, now the clear top risk and measured at 1,207 lines / 34 exports / 19 importers / 15 mocking test files. **Owner: O2d unblocks all of Lane B with one console action.** Nothing pushed; repo still public |
+| 2 | 2026-08-20 | `chore/gcp-migration-ledger` | **A0 CLOSED.** Re-verified probe preconditions live (Railway 200, `DEBUG_ENDPOINTS` on, token matches) — the stale "probe blocked on a deploy + US number" note is dead. Fast-forwarded local `main` 88f8b6b→f285351 (pure FF). Ran the probe 12/12 and eval ×2; recorded the full baseline + 6 findings. Diagnosed the tripped gate: **the merged fix works, the gate is mis-specified**. Closed O13/O15/O17, O14 → `wip`, added O18 (US counsel) + O19 (clinic email). Published the 17-item owner runbook | **A1 branch off `origin/main`** — five PHI leak paths, A1.1 first. Owner works the runbook. **`DEBUG_ENDPOINTS`/`DEBUG_TOKEN` are still ON on Railway — unset when no further probe run is wanted** |
+| 7 | 2026-08-21 | `feat/gcp-lane-a` | **The four quota-independent compliance items, one commit each.** **O29 PHI-access audit logging** (`bb78637`, migration 030) — the §164.312(b) REQUIRED spec nobody had built; table + stdout sink, append-only with two locks proved independent. **O28 erasure reaches Twilio** (`b829fd4`) — and found that `eraseCallerData` ran on a DIFFERENT connection from its own tenant scope, so under RLS it would have erased nothing and answered 200. **Dashboard RLS** (`833a869`, migration 031) — 48 queries scoped with zero call-site edits, plus a second bootstrap problem the ledger never mentioned: **onboarding was simply broken under RLS**, and `ssl:{rejectUnauthorized:false}` was unconditional against the PHI database. **Automatic logoff** (`3a8ec2c`) — 15-min idle logoff plus a token-age ceiling, with its real limit written down rather than glossed. **Five gates watched failing first; four sabotage-verified.** Two of my own bugs were caught by tests rather than by me: `completeCall` filed an audit row when both its statements had failed, and the first version of the unaudited-access alarm would have fired on every turn of every call forever. **A0's "14% of turns time out" is corrected** — it is one scripted case, the real number is 7.9 s, and the dominant stage is a 5.6 s `stt_endpoint_ms` on digit sequences that the ledger had wrongly attributed to the deliberate holds | **Owner: the billing quota (O2d) still blocks ALL of Lane B.** Then B0a re-apply, B1. New items for later: **O31** (real inactivity enforcement at B3), **O32** (per-turn writes unaudited in hipaa mode, B2), and the **digit-endpointing 7.9 s** finding — a fix was NOT attempted, it is the owner's call. Baselines: root **1974**, db **93**, dashboard **99**, frontend **29**, sim **2** |
+
+---
+
+# ATTEMPT 2 — opened 2026-08-28
+
+**Everything above this line is ATTEMPT 1 and is HISTORY.** The estate it describes does not
+exist: org `564252011558`, billing `01C71E-7C0893-377AE9` and every `*-c3a3bd` project were
+suspended by Google on 2026-08-25 for an AUP violation **scoped to the owner**, cause never
+disclosed. `admin@vetratd.com` is not coming back. **Read attempt 1 for its measured facts and
+its traps — they are still true about the CODE — and never for the state of any GCP resource.**
+
+**The approved plan is `~/.claude/plans/ok-i-am-thinking-curious-spindle.md`** (approved
+2026-08-27, corrected 2026-08-28). Six phases, **one phase per session**.
+
+**What changes from attempt 1:** UK is the primary market, not the US. No GCP BAA and no US
+healthcare — `DEPLOYMENT_MODE=hipaa` stays in the code and in the tests and is **deployed
+nowhere**, which deletes attempt 1's hardest work (Google STT v2, CMEK-on-speech, the credential
+boundary gate). Three projects — `vetra-uk`, `vetra-us` (dark), `vetra-core` — under the
+auto-provisioned org `208508072539`, on a **paid** billing account `01DB07-24C0F8-391DCC`.
+
+---
+
+## Phase 1 — CLOSED 2026-08-28 · branch `feat/gcp-2` · merge commit `62b87c2`
+
+**Goal: converge the two living branches with the receptionist behaving identically afterwards.**
+`dev` (19 receptionist commits) merged INTO a branch off `feat/gcp-lane-b-terraform` (187
+migration commits). Neither contained the other; both were 0 behind `main`. Merge base `f285351`.
+Direction was the point: behaviour moves into the structural branch, never the reverse.
+
+**Nothing was pushed. `main` was not touched. No GCP, Twilio, Railway or production contact.**
+
+### The conflict surface was smaller than expected, and that was the danger
+
+23 files overlapped. **Only 2 conflicted textually** — `.env.example` and `.gitignore`, both
+add/add against an **empty base region**, both resolved by keeping both sides. Neither half was
+optional: dropping lane-b's `.env.example` block fails `tests/envInventory.test.js`, which fails
+the build when the file and the code disagree *in either direction*; dropping dev's `.gitignore`
+block leaves `*.tfstate`, `*.tfvars` and `.env.*` publishable from a **public** repo.
+
+**The other 21 auto-merged silently, which is where the real risk lived.** Verified mechanically
+in both directions rather than by reading: every line each side ADDED must be present in the
+merged tree, and every line each side DELETED must be absent.
+
+| | dev added, missing | dev deleted, survived | lane-b added, missing | lane-b deleted, survived |
+|---|---|---|---|---|
+| all 21 files | **0** | **0** | **0** | 19, all false positives |
+
+The 19 are duplicate-line artifacts — closing braces and boilerplate comment rules. The only two
+that could have been real were checked by occurrence count across all four trees:
+
+```
+server.js   'const config = db.loadConfig(business);'    base=2 dev=2 laneb=1 merged=1
+gemini.js   'const apiKey = process.env.GEMINI_API_KEY;' base=2 dev=2 laneb=1 merged=1
+```
+
+lane-b deleted one of two identical occurrences; the merged tree matches lane-b exactly.
+`lib/voice/session.js` — 3,105 lines, edited on both sides, the phase's largest single risk —
+auto-merged with **zero loss on either side**.
+
+### The break git could not flag, and would not have
+
+**lane-b DELETES `services/supabase.js`** (renamed to `services/db.js`, a strict superset;
+`loadConfig(business, capabilityRows = null)` is signature-identical). Every *modified* file
+resolved correctly, because lane-b owned those import hunks.
+
+**But three test files dev ADDS import it.** An added file is copied in with no merge at all, so
+there is no conflict, no warning, and nothing for a conflict list to show:
+
+```
+tests/pastAppointments.test.js:20        import { loadConfig } from "../services/supabase.js";
+tests/spellAskCap.test.js:21             import { loadConfig } from "../services/supabase.js";
+tests/toolRefusalCallerFacts.test.js:19  import { loadConfig } from "../services/supabase.js";
+```
+
+Repointed to `services/db.js`. **The lesson generalises past this merge: when one branch deletes
+a module, the conflict list covers the files the other branch MODIFIED and is blind to the files
+it ADDED.** Swept the whole merged tree for every deleted module (`services/supabase.js`,
+`services/deepgram.js`, `lib/mediaStream.js`, `supabaseClient`) — those three were the complete
+set. `tests/pipelineSelection.test.js:53` also names `lib/mediaStream.js` but asserts it is
+*absent*, which is correct as written.
+
+### lane-b's env gate then caught a second integration gap
+
+`npm test` failed once, on `tests/envInventory.test.js`:
+
+```
+AssertionError: undocumented: nobody deploying this could know to set these
++ Array [ "GIT_COMMIT_SHA", "RAILWAY_GIT_BRANCH", "RAILWAY_GIT_COMMIT_SHA" ]
+```
+
+dev's `cc9b362` reads all three at `server.js:276-277`; **`tests/envInventory.test.js` exists only
+on lane-b**, so dev never had a gate to answer to. Documented in `.env.example`. This is the gate
+working, not a nuisance — and see *Parked* below, because it has a Cloud Run consequence.
+
+### Prompt snapshots — deleted and regenerated, never merged
+
+All 110 deleted, regenerated from the merged code, **110 back**. A hand-resolved snapshot records
+nothing, and the suite stays green through a prompt regression, so this diff is the only detector
+that exists. Reviewed line by line against **both** parents:
+
+| Compared to | Diff | Every line attributable to |
+|---|---|---|
+| `dev` | 20 files, **170 insertions, 0 deletions** | lane-b's SMS work, and nothing else: the "You cannot send text messages on this line" prompt line and the `record_sms_consent` tool declaration, 10 fixtures each |
+| `feat/gcp-lane-b-terraform` | 24 files, 72 insertions, 50 deletions | dev's prompt edits, and nothing else: the FULL-name read-back rewrite, the partial-answer rule, and the one-question-per-turn split of the booking checklist (renumbered 1-5 to 1-8) |
+
+**Nothing in either direction is unattributable, so the merged prompt is byte-for-byte the union
+of the two branches and nothing more.** Independent corroboration: the regenerated files are
+**byte-identical to what git's own auto-merge produced** for the ten overlapping `.static.txt`
+files, so two independent methods agree.
+
+### Gates — run on the merged tree, numbers pasted not claimed
+
+| Gate | Result |
+|---|---|
+| `npm test` | **2350 passed / 125 files, 0 failed** |
+| `npm run db:up` + `npm run test:db` | **191 passed / 15 files**, Docker PG16 `vetra-pg16` healthy on **55432**, 36 migrations applied and 0 pending, RLS refusing unscoped writes |
+| `npm run sim:cutoff` | **3 passed.** punctuated+trailing800 **50.0% to 12.5%**, fluent control **0 cutoffs**, reply latency **1260ms** unchanged. Detector self-test fires (`replies=3 turns=3 cutoffs=1`), so the sim can still fail |
+| dashboard backend | **126 passed / 13 files** |
+| dashboard frontend | **36 passed / 6 files** |
+| snapshot diff | reviewed by eye, both directions, table above |
+| real module graph | `session.js`, `gemini.js`, `tools.js`, `db.js`, `capabilities/index.js`, `textSession.js` all import unmocked; `node --check` clean on every touched file |
+
+**`npm install` was required** — node_modules held dev's dependency set and lane-b adds `pg`,
+`@google-cloud/cloud-sql-connector` and `@google-cloud/speech` while removing
+`@supabase/supabase-js`. Symptom was `Failed to load url pg (resolved id: pg)`, which reads like a
+merge error and is not. **`package-lock.json` was not modified** — lane-b's lock was already
+correct.
+
+---
+
+## Attempt 2 — parked, deliberately NOT fixed in Phase 1
+
+Phase 1's requirement was that nothing moves. These are real and they are for later phases.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P1 | **RESOLVED 2026-08-28 — see the P1 section below; decision is `global`, disclosed.** Original finding: **`VERTEX_LOCATION=global` is REFUSED BY LIVE CODE.** The plan's 2026-08-28 decision is `global` with `gemini-3.6-flash`, on measured availability. But `services/gemini.js:175` declares `VERTEX_FORBIDDEN_LOCATIONS` as exactly `["global"]` and **throws** at client construction, and `.env.example` documents "NEVER global" at length. This is code, not a comment — attempt 1 decided the opposite and enforced it. **The decision cannot ship until this is changed, and changing it is a residency-posture change that needs writing down, not a one-line edit.** | `services/gemini.js:175,224-229,294-296`; `.env.example` | 2 or 3 |
+| P2 | **Build reporting dies on Cloud Run.** `GET /` reports the build SHA from `RAILWAY_GIT_COMMIT_SHA`, falling back to `GIT_COMMIT_SHA`. **Railway injects the first; Cloud Run injects neither.** Unless Terraform or Cloud Build passes `GIT_COMMIT_SHA` at deploy time, every deployed service reports "Build: unknown" — and attempt 1 records that "is my fix live?" already cost a wasted test call once | `server.js:276-277` | 2 |
+| P3 | **⚠ RECLASSIFIED 2026-08-28 — NOT cosmetic. The files hold REAL CALLER PHONE NUMBERS and the repo is PUBLIC. See "P3 — RECLASSIFIED" below.** Original finding: 68 files under `.playwright-mcp/` are **tracked AND gitignored** on `main`, `dev` and lane-b alike. Pre-existing on both parents, identical count, **not caused by this merge**. Cosmetic; noted so a future session does not mistake it for merge damage | `.playwright-mcp/` | any |
+| P4 | **The root suite is not hermetic — it changes result on an env var.** `tests/toolTimeout.test.js` asserts `reason_code === "TIMEOUT"` and gets `UNAVAILABLE` whenever `DATABASE_URL` is set in the shell, which it will be for anyone who just ran `npm run test:db` in the same terminal. **Verified pre-existing: `feat/gcp-lane-b-terraform` fails it identically, and the file is lane-b's verbatim — the merge did not touch it.** The canonical root-suite run is with `DATABASE_URL` UNSET, which is the documented property `vitest.db.config.js` says is worth protecting; that run is green at 2350. Recorded, not fixed, per the record-and-park rule | `tests/toolTimeout.test.js:47-60` | any |
+
+---
+
+## P1 RESOLVED 2026-08-28 — measured, and it corrects the standing record twice
+
+**Decision: `VERTEX_LOCATION=global`, and the inference leg is disclosed as an international
+transfer.** Taken by the owner 2026-08-28 after the probe below.
+
+Probed live against the scratch project `project-b147bdfa-d267-426a-8c7` with `:generateContent`
+(`maxOutputTokens=5`), not `:countTokens`, and with controls on both the model name and the
+location. **`:countTokens` is NOT a valid availability signal — it returned 200 for
+`locations/europe-west2` + `gemini-3.6-flash`, which `:generateContent` on the regional host
+refuses.** Attempt 1's table was built on `:countTokens`.
+
+| Call shape | Region actually pinned? | `gemini-3.6-flash` |
+|---|---|---|
+| `europe-west2-aiplatform.googleapis.com` (regional host) | **YES** | **404** |
+| `aiplatform.googleapis.com` + `locations/europe-west2` | **NO** | 200, real reply |
+| `aiplatform.googleapis.com` + `locations/eu` | **NO** | 200, real reply |
+| `eu-aiplatform.googleapis.com` | — | **400, host does not exist** |
+
+**Correction 1 — `eu` and `global` are the same call, and nothing established otherwise.** Both go
+through `aiplatform.googleapis.com`. The control is decisive: **`locations/madeup-region-9`
+returned `200 SERVED`**, and so did `locations/asia-northeast1`, while an empty location returned
+400. The path segment is **not validated**, so a 200 on `locations/eu` is **not evidence of EU
+processing**. This does not prove `eu` is ignored — Google may honour real regions and fall back
+only for garbage — but a residency claim must be positively evidenced, and by probe this one
+cannot be. **`services/gemini.js` refusing `global` while permitting `eu` is therefore a
+distinction that was never established.** Attempt 1's LLM-leg residency posture rested on it.
+
+**Correction 2 — London's regional host serves exactly ONE model, and the earlier "404 in
+europe-west2" was the regional HOST, not the region.** On
+`europe-west2-aiplatform.googleapis.com`: `gemini-2.5-flash` **200**; `gemini-3.6-flash`,
+`gemini-2.5-flash-lite`, `gemini-2.5-pro` and the bogus control all **404**. So genuine UK-pinned
+inference is available, and only with `gemini-2.5-flash` — which scored 17-18/20 against
+3.6-flash's 19/20 on the 2026-07-24 matrix, and has no in-region fallback.
+
+**The 2026-08-28 finding "`eu` is not a Vertex host at all — `Invalid hostname:
+eu-aiplatform.googleapis.com`" is reproduced here as the 400 above and is a real observation with
+the wrong conclusion drawn from it.** The multi-regions are reached on the global host with the
+location in the path; `services/gemini.js:232-249` already documented this and already carries the
+`baseUrl` override for it.
+
+**What the decision costs, stated plainly:** the inference call leaves the UK and the EU. Caller
+data at rest (Cloud SQL), audio transcription (Deepgram `api.eu.deepgram.com`), secrets, KMS and
+compute all remain in `europe-west2`. The transfer needs a line in the privacy notice **and** the
+Art. 30 record, alongside Identity Platform and ElevenLabs. **Re-probe `europe-west2`'s REGIONAL
+HOST monthly for a 3.x arrival** — that is the trigger to revisit, and it is one tfvars line plus
+the baseUrl rule.
+
+**Code change DONE — commit `5f129f8`, made 2026-08-28 at the owner's request.** Five files:
+`services/gemini.js`, `.env.example`, and the three test files that asserted the old contract.
+
+**The load-bearing part was not the relaxed refusal.** `VERTEX_MULTI_REGIONS` became
+`VERTEX_GLOBAL_HOST_LOCATIONS` and now includes `global`, because
+**`global-aiplatform.googleapis.com` returns 404** (probed). Relaxing the guard WITHOUT extending
+the `baseUrl` override would have failed on the first turn of the first call — the exact incident
+that override exists to prevent (`Invalid hostname: us-aiplatform.googleapis.com`, every turn).
+A real region still keeps the SDK-derived host: that host is the only thing that pins one, and
+forcing the global host there would unpin it while the config still read `europe-west2`.
+
+`VERTEX_FORBIDDEN_LOCATIONS` is **kept and empty** — the refusal POINT (one construction site) is
+the valuable part, and adding an entry makes a refusal real again.
+
+`eval/run.js`'s `preflightBackend` needed no change: it reports whatever `getClient` throws, so it
+inverted with the guard. Its test did.
+
+Gates re-run because this changes runtime behaviour: **2352 / 191 / 3 / 126 / 36, and 129 snapshot
+tests with ZERO snapshots moved** — the last is the one that matters, since it proves the change
+touched backend selection and not the prompt.
+
+**Probe method trap, recorded because it silently produced a fully wrong result table.** PowerShell
+`Invoke-WebRequest` sends `Expect: 100-continue`, and through the local TLS interception every
+request came back **417 with a Google "Sorry..." HTML page — including the control**. It reads like
+an API answer. Set `[System.Net.ServicePointManager]::Expect100Continue = $false`. Always probe
+with a control that MUST fail; the 417 table was only recognisable as garbage because the bogus
+model did not 404.
+
+---
+
+## Phase 2 — CLOSED 2026-08-28 · branch `feat/gcp-2` · commit `eb2e63e`
+
+**Goal: make `infra/terraform/` describe the estate that exists instead of the one Google deleted.**
+Configuration only. **No GCP contact, no apply, no plan against a real backend, nothing created,
+nothing pushed, `main` untouched.** 17 files, +1,123 / -626, all under `infra/terraform/`.
+
+### Six of the seven briefed items were verified before being done; two of them changed
+
+Phase 2's list was written partly under the no-org assumption, corrected 2026-08-28. Re-deriving
+rather than executing changed the answer twice and confirmed it five times.
+
+| # | Briefed | Verified as | Done |
+|---|---|---|---|
+| 1 | `org_id = "208508072539"`; drop `disable_sa_key_creation` | Correct. Google set it, plus five more secure-by-default policies | tfvars + `org-policies.tf` |
+| 2 | `stack_projects` 6 → 3, staging and logging REMOVED | Correct, and it forced a derivation fix — see below | `variables.tf`, `locals.tf` |
+| 3 | logging.tf — convert org sink to per-project? | **NO. The premise is void** — see below | destination repointed only |
+| 4 | `min_instances = 1` with `cpu_idle = true` | Correct; `false` is ~$70/mo = the whole budget | `cost-controls.tf` |
+| 5 | P2 — pass `GIT_COMMIT_SHA` at deploy time | Correct. Nothing in the module set it | `migrate-job.tf` + both services |
+| 6 | `terraform_quota_apis` on the bootstrap project | **The README's list was INCOMPLETE — 8 of 19** | README rewritten; Phase 4 action |
+| — | `uniform_bucket_level_access` audit | **Already satisfied, and logging.tf was never the place** | nothing to change |
+
+### Item 3 — the org sink STAYS, and this is the reasoning
+
+**Decision: keep `google_logging_organization_sink`. Do not convert to per-project sinks.**
+
+The plan item was written when attempt 2 was believed to have **no organization**, and a sink needs
+an org node to hang off. The probe on 2026-08-28 found one — `vetratd-org`, `208508072539`, ACTIVE,
+auto-provisioned at signup — and **the plan's own correction table already lists "org-level log
+sinks" under "work as originally designed".** The premise is void, so the item is void.
+
+Converting anyway would have cost the whole control and bought nothing:
+
+- a per-project sink is deletable by **the very project admin the design defends against**, which is
+  the §164.312(b) weakness `logging.tf` was written to close;
+- `include_children = true` captures a project created next month with nobody remembering to wire it
+  up — a property per-project sinks cannot have at all;
+- no compensating control at the project level recovers either.
+
+**A weaker control adopted to satisfy a superseded plan item is worse than no change, because the
+plan then reads as satisfied.** Written into `logging.tf`'s header, not just here.
+
+Only the DESTINATION moved: three `local.project_id_for_stack["logging"]` → `["shared"]`, i.e. the
+`core` project.
+
+**And the bucket-lock warning did not apply, for a reason worth recording.** `logging.tf` creates
+`google_logging_project_bucket_config` — a **Cloud Logging** bucket, not a GCS bucket. It has no
+`uniform_bucket_level_access` argument and the `storage.uniformBucketLevelAccess` constraint does not
+reach it. The plan's instruction to "check logging.tf" for that constraint is a category error. The
+module's only two `google_storage_bucket` resources are `loadbalancer.tf:89` (SPA) and
+`shared.tf:208` (tfstate); **both already set it, and there is no `google_storage_bucket_acl` or
+`google_storage_default_object_acl` anywhere in the module.** Nothing to change. The audit-only lock
+split was already correct and no `locked` argument was added.
+
+### Two things the reshape IMPLIED that nothing on the list spelled out
+
+Both are cost or correctness bugs that a `terraform plan` would have rendered as ordinary creates.
+
+**A. `enable_uk_resources` gated one lane, and attempt 2 reversed which lane needs gating.**
+
+`locals.tf` read `if v.lane != "uk" || contains(var.enable_uk_resources, k)` — a gate on the UK,
+because in attempt 1 the US was live and the UK was held back. **Attempt 2 inverts the polarity: the
+UK is the only market and `us-prod` is DARK — and under that expression `us-prod` was
+unconditionally ACTIVE.** The first apply would have built, for a lane nobody is serving:
+
+- a VPC, subnet, peering range and runtime service account;
+- a Cloud SQL instance at ~$98/month — **more than the entire $55-80/month estate budget**;
+- a Google STT KMS **key ring, which can never be deleted**. Terraform removes one from state and
+  reports success, leaving a name that can never be used again.
+
+Replaced with `var.active_stacks` (list of regional stack keys, default `["uk-prod"]`), symmetric in
+both lanes, plus a validation refusing an empty list. **A gate named after one lane stops being a
+gate the moment the other lane is the one you want held back.**
+
+**B. `DEPLOYMENT_MODE` was hard-coded per lane, and the US branch is a market this business is not in.**
+
+`cloud-run.tf` set `local.stacks[stack].lane == "us" ? "hipaa" : "standard"`. The locked decision is
+`standard` on **both** lanes: there is no GCP BAA, and US healthcare is closed on Twilio's
+$2,000/month BAA regardless of what Google signs. New `var.deployment_mode`, default `"standard"`,
+which **also gates `speech.tf`** — so lighting `us-prod` under `standard` cannot silently provision
+the permanent key ring for a Speech API that lane will never call.
+
+### The derivation fix that made three-projects possible at all
+
+`local.projects` read `local.stacks[pk].display` and `local.stacks[pk].region` — legal only while
+project keys WERE stack keys. They are not any more (`uk-prod` → `uk`, `shared` → `core`), and
+`local.stacks["core"]` does not exist. Project IDs are built from the PROJECT key
+(`projects.tf:23`), which is exactly what makes them `vetra-uk-<suffix>` rather than
+`vetra-uk-prod-<suffix>`, so the rename is load-bearing and not cosmetic.
+
+Both now derive from `members`. **`region` uses `one(distinct([...]))` rather than `members[0]`**:
+`one()` returns the single element and **errors on more than one**. A future two-region merge fails
+loudly at plan time instead of provisioning one lane's database, secrets and services into the other
+lane's region — which is the "first-stack-wins shortcut" that same block warns against, and which
+`members[0]` would have done silently.
+
+`var.stack_projects`'s old validation asserted every value must itself be a KEY of the map. **That
+assertion existed only to keep `local.stacks[pk]` legal, and it would now refuse the correct
+default.** Replaced with a project-ID-shape regex, plus a new validation refusing unknown stack keys
+— an unrecognised key otherwise fails deep inside a for-expression with an error naming neither the
+variable nor the typo.
+
+### Everything else that changed, and why
+
+| File | Change |
+|---|---|
+| `versions.tf` | **`backend "gcs"` COMMENTED OUT.** It named the deleted `vetra-tfstate-c3a3bd`, and the state bucket is a resource this module creates — so the first apply necessarily runs on local state, then `init -migrate-state`. The README already documented that sequence and the code disagreed with it |
+| `outputs.tf` | `c2_staging_min_instances` was `min([... if endswith(v.stack, "-staging")]...)`. **With staging gone that list is empty and `min()` with no arguments is an ERROR, not zero** — an output nobody reads taking down `plan`. Replaced with `c2_min_instances_total`, and added `c11_cpu_always_allocated` |
+| `essential-contacts.tf` | The `@vetratd.com`-only regex was an **attempt-1 ORG constraint**; it reads `enforce: false` here, and that mailbox is suspended. A validation demanding a domain nobody can receive on would have refused every reachable address. Now validates shape only — **and refuses EXACTLY ONE contact**, because one contact on one unread mailbox is the shape that already failed |
+| `cloud-run.tf` | `staging_caller_allowlist` and its `dynamic "env"` removed — its only reader was `env == "staging"`, which can no longer be true. Why the control existed is recorded in place, not deleted |
+| `cost-controls.tf` | `cpu_idle = true`, unconditionally. The u1 VPC-description-forces-replacement chain is **kept and re-scoped**: attempt 2 does not expose it today (one stack per project) and it returns the instant two stacks share one |
+| `budget.tf`, `iam.tf`, `imports.tf`, `locals.tf` | Comments that named dead identifiers **as current** rewritten. `budget.tf` now says the paid account raises the stakes rather than lowering them: attempt 1's worst case was an expired trial, this one's is a card |
+| `README.md` | Rewritten for three projects. Adds the full 19-API bootstrap list, `TF_DISABLE_PLUGIN_TLS=1` with its actual failure text, `~/.gcloud-vetra2`, and a plan-invisible-traps section |
+
+`c3a3bd` still appears five times — `shared.tf:143,164`, `identity-platform.tf:141,163`,
+`cloud-run-dashboard.tf:224` — **all inside `#` comments quoting real attempt-1 API output as
+evidence.** Left verbatim on purpose: rewriting a quoted measurement falsifies the evidence. No live
+value anywhere in the module names a deleted resource.
+
+### Traps checked and found ALREADY CORRECT — verified, not assumed
+
+- **`in:eu-locations` does not contain `europe-west2`.** `local.uk_locations` still reads
+  `["in:eu-locations", "in:europe-west2-locations"]`, confirmed by evaluating it. Now stated in
+  `org-policies.tf` and the README as well, with the reminder that **`plan` does not evaluate org
+  policy**, so this is only ever caught by reading.
+- **Cloud SQL backups.** `sql.tf:306` already pins `backup_configuration.location` to
+  `each.value.region`, with the comment explaining that `eu` is EU-only and a London instance's
+  backups would sit outside the UK.
+- **The two Cloud Run URL forms.** `service_base_url` still composes the project-number form and
+  `twilio_webhook_base` still carries it; `.uri` is still only reported alongside its warning.
+- **VPC description forces replacement.** Preserved, re-scoped, and now in the README's bite list.
+
+### Gates — pasted, not claimed
+
+```
+$ terraform fmt -check -recursive infra/terraform
+fmt exit=0
+
+$ terraform init -backend=false && terraform validate
+Terraform has been successfully initialized!
+Success! The configuration is valid.
+
+$ npm test
+ Test Files  125 passed (125)
+      Tests  2352 passed (2352)
+   Duration  30.10s
+```
+
+**2352 is unchanged from the P1 commit, which is the assertion that matters** — Phase 2 touched no
+application code, and `git status` confirms all 17 modified files are under `infra/terraform/`.
+
+**`validate` does not evaluate locals, so it is not sufficient on its own.** The derived model was
+evaluated in `terraform console` (local only, no backend, no credentials):
+
+```
+local.project_keys              ["core", "uk", "us"]
+keys(local.stacks)              ["shared", "uk-prod", "us-prod"]
+keys(local.active_regional_stacks)  ["uk-prod"]          <- us-prod is DARK
+keys(local.speech_stacks)       []                       <- no KMS key ring
+local.uk_locations              ["in:eu-locations", "in:europe-west2-locations"]
+local.projects["uk"]            region=europe-west2, has_prod=true, locations both groups
+local.projects["us"]            region=us-central1,  locations ["in:us-locations"]
+local.projects["core"]          region=us-central1,  locations both continents
+```
+
+**Every new validation was made to fail on purpose, because a guard nobody has seen refuse is not a
+guard:**
+
+| Input | Result |
+|---|---|
+| `us-prod` and `uk-prod` in one project | REFUSED — "the credential boundary" |
+| `stack_projects` naming `logging` | REFUSED — "may name ONLY uk-prod, us-prod and shared" |
+| `active_stacks = ["uk-staging"]` | REFUSED — "must name regional stack keys" |
+| `active_stacks = []` | REFUSED — "cannot be empty" |
+| exactly one essential contact | REFUSED — "or at least TWO" |
+| two contacts, one a Gmail | **ACCEPTED** — the positive control |
+
+### One thing to disclose: terraform DID reach GCS once, and it was the residue
+
+The first `terraform init -backend=false` **contacted Google Cloud Storage.** `-backend=false` reuses
+the *previously configured* backend, and `.terraform/terraform.tfstate` still cached attempt 1's
+`gs://vetra-tfstate-c3a3bd`:
+
+```
+Error: Failed to open state file at gs://vetra-tfstate-c3a3bd/root/default.tfstate:
+googleapi: got HTTP response code 403 ... nithinjd06@gmail.com does not have
+storage.objects.get access ... (or it may not exist)
+```
+
+**It was a read of a bucket that no longer exists, by the wrong identity, and it was refused.**
+Nothing was read, written or created; no attempt-2 project was touched. The cache was moved to the
+scratchpad and every gate after that ran clean.
+
+**The lesson is about the residue, not the command.** `-backend=false` is not a promise of no network
+— it declines to *configure* a backend, and happily reuses one already cached. **And
+`terraform.tfvars` is auto-loaded by every `plan`:** with the residue in place, `validate` picked up
+attempt 1's six-entry `stack_projects` and would have failed the new validation for reasons having
+nothing to do with the config. It was moved aside for the gates and **restored afterwards**, so the
+directory is as it was found.
+
+**Phase 4 must delete all three classes of residue deliberately before its first `init`** —
+`terraform.tfstate`, `terraform.tfvars`, `.terraform/`, and the ~20 `.tfplan` files. Confirmed still
+untracked and gitignored: `git ls-files infra/terraform` is **26**, and no `.tfstate`, `.tfvars` or
+`.tfplan` is tracked (only `terraform.tfvars.example`).
+
+---
+
+## Attempt 2 — parked in PHASE 2, not fixed. Ask before pulling any in
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P5 | **Lighting `us-prod` gives it no ears and no voice.** `secrets.tf` scopes `deepgram-api-key` and `elevenlabs-api-key` to `lanes = ["uk"]`, encoding attempt 1's decision that a `hipaa` US lane may hold neither. Under `deployment_mode = "standard"` the US lane needs BOTH. It is a variable default, so the fix is a tfvars override rather than a code change — but nothing says so at the point of use, and the failure is a US service that boots and cannot hear. Harmless while `us-prod` is dark; a landmine the day it is lit | `secrets.tf:73-80` | 4, with the US |
+| P6 | **`cloud_sql_tier.staging`, `cloud_run_max_instances.staging` and `cloud_sql_backup_retention_days.staging` are now unreachable.** Every stack is prod, so `has_prod` is always true. Kept rather than removed because deleting them ripples into six expressions and the tfvars example for no behavioural gain, and restoring a non-prod stack would need the type back. Marked as dead in the tfvars example. Do not read them as describing anything that exists | `cost-controls.tf` | any |
+| P7 | **`max_instance_count` and `DB_POOL_MAX` deliberately NOT touched**, though the plan's Phase 2 list names them. Both must be sized from the provisioned instance's `max_connections`, and **that number is unmeasured** — the plan itself says read it off the instance and do not assume. Raising a ceiling from a guess is how `instances × DB_POOL_MAX` quietly exceeds what Cloud SQL will accept | `cost-controls.tf`, Phase 3b | 3 or 4 |
+| P8 | **The tfstate bucket sits in `us_region`** (`shared.tf:210`), on a UK-first estate. State holds resource metadata, not caller data, and `core` permits both continents, so this is not a residency finding — but it is a default nobody re-derived after the market flipped. One line if it should be London | `shared.tf:210` | any |
+| P27 | **Lighting `us-prod` crash-loops it at boot, before the port ever opens.** `LIVE_SURFACE` and `LIVE_MODEL` render unconditionally on every voice service in `cloud-run.tf`, but `secrets.tf` scopes `gemini-api-key` to `lanes = ["uk"]` — a US service can never be granted it. The day `us-prod` joins `var.active_stacks`, `voice-us-prod` renders `LIVE_SURFACE=aistudio` with no credential behind it, `checkLiveSurface` in `lib/bootChecks.js` raises a FATAL `live_surface_not_configured`, and `server.js:1551` calls `assertBootConfig()` before the port opens — the service never starts listening at all. `terraform plan` gives no warning. Harmless while `us-prod` is dark; the US lane's Live surface (vertex? disabled? a per-stack map?) must be decided before it is lit | `cloud-run.tf:673-681`, `secrets.tf:82-84` | 4, with the US |
+
+**Still open from Phase 1:** P3 (68 `.playwright-mcp/` files tracked AND gitignored, cosmetic) and
+P4 (`tests/toolTimeout.test.js` is non-hermetic — run the root suite with `DATABASE_URL` UNSET or a
+green suite looks like a regression). P1 and P2 are both **RESOLVED**: P1 in `5f129f8`, P2 in this
+phase's `eb2e63e`.
+
+---
+
+## Attempt 2 — BUSINESS READINESS GATES. Not phases, and the phases do not close all of them
+
+**Written 2026-08-28 in the Phase 2 session, from a question the phase list cannot answer: "after all
+the phases, is this ready to sell?" The answer is no, and the reason is that the plan is a MIGRATION
+plan. It moves what exists onto GCP correctly. It was never scoped to make a business sellable, and
+it says so — it carries an explicit out-of-scope list.**
+
+Five gates. They do not unlock together, and **the one that blocks selling today is not blocked by
+any phase.**
+
+### Gate A — can answer a call for one clinic · **ALREADY OPEN**
+
+A paying clinic was still answering on Railway through the August suspension (attempt-1 status
+line). **So the question is not "when can we start selling" — it is "when can we sell to customer #2
+without it being a favour somebody personally babysits."** Everything below is about that.
+
+### Gate B — safe to sell · **PARTLY OPEN, and what remains is not a phase**
+
+Five risks were knowingly accepted on `main` when the website rebuild was reverted. **They were
+recorded as live on `main`, and nobody had re-checked them against `feat/gcp-2`.** Checked
+2026-08-28:
+
+| # | Risk | On `main` | On `feat/gcp-2` |
+|---|---|---|---|
+| 1 | `phone-numbers/buy` + `/available` unauthenticated — a business UUID provisions a Twilio number billed to the owner | **LIVE**, `server.js:622`, no middleware | **FIXED.** `requireBusinessAccess` on both (`server.js:876,906`), plus `withTenantSafe` under RLS |
+| 2 | `POST /api/contact` loses every submission when Brevo is unset | route absent from root `server.js` | **MOVED**, not lost — `AI-phone-dashboard/backend/src/server.js:85` with a rate limiter. Whether mail sends is DEPLOY CONFIG, unverifiable from code |
+| 3 | 68 `.playwright-mcp/` files tracked in git, holding **real caller phone numbers**, in a **public** repo | **LIVE** | **STILL LIVE — 68 files, unchanged** |
+| 4 | Self-serve signup live, against the stated concierge-only intent | LIVE (Supabase) | **STILL LIVE**, now on Identity Platform — `frontend/src/auth.js:157` `createUserWithEmailAndPassword` |
+| 5 | `axios` pinned to a version with 18 high-severity CVEs, `react-router` needing a v8 migration | as recorded | **LIKELY RESOLVED** — `axios ^1.13.5`, `react-router-dom ^7.13.1`. No audit was run, so this is *not* evidenced |
+
+**CUTOVER CLOSES #1 BY ITSELF.** That is worth stating because it inverts the intuition: the
+migration is not neutral on security, it is the fix for the worst code-level item. **#3 and #4 it
+does not touch.**
+
+**#3 is the one with a clock on it, and the ledger previously under-rated it — see the P3
+correction below.**
+
+> `.playwright-mcp/calls-2026-07-22.csv` is tracked and its header is
+> `Date,Caller,Status,Duration (s),Sentiment,Summary`, with rows carrying full E.164 caller numbers.
+> `git remote get-url origin` is `https://github.com/VetraTD/ai-phone-assistant.git` — public.
+> This is personal data of real callers, published. `git rm` does not fix it; the data stays in
+> history, and the repo being public means "delete it now" is not the same as "it was never seen".
+> **This is an owner decision with a legal dimension, not a code task, and it is live independent of
+> everything else in this ledger.**
+
+**#4 is a business decision, not a bug.** The recorded intent is concierge onboarding, no self-serve.
+The code still offers self-serve. One of the two should change; today they disagree, and the code
+wins because the code is what runs.
+
+### Gate C — verified · **PHASE 5 CLOSES IT, and it is more load-bearing than it looks**
+
+**The receptionist in `feat/gcp-2` is a union of work, much of which has never answered a real
+phone.** Checked 2026-08-28:
+
+- `fix/live-call-defects-2026-08` — **merged and deployed 2026-08-04**, hand-tested with Josh on real
+  handsets. Real acoustic echo remains never verified, by design: no probe has a microphone.
+- `fix/receptionist-feedback-2026-08` — the four Digile Media complaints. Recorded as **"Not
+  deployed. Not committed unless the owner asked since."** It IS in `feat/gcp-2` (every branch is;
+  verified 2026-08-28 — only `chore/gcp-migration-ledger` is unmerged and it is redundant).
+  ~~**It has never answered a real phone.**~~ **CORRECTED 2026-08-29: IT HAS.** `5e1470e`
+  *"merge: receptionist fixes from the Digile Media test call"* is an ancestor of `origin/main`
+  (2026-08-26), Railway autodeploys `main`, and the owner reports test-calling it and deriving further
+  changes from what they heard. The claim above was written from the branch's own status line and was
+  stale by three days.
+
+  **What is genuinely still un-phoned is narrower and deeper: the 35 behaviour-affecting commits on
+  `feat/gcp-2` that `origin/main` does not have.** Measured 2026-08-29 over `lib/voice`,
+  `services/gemini.js`, `services/tools.js`, `capabilities/` and `database/`. The audible ones:
+  **`d71b170` swaps the LLM backend to VERTEX** (main runs the API-key path — a different host, and
+  Phase 5 measured `llm_ttfb` p50 2516ms on it); `2665222` sends the opening sentence on its own for
+  *1.5s less silence per turn*; `567c1a7` a spoken phone number was losing a digit and money read
+  wrong; `dd5659f` + `297891c` caller-facing SMS now needs a recorded spoken yes; `eb101fa` Deepgram
+  EU + training opt-out; `0a1533f` deletes the legacy pipeline outright. **A Railway test call cannot
+  cover any of these, because Railway does not run them.**
+- The greeting-discard / appointment-guard work — partly live, with migration 026's value recorded as
+  unmeasured.
+
+**These are prompt and turn-taking changes, which is precisely the category the test suite stays
+green through.** 2352 passing tests say the code does what the tests say. They do not say the
+receptionist sounds right. **Phase 5's live call is the first genuine test of a batch of fixes that
+has been accumulating since early August.** Treat it as a product gate, not a migration gate.
+
+### Gate D — sellable to a clinic that asks questions · **PHASE 6, PLUS ONE THING NO PHASE OWNS**
+
+Phase 6 delivers ROPA, DPIA, privacy notice, ICO registration, and a UK-residency claim that is now
+defensible end to end (Cloud SQL, Deepgram EU, KMS, secrets and compute all `europe-west2`; the
+Vertex inference leg disclosed as an international transfer).
+
+**Missing and in no phase: a customer-facing DPA.** Under GDPR Art. 28 this business is a PROCESSOR
+for every clinic it serves, and a written contract is not optional — it is the clinic's obligation as
+controller as much as this one's. The sub-processor register answers a different question. **The
+first prospect with a compliance officer asks for a DPA, and "we have a sub-processor register" is
+not the answer to it.** Owner work, with drafting lead time, and it can start today.
+
+### Gate E — sellable REPEATEDLY · **NO PHASE OWNS ANY OF THIS**
+
+| Missing | Why it bites |
+|---|---|
+| **Uptime alerting** | `budget.tf` alerts on COST. Nothing alerts on the voice service being down. For a business that IS the customer's phone, the failure mode is learning from the customer. The single highest-value thing not on any list |
+| **Twilio concurrent-calls and CPS** | New accounts start low. The raise request has lead time and is owner work. Phase 3b DOCUMENTS the binding cap; nothing raises it |
+| **A2P 10DLC / UK sender registration** | Mentioned in tfvars comments, owned by nobody. A number can answer calls and refuse to text, shown separately in Twilio |
+| **Onboarding customer #2** | Phase 5 recreates ONE demo tenant via `scripts/import-tenant.js`. There is no path for a new clinic that does not involve the owner running a script |
+| **Support rota** | The owner is the on-call, alone. Same single point of failure as the billing account |
+| **Rollback past one week** | Phase 6 keeps Railway warm for one week, then retires Railway and Supabase. A problem surfacing in week three has no path back |
+| **Graceful degradation at the vendor cap** | Explicitly out of scope in the plan. Caller 11 when ElevenLabs caps at 10 is undefined behaviour |
+
+### Two product risks that are not gates, and that no phase improves
+
+- **Measured voice-to-voice p50 is 3,062 ms.** That is the product's core feel. Phase 5 only checks it
+  has not REGRESSED against the Railway baseline — nothing in the plan makes it faster. Whether 3s is
+  sellable is a market question this ledger cannot answer, but **no claim about pickup speed belongs
+  on the website** until it is.
+- **`cpu_idle = true` is unmeasured.** If turn one after an idle gap is audibly worse on a real call,
+  the fix is one bool and ~$70/month, which is the entire estate budget. **Found in Phase 5, on a
+  handset, not before.**
+
+### Outside this repo entirely, and therefore outside this ledger's ability to track
+
+Pricing, sales pipeline, customer contracts, insurance, and who answers when it breaks at 02:00.
+Roughly half of "business ready", none of it visible here. Recorded so that a green ledger is never
+mistaken for a ready business.
+
+### The shortest honest path
+
+1. **Gate B item #3** — the published caller data. Owner decision, has a clock, blocked by nothing.
+2. **Gate B item #4** — make the code and the concierge-only intent agree.
+3. **Phases 3 → 6**, in order, one per session.
+4. **In parallel, because they have lead times and do not wait on code:** Twilio CPS raise, DPA
+   drafting, ICO registration, cofounder as Owner on billing.
+5. **Then uptime alerting**, before customer #2 rather than after.
+
+---
+
+## P3 — RECLASSIFIED 2026-08-28. It was recorded as cosmetic and it is not
+
+The Phase 1 parked table describes P3 as "68 files under `.playwright-mcp/` are tracked AND
+gitignored ... Cosmetic". **That was written about the TRACKING, and nobody read what is inside the
+files.** One of them, `calls-2026-07-22.csv`, holds real caller phone numbers, and the repository is
+public.
+
+**The tracked-vs-gitignored observation is still correct and still not merge damage.** What is wrong
+is the severity. See Gate B above. Left unfixed here under the record-and-park rule — it is an owner
+decision with a legal dimension, and `git rm` is not a fix.
+
+---
+
+## Attempt 2 — the Phase 3 BRIEF, kept for the record. SUPERSEDED by the Phase 3 section below
+
+**Phase 3 is CLOSED — see "Phase 3 — CLOSED 2026-08-28" below for what was actually done, which
+differs from this brief in three places. The "Phase 4 preconditions" list at the end of this
+section is NOT superseded and is still the live checklist.**
+
+**Do not start Phase 3 work in the Phase 2 session.** Open Phase 3 by reading this section, the
+Phase 2 section above, and the plan's Phase 3 list. **Phase 3 is APPLICATION code — `lib/`,
+`migrations/`, `scripts/` — not `infra/terraform/`.** It needs nothing from GCP.
+
+**3a. Postgres-backed call state — the one real correctness fix, and it is a live bug on `main`.**
+`lib/callStateStore.js` exports `createMemoryStore()` and nothing else, and the store is an
+**in-process Map**. `/twilio/status` is a plain HTTP POST, so the moment a second Cloud Run instance
+exists it lands on an instance that does not hold the WebSocket, reads empty state, and silently
+produces: **no call summary, no missed-call notification, and every short call tagged as spam**
+because `sawCallerFinal` reads false on a caller who spoke. This is not a capacity limit; it is
+wrong behaviour that today's single instance hides.
+
+Add `createPgStore()` behind the identical `CallStateStore` interface. New migration: `call_state`
+(`call_sid` PK, `db_call_id`, `business_id`, `saw_caller_final`, `updated_at`) with TTL cleanup.
+Selection by `CALL_STATE_STORE=pg|memory` — `var.call_state_store` is already `"postgres"` in the
+tfvars example and already threaded to `local.cloud_sql_plan`.
+
+**`SHARED_FIELDS` is three scalars written at CALL BOUNDARIES ONLY, never per turn**, so this adds
+zero latency to the turn loop and needs no Memorystore ($70-100/month avoided — and
+`redis.googleapis.com` is deliberately absent from `local.regional_apis` so nobody enables it "just
+in case").
+
+Test it as a genuine cross-process case: two independent pools, one writes, the other reads.
+**Sabotage-verify** — remove the write and the status handler must lose `businessId`. A test that
+cannot fail is not evidence; see the cutoff simulator that printed a 50% failure rate and passed
+green.
+
+**3b. Capacity, honestly. Cloud Run is not the ceiling.** Bind order:
+
+1. Shared state — fixed by 3a.
+2. **Cloud SQL connections.** `instances × DB_POOL_MAX` must stay under the instance's
+   `max_connections`. **READ THAT VALUE OFF THE PROVISIONED INSTANCE; DO NOT ASSUME IT.** This is
+   why Phase 2 parked P7 and left `max_instance_count` and `DB_POOL_MAX` alone — the instance does
+   not exist yet, so both numbers would have been guesses.
+3. **Vendor caps — the actual wall.** ElevenLabs concurrent-request cap per plan tier, Deepgram
+   concurrent streams, **Twilio concurrent calls and CPS (new accounts start low, and the raise
+   request has lead time and is owner work)**, Vertex QPM. One of these binds long before GCP does.
+
+Ship `scripts/load-test-calls.js` opening N real concurrent media-stream WebSockets, and a written
+capacity table naming the current binding vendor cap and the cost to raise it.
+
+**3c. Latency and cost, measured.** `services/geminiCache.js` is written and gated off behind
+`GEMINI_EXPLICIT_CACHE`. The LLM is ~42% of the turn. **Read `cachedContentTokenCount`
+(`services/gemini.js:1212-1216`) before and after — the recorded hit rate is contradictory across
+sessions, so MEASURE, do not cite.** Remember `cachedContent` is mutually exclusive with BOTH
+`systemInstruction` and `tools`, which is the real obstacle.
+
+### What Phase 3 must NOT do
+
+- **No `infra/terraform/` changes.** Phase 2 closed it and Phase 4 applies it. If Phase 3 finds a
+  Terraform problem, park it here.
+- **No GCP contact, no apply.** Phase 3 needs none.
+- **Never push, never touch `main`** — `main` is production, Railway autodeploys from it, and the
+  repo is public.
+- **Run the root suite with `DATABASE_URL` UNSET** (P4), or a green suite reads as a regression.
+
+### Phase 4 preconditions, collected here so they are not rediscovered
+
+Phase 4 is the first apply and needs the owner present.
+
+1. **Enable the WHOLE 19-API list on the bootstrap project BEFORE the first apply.** ⚠ **Corrected
+   2026-08-28: `local.terraform_quota_apis` alone is FOURTEEN.** The 19 is the union of it and
+   `local.common_apis`, and that union is exactly what the README's `gcloud services enable` command
+   lists — verified programmatically, nothing missing, nothing extra. **Enabling only the 14 restarts
+   the 403 cycle this precondition exists to prevent.** Use the README command verbatim.** The command is in the README's bootstrap section. This trap fired five times
+   in attempt 1 and again on 2026-08-28, always as a 403 naming the quota project that reads as a
+   permissions problem: `Cloud Resource Manager API has not been used in project ... or it is
+   disabled`. Verify with `gcloud services list --enabled`, do not assume.
+2. **Delete the attempt-1 residue in `infra/terraform/` before the first `init`** —
+   `terraform.tfstate`, `terraform.tfvars`, `.terraform/`, ~20 `.tfplan` files. `terraform.tfvars`
+   is auto-loaded by every `plan`, and `.terraform/terraform.tfstate` caches the dead GCS backend
+   and made `init` reach for it during Phase 2.
+3. **Pin `project_id_suffix` in tfvars and write it in this ledger BEFORE the apply that creates the
+   projects.** Left empty it is a `random_id` living only in state, and losing state renames every
+   project — which is exactly what happened to B0a.
+4. **Do not hand-create the three projects.** Terraform creates them. Hand-creating is how attempt 1
+   ended up in import-block adoption.
+5. **`backend "gcs"` in `versions.tf` is commented out and must stay so for the first apply.** The
+   state bucket is a resource this module creates. After the apply: read `tfstate_bucket` from the
+   outputs, uncomment, paste the name, `terraform init -migrate-state`. **Do it — do not leave it.**
+6. **Add the cofounder as Owner on all three projects and on the billing account on day 0**, and as
+   a second essential contact. There is no second super-admin on this org, so one suspended account
+   is total loss — which is not hypothetical.
+7. **Read the plan for `must be replaced` before applying any of it.** A one-word change to a VPC
+   `description` forces network replacement, which cascades into destroying the Cloud SQL instance.
+8. **Fill in `dashboard_domains` and `dashboard_url`** once the `core` project ID exists. Both are
+   placeholders. Leaving them produces a dashboard that loads, renders its sign-in form, and is
+   refused by CORS on every call behind it — and the sign-in page makes no API call, so nothing looks
+   wrong until somebody signs in.
+9. **Neither `terraform plan` nor `validate` evaluates org policy.** `in:eu-locations` not containing
+   `europe-west2`, and `storage.uniformBucketLevelAccess` being enforced, are both invisible to a
+   clean plan. Both are currently correct in the config; a clean plan is not what says so.
+
+---
+
+## Attempt 2 — the Phase 2 BRIEF, kept for the record. SUPERSEDED by the Phase 2 section above
+
+**This is what Phase 2 was told to do, before doing it. Two items changed on re-derivation and
+one was a category error — see "Phase 2 — CLOSED" above for what was actually done and why.**
+Kept rather than deleted so the difference between the brief and the result stays legible.
+
+
+**Do not start Phase 2 work in the Phase 1 session.** Open Phase 2 by reading this section and the
+plan's Phase 2 list. `infra/terraform/`, configuration only, no new resources:
+
+1. `org_id = "208508072539"` in tfvars — the org EXISTS (auto-provisioned at signup). **Drop
+   `disable_sa_key_creation` from the module: Google already set it**, so managing it is Terraform
+   fighting a policy it did not create.
+2. **`storage.uniformBucketLevelAccess` is ENFORCED org-wide.** Audit every
+   `google_storage_bucket` for `uniform_bucket_level_access = true` and remove any ACL access
+   **before** the first apply — check `logging.tf` and `loadbalancer.tf`.
+3. `stack_projects` collapses six stacks to three: `uk-prod` to `uk`, `us-prod` to `us`,
+   `shared` to `core`. Staging and logging stacks are **removed, not merged**.
+4. `logging.tf` — org sink becomes per-project sinks into the `core` bucket. **Lock audit logs
+   only**; locking application logs creates undeletable PHI that is unerasable under Art. 17.
+5. `cloud-run.tf` — `min_instances = 1` with **`cpu_idle = true`**. `cpu_idle=false` alone is
+   about $70/mo, which is the whole budget.
+6. Resolve **P1** above, or Phase 4 applies a config the code refuses to boot with.
+7. Enable the whole `terraform_quota_apis` list on the bootstrap project **before** the first
+   apply — attempt 1 recorded the quota-project 403 five times and it fired again on 2026-08-28.
+
+**Still true and still invisible to `terraform plan`:** `in:eu-locations` does NOT contain
+`europe-west2` — the UK left the EU. `uk_locations` must stay
+`["in:eu-locations", "in:europe-west2-locations"]`.
+
+---
+
+## Phase 3 — CLOSED 2026-08-28 · branch `feat/gcp-2` · commits `f3a7680`, `bb63652`, `8810538`
+
+**Goal: concurrency and cost, in APPLICATION code.** No `infra/terraform/` changes, no GCP
+contact, no apply, nothing pushed, `main` untouched.
+
+**Verifying before doing changed the answer three times, and the plan's Phase 3 list was stale in
+two places.** `services/gemini.js:1212-1216` (the `cachedContentTokenCount` reference) is wrong —
+it is at **1594-1595 and 2135-2137**. `scripts/migrate.js`'s own header says 26 migration files;
+there are 36, and `npm run db:status` read **`applied: 36, pending: none`**, so the new migration
+is **038** and the number was read rather than assumed. The eval suite is **40 scenarios, not 37**.
+
+### 3a — `createPgStore()`, and a second bug that only a real store could expose
+
+`createPgStore()` sits behind the identical `CallStateStore` interface, selected by
+`CALL_STATE_STORE`, on new migration **038** (`applied: 37, pending: none`, read back).
+
+**It takes `services/db.js`'s existing pool rather than opening its own.** That is P7-shaped, not
+tidiness: `instances × DB_POOL_MAX` under `max_connections` is the constraint Phase 4 has to size
+against, and a store with its own pool would silently double the left-hand side for three scalars
+written at call boundaries.
+
+**`call_state` has NO row-level security and NO grant to `vetra_app`**, matching
+`business_directory`'s category exactly: it is read BEFORE the tenant is known, because it is how
+the tenant becomes known. A `business_id = app_current_business_id()` policy would return zero rows
+to the status handler and **defeat the fix while looking careful**. Access is via SECURITY DEFINER
+functions, so the application role cannot enumerate. `app_call_state_merge` **RAISES on any key
+outside `SHARED_FIELDS`** — the property the whole cost argument rests on (nothing written per
+turn) is now enforced by the database rather than described in a comment.
+
+**THE POSTGRES STORE FOUND A PRE-EXISTING BUG, and it is the same bug in a new costume.** Both
+boundary writes are fire-and-forget: `session.js:3145` publishes the whole slice at pickup —
+carrying `sawCallerFinal: false` — and `session.js:1614` latches it true. A Map and a file complete
+synchronously and therefore in issue order. **A connection pool does not.** A caller who speaks over
+the greeting can produce latch-then-pickup, and the pickup write puts the latch back to false,
+**re-tagging a short real call as spam through the fix for it**. `writeShared` now serialises per
+call SID. Deliberately NOT a latch in SQL: that would make the two stores behave differently, at
+which point `CALL_STATE_STORE` is not a switch but a behaviour change.
+
+The cross-process contract moved to `tests/helpers/callStateCrossProcessSuite.js` and runs **twice** —
+the file stand-in in the root suite, and **two genuine pools in two OS processes** against Postgres.
+**Two sabotage cases, because a test that cannot fail is not evidence:** remove the boundary write
+and the cold process must lose `businessId`; bypass the write queue and the latch must be lost.
+A third guard asserts the `REVOKE` actually held — which is how P9 below was found.
+
+### 3b — capacity, and the cap is real and it is not GCP
+
+`scripts/load-test-calls.js` opens N real media-stream WebSockets speaking Twilio's own frame
+sequence. Full table in **`docs/capacity.md`**, with every row labelled MEASURED / RECORDED /
+UNKNOWN.
+
+**THE BINDING CONSTRAINT TODAY IS ELEVENLABS AT 10 CONCURRENT**, and the vendor said so itself in a
+1008 close reason under load rather than it being read off a pricing page:
+`"maximum of 10 concurrent requests"`. **The knee is exactly at the cap:**
+
+| Concurrent calls | Served | EL refusals | Time to first audio |
+|---|---|---|---|
+| 10 | 10/10 | 0 | **p50 762 ms**, max 838 ms |
+| 20 | 20/20 | 10 | p50 729 ms, **p95 4,632 ms** |
+| 30 | 30/30 | 20 | **p50 4,617 ms**, max **8,393 ms** |
+
+**Gate E records "Caller 11 when ElevenLabs caps at 10 is undefined behaviour". It is not
+undefined.** No call is dropped and no socket is refused: the greeting falls back to the Google
+Chirp3 voice, so the caller hears **four to eight seconds of silence and then a different voice**,
+and the breaker then opens for 60 s and gives that treatment to everyone. Defined, and bad.
+
+**A methodological trap worth carrying:** the first 30-call run reported *"15 of 30 legs got no
+audio"*, which reads as dropped calls. Raising `--hold` from 5 s to 20 s brought all 30 in. **The
+failure mode is latency, not loss, and a load test that stops watching too early reports the wrong
+failure.**
+
+**MEASURED, and it is the term everybody guesses: ONE INSTANCE REACHES `DB_POOL_MAX`.**
+`pg_stat_activity` showed **10** connections at 10 concurrent calls, and **10** at 20 and at 30 —
+the pool caps and calls queue. So `instances × DB_POOL_MAX` is **not** a pessimistic bound; it is
+reached at roughly `DB_POOL_MAX` concurrent calls per instance.
+
+Deepgram sustained **30 concurrent streams, zero errors** — a floor, not its cap. **Twilio
+concurrent calls and CPS, and Vertex QPM, are left UNKNOWN rather than estimated**; these runs used
+the AI Studio key, so they say nothing about Vertex quota at all. **The Cloud SQL row is an explicit
+Phase 4 fill-in** — the instance does not exist (P7).
+
+### 3c — the hit rate, and a gate that was a coin flip
+
+**The contradiction in the record has an explanation, and it is not that anyone measured badly.**
+
+**On the REAL prompt: 86.9% and 86.7% of prompt tokens served from cache, ZERO misses in 407
+turns**, across two full eval runs. The older figures — "94%" in `.env.example`, "98.8%" in
+`services/geminiCache.js` — were measured against **synthetic filler whose dynamic tail is tiny**.
+The real prompt has a real tail, so it caches less. **They never disagreed about the same prompt;
+they measured different prompts.** `.env.example` corrected.
+
+**`scripts/verify-explicit-cache.js`'s function-calling gate was not a measurement.** It sent ONE
+request per arm, with **no uncached control at all**, and printed a verdict. Adding a control
+produced `BROKEN — uncached calls the tool, cached does not` and then, on the very next run, **its
+exact inverse**. `temperature: 0` is not deterministic for whether this model emits a function call,
+so a single-shot two-arm comparison is **a coin flip dressed as a verdict** — and it would have
+killed or shipped the feature on noise, whichever way it landed first. It now runs N trials per arm
+and compares rates. At 8 trials: **uncached 3/8, cached 4/8. Indistinguishable.**
+
+**So tool calling is NOT broken under a cache, and mutual exclusivity is not what blocks this.**
+`services/gemini.js:1687-1693` already works around it by putting `tools` inside the cache, and that
+works. The standing note in this ledger and in the memory naming exclusivity as "the real obstacle"
+is **superseded**.
+
+Eval, **two runs per mode**, judged against the spread rather than a single pair:
+
+| | hard | judge | p50 total-turn |
+|---|---|---|---|
+| OFF | 37/40, 40/40 | 34, 34 | 2,155 ms, 1,915 ms |
+| ON | 39/40, 39/40 | 32, 37 | 1,990 ms, 2,030 ms |
+
+**Every metric overlaps, and the within-arm spread (judge 32-37 on ON alone) exceeds any
+between-arm difference.** No latency win, corroborating the documented "TTFT is flat in prompt
+size".
+
+**`GEMINI_EXPLICIT_CACHE` STAYS OFF — and the reason has changed.** Not "tools break under a
+cache", which is measured false. It is that two runs per mode can only show *no harm was detected*,
+not that it is safe. What this session removed is a false blocker and a contradictory number; what
+remains is a cost decision needing the band procedure, not another single pair.
+
+### Gates — pasted, not claimed. `DATABASE_URL` UNSET for the root suite (P4)
+
+| Gate | Phase 2 baseline | Phase 3 | Why it moved |
+|---|---|---|---|
+| `npm test` | 2352 / 125 files | **2362 / 126** | +7 `callStateStoreSelection.test.js`, +3 sabotage/ordering |
+| `npm run test:db` | 191 / 15 files | **211 / 16** | +20, the new `callStatePgStore.test.js` |
+| `npm run db:status` | applied 36 | **applied: 37, pending: none** | migration 038, read back |
+| `npm run sim:cutoff` | 3 passed | **3 passed** | — |
+| dashboard backend | 126 / 13 | **126 / 13** | unchanged |
+| dashboard frontend | 36 / 6 | **36 / 6** | unchanged |
+| prompt snapshots | — | **ZERO moved** | 3a is not a prompt change |
+
+Two gates failed first and both were the gate working. `tests/phiAuditCoverage.test.js` refused the
+new `getPool` export until it was classified; `tests/db/schemaParity.test.js` refused `schema.sql`
+until its copy of `app_call_state_merge` was **byte-identical** to the migration's, because Postgres
+stores the function body verbatim and a three-line comment difference is a different function.
+
+---
+
+## Attempt 2 — parked in PHASE 3. P5-P8 carried forward unchanged; P9-P12 are new
+
+**P5, P6, P7 and P8 all still stand exactly as written in the Phase 2 section above.** P7 in
+particular is now *half* answered: the left-hand side is measured (see 3b), the right-hand side
+still needs the instance.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P9 | **A control this ledger relies on does not exist.** Migration 033's own `COMMENT ON TABLE` says `business_directory` is *"deliberately NOT granted to vetra_app — only the SECURITY DEFINER bootstrap function reads it"*. **It is granted.** Measured: `business_directory grants to vetra_app: INSERT,SELECT,UPDATE,DELETE`. Cause: 029's `ALTER DEFAULT PRIVILEGES ... GRANT ... TO vetra_app` grants **every table created afterwards**, and 033 only revoked `FROM PUBLIC`. So the application role can enumerate every tenant's phone number, and the comment says it cannot. **Migration 038 does not repeat the mistake** (explicit `REVOKE ... FROM vetra_app`, with a test asserting it held) — but 033 is untouched under record-and-park. One `REVOKE` plus a test; the risk is that the claim is *written down as a control* | `database/033_phone_directory_bootstrap.sql:69`, `database/029_row_level_security.sql` | ask first |
+| P10 | **RESOLVED 2026-08-28 on `feat/gcp-2`, commit `60d1afa` — at the owner's request, and `main` IS STILL EXPOSED. See the P10 section below.** Original finding: **`/twilio/media-stream` accepts any WebSocket upgrade, with no authentication of any kind.** `server.js:1134` checks only the path — no Twilio signature, no token, unlike `/twilio/probe-stream` right beside it which requires `DEBUG_TOKEN`. `businessPhone` then arrives in attacker-controlled `customParameters`. **This is not theoretical: `scripts/load-test-calls.js` opened 30 concurrent calls against a real tenant with no credential.** Each socket costs a Deepgram stream, Gemini turns and ElevenLabs synthesis, and consumes the **10-concurrent ElevenLabs cap**, so an unauthenticated caller can both spend money and deny service to real callers. Twilio cannot send headers, so the fix is the same shape as the probe path's: a token in the URL, issued per call by `/twilio/voice` | `server.js:1130-1140` | ask first — security, not migration |
+| P11 | `scripts/migrate.js`'s header comment says *"26 plain-SQL files"*. There are 37. A comment, but it is the file a new operator reads to understand the migration story | `scripts/migrate.js:12` | any |
+| P12 | **The recorded eval noise band is stale.** The ledger says "35-37 of 37"; the suite is now **40 scenarios**, and four runs this session gave hard 37, 40, 39, 39. Anyone judging against 37 will read a normal run as a regression | `eval/`, ledger | any |
+
+---
+
+## Attempt 2 — the Phase 4 BRIEF, kept for the record. SUPERSEDED by the Phase 4 section below
+
+**Phase 4 is the first apply and the first GCP contact of attempt 2.** Open it by reading the Phase
+2 section (what the module now describes), this Phase 3 section, and **the "Phase 4 preconditions"
+list in the superseded Phase 3 brief above — all nine of them still stand and none has been done.**
+
+Three things Phase 3 hands to Phase 4 specifically:
+
+1. **`DB_POOL_MAX` and `max_instance_count` are still unset, and now half the arithmetic is
+   measured.** One instance reaches `DB_POOL_MAX` (10 by default) at about that many concurrent
+   calls. Read `max_connections` off the instance, subtract a reserve for the migrate job, the
+   dashboard backend and `superuser_reserved_connections`, then divide. **Do not raise either from a
+   guess** — that is still P7.
+2. **`CALL_STATE_STORE` must be set to `pg` on Cloud Run, and `var.call_state_store` does not do it
+   yet.** The Terraform variable exists and is already `"postgres"`, but it only reaches
+   `local.cloud_sql_plan` and an output — **nothing renders it into a service environment variable.**
+   The application accepts `postgres` as well as `pg` precisely so that whichever word gets wired
+   through works. **Left as a Phase 4 item rather than fixed here, because Phase 3 must not touch
+   `infra/terraform/`.** A deployment that misses this runs the in-process Map on multiple instances,
+   which is exactly the silent bug Phase 3a existed to close.
+3. **Migration 038 must be applied by the migrate job before the new store is selected**, or the
+   first boundary write fails against a missing table. The store degrades rather than crashing (the
+   write is fire-and-forget and logged), so the symptom is a silent return of the original bug.
+
+### What Phase 4 must NOT do
+
+- **Do not fix P9 or P10 during the apply.** Both are real, both are security-shaped, and both are
+  owner decisions under the record-and-park rule. P10 in particular becomes materially more urgent
+  the moment a public Cloud Run URL exists — raise it, do not silently bundle it.
+
+---
+
+## P10 RESOLVED 2026-08-28 — and `main` is still exposed
+
+**Fixed on `feat/gcp-2` at the owner's request** (commit `60d1afa`), immediately after Phase 3
+closed, because the finding turned out not to be a Phase 4 concern: `origin/main:server.js:837`
+carries the identical unauthenticated upgrade, Railway autodeploys `main`, and that URL is public.
+**It was live in production while it was being written down as a Phase 4 item.**
+
+`/twilio/voice` mints a per-call token into the `<Stream url>`; the upgrade verifies it before the
+handshake completes; `session.js` checks the token's call SID against the `start` frame.
+
+**Four design points, each of which is load-bearing rather than stylistic:**
+
+- **A signed token, not a stored nonce.** The whole premise of Phase 3 is more than one instance, so
+  a nonce written by the instance serving `/twilio/voice` and read by the instance taking the
+  upgrade is **the same cross-instance problem `call_state` exists to solve** — and it would put a
+  synchronous database read on the pickup path, which is the one path where latency is the product.
+- **The token is in the PATH.** Twilio does not carry a `<Stream url="...">` query string through to
+  the websocket handshake; a `?token=` form arrives EMPTY and the upgrade fails with a 31920 that
+  reads like a broken endpoint. Not a guess — `probeUpgradeAllowed` records being bitten by exactly
+  this, and this follows the shape that already works.
+- **The signing key is DERIVED from `TWILIO_AUTH_TOKEN`** by HMAC with a fixed label, so **nothing
+  needs provisioning in Secret Manager or Terraform** — which Phase 3 must not touch — and it cannot
+  ship half-configured. A subkey, so leaking one does not hand over the other. `MEDIA_STREAM_SECRET`
+  overrides it for rotation.
+- **Enforcement is tied to `TWILIO_VALIDATE_SIGNATURE`.** Same threat model, same question, one
+  switch — it must not be possible to disable one while believing the other still holds. Boot
+  announces which way it is set, **including the fail-closed case** where tokens are required and no
+  key exists, because "no call connects" otherwise reads as a Twilio or networking fault.
+
+**Verified end to end against a running server, both directions, and the negative case first:**
+
+| Run | Result |
+|---|---|
+| `--no-token` (the exploit) | **0/5 sockets opened, 5 refused**, `Unexpected server response: 403` |
+| minted token | **5/5 opened, 5/5 got audio**, p50 **685 ms** — no latency cost against the 762 ms baseline |
+| valid token, swapped call SID | upgrade accepted, then **closed 1008 `call sid does not match token`** |
+
+**The refusal costs nothing:** those 5 refusals produced **zero `stt_open` and zero
+`media_stream_start`**, so an unauthenticated attempt now allocates no vendor resource at all.
+
+**The first unit test asserts a GOOD token is ACCEPTED, deliberately and first.** `server.js`
+already shipped a `verifyTwilioSignature` that rejected EVERY request for the life of a deployment
+while three negative tests and a source scan stayed green — because nothing ever asserted the
+positive case, and "correctly refuses bad input" and "refuses everything" are the same suite without
+it.
+
+### What is NOT fixed
+
+~~**`main` is unchanged and still open.**~~ **CLOSED IN PRODUCTION 2026-08-29.** The owner decided
+to carry it to `main` rather than wait for cutover, on the reasoning that cutover has no date. The
+fix was cherry-picked onto a branch off `main` (NEVER a merge of `feat/gcp-2`, which is 211 commits
+ahead), `scripts/load-test-calls.js` dropped as a Phase 3b tool that does not exist there, and the
+import block hand-resolved to keep ONLY `mediaStreamToken` — the incoming side pulled in five
+lane-b modules that do not exist on `main` and would have crash-looped the process. Baseline
+discipline: `origin/main` 89 files / 1761 tests, the branch 90 / 1776, delta exactly the new test
+file. Shipped as `8e4feb2`, then `eeab359` once P20 was found. **Verified live, both directions,
+on production.**
+
+---
+
+## Phase 4 PREP — done 2026-08-28, commit `78ddb61`. **THE APPLY HAS NOT RUN.**
+
+Configuration only. Nothing applied, no GCP contact, nothing pushed. Three of the nine
+preconditions closed, plus a fourth that stopped being blocked, plus one that turned out to be a
+**hard gate on the owner**.
+
+### **`project_id_suffix` = `edc8ca`. WRITE THIS DOWN; IT IS THE THING B0a LOST.**
+
+```
+vetra-uk-edc8ca      vetra-us-edc8ca      vetra-core-edc8ca
+```
+
+Pinned in `terraform.tfvars.example` and here, deliberately in two places: if the tfvars is lost the
+ledger still names the projects. **Evaluated, not assumed** — `terraform console` returns
+`local.project_suffix = "edc8ca"` and the three IDs above. **Sabotage-verified:** with the pin
+removed the same expression returns `(known after apply)`, so the pin is what makes the names
+knowable at all.
+
+**Do not change it after the first apply.** Project IDs are immutable, so editing it does not rename
+anything — it asks Terraform to create three NEW projects and orphan the old ones, which stay
+billable and hold a KMS key ring that can never be deleted.
+
+### Precondition 2 — the residue is gone, and it was worse than "stale"
+
+Deleted: `terraform.tfvars`, `terraform.tfstate`, `terraform.tfstate.backup`, 20 `.tfplan` files,
+and a **263 MB** `.terraform/`. All untracked, so all backed up before deletion.
+`.terraform.lock.hcl` is TRACKED and was KEPT — it pins provider versions.
+
+**Verified as attempt-1 before deleting rather than assumed**, and this is the part that matters:
+
+| | `terraform.tfvars` (deleted) | `terraform.tfvars.example` (tracked, kept) |
+|---|---|---|
+| org | `564252011558` — **dead** | `208508072539` — live |
+| billing | `01C71E-7C0893-377AE9` — **dead** | `01DB07-24C0F8-391DCC` — live |
+| suffix | `c3a3bd` — **dead** | now `edc8ca` |
+
+**`terraform.tfvars` is auto-loaded by every `plan`.** Phase 4's first plan would have run against
+the SUSPENDED estate and silently overridden everything Phase 2 wrote into the example — a plan that
+looks fine and names projects that do not exist.
+
+**Evidence the cached-backend trap is closed:** `terraform init -backend=false` now completes
+without reaching GCS. In Phase 2 the same command reached for the deleted `vetra-tfstate-c3a3bd`
+bucket, because `.terraform/terraform.tfstate` cached it.
+
+### `CALL_STATE_STORE` now actually reaches the service
+
+`var.call_state_store` has existed since attempt 1 and reached **nothing but `local.cloud_sql_plan`
+and an output**. A variable that is validated, documented, defaulted to `"postgres"` and never
+rendered onto the service **is not a setting — it is a comment that typechecks.**
+
+Unset, `lib/callState.js` defaults to the in-process Map, so this omission would have **quietly
+un-done Phase 3a**: on more than one instance, no call summary, no missed-call notification, and a
+spam tag on every short call where the caller spoke — with nothing logged.
+
+**It is the same failure shape as `DEEPGRAM_REGION`, which `cloud-run.tf` already records:** the
+variable existed, a test proved the FUNCTION returned the EU host, and nothing set the env var, so
+every caller's audio would have gone to the US with the suite green. Passed through verbatim,
+because `lib/callState.js` accepts this module's vocabulary (`postgres`) alongside its own (`pg`).
+
+### Precondition 8 closed early, because the suffix made it knowable
+
+`dashboard_domains` and `dashboard_url` said "fill in once the core project ID is known". Pinning
+the suffix makes that ID deterministic, so both are now real (`vetra-core-edc8ca.web.app`). **Still
+outstanding: the custom `app.<domain>` origin, once DNS is decided** — without it that origin gets
+the CORS failure, and the sign-in PAGE does not trigger it because it makes no API call, so nothing
+looks wrong until somebody signs in.
+
+### ⚠ PRECONDITION 6 IS A HARD GATE, AND IT IS THE OWNER'S
+
+`terraform console` refused to evaluate until `essential_contacts` was overridden:
+
+```
+Set either zero essential contacts (and know that Google's suspension, billing and
+security notices reach nobody) or at least TWO. Exactly one is the shape that already
+failed: attempt 1 had a single contact on a mailbox nobody read.
+```
+
+**The example still holds exactly ONE contact, so Phase 4 cannot even `plan` until a second is
+added.** This is enforced by a validation rule, not advisory, and it is deliberately not something a
+session can fix on the owner's behalf — it needs a real second person's address.
+
+### Owner precondition work done 2026-08-28 — first GCP contact of attempt 2
+
+**The 19 quota APIs are ENABLED on the bootstrap project `project-b147bdfa-d267-426a-8c7`, and
+verified rather than assumed: 19/19 present, none missing** (42 total on the project, the rest being
+Google's defaults plus `aiplatform` from the P1 probe). That is precondition 1, closed.
+
+**⚠ The ledger said "the WHOLE `local.terraform_quota_apis` list (19 APIs)" and that local is
+FOURTEEN.** The 19 is its union with `local.common_apis`, which is exactly what the README's command
+lists — checked programmatically against both, nothing missing, nothing extra. Enabling only the 14
+would have restarted the 403 cycle the precondition exists to prevent. Corrected in place above.
+
+**Essential contacts set to `nithinjd06@gmail.com` and `josh.tite@vetratd.com`**, which closes the
+hard gate: `terraform console` now evaluates the module unaided, having refused to before.
+
+`nithin.dodla@vetratd.com` was the owner's first choice and was swapped for the Gmail once the
+finding below landed. **The swap is not required by the config** — an Essential Contact needs no
+Google account and the `@vetratd.com` address was perfectly valid as a contact. It is better for the
+reason the control actually exists: `nithinjd06@gmail.com` is an inbox the owner demonstrably reads,
+and attempt 1 failed with a contact configured, on a mailbox nobody read. `josh.tite@vetratd.com`
+stays and remains valid; whether it is monitored is still an assumption.
+
+### ⚠ PRECONDITION 6 IS HALF BLOCKED — `@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN
+
+**Measured, not inferred.** Both IAM grants were attempted and both were refused by Google:
+
+```
+INVALID_ARGUMENT: User josh.tite@vetratd.com does not exist.
+INVALID_ARGUMENT: User nithin.dodla@vetratd.com does not exist.
+```
+
+`gcloud organizations describe 208508072539` returns **no `directoryCustomerId`** — the org was
+auto-provisioned at signup and has no Cloud Identity or Workspace directory behind it. So
+`@vetratd.com` addresses are mailboxes somewhere, and they are **not Google accounts**.
+
+**The distinction that matters, and it is why one half worked and the other did not:**
+
+| | Needs a Google account? | Status |
+|---|---|---|
+| **Essential Contacts** | **No** — a plain address | ✅ both set, gate closed |
+| **IAM** (billing admin, org admin, project Owner) | **Yes** | ❌ refused, `does not exist` |
+
+**Current billing IAM is `user:vetratd@gmail.com` and nothing else** — read off the account, not
+assumed. That is precisely the single point of failure precondition 6 exists to remove, and it is
+still open: one suspended Gmail is still total loss.
+
+**This does not block the apply. It blocks the thing that makes the apply survivable.** Resolving it
+needs a real Google account for the cofounder — an existing Gmail is instant and free; putting Cloud
+Identity on `vetratd.com` would make `@vetratd.com` real identities and give proper offboarding, and
+the migration path for an org that currently has NO directory has not been verified here.
+
+### PARTIAL FIX APPLIED 2026-08-28 — a second ACCOUNT, not yet a second PERSON
+
+**Asked whether Josh having the `vetratd@gmail.com` password counts. It does not, and the reason is
+the shape of what actually happened.** The failure mode is **the account being suspended**, not the
+person being unreachable — Google killed `admin@vetratd.com` and scoped it to the owner. A second
+person holding the password to a dead account has nothing. Two keyholders on one account is one
+account.
+
+It is also unattributable: every audit entry reads `vetratd@gmail.com` and no query can say which
+human acted. This estate is heading for ICO registration and a processor DPA, and `logging.tf` and
+migration 029 both exist to make "who did this" answerable — a shared login gives that back.
+
+So `nithinjd06@gmail.com` was granted instead, and **read back rather than assumed**:
+
+```
+roles/billing.admin                       user:nithinjd06@gmail.com   (+ vetratd@gmail.com)
+roles/resourcemanager.organizationAdmin   user:nithinjd06@gmail.com   (+ vetratd@gmail.com)
+```
+
+`organizationAdmin` is the break-glass half: it can set IAM on the org and its projects, so this
+account can restore any access `vetratd@gmail.com` loses. Project-level Owner is not granted because
+the projects do not exist yet — that is the Phase 4 half of precondition 6.
+
+**What this genuinely fixes:** losing `vetratd@gmail.com` — suspension, lockout, a forgotten
+recovery phone — no longer loses the estate.
+
+**What it does NOT fix, stated plainly so nobody reads this row as closed:**
+
+- It is **the same human**. Redundancy against account loss, not against the owner being
+  unavailable. The support rota is still one person (Gate E).
+- **Attempt 1's suspension was scoped to the OWNER** — *"detected for multiple projects you own"* —
+  and the cause was never disclosed. If Google's enforcement attaches to a person rather than an
+  account, a second account belonging to that same person **may not survive it either**. This
+  mitigation is therefore unproven against the precise event it is insuring against.
+- `iam.tf` manages only `google_organization_iam_member` for a service account, which is additive,
+  so these manual bindings will not drift and Terraform will not remove them. Equally, **Terraform
+  does not manage them, so nothing re-creates them** if they are ever removed by hand.
+
+**Precondition 6 stays OPEN.** It closes when a Google account belonging to Josh holds these roles.
+
+### Gates
+
+`terraform fmt -check -recursive` **exit 0** · `terraform validate` **Success** · `npm test`
+**2377 / 127 unchanged**.
+
+### Still outstanding for Phase 4 — with the owner
+
+Preconditions **1** (enable the 19 `terraform_quota_apis` on the bootstrap project), **6** (second
+essential contact AND cofounder as Owner on billing), **4**, **5**, **7** and **9** are unchanged.
+Real credential values are needed in the session itself, because Secret Manager is in the
+dependency chain.
+
+---
+
+## Attempt 2 — the Phase 5 BRIEF, kept for the record. SUPERSEDED by the Phase 5 section below
+
+**Phase 4 is CLOSED and the estate is live.** Phase 5 is the true serialization point of this plan:
+it needs a real handset and a person listening, and nothing in it can be done unattended.
+
+Open it by reading the **Phase 4 section above**, then the plan's Phase 5 gate table.
+
+### Start here, in this order
+
+1. **Twilio signature.** Signed → 200, tampered → 403, unsigned → 403. **Positive control FIRST** —
+   `server.js` once shipped a `verifyTwilioSignature` that rejected EVERY request for the life of a
+   deployment while three negative tests stayed green.
+2. **⚠ THE WEBHOOK URL IS `twilio_webhook_base`, NEVER `.uri`.** Both exist and both serve the same
+   revision, so the difference is invisible until the signature check runs — it is an HMAC over the
+   exact URL string:
+   ```
+   https://voice-uk-prod-462445274080.europe-west2.run.app
+   ```
+3. **Smoke-test the EU Deepgram endpoint BEFORE the live call.** `DEEPGRAM_REGION=eu` is set on the
+   serving revision, but nothing has yet proved this key works against `api.eu.deepgram.com`. If it
+   does not, the failure arrives as no transcription on a real call with a real caller.
+4. **Tenant import.** Digile Media via `scripts/import-tenant.js`. Config only; it refuses any
+   payload naming a PHI table.
+5. **Live call.** Repoint `+441372656055`. Book, reschedule, be heard.
+6. **Concurrency:** 10 concurrent calls, and **all 10 must resolve `businessId` in `/twilio/status`**
+   — that assertion is the entire point of 3a, and 3a is now confirmed live (`store=pg shared=True`).
+7. **Latency:** take the Railway baseline FIRST, then compare. **`cpu_idle = true` is UNMEASURED and
+   `db-g1-small` is shared-core** — either could show up here, and both have a known one-line fix
+   (`cpu_idle = false`, ~$70/mo; or a tier bump, a restart). Test turn ONE after an idle gap, never
+   a p50.
+8. **RLS** 58/58 against Cloud SQL, positive controls first, transaction rolled back. **Eval**
+   against the band, not a single run — **the band is 37-40 of 40, not "35-37 of 37" (P12).**
+   **Restore** and **DSR** as per the plan.
+
+### What Phase 5 must NOT do
+
+- **Do not fix P9 or P10-on-`main`.** Both are security-shaped and both are the owner's call.
+- **Do not light `us-prod`.** `active_stacks = ["uk-prod"]`. It would build a second Cloud SQL
+  instance and an UNDELETABLE KMS key ring for a market this business is not in — and P5 says it
+  would boot with no ears and no voice anyway.
+- **Do not change `project_id_suffix`.** IDs are immutable; editing it creates three NEW projects
+  and orphans the live ones, billable, holding a key ring that can never be deleted.
+
+### Still open and OWNER-ONLY, carried forward
+
+- **⚠ PRECONDITION 6 IS STILL OPEN.** It closes when a Google account **belonging to JOSH** holds
+  `billing.admin` and `organizationAdmin`. `nithinjd06@gmail.com` now holds both, plus Owner on all
+  three projects — but that is a second **ACCOUNT, not a second PERSON**, and attempt 1's suspension
+  was scoped to the OWNER with the cause never disclosed. **`@vetratd.com` addresses are NOT Google
+  identities** — measured, the org has no `directoryCustomerId`. Any Gmail he already has works, is
+  free, and takes a minute.
+- **M365 shared mailbox for outbound mail.** Required before the FIRST REAL CLINIC. See the Phase 4
+  SMTP note — the From address must not become `@vetratd.com` while the host is Gmail.
+- **Twilio concurrent-calls and CPS raise.** Still UNKNOWN, never measured, has lead time.
+- **Gate B item #3** — `.playwright-mcp/` holds real caller phone numbers in a PUBLIC repo. Has a
+  clock, blocked by nothing, and no phase owns it.
+- **A customer-facing DPA** (Art. 28). No phase owns it; drafting has lead time.
+- **Uptime alerting.** Nothing alerts on the voice service being down; `budget.tf` alerts on COST
+  only. The signal that concurrency is at the wall is ElevenLabs 1008 refusals and callers hearing
+  the Google fallback voice.
+
+---
+
+## Phase 4 — CLOSED 2026-08-29 · branch `feat/gcp-2` · **THE FIRST APPLY OF ATTEMPT 2**
+
+**The estate exists.** Three projects, one Cloud SQL instance, two Cloud Run services, state in
+GCS, and a voice service returning 200. **Nothing pushed, `main` untouched, no Twilio repoint, no
+live call, no tenant import.**
+
+```
+vetra-uk-edc8ca     462445274080   europe-west2   Cloud Run + Cloud SQL. THE LIVE STACK
+vetra-us-edc8ca    1050513323476   (none)         created, EMPTY, dark
+vetra-core-edc8ca   427725568491   us-central1    registry, Identity Platform, logs, tfstate
+```
+
+**`project_id_suffix = edc8ca` HELD.** Evaluated at plan time before anything was created, not
+hoped for afterwards.
+
+### THREE CONFIG BUGS STOOD BETWEEN THE MODULE AND A PLAN, AND `validate` SAW NONE OF THEM
+
+Phase 2 closed on `terraform validate` **Success**, and Phase 4 prep re-confirmed it. The first real
+`plan` failed three times before producing a single resource.
+
+| # | Bug | Why validate could not see it |
+|---|---|---|
+| 1 | `project_display_names` default `"Vetra US (dark)"` — **GCP forbids parentheses in a project display name** | It is a plain string; the provider rejects it at PLAN time. And because `google_project.this` is a `for_each`, one bad member **aborted the whole plan walk** — so the symptom was an 8-resource plan, not an error about a name |
+| 2 | `google_compute_global_address.private_services` indexed `local.network_cidr[each.value]`. `network_cidr` is keyed by **STACK** (`uk-prod`); the resource iterates **PROJECT** keys (`uk`) | In attempt 1 project keys WERE stack keys, so it resolved by coincidence. **Phase 2's reshape broke it and nothing failed until an apply was attempted.** Keys are known only once variables evaluate |
+| 3 | README told the operator to verify `gcloud organizations list` prints **`564252011558`** — attempt 1's SUSPENDED org — in two places | Prose |
+
+**The generalisable part: `terraform validate` checks syntax and types. It does not evaluate
+`for_each` keys, provider-side field validation, or org policy.** Precondition 9 said this about org
+policy only; it is broader than that.
+
+### PRECONDITION 10, WHICH NOBODY HAD WRITTEN DOWN: `organizationAdmin` CANNOT WRITE ORG POLICY
+
+The first apply stopped with **5 resources created and NO PROJECTS**:
+
+```
+Error 403: Permission 'orgpolicy.policies.create' denied on resource
+'//cloudresourcemanager.googleapis.com/organizations/208508072539'
+```
+
+`projects.tf:70` carries `depends_on = [google_org_policy_policy.skip_default_network]`
+**deliberately** — `skipDefaultNetworkCreation` must be in force BEFORE a project exists, or GCP
+auto-creates a default VPC with permissive firewall rules in all three. The org policy is therefore
+the first real node in the graph, and its failure skipped every resource downstream.
+
+**Measured off both role definitions rather than inferred:**
+
+| Role | orgpolicy permissions it includes |
+|---|---|
+| `resourcemanager.organizationAdmin` | `constraints.list`, `policies.list`, `policy.get` — **READ ONLY** |
+| `orgpolicy.policyAdmin` | `policies.create`, `.delete`, `.update`, `policy.set` |
+
+GCP separates "manage IAM" from "manage org policy"; the name `organizationAdmin` implies otherwise.
+**Nobody on the org held `policyAdmin`.** Granted to `vetratd@gmail.com` AND `nithinjd06@gmail.com`
+and read back. **It cannot live in Terraform** — it is the permission Terraform needs in order to
+run — so it is now **bootstrap item 3 in the README**, beside the 19 APIs.
+
+**The control it protects was then verified to hold:** the only network in `vetra-uk-edc8ca` is
+`vetra-uk`. No `default` network was ever created.
+
+### `roles/owner` FOR AN EXTERNAL GMAIL CANNOT BE GRANTED BY API AT ALL
+
+Second apply, three failures, cause named by Google in the error body:
+
+```
+"member": "user:nithinjd06@gmail.com", "role": "roles/owner",
+"type": "ORG_MUST_INVITE_EXTERNAL_OWNERS"
+```
+
+This org has **no Cloud Identity directory** (measured in prep — no `directoryCustomerId`), so every
+Gmail is external to it. `vetratd@gmail.com`'s three Owner bindings succeeded only because it
+created the projects and was already Owner. **The owner ran the Console invitation flow and accepted
+it**; all three bindings were then read back present and Terraform adopted them. See **P14** — the
+config now describes a binding it cannot itself produce.
+
+### THE APPLY WAS SIX APPLIES, AND THE ORDER WAS FORCED BY THE MODULE, NOT BY PREFERENCE
+
+The brief said first apply through Artifact Registry, then build, then the migrate job with
+`-target`. **That cannot be run as written.** `local.migrate_targets` and
+`local.deployable_dashboard_services` derive **directly from `local.active_sql_instances`, with no
+image gate**. So `enable_prod_databases = ["uk"]` — the switch that creates Cloud SQL — *also* pulls
+the migrate job and the dashboard service into the same plan, both on `image_tag = "0000000"`, a tag
+that does not exist. Only the voice service is held back, by `wire_runtime_secrets`. **Terraform
+1.15.8 has no `-exclude` flag.**
+
+Actual order: **4a** everything through Artifact Registry with `enable_prod_databases = []` → **4b**
+Cloud SQL via `-target` → **build + verify images** → **4c** migrate job via `-target`, then EXECUTE
+it → **4d** Cloud Run. Each step's plan was read for `must be replaced` first; **every plan in this
+phase was 0 to destroy and 0 replacements.**
+
+### P7 CLOSED — `max_connections` READ OFF THE INSTANCE, NOT ASSUMED
+
+Read by executing the migrate job with an `--args` override against the private-IP instance:
+
+```
+max_connections                = 50
+superuser_reserved_connections = 3
+cloudsqladmin holding          = 3
+[system] background workers    = 5   (NOT counted against max_connections)
+```
+
+**`DB_POOL_MAX` was rendered onto NEITHER service before this phase** — the third instance of the
+`CALL_STATE_STORE` / `DEEPGRAM_REGION` shape, a value the code reads and the module never sent. Both
+services would have taken the application default of 10 against `cloud_run_max_instances.prod = 20`:
+**worst case 400 connections against a ceiling of 50.**
+
+| Setting | Was | Now | Reasoning |
+|---|---|---|---|
+| voice `DB_POOL_MAX` | unset → 10 | **10** | Phase 3b measured one instance REACHING 10 at 10 concurrent calls. Lower makes callers queue on connection acquisition, and latency is the product |
+| dashboard `DB_POOL_MAX` | unset → 10 | **5** | CRUD over HTTP, not on a call path |
+| `cloud_run_max_instances.prod` | 20 | **2** | `cloud_run_concurrency` is 10 and ElevenLabs refuses concurrent request 11, so ONE instance already serves the entire vendor-capped workload; the second is rollout headroom |
+
+Worst case now **`2x10 + 2x5 + 2 + 3 + 3 = 38 of 50`**, 12 spare.
+
+**⚠ RAISE IN THIS ORDER — raising the last one first changes nothing:**
+
+1. ElevenLabs concurrency (the actual cap, 10)
+2. Twilio concurrent calls and CPS (**still UNKNOWN**, never measured, has lead time)
+3. Cloud SQL tier, for a bigger `max_connections` (a restart)
+4. **THEN** these two values
+
+`max_instance_count` is a **CEILING, not a reservation** — nothing is billed for instances that never
+start, and raising it later is a tfvars edit plus an apply with no downtime. Written down because
+"we have more clients now, raise the instances" is the obvious wrong move. Also: connections do NOT
+scale with callers — Phase 3b measured the same 10 serving 10, 20 AND 30 concurrent calls.
+
+### THE TIER IS `db-g1-small`, AND THAT WAS A DECISION RATHER THAN A DEFAULT
+
+The module default is `db-custom-2-7680` at **$98.62/mo**, which exceeds the whole approved
+~$55-80/mo estate budget on that line alone — and **the `db-g1-small` override was COMMENTED OUT in
+`terraform.tfvars.example`**, so the expensive default would have won by inaction. Chosen because the
+workload is capped at 10 concurrent calls by a different vendor entirely, and because tier changes
+are a restart rather than a rebuild. **The residual risk is latency, not connections:** shared-core
+means burstable, throttled CPU, and that surfaces in Phase 5's latency gate against the Railway
+baseline, where somebody is already looking.
+
+**⚠ `cloud_sql_tier.prod` is per-ENVIRONMENT, not per-project.** If `us-prod` is ever lit it inherits
+`db-g1-small`. Raise the tier in the same edit that adds a second project to
+`enable_prod_databases`.
+
+### `VERTEX_LOCATION` WAS `eu`, AND THE COMMENT DEFENDING IT WAS SUPERSEDED
+
+`cloud-run.tf` still carried attempt 1's reasoning — *"never `global`, which routes anywhere on earth
+and voids the residency claim"*. P1's re-probe on 2026-08-28 measured that distinction out of
+existence: **the HOST decides residency, the path location does not**, and `services/gemini.js:191`
+lists `"us"`, `"eu"` AND `"global"` as `VERTEX_GLOBAL_HOST_LOCATIONS` — all three reach the same
+host. So `eu` was **asserting** residency rather than buying it, while the privacy notice and the
+Art. 30 record are supposed to DISCLOSE this leg as an international transfer. Same shape as P9.
+
+Now `var.vertex_location`, default **`global`** — which `services/gemini.js:174` calls "the honest
+label for what this deployment actually does". Made a variable rather than a literal because a REAL
+region does pin the host, and that becomes a genuine residency control the day europe-west2's
+REGIONAL host serves a 3.x model. **Re-probe monthly.**
+
+### The image was verified by reading it, and the first attempt at that was WRONG
+
+Both images built from HEAD `b7de0dd`. The four dirty files at build time were all under `infra/`,
+which `.gcloudignore` excludes from both tarballs, so the tag honestly names the contents.
+
+```
+voice      b7de0dd,latest   sha256:1af6f8c9d84fd163...
+dashboard  b7de0dd,latest   sha256:4d2ff41c8c207f33...
+```
+
+**The first verification run reported `migration files: 0`, and that was the harness, not the image.**
+Cloud Build overrides the image's `WORKDIR` with `/workspace`; under `--no-source` that directory is
+empty. Re-run against absolute `/app` paths, with three controls — a string that cannot exist, a file
+that cannot exist, and `/app/server.js` which MUST be present to prove the image is being read at
+all:
+
+```
+control ok: reading /app, absence detectable
+migration files in image: 38 · 038_call_state + app_call_state_merge present
+lib/mediaStreamToken.js present (P10) · createPgStore present (3a)
+```
+
+**That is also P13:** `cloudbuild.yaml:157`'s own `verify-migrations-present` step has the identical
+bug — it runs `ls database/*.sql` RELATIVE, so it reads `/workspace`, the uploaded SOURCE, and passes
+whether or not the Dockerfile ever `COPY`'d `database/`. Its comment says it exists to catch *"a
+`COPY database ./database` that silently matched nothing"*, which is precisely what it cannot see.
+
+### Migration applied by the job, then READ BACK rather than believed
+
+```
+database is empty; applying schema.sql as the baseline.
+schema.sql applied; 37 migrations recorded as baseline.
+granted vetra_app to voice-uk-prod@vetra-uk-edc8ca.iam
+```
+
+**37 against 38 `.sql` files in the image — explained, not waved through:** `database/` holds 37
+NUMBERED migrations plus `schema.sql`, and `schema.sql` carries 038's `call_state` and
+`app_call_state_merge`. Consistent with Phase 3's recorded `applied: 37, pending: none`. Confirmed by
+a second execution with `--args` overridden to `--status`:
+
+```
+applied: 37
+pending: none
+```
+
+**Creating the job did not run it** — `LAST_EXECUTION_STATUS` was empty until executed, exactly as
+the brief warned.
+
+### THE GATE — every line read off the SERVING revision `voice-uk-prod-00001-r6c`
+
+| Gate | Result |
+|---|---|
+| `GET /` | **HTTP 200** in 0.56s, and **`Build: b7de0dd`** rather than `Build: unknown` — **P2 confirmed resolved on a live service** |
+| Boot STT line | `Deepgram nova-3 (DEPLOYMENT_MODE=standard)` |
+| `db_backend` | `backend=cloudsql database=vetra_uk_prod auth=IAM instance=vetra-uk-edc8ca:europe-west2:vetra-uk` |
+| **`call_state_store_selected`** | **`store=pg shared=True`** — Phase 3a shipped |
+| `DEEPGRAM_REGION` | `eu` |
+| `DB_POOL_MAX` / maxScale / minScale | `10` / `2` / `1` |
+| `VERTEX_LOCATION` | `global` |
+| media-stream | `[boot] media-stream upgrades require a per-call token` — P10 live |
+
+**⚠ A trap in reading the gate itself.** `db_backend` and `call_state_store_selected` are STRUCTURED
+log entries. A `textPayload:` filter returns nothing for them, which reads exactly like the subsystem
+never initialised. **They are in `jsonPayload`.** The first query said "missing" and was wrong.
+
+### Traps checked against LIVE resources — a clean plan is not what says any of this
+
+- **`in:eu-locations` / europe-west2.** The EFFECTIVE policy on `vetra-uk-edc8ca` expands to **71
+  values INCLUDING `europe-west2`, with ZERO `us-*` or `northamerica-*`.** Read off the live policy,
+  which is the only thing that can establish it.
+- **Cloud SQL backups.** `location: europe-west2` **on the instance**, not the `eu` multi-region. The
+  Brexit backup trap is closed in fact.
+- **CMEK is UK-resident:** `projects/vetra-uk-edc8ca/locations/europe-west2/keyRings/vetra-sql-uk`.
+- **Both Cloud Run URL forms exist**, as recorded. `twilio_webhook_base` is
+  `https://voice-uk-prod-462445274080.europe-west2.run.app`; `.uri` is
+  `https://voice-uk-prod-qn43z3hljq-nw.a.run.app`. **THE WEBHOOK MUST BE THE FORMER.**
+- **Twilio SID shape** verified `AC...` (34 bytes) BEFORE deploy, so the import-time crash-loop at
+  `services/notifications.js:56` could not fire.
+- **UBLA true** on both GCS buckets. **State bucket has object versioning enabled.**
+
+### Secrets — loaded by the owner, then verified by LENGTH rather than by trust
+
+All five hold exactly one ENABLED version, **no trailing newline on any** (a newline in a credential
+fails auth in a way that reads like a wrong key), each the right shape for its vendor: SID 34 bytes
+starting `AC`, auth token 32, Deepgram 40, ElevenLabs 51 starting `sk_`, SMTP 16.
+
+**Vendor accounts: US Deepgram and US ElevenLabs are CORRECT; Twilio must be the UK account.**
+`sttDeepgram.js:113` states it outright — *"`api.eu.deepgram.com` is NOT an account flag, it is a
+different base URL"* — so EU processing is chosen by `DEEPGRAM_REGION=eu`, not by signup country.
+ElevenLabs is already a **disclosed international transfer**, so no UK account would change anything.
+Twilio must match the account owning the `+44` number, because the signature is an HMAC with that
+account's token. **Signup country is a billing fact, not a data-protection one.**
+
+**⚠ `smtp_config` DEFAULTED TO `{}` AND WOULD HAVE BROKEN THE DEPLOY.** `lib/bootChecks.js` treats a
+half-configured credential pair as FATAL, so `SMTP_PASS` with no `SMTP_USER` is a service that does
+not start — and `cloud-run.tf` records that the first deploy did exactly this. Set explicitly to
+Gmail, matching what Railway sends with today.
+
+**⚠ THE FROM ADDRESS MUST STAY `@gmail.com` WHILE THE HOST IS GMAIL.** `vetratd.com` publishes
+`v=spf1 include:spf.protection.outlook.com -all` under DMARC `p=quarantine`, with no Gmail DKIM
+selector. Setting `SMTP_FROM_EMAIL=...@vetratd.com` over Gmail is silently quarantined — it reads as
+a one-line professionalism fix and would junk every clinic notification. This is exactly why Brevo
+was removed (`AI-phone-dashboard/backend/src/services/mailer.js`). **The destination is an M365
+SHARED MAILBOX on vetratd.com (free, no licence) with Send As granted to a licensed mailbox.
+REQUIRED BEFORE THE FIRST REAL CLINIC, not before cutover** — today's only tenant is a demo with no
+real callers. Note also that `sendEmail` goes `to: config.email`, the CLINIC's address: this is
+customer-facing mail, and the mail provider is a sub-processor.
+
+### State moved to GCS. It was not optional and it is done
+
+`gs://vetra-tfstate-edc8ca/root/default.tfstate`, 259,660 bytes, **object versioning enabled**, UBLA
+true. Local `terraform.tfstate` is now 0 bytes with a `.backup` retained. `terraform state list`
+reads **156** resources from the backend: 136 + 14 SQL + 1 migrate job + 5 Cloud Run, fully
+attributable.
+
+**⚠ The bucket is in `US-CENTRAL1`** on a UK-first estate — that is **P8, now a fact rather than a
+prediction**. State holds resource metadata, not caller data, and `core` permits both continents, so
+it is not a residency finding. It is still a default nobody re-derived after the market flipped.
+
+### `bootstrap_project_id` repointed at `core` — same trap, second project
+
+The 19-API list was enabled on `vetra-core-edc8ca` and **verified 19/19, none missing**, BEFORE
+repointing. Then `bootstrap_project_id = "vetra-core-edc8ca"`.
+
+**The confirming `plan` did NOT come back clean, and that is P15, not a mistake in the repoint.**
+
+### Gates — pasted, not claimed. Root suite with `DATABASE_URL` UNSET (P4)
+
+| Gate | Expected | Phase 4 |
+|---|---|---|
+| `npm test` | 2377 / 127 | **2377 / 127** |
+| `npm run test:db` | 211 / 16 | **211 / 16** |
+| `npm run sim:cutoff` | 3 | **3** |
+| dashboard backend | 126 / 13 | **126 / 13** |
+| dashboard frontend | 36 / 6 | **36 / 6** |
+| `terraform fmt -check -recursive` | exit 0 | **exit 0** |
+| `terraform validate` | Success | **Success** |
+
+**Nothing moved.** Only `infra/terraform/` was edited this phase — 7 files, no application code.
+
+**One gate failed first and the failure was mine, not the code's.** `test:db` reported
+`1 failed | 15 skipped`, 211 skipped, on `ECONNREFUSED 127.0.0.1:5432` — the container publishes
+**55432**, and it had been run with `DATABASE_URL` unset. Set correctly it is 211/16. **It exposed
+P17 on the way:** `vitest.db.config.js` promises *"With DATABASE_URL unset these describe blocks skip
+rather than fail"*, and 15 of 16 files honour that while `tests/db/importTenant.test.js` tries to
+connect anyway and dies on a 30s hook timeout.
+
+---
+
+## Attempt 2 — parked in PHASE 4. P5-P12 carried forward; P13-P20 are new
+
+**P5, P6, P8, P9, P11 and P12 stand exactly as written.** **P7 is CLOSED** (see above — 50 measured,
+`DB_POOL_MAX` 10/5 and `max_instance_count` 2 set from it). **P10 remains RESOLVED on `feat/gcp-2`
+and `main` IS STILL EXPOSED.** **P8 is now confirmed fact:** the state bucket is in `US-CENTRAL1`.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P13 | **A build guard that cannot see what it claims to check.** `cloudbuild.yaml`'s `verify-migrations-present` runs `ls database/*.sql` RELATIVE, and Cloud Build sets the step cwd to `/workspace` — the uploaded SOURCE, not the image. So it passes whether or not the Dockerfile ever `COPY`'d `database/`, which is the exact failure its own comment says it exists to catch. Verified: the same check against `/app` is real and passes (38 files). One-word fix (`/app/database/*.sql`), but it is a test-integrity change | `cloudbuild.yaml:157` | ask first |
+| P14 | **The module describes an IAM binding it cannot create.** `google_project_iam_member.owners` cannot grant `roles/owner` to an external Gmail on an org with no Cloud Identity — `ORG_MUST_INVITE_EXTERNAL_OWNERS`, measured. The three bindings exist only because the owner used the Console invitation flow; Terraform then adopted them. **If a project is ever recreated the apply fails again and needs the same manual step.** Not fixable in config; it is a documented bootstrap action or nothing | `iam.tf:15`, README bootstrap | any |
+| P15 | **RESOLVED 2026-08-31 — benign, and an EARLIER ENTRY TODAY GOT THIS WRONG.** A read-only `terraform plan -lock=false` (needs `TF_DISABLE_PLUGIN_TLS=1` on this workstation) returns **`Plan: 0 to add, 2 to change, 0 to destroy`**. **The apply is SAFE for the warm instance.** A first pass here claimed state held `min_instance_count = 0` against a live `1` and warned of a cold-start risk to Gate 4. **That was an error of reading, not a real drift:** `google_cloud_run_v2_service` has TWO scaling blocks, and a `grep -A4` matched the first. (1) **Service-level `scaling`** — `manual_instance_count`, `min_instance_count`, `scaling_mode`. State holds `0/0/null`; the config **never declares it**; the API supplies defaults. THIS is the perpetual diff, and removing it changes nothing. (2) **`template.scaling`** — the one that matters. State `min 1 / max 2`, config computes `min 1 / max 2` (`cost-controls.tf:374`, prod + `warm_in_prod`), live reports `autoscaling.knative.dev/minScale = 1`, `maxScale = 2`. **All three agree and it is NOT in the diff.** So C-11 is intact and an apply does not touch the warm instance. Note `cloud-run.tf:255-280` describes this diff at the TEMPLATE level and says it "disappears for production, where min is 1" — the phenomenon is real but the block is the service-level one, which appears regardless of the template value; comment corrected in the same commit. Original finding follows. | **`terraform plan` NEVER READS CLEAN, so step 10's "confirm no diff" cannot pass as written.** Both Cloud Run services show a perpetual `~ scaling { - manual_instance_count = 0 -> null, - min_instance_count = 0 -> null }`. The API returns a SERVICE-level `scaling` block populated with zeros; the config declares `scaling` only inside `template`. **Applied it, and the identical diff returned on the next plan** — confirmed perpetual, and the service was untouched (same revision, still 200, min 1 / max 2). Harmless in itself, corrosive in effect: a permanently dirty plan trains people to wave diffs through. Likely fix is `lifecycle { ignore_changes = [scaling] }` on both services | `cloud-run.tf`, `cloud-run-dashboard.tf` | any |
+| P16 | **An output whose description asserts a check it does not perform.** `secrets_awaiting_values` says *"Secrets that exist with no version ... this list is the deploy checklist"*, but its value is an unconditional `for k, v in local.runtime_secrets_by_project`. It lists all five FOREVER, including now, when all five demonstrably hold a version. Anyone reading it post-deploy concludes the secrets are unset. Same shape as P9 | `secrets.tf:150` | any |
+| P17 | **A documented skip that one file does not honour.** `vitest.db.config.js` promises *"With DATABASE_URL unset these describe blocks skip rather than fail, so the command is safe to wire into CI before the CI has a database."* 15 of 16 files skip; `tests/db/importTenant.test.js` connects anyway, hits `ECONNREFUSED ...:5432` and dies on a 30s hook timeout, taking the run to red and skipping all 211 tests. **Anyone wiring `test:db` into CI on that promise gets a red build** | `tests/db/importTenant.test.js`, `vitest.db.config.js` | any |
+| P18 | **CLOSED 2026-08-31. The dashboard is served, and the CORS apply this row demanded was ALREADY DONE.** Deployed to **https://vetra-core-edc8ca.web.app** (dashboard at `/app`) from a local build via `AI-phone-dashboard/frontend/scripts/deploy-hosting.js`; the Hosting site already existed (it arrives with Identity Platform). `/` and `/app` both 200, SPA routes `no-cache`, hashed assets `immutable`. **CORS verified live rather than assumed:** `CORS_ORIGINS=https://vetra-core-edc8ca.web.app` is ALREADY on the deployed service — the attempt-2 tfvars were correct before Phase 4's apply, so it shipped with the estate. A preflight from the hosting origin returns **204 with the origin echoed**; from `evil.example.com`, **500 and no allow-origin** (the known `cors`-hands-Express-an-Error shape — ugly, but refusing). **NO APPLY WAS RUN, and running one would have been pure churn:** the plan is 2 cosmetic scaling changes (see P15) and applying it restarts the voice service that answers `+441372656055`. **THE TRAP THAT NEARLY SHIPPED A DEAD BUILD:** the frontend's local `.env` carries `VITE_API_URL=http://localhost:3001` and Firebase config for `vetra-shared-c3a3bd`, the DEAD attempt-1 project — and `cloudbuild.frontend.yaml` still DEFAULTS `_FIREBASE_PROJECT` to that dead project. Built instead with `VITE_API_URL=` the dashboard-api Cloud Run URL, `VITE_FIREBASE_PROJECT_ID=vetra-core-edc8ca`, and the Terraform-managed key `google_apikeys_key.identity_platform_web`; then ran cloudbuild's own four guards against the bundle (API URL present, project id present, no localhost, no dead project). **Still open, minor:** no Firebase Web App is registered on `vetra-core-edc8ca` (`webApps` returns `{}`) — auth works from key + project id, but anything expecting a registered web-app config will surface there; the Cloud Build path remains unproven on attempt 2; and `app.<domain>` is still a Phase 6 DNS change. Original finding follows. | **THE DASHBOARD FRONTEND IS SERVED NOWHERE, AND `DASHBOARD_URL` ON THE LIVE VOICE SERVICE POINTS AT A 404.** Step 7 of the Phase 4 brief said "Cloud Run → Firebase Hosting". The Cloud Run half is done; **the Firebase Hosting half was not done and could not be, because nothing in this repository implements it.** Measured 2026-08-29: `https://vetra-core-edc8ca.web.app/` returns **HTTP 404**, the SPA bucket `vetra-dashboard-edc8ca` is **empty**, and `load_balancer_status.forwarding_rule` is **NOT created**. Meanwhile the serving revision carries `DASHBOARD_URL=https://vetra-core-edc8ca.web.app/app`. **There are TWO possible serving paths and the config points at the one the module does not implement:** (a) **Firebase Hosting** (`.web.app`) — what `dashboard_domains`/`dashboard_url` name, but there is **no `google_firebase_*` resource, no Hosting site and no `firebase.json` anywhere in the repo**; Terraform only grants the deployer `roles/firebasehosting.admin`. (b) **GCS bucket + CDN load balancer** — which `loadbalancer.tf` and `cloudbuild.frontend.yaml` actually implement, but `enable_load_balancer` defaults **false** and it is blocked on a domain, DNS pointing at the LB IP for a managed certificate, and ~$18/mo for the forwarding rule. **Consequence today:** owner notification emails link to a dead URL, and the CORS allow-list plus Identity Platform `authorized_domains` name an origin nobody serves — and the sign-in PAGE makes no API call, so nothing looks wrong until somebody signs in. Harmless while the only tenant is a demo; it is a Phase 6 DNS decision (`app.<domain>`), not a bug to fix blind. **Decide which path serves the dashboard before promising a clinic a login** | `loadbalancer.tf`, `cloudbuild.frontend.yaml`, `dashboard_url` in tfvars | 6, with DNS |
+| P19 | **RESOLVED 2026-08-29 — CLOSED IN PRODUCTION AND VERIFIED SIX WAYS.** The owner set `TWILIO_VALIDATE_SIGNATURE=true` on both services after the P20 code fix. Measured on production `eeab359`: unsigned POST **403**, wrong signature **403** (was 500), correct signature **200 + TwiML**; media-stream upgrade with no token **403**, garbage token **403**, valid token **OPENED**. Both controls now discriminate rather than refusing everything or nothing. Original finding: **PRODUCTION RUNS WITH TWILIO SIGNATURE VALIDATION DISABLED, AND THAT IS A BIGGER HOLE THAN P10.** Measured on the live Railway service 2026-08-29, immediately after P10 shipped to `main` (`8e4feb2`): an **UNSIGNED** `POST /twilio/voice` with no `X-Twilio-Signature` returned **HTTP 200 and real TwiML**. Both `server.js:66` and `mediaStreamToken.js:91` read `TWILIO_VALIDATE_SIGNATURE !== "false"`, so they default ON and the only way to observe this is the variable being explicitly set to the string `false` in Railway. **Consequences, both live:** anyone can drive the receptionist on the production number with no Twilio credential at all; and **the P10 fix is INERT** — verified, an unauthenticated media-stream upgrade still OPENED against `Build: 8e4feb2`, because one switch deliberately governs both controls. **The remedy is an env var, not a deploy:** set `TWILIO_VALIDATE_SIGNATURE=true` or delete it. **⚠ Flipping it is not risk-free:** validation recomputes the HMAC over `BASE_URL + req.originalUrl`, so if `BASE_URL` does not match the URL Twilio actually calls, EVERY call 403s — the same shape as the validator that once rejected every request for the life of a deployment. Do it while no real business is attached | Railway env, `server.js:66`, `server.js:213` | owner, now |
+| P20 | **TWILIO SIGNATURE VALIDATION HAD NEVER WORKED, AND THE SUITE STRUCTURALLY CANNOT CATCH IT. RESOLVED 2026-08-29, commit `eeab359`, ON `main` AND `dev`.** `server.js:7` did `import * as twilio from "twilio"`. The package is CJS, so under **Node native ESM** that namespace carries the SDK on `.default` and `twilio.validateRequest` is **undefined** -- every request bearing an `X-Twilio-Signature` header threw a TypeError, which the central error handler turned into a **500**. Measured on staging before the fix: unsigned -> 403 (that branch returns before the broken call), wrong signature -> **500**, correct signature -> **500**. Invisible for the life of the deployment because `TWILIO_VALIDATE_SIGNATURE=false` meant the function never executed; switching it on turned every real call into *"We are sorry, an application error has occurred"*. **⚠ THE PART WORTH REMEMBERING: THE TEST SUITE CANNOT SEE THIS CLASS OF DEFECT.** Vitest resolves CJS through Vite interop, which hoists named exports onto the namespace; Node does not. Measured both: `node` gives `undefined`, `vitest` gives `function`. **So the broken import passes every test and fails in production**, and all four new HTTP assertions would have gone green against the old code. Fixed by importing the default export; `tests/twilioSignatureValidation.test.js` added as **the only server test that does NOT set `TWILIO_VALIDATE_SIGNATURE=false`** -- every other one does, which is exactly why this path was never executed. Positive case asserted first; the load-bearing assertion is **403-not-500**, because a crash and a refusal are indistinguishable to anything only checking "not 200". Verified live on staging: unsigned 403, wrong 403, correct **200 + TwiML** | `server.js:7`, `tests/twilioSignatureValidation.test.js` | **RESOLVED** |
+
+---
+
+---
+
+## Phase 5 — PARTLY CLOSED 2026-08-29 · branch `feat/gcp-2` · **THE FIRST TRAFFIC THE ESTATE HAS EVER SERVED**
+
+**Eight of the nine gates are closed with pasted evidence. GATE 4 — THE LIVE CALL — IS OPEN AND
+STAYS OPEN**, because the owner has no UK handset and the one thing a probe cannot do is listen. A
+friend on a UK handset dials `+441372656055` next session; the number is **already repointed at GCP
+and deliberately left that way**. Gate 9b (DSR) is **BLOCKED, and the blocker is itself a finding**
+(P25).
+
+Nothing pushed. `main` untouched. No Terraform apply and no new revision — **every measurement below
+is against the same serving revision `voice-uk-prod-00001-r6c` that Phase 4 closed on**, which is
+precisely why `DEBUG_ENDPOINTS`/`DEBUG_TOKEN` were NOT switched on to make probing easier.
+
+### THE LIVE-CALL PROBLEM WAS A TWO-ACCOUNT PROBLEM, AND MEASURING IT CHANGED THE ANSWER
+
+The plan says "repoint `+441372656055`". The owner opened the session saying they have no access to
+UK numbers, only a US Twilio number. Both Twilio accounts were then read rather than assumed:
+
+| | Account A `AC1828…43b6` | Account B `AC7253…ab09` |
+|---|---|---|
+| Where its auth token lives | **GCP Secret Manager `twilio-auth-token`, on the live revision** | the repo's local `.env` |
+| Numbers | **`+441372656055`** → was Railway prod | `+18176011171` → Railway staging, `+18175803291` → Railway prod |
+| State | Full, active, £18.40 | Full, active, $8.58 |
+
+**Twilio signs a webhook with the auth token of the account that OWNS the number.** The owner's US
+number is on the account whose token GCP does *not* hold, so pointing it at GCP would have produced
+**403 on every request** — indistinguishable from P20's broken validator, which is the exact
+confusion this phase exists to prevent. Three options were put to the owner (buy a US number on
+account A, ~$1.15/mo; swap the deployed secret to account B; repoint the UK number). **The owner
+supplied a fourth and better one: a friend in the UK dials the real number.** It removes every
+caveat at once — same account, same token, real UK carrier, real handset — and costs nothing. The UK
+number was confirmed demo/owner-only, so repointing moves no real traffic.
+
+Repointed by API 18:38:32Z, read back:
+
+```
+voice_url        https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/voice
+status_callback  https://voice-uk-prod-462445274080.europe-west2.run.app/twilio/status
+revert           https://ai-phone-assistant-production-2300.up.railway.app/twilio/{voice,status}
+```
+
+**Also measured, because the owner asked whether ANY number would work:** nothing in the stack is
+bound to `+441372656055`. Any number on account A works given three things — same account (the
+signature), its webhook pointed at `twilio_webhook_base` (buying does NOT do this; the app's own
+`services/twilioNumbers.js:54-64` sets it at purchase time, the console does not), and a
+`businesses.phone_number` holding the exact E.164 string (`app_lookup_business_by_phone` matches
+exactly; migration 024's trigger strips whitespace). **UK numbers are already unblocked on that
+account** — GB local numbers need `address_requirements: local`, and the account holds a
+**twilio-approved UK regulatory bundle** plus two validated GB addresses. No lead time.
+
+### Gate 1 — Deepgram EU, smoke-tested BEFORE anything dialled
+
+The deployed key is **byte-identical** to the local one (`sha256 f33ec34067fc`), so this tests what
+production uses. Driven through the REAL seam (`createSttStream`, the same call `session.js` makes):
+
+```
+DEEPGRAM_REGION=eu, 10 recorded utterances   10/10 final, 0 noFinal, WER 0.0000 norm, stt p50 270ms
+REST api.eu.deepgram.com + deployed key      HTTP 200, "Hi. I'd like to book an appointment.",
+                                             remote 3.64.4.20 (Frankfurt)
+NEGATIVE CONTROL garbage key, EU host        HTTP 401 INVALID_AUTH        <- the test can fail
+same key, US host                            HTTP 200, remote 4.20.80.211 <- different host, so
+                                                                            `eu` is a real routing change
+```
+
+**Left unproven at that point, and stated as such:** egress from INSIDE the container. The driven
+calls below then settled it, because they transcribed.
+
+### Gate 2 — Twilio signature. POSITIVE CONTROL FIRST, and P20's trap reproduced live
+
+`feat/gcp-2` fixed this INDEPENDENTLY of `main` (`f494567`, `lib/twilioSignature.js`, default
+import). **`eeab359` is NOT an ancestor of this branch** — two separate fixes for one bug. P20's
+lesson is that reading the import proves nothing, so it was run under Node:
+
+```
+NODE NATIVE ESM  import * as twilio -> validateRequest  undefined   <- the bug, still reproducible
+NODE NATIVE ESM  default import     -> validateRequest  function    <- the fix, under Node not vitest
+
+LIVE, against voice-uk-prod-00001-r6c:
+  SIGNED (positive control FIRST)     HTTP 200 + TwiML
+  TAMPERED signature                  HTTP 403
+  UNSIGNED (no header)                HTTP 403
+  SIGNED FOR THE `.uri` HOST          HTTP 403   <- the URL trap is REAL, and BASE_URL is the right one
+```
+
+The signature was computed independently (raw HMAC-SHA1 over Twilio's documented string), not with
+the SDK, so the code under test cannot sign and verify itself into agreement. Local controls ran
+first: good accepted, tampered/short/absent/wrong-URL all rejected.
+
+**The 200 also proved two things nothing had asked for:** the service reaches Cloud SQL — the body
+was the `no_business_found` voicemail, which is only reachable when the lookup SUCCEEDS and returns
+nothing, since a lookup FAILURE takes a different branch — and `+44` selected the **en-GB** profile
+(`Polly.Amy`), so `countryFromE164` works on the live service.
+
+### Gate 3 — tenant import, and it failed first on a column deleted ten migrations ago
+
+Source of truth was the live Supabase row: **`Digile Media`, `dabd2c51-…`, `+441372656055`,
+`+447426704500`, `Europe/London`, ElevenLabs voice `Xb7hH8MSUJpSbSDYk0k2`**. The payload was built
+and base64'd entirely inside Python, never through a Windows console, because `custom_instructions`
+carries non-ASCII and a cp1252 round-trip would have silently corrupted the receptionist's prompt.
+
+**First execution FAILED: `column "voice_style" of relation "businesses" does not exist`.** Migration
+002 added it, **migration 012 dropped it**, and `scripts/import-tenant.js`'s `BUSINESS_FIELDS` still
+names it — so the import dies against any source database that still has the column, which Supabase
+does. Parked as **P21**. The value was null, so it was removed from the payload rather than fixing
+code under record-and-park.
+
+```
+created tenant 55c7c8c4-2c33-463c-875a-7f16d6bcc17e
+  capability appointments: enabled=true
+EVIDENCE  id=55c7c8c4-…  name=Digile Media  phone=+441372656055  tz=Europe/London
+EVIDENCE  business_directory routes +441372656055 -> 55c7c8c4-…
+```
+
+23 fields carried; 9 did not (5 empty address fields, `country` null, `id`/`created_at` regenerated,
+and **`default_language`, which has no target column**). `locale` was left NULL **deliberately**:
+`resolveVoiceLocale` then derives **en-GB** from the `+44` number, and inventing config is not
+importing it. Read back INSIDE the transaction under RLS by the script itself. **No env drift on the
+job definition afterwards — verified, 0 occurrences.**
+
+Re-probing the signed webhook after the import returned
+`<Connect><Stream url="wss://…/twilio/media-stream/<token>">` instead of the unrouted voicemail: the
+tenant routes, and P10's per-call token is in the path.
+
+### Gate 5 — concurrency, and it proved MORE than the gate asked for
+
+`scripts/load-test-calls.js` opens sockets and streams SILENCE, so it never produces a turn and never
+sends a status callback. The gate's assertion — *all 10 resolve `businessId` in `/twilio/status`* —
+therefore needed its second half driven separately: ten signed status callbacks, then the answer read
+out of the structured logs.
+
+```
+10 concurrent sockets   10/10 opened, greeting first-frame 267-508ms, 616-684 audio frames each
+10 signed callbacks     10/10 HTTP 200
+businessId resolved     10/10  -> 55c7c8c4-2c33-463c-875a-7f16d6bcc17e
+```
+
+**4 of the 10 status callbacks landed on a DIFFERENT Cloud Run instance than the one that served the
+socket, and every one still resolved `businessId`.** That is Phase 3a's Postgres call-state store
+working in production against the exact case an in-process Map fails — and fails *silently*, looking
+identical in every test. Instances seen: `bb9ad845`, `e1bc1ec4` (`max_instances` = 2, so it scaled to
+the ceiling under 10 concurrent).
+
+**Zero log entries above WARNING for the whole session** — no ElevenLabs 1008, no breaker trip, no
+Deepgram error, no DB error. **N=10 is served clean**, and N=10 is the documented vendor cap.
+
+### Gate 6 — latency, and the FIRST attempt at it measured the probe instead of the service
+
+Two instrument problems had to be solved before any number here meant anything, and the first nearly
+entered this ledger as a production defect:
+
+1. **`finishTurn()` runs from the Twilio MARK HANDLER** (`session.js:3389`). Twilio echoes a
+   `turn-<n>-done` mark back once the audio queued before it has finished playing. A driver that
+   ignores marks produces turns that complete and never emit a latency sample — **9 turns completed,
+   2 logged.** That is the PROBE's fault, not the service's. With a paced mark echo added: **8
+   samples from 3 calls.** Written down because the failure reads exactly like "the server stopped
+   instrumenting", and the next person to write a driver will hit it.
+2. **Turn 0's `playout_ms` and `true_v2v_ms` are NEGATIVE on every call** (-25756, -26909, -26124;
+   turns 1+ clean). Marks are first-write-wins per turn, and the GREETING's first frame is written
+   inside turn 0's window, so it claims `first_frame_wire`. Server-side, so a real call will do it
+   too — the live call can confirm. **P24**, and it matters because `lib/probe/report.js:96` prefers
+   `true_v2v_ms` for its headline, so a run dominated by first turns reports an impossibly fast
+   number.
+
+**Baseline taken FIRST, and it is the committed one:** `eval/a0-baseline.json`, captured 2026-08-20
+on Railway over 12 calls / 84 turns. Railway production's own `/api/debug/latency` is **404**
+(`Build: eeab359`), so a fresh Railway baseline was not obtainable; the recorded one is the baseline
+of record and its provenance is stated rather than implied.
+
+```
+metric                      GCP (8 turns)   A0 Railway (84 turns)
+voice_to_voice_ms p50            2825            2980     <- 155ms FASTER, no regression
+true_v2v_ms p50 (turns 1+)       3143            4022
+llm_ttfb_ms p50                  2516             —       <- Gemini dominates the budget
+llm_tool_ms p50                  1571             —
+stt_endpoint_ms p50               460             —
+tts_ttfb_ms p50                   101             —
+```
+
+**Fair in the way that matters, weak in another.** Fair: both `voice_to_voice_ms` figures are
+IN-PROCESS marks (`speech_end -> first_audio_sent`), so neither includes a carrier leg and the
+caller's geography cannot bias it — which is also why a US number would have been an acceptable
+instrument for this gate. Weak: 8 turns against 84, on clean synthetic audio, so `stt_endpoint_ms` is
+optimistic against a real handset.
+
+### `cpu_idle` — MEASURED AT LAST, and the first measurement was a FALSE ALARM
+
+The ledger has carried `cpu_idle = true` as UNMEASURED since Phase 2, with `false` costing ~$70/mo —
+the entire estate budget — and the stated test being "turn ONE after an idle gap, never a p50".
+Measured here with two cold/warm pairs, each cold call preceded by a **~22 minute forced idle gap**
+and followed immediately by a warm control on the same instance:
+
+```
+                  greeting_ttfa    llm_ttfb (turn 0)   voice_to_voice (turn 0)
+pair 1  COLD          523ms             6797ms                2596ms
+        warm          275ms             1952ms                2195ms
+pair 2  COLD          500ms             2531ms                2642ms
+        warm          271ms             1972ms                2281ms
+```
+
+**The first pair's `llm_ttfb` of 6797ms did NOT reproduce** — 2531ms on the second cold call against
+1952/1972 warm, and against a warm turn-0 range of 1952-3895ms across six calls. Reporting 6797 as
+"the cold-start penalty" off one sample would have been wrong, and this repository has already been
+burned by exactly that (the cache probe that gave opposite verdicts on consecutive N=1 runs). It is
+recorded as a one-off, not a law.
+
+**What reproduces, tightly, in both pairs:** greeting first-audio **500-523ms cold vs 271-275ms
+warm** (~240ms), and turn-0 `voice_to_voice_ms` ~350-400ms worse cold. Both sub-half-second. The
+warm greeting figure is corroborated by ten more samples from the concurrency run (267-508ms under
+N=10 load).
+
+**Reading, and it is deliberately not a verdict:** on this evidence `cpu_idle = true` costs a quarter
+of a second on the greeting and under half a second on turn one, which does not justify ~$70/mo — but
+the ledger's own criterion is *"if turn one after an idle gap is audibly worse on a real call"*, and
+audibly is a judgement a probe cannot make. **The friend's cold call decides it.** If it sounds fine,
+close the item; the fix stays one bool and one apply.
+
+### Gate 7 — RLS against Cloud SQL, and the pass is NARROWER than "58/58"
+
+```
+58 passed, 1 failed, 6 noted. Nothing was persisted — the transaction was rolled back.
+FAILURE: structure :: call_state: RLS enabled AND forced -> enabled=false forced=false policies=0
+```
+
+**The failure is Phase 3a's deliberate design, not a hole.** Migration 038 does
+`REVOKE ALL ON call_state FROM vetra_app` and grants only the four SECURITY DEFINER functions,
+because call state is read BEFORE the tenant is known. `c8-rls-proof.js` discovers tenant-scoped
+tables by looking for a `business_id` column, `call_state` has one, and no exemption list names it.
+**P22** — one line in `NOT_APP_REACHABLE`, whose existing wording already matches 038's design.
+
+**The narrower point, and it is the one that matters:** the run connected **as `postgres`, not
+`vetra_app`** — `cannot SET ROLE vetra_app (42501)` — and the script says so itself: *"RLS POLICIES
+are fully exercised — FORCE binds the table owner too. The GRANT surface is NOT."* So this is a
+**policy-complete, grant-incomplete** pass. **P9 is a GRANT finding, so this run can neither confirm
+nor clear it on Cloud SQL.** Recorded as **P23** rather than allowed to read as a clean 58/58.
+
+### Gate 8 — eval, judged against the band and not against a single run
+
+**39/40 hard**, 34/40 judge (advisory), 212 turns, 1 MAX_TOKENS truncation (0.5%). **Inside the
+37-40 band (P12)** — the ledger's old "35-37 of 37" remains stale and unused. The single hard failure
+is `no-invented-appointment`, and it fired *after* a real `check_appointment_availability` tool call
+returned that exact slot: the assertion is a regex over reply text and cannot tell a grounded slot
+from an invented one. Recorded, not fixed.
+
+### Gate 9a — restore, measured on the clock and then TORN DOWN
+
+PITR clone of `vetra-uk` to a throwaway `vetra-uk-restore-probe`, recovery point **18:50Z, chosen to
+sit AFTER the 18:37Z tenant import** so the restore had something falsifiable to carry.
+
+```
+CLONE operation, the API's own timestamps  591s (9m51s)   18:51:31.982Z -> 19:01:23.122Z
+end-to-end from the command                640s (10m40s)  — gcloud's own --wait GAVE UP at 592s with
+                                                            "taking longer than expected" while the
+                                                            operation was still running
+teardown (protection off + delete)         108s
+CONTENT  applied: 37, pending: none
+CONTENT  updated existing tenant 55c7c8c4-…  (matched on +441372656055)
+         business_directory routes +441372656055 -> 55c7c8c4-…
+```
+
+The content proof is the strong half: re-running the import against the clone reported **"updated
+existing tenant"** with the **same id**, so the row written at 18:37 and its directory entry both
+came back.
+
+**Drift, itemised.** Identical: tier, region, POSTGRES_16, disk, **the same CMEK key**,
+private-IP-only, backups + PITR in `europe-west2`, `phi: true`, deletion protection. Different:
+**zone `europe-west2-a` -> `europe-west2-c`**; a **new server CA** (`65174ac7…` -> `0d937e19…`, so
+anything pinning the cert must refetch); a **different instance service account** (which opened the
+same CMEK key regardless); `settingsVersion` 3 -> 2; and name/IP.
+
+**What this gate does NOT prove, and it is the expensive half: the data comes back, but there is no
+path back into service.** The restored instance has a different name and IP, is **not in `tfstate`**,
+and nothing in the repository documents recovery. A real incident means repointing
+`CLOUD_SQL_INSTANCE` on two Cloud Run services and the migrate job, or a rename dance, plus
+reconciling Terraform state. That is the hour nobody has costed. **P26.**
+
+### Gate 9b — DSR, BLOCKED, and the blocker is the finding
+
+Art. 15 export and Art. 17 erasure are HTTP routes behind `requireBusinessAccess`, which requires an
+Identity Platform session. **`scripts/import-tenant.js` creates the business and deliberately NO
+dashboard user** — its own header says attaching one later "needs a flow that does not exist yet",
+and migration 036 keys the tenant lookup on `auth_uid`. So **an imported tenant cannot exercise its
+own subject-access rights through the product**, and nobody can on its behalf without inventing that
+flow or rebuilding the image with a new script. Not forced. **P25**, and it is Gate-D-shaped: the
+first clinic that asks for a subject access request has no path.
+
+### Gates run before committing — pasted, root suite with `DATABASE_URL` UNSET (P4)
+
+**`npm install` WAS required** — `node_modules` held `main`'s dependency set and `npm run eval` died
+on `Cannot find package 'pg'`, exactly the symptom the brief predicted.
+
+```
+npm test                          2377 / 127 files   ✓ target
+npm run test:db                    211 / 16 files    ✓ target   (DATABASE_URL SET)
+npm run sim:cutoff                   3 passed        ✓ target
+dashboard backend                  126 / 13          ✓ target
+dashboard frontend                  36 / 6           ✓ target
+terraform fmt -check -recursive      exit 0          ✓
+terraform validate                   Success         ✓
+```
+
+Nothing moved, in either direction.
+
+---
+
+## Attempt 2 — parked in PHASE 5. P5-P20 carried forward; P21-P26 are new
+
+**RESOLVED and now closed: P7** (Phase 4, `max_connections` = 50 measured), **P10** and **P19** and
+**P20** (all closed in production, verified six ways, commit `99adfd0`). **P5, P6, P8, P9, P11-P18
+stand exactly as written.** **P12's band — 37-40 of 40 — was used this phase and held (39/40).**
+
+**P9 deserves one line of new information:** `c8-rls-proof.js` EXCLUDES `business_directory` from
+isolation testing on the stated grounds that it is *"granted to nobody"* — which is precisely the
+claim P9 measured as false. So the isolation suite skips the one table the application role can
+actually read, and P23 below means this phase could not settle it on Cloud SQL either.
+
+| # | Finding | Where | Phase |
+|---|---|---|---|
+| P21 | **The tenant importer names a column that migration 012 DELETED, and it fails the whole import.** `BUSINESS_FIELDS` includes `voice_style`; migration 002 added that column and **012 dropped it**. Any source database that still has it — Supabase production does — makes the import die with `column "voice_style" of relation "businesses" does not exist`, after the payload has been built and the job has run. The script handles the opposite case gracefully (unknown fields in the payload are ignored with a warning); it does not handle its own allow-list being ahead of the schema. Measured this phase: first execution failed, second succeeded with the field removed. No application code reads `voice_style` anywhere. **One-word fix, and it will hit again at D3 when the US clinic moves** | `scripts/import-tenant.js:70-97` | ask first |
+| P22 | **A deliberate design decision reads as a FAIL in the RLS proof.** `c8-rls-proof.js` discovers tenant-scoped tables by looking for a `business_id` column. Migration 038's `call_state` has one, and no exemption list names it — so the structure check reports `call_state: RLS enabled AND forced -> enabled=false forced=false policies=0` as a failure. 038 does exactly this ON PURPOSE (`REVOKE ALL ON call_state FROM vetra_app`, four SECURITY DEFINER functions granted instead) because call state is read BEFORE the tenant is known. The mechanism worked as designed — it caught a new table — but the gate now cannot be read as pass/fail without a human explaining it every time. **One line in `NOT_APP_REACHABLE`, whose existing wording already describes 038's design word for word** | `scripts/c8-rls-proof.js:143`, `database/038_call_state.sql:104` | ask first |
+| P23 | **THE CLOUD SQL RLS RUN CANNOT TEST THE GRANT SURFACE, AND P9 IS A GRANT FINDING.** The migrate job connects as `postgres`; `SET ROLE vetra_app` fails with 42501, so the run falls back to the connected role. The script is honest about it — *"RLS POLICIES are fully exercised ... The GRANT surface is NOT: this role has broader privileges, so any check that depends on `vetra_app` being REFUSED is skipped rather than passed"* — and reports it as a `[note]`, not a failure. **Consequence: "RLS 58/58 against Cloud SQL" means policies, not grants**, and the two have already been different facts once (the reason C8 exists at all). Closing it needs `vetra_app` membership for the job's role, which is a migration | `scripts/c8-rls-proof.js` preflight, Cloud SQL roles | ask first |
+| P24 | **TURN 0'S TIMINGS ARE CONTAMINATED BY THE GREETING ON EVERY CALL, AND ONE OF THE CONTAMINATED ONES IS THE HEADLINE NUMBER.** Marks are first-write-wins per turn, and the GREETING's audio is produced inside turn 0's window, so it claims marks that belong to the turn's own reply. Measured on 6 of 6 driven calls: `playout_ms` -25756, -26909, -26124, -27571, -24334, -23811 and `true_v2v_ms` ≈ -21000 to -23000; on the cold call **`tts_ttfb_ms` was -4202** as well, so `tts_first_byte` is claimed too — the contamination is not limited to `first_frame_wire`. Turns 1+ are clean (playout 0, true_v2v ~3.1-3.6s), and `voice_to_voice_ms` stays sane on turn 0 (`first_audio_sent` is evidently marked on the turn's own path). **`lib/probe/report.js:96` PREFERS `true_v2v_ms` over `voice_to_voice_ms` for its headline**, so any run weighted toward first turns reports an impossibly fast — or negative — voice-to-voice figure. Server-side, so real calls will do it too; the live call can confirm. Fix is to scope the greeting's marks outside turn 0, or to start turn indexing after it | `lib/voice/metrics.js:249-251`, `lib/probe/report.js:96` | ask first |
+| P25 | **AN IMPORTED TENANT CANNOT EXERCISE ART. 15 OR ART. 17 AT ALL.** Both DSR routes sit behind `requireBusinessAccess`, which needs an Identity Platform session, and migration 036 keys the tenant lookup on `auth_uid`. `scripts/import-tenant.js` creates the business and **deliberately no dashboard user** — its own header records the consequence: *"the imported tenant has no dashboard user. Attaching one later needs a flow that does not exist yet."* So Phase 5's DSR gate could not be run at all against the tenant Phase 5 imported, and more importantly **a real clinic migrated by import has no path to serve a subject access request**. Not a bug in either file; a missing flow that only shows up when the two are combined, which is exactly what a migration does. Gate D — the first prospect with a compliance officer asks for this | `scripts/import-tenant.js` header, `server.js:740`, migration 036 | 6 |
+| P26 | **RESOLVED 2026-08-31 — `scripts/restore-drill.js` + `docs/runbooks/restore-drill.md`, commit `26fe7f5`.** The script moves `CLOUD_SQL_INSTANCE` on all THREE workloads (both Cloud Run services AND the migrate job — leaving the job behind means the next deploy migrates the database nobody is serving), dry-run unless `--confirm`, and STOPS rather than continuing on a partial failure because a split estate is worse than either end state. Verified against the LIVE estate read-only: `--status` reports all three on `vetra-uk-edc8ca:europe-west2:vetra-uk`; `--repoint` prints three correct commands and changes nothing; an unsafe instance name is refused; `--rollback` refuses to guess the original. **Deliberately drives gcloud, not Terraform** — recovery must not depend on a healthy state file — so the runbook has an "Afterwards" section: DO NOT `terraform apply` until state is reconciled, or it points production back at the instance you were recovering from. **THE ACTUAL DRILL IS STILL UNRUN**, and deliberately: it restarts both services, and Gate 4 has not happened. Two environment traps recorded there: `TF_DISABLE_PLUGIN_TLS=1` is REQUIRED on this workstation (Norton intercepts the loopback gRPC between Terraform and its own plugins — every provider fails `x509: certificate signed by unknown authority`, which reads as a config fault), and `gcloud` is a `.cmd` shim needing `shell: true` from Node. Original finding follows. | **THE RESTORE BRINGS THE DATA BACK AND HAS NO PATH BACK INTO SERVICE.** Measured this phase: a PITR clone takes **591s**, carries all 37 migrations and the tenant row, and matches the source on tier, region, CMEK key, private-IP-only and backup configuration. But it lands with a **different name, a different private IP, a different zone (`europe-west2-a` -> `-c`), a fresh server CA, and it is NOT IN `tfstate`.** Recovery therefore means repointing `CLOUD_SQL_INSTANCE` on two Cloud Run services and the migrate job, or a rename dance, plus reconciling Terraform state — and **nothing in this repository documents any of that**. The gate as written ("wall clock, drift itemised") measures the half that works. Also worth knowing: `gcloud`'s own `--wait` **gave up at 592s** and printed "taking longer than expected" while the operation was still running, so an operator watching the CLI would reasonably conclude the restore had failed | runbook that does not exist, `infra/terraform/` | 6 |
+
+**One thing that is NOT a finding, recorded so the next person does not lose an hour to it:**
+`finishTurn()` runs from the Twilio **mark handler** (`session.js:3389`), and Twilio only echoes a
+mark back once the audio queued before it has finished playing. Any probe that drives
+`/twilio/media-stream` directly must **echo marks back, paced by the audio it received**, or turns
+complete and emit no `turn_latency` at all — 9 turns completed and 2 logged, which reads exactly like
+the server having stopped instrumenting. The service was fine; the probe was wrong.
+
+---
+
+## DEPLOY 2026-09-01 — THE ESTATE NOW RUNS CURRENT CODE. `voice-uk-prod-00002-kfc`
+
+**The finding that prompted this: GCP had been serving a build from 2026-08-29 while `main`
+(which Railway autodeploys) had moved to `13265a3`.** Railway was AHEAD of GCP on receptionist
+behaviour — rounds 4/5 hold lines, spelling, the semantic end-of-turn arbiter — so a cutover
+without a rebuild would have been a DOWNGRADE, not a lateral move. Measured, not assumed:
+`GET /` on Railway reported `Build: 13265a3 (main)`; `GET /` on GCP reported `Build: b7de0dd`.
+
+**Port:** `chore/port-dev-2026-09-01` off `feat/gcp-2`, `dev` merged in, fast-forwarded,
+both pushed. 94 files, +4,399/-350.
+
+**52 conflicts, and 48 of them were snapshots.** The four real ones and why they resolved the way
+they did:
+
+| File | Resolution |
+|---|---|
+| `services/gemini.js` | **dev.** Both branches fixed the same spelling bug independently. gcp-2 kept `THE LETTERS WIN` inside the `SPELLING NOT YET CONFIRMED` block, which is gated on `!callerHasNameOnFile` and therefore **never rendered for a returning caller**; dev's `6e5d030` moved it into the static TOOL CONTRACT. Taking dev drops the copy that does not render and keeps the write-block wording. |
+| `tests/promptSplit.test.js` | **dev**, for the same reason — it tests the new placement and carries the staging evidence for why the old one was wrong. |
+| `.env.example` | **Both, minus one line.** Not a clean add/add: gcp-2's 380-line block ENDS on the `VOICE_SPELL_ASK_CAP` comment that dev changed from `Default 1` to `Default 3`. Naive "keep both" duplicates the comment with contradictory values. |
+| `tests/session.test.js` | **Both — and this is the one that broke.** Each parent adds a top-level `describe` at the same point, so keeping both bodies kept only ONE pair of closing braces. The file became an unterminated block, and **vitest reported it as `vite:import-analysis` "invalid JS syntax" at line 1:1**, which reads like a transform/plugin bug rather than a merge artefact. `node -c` names the real line. Fixed in `5564fb6`. |
+
+**Snapshots deleted and regenerated (110 written), then checked against BOTH parents:**
+vs `dev` — 20 files, **170 insertions and zero deletions**, all `record_sms_consent` and the
+no-SMS line, i.e. exactly `capabilities/smsConsent.js`, which is gcp-2-only. vs `feat/gcp-2` — 58
+files, and every deleted line has a newer replacement in the same diff. **The merged prompt is the
+exact union of the two branches**, evidenced in both directions rather than asserted.
+
+**Gates — pasted, not claimed.** Root suite with `DATABASE_URL` UNSET (P4); `test:db` against the
+local PG16 on **port 55432**, not 5432.
+
+```
+root suite    2604 passed / 135 files    (was 2501 on feat/gcp-2)
+test:db        224 passed / 18 files
+sim:cutoff       3 passed  — punctuated+trailing800 12.5%, fluent control 0.0%, reply 1260ms
+dashboard be   126 passed / 13 files
+dashboard fe    36 passed /  6 files
+terraform plan  0 to add, 3 to change, 0 to destroy   (2 of them are P15's benign scaling diff)
+```
+
+**THE BUILD FAILED FIRST, AND THE REASON IS WORTH KEEPING.** `gcloud builds submit` without
+`--service-account` runs as `427725568491-compute@developer.gserviceaccount.com`, which has no
+`storage.objects.get` on `vetra-core-edc8ca_cloudbuild` — the error names the SOURCE TARBALL and
+reads like the upload failed. The working command is the one already written at line 1447 of this
+file: `--service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com`.
+Build `8931dc18` SUCCESS in 54s.
+
+**TWO MIGRATIONS WERE PENDING ON THE LIVE DATABASE, AND NOTHING HAD SAID SO.** The migrate job was
+updated to the new image with `-target` and executed BEFORE the service rolled, which is the only
+order that does not run new code against an old schema:
+
+```
+database already has 16 application table(s) and 37 ledger row(s); skipping baseline
+applied 039_revoke_directory_grants.sql (27ms)      <- P23/P9
+applied 040_attach_user_to_business.sql (25ms)      <- P25
+2 migration(s) applied.
+granted vetra_app to voice-uk-prod@vetra-uk-edc8ca.iam
+```
+
+**Verified on the serving revision `voice-uk-prod-00002-kfc`, read back rather than believed:**
+
+```
+GET /                     200, Build: 5564fb6
+call_state_store_selected store=pg  shared=True
+db_backend                cloudsql / IAM / vetra_uk_prod
+env                       DEEPGRAM_REGION=eu  VERTEX_LOCATION=global  DEPLOYMENT_MODE=standard
+                          VERTEX_ENABLED=true  DB_POOL_MAX=10  GIT_COMMIT_SHA=5564fb6
+scaling                   minScale 1 / maxScale 2   (C-11 intact)
+signature  signed 200 + correct TwiML | unsigned 403 | tampered 403
+           TwiML carries the per-call media-stream token in the PATH and resolves
+           businessPhone=+441372656055, so routing survived the redeploy
+dashboard-api /health 200 | dashboard SPA /app 200
+```
+
+**Unchanged and deliberately so:** `dashboard_image_tag` stays `b7de0dd` — `AI-phone-dashboard/`
+has zero diff across the port, and the two tags are independent on purpose. `+441372656055` is
+still pointed at `twilio_webhook_base`.
+
+**Noticed at boot, NOT fixed, and it has been true since Phase 4:**
+`[boot] notice sms_channel_off — TWILIO_ACCOUNT_SID/TOKEN are set; TWILIO_SMS_FROM is not`, so
+every business with `notification_phone` set silently receives no text and caller SMS follow-ups do
+not send. The boot notice is trap 8 working exactly as designed. Owner decision, not a deploy fix.
+
+### THE FIRST REAL CALL FOUND A ~2s/TURN PARITY GAP, AND IT WAS A FLAG NOBODY SET
+
+**The owner reported latency "way more than Railway". It was not geography and not Vertex.** The
+transatlantic leg is ~80ms; the turn metrics off `voice-uk-prod-00003-znz` decompose it:
+
+```
+16:56:58  stt_tail=6     llm_ttfb=3422  tts_ttfb=97   v2v=3526
+16:57:08  stt_tail=3003  llm_ttfb=2875  tts_ttfb=98   v2v=5978  true_v2v=6408   <- barged_in, contaminated
+16:57:29  stt_tail=700   llm_ttfb=2772  tts_ttfb=385  v2v=3858  true_v2v=4232
+
+turn 1:  llm_request=7 -> llm_first_tool=2008   (llm_tool_ms 2001)
+         tool_duration = 7ms                     set_call_intent itself
+         llm_reply_after_tool_ms = 1421          the SECOND round trip
+         llm_ttfb_ms = 3422 = 2001 + 1421
+```
+
+**Every turn paid TWO sequential model round-trips**, because the model calls `set_call_intent`
+before it speaks. It fired on all four turns of the call, including one where the intent did not
+change (`general_question` -> `general_question`).
+
+**`VOICE_INTENT_MARKER` has been ON IN RAILWAY since 2026-08-04 and was set by NOTHING in this
+module.** `services/gemini.js:486` is `process.env.VOICE_INTENT_MARKER === "true"`; the revision
+carried no `VOICE_*` variables at all. **This is the FOURTH instance of one failure shape** —
+after `DEEPGRAM_REGION`, `CALL_STATE_STORE` and `DB_POOL_MAX` — a flag that exists, is documented
+in `.env.example`, is covered by tests, and is rendered onto no service. The tests prove the
+FUNCTION behaves; nothing proves a deployment sets the variable.
+
+The 2026-08-04 live measurement of the same flag: `llm_ttfb_ms` **1,836 -> 940ms (-49%)**,
+`true_v2v_ms` p50 **3,062 -> 2,607ms**, turns paying a tool round-trip **80% -> 35%**,
+`set_call_intent` really cost **1,030ms**. GCP paid MORE than Railway did for it —
+`llm_tool_ms` 1,669-2,001ms against that 1,030ms — so the gap the owner heard is ~2-2.5s a turn.
+
+**FIXED in `infra/terraform/`**: `var.voice_intent_marker`, bool, **default true** to match
+Railway, rendered as the exact literal because the code compares a STRING (`"false"` and unset
+reach the same branch; there is no third state). `fmt` 0, `validate` Success, plan **0 to add, 2 to
+change** — the env addition plus P15's benign scaling diff. Applied: **`voice-uk-prod-00004-ctg`**,
+`VOICE_INTENT_MARKER = true`, `GET /` 200, and the signature + routing re-verified afterwards
+(signed 200, `businessPhone=+18176011171`).
+
+**What to check on the next call, because marker mode has one caller-audible failure mode:**
+`intent_marker_leaks` must be **0** (`lib/voice/metrics.js:110` — the defensive strip repairs a
+leak, so without the counter it leaves no trace and a latency probe cannot hear it). Also read
+`tts_fallback_turns` and `internal_term_leaks`; both must be 0.
+
+**Read alongside it, and do NOT mistake either for a regression:** turn 2's `stt_final=3003` is a
+turn with `barged_in: true` and two `barge_in` events, so it is not an STT measurement; and turn
+1's `first_frame_wire: -15266` is P24's known greeting contamination. Caching is healthy —
+`cached_tokens` 1,881 of `prompt_tokens` 5,435.
+
+---
+
+## Attempt 2 — NEXT SESSION: finish Gate 4, then PHASE 6. **A US NUMBER ON ACCOUNT A CAN DO IT**
+
+**Phase 5 left exactly one gate open, and it is the product gate, not a migration gate.**
+
+### Start here
+
+1. **THE LIVE CALL, and it is already set up.** `+441372656055` is repointed at
+   `twilio_webhook_base` and the `Digile Media` tenant is imported and routing. A friend on a **UK
+   handset** dials it.
+   **OR — measured 2026-09-01 — buy a US local number ON ACCOUNT A and dial it yourself.** US local
+   on account A returns `address_requirements: none`, balance £18.40, ~$1.15/mo. **The owner's
+   EXISTING US number cannot do this job**: it is on account B, the accounts are unrelated
+   top-level accounts (checked — A has no subaccounts, B's only subaccount is `vetratd_staging`),
+   so there is no cross-account number move without Twilio support, and pointing a B number at GCP
+   403s every request. The two alternatives both cost more than $1.15: disabling
+   `TWILIO_VALIDATE_SIGNATURE` also disables the media-stream token (deliberately — one switch
+   cannot be turned off believing the other holds), which re-opens P10 on a public URL; swapping the
+   deployed secrets to account B breaks `+441372656055` and repoints every outbound Twilio call.
+   **Routing a second number needs a `business_directory` row**, and Cloud SQL is private-IP only,
+   so it runs from inside the VPC — `gcloud run jobs execute vetra-migrate-uk-prod --args=<script>`.
+   Note the `businesses` trigger DELETES every directory row for a business on any `phone_number`
+   UPDATE, so a hand-added second row is temporary; importing a second demo tenant is the durable
+   version. **What a US number does NOT prove:** the UK carrier path, and it adds a transatlantic
+   leg each way — in-process `voice_to_voice_ms` will not move, the ear will, so `cpu_idle` cannot
+   be judged from it. **Call 1 must be the COLD one** — `cpu_idle = true` only shows on turn one
+   after an idle gap, and a second call spends the evidence for ~15 minutes.
+   - Book an appointment on call 1. Reschedule it on call 2. Barge in and cough on call 3.
+   - Listen for: time-to-first-word after the caller stops; dead air over ~2s; being cut off; whether
+     it says "Digile Media" and sounds **British**; whether the booking and reschedule actually
+     completed.
+   - **This is the first real test of receptionist work accumulated since early August** — the four
+     Digile Media complaints, the turn-taking work, the greeting/appointment guard. **None of it has
+     ever answered a phone**, and prompt and turn-taking changes are exactly the category a green
+     suite stays green through. Treat a bad call as a finding, not a surprise.
+2. **Confirm P24 on that call** — does turn 0 report a negative `true_v2v_ms` with a real caller? The
+   driven calls say it will.
+3. **Then revert or keep the repoint deliberately**, and say which. The revert is one API call.
+
+### What the next session must NOT do
+
+- **Do not read Phase 5's 8-turn latency sample as the last word.** It says "no regression against
+  A0" and it does, but it is 8 turns of clean synthetic audio against A0's 84 through real carriers.
+- **Do not light `us-prod`, do not change `project_id_suffix`, do not fix P9 or P18 blind.** All
+  unchanged from Phase 4, all still true.
+
+### Then Phase 6 — cutover and compliance pack
+
+DNS split (`app.<domain>`), and **P18 is a Phase 6 decision that now has a date**: the dashboard
+frontend is served nowhere and `DASHBOARD_URL` on the live service is a 404. Railway warm for one
+week. Compliance pack: six documents exist and need review, ROPA/DPIA/privacy notice still to write,
+ICO registration to file. **P25 belongs in this phase too** — a clinic with no dashboard user cannot
+serve a DSR, and that is a compliance commitment, not a nicety.
+
+### Still open and OWNER-ONLY, carried forward unchanged
+
+- **⚠ PRECONDITION 6.** Closes when a Google account belonging to **JOSH** holds `billing.admin` and
+  `organizationAdmin`. `@vetratd.com` addresses are NOT Google identities — measured, the org has no
+  `directoryCustomerId`. `nithinjd06@gmail.com` is a second ACCOUNT, not a second PERSON.
+- **Twilio concurrent-calls and CPS raise.** Still UNKNOWN, never measured, has lead time. Phase 5
+  now shows N=10 served clean with zero vendor refusals, which is the ElevenLabs cap — Twilio's own
+  limit is still unmeasured and is the next one up the raise order.
+- **A customer-facing DPA** (Art. 28). No phase owns it; drafting has lead time.
+- **M365 shared mailbox** before the first real clinic. The From address must not become
+  `@vetratd.com` while the host is Gmail.
+- **Gate B item #3** — `.playwright-mcp/` holds real caller phone numbers in a PUBLIC repo. Has a
+  clock, blocked by nothing, owned by no phase.
+- **Uptime alerting.** `budget.tf` alerts on COST only. Nothing alerts on the voice service being
+  down, and Phase 5 proved the service can serve 10 concurrent callers — which also means it can stop
+  serving them without anyone being told.
+
+---
+
+## Attempt 2 — session log
+
+| # | Date | Branch | Did | Left for next |
+|---|---|---|---|---|
+| A2-1 | 2026-08-28 | `feat/gcp-2` | **PHASE 1 CLOSED.** Branched off `feat/gcp-lane-b-terraform`, merged `dev` in, commit `62b87c2`. Only 2 of 23 overlapping files conflicted textually; the 21 silent auto-merges were verified line-by-line in both directions and are clean. **Two integration breaks that produced no conflict:** three dev-ADDED test files importing the `services/supabase.js` that lane-b deletes, and three env vars dev reads that lane-b's `envInventory` gate demands be documented. All 110 prompt snapshots deleted and regenerated; the diff against both parents is 100% attributable, so **the receptionist's prompt is the exact union of the two branches**. Five suites green: 2350 / 191 / 3 / 126 / 36. Final verification also turned up **P4**, a pre-existing non-hermetic root-suite test, confirmed on lane-b and left parked. **Nothing pushed, `main` untouched, no GCP contact.** | **Phase 2 — reshape Terraform.** Start with P1 (`VERTEX_LOCATION=global` is refused by `services/gemini.js:175`) and the uniform-bucket-level-access audit, both BEFORE any apply |
+| A2-2 | 2026-08-28 | `feat/gcp-2` | **PHASE 2 CLOSED — commit `eb2e63e`, 17 files, +1,123/-626, all under `infra/terraform/`.** The module now describes three stacks in three projects (`uk`, `us`, `core`) instead of attempt 1's six-and-four. **Project keys stopped being stack keys**, which forced `local.projects` to derive `display` and `region` from its members — `region` uses `one(distinct(...))` so a future two-region merge fails loudly instead of silently picking a lane. **Item 3 was re-derived and REVERSED: the org log sink STAYS**, because the "convert to per-project sinks" item was written under the no-org assumption the plan itself already voids, and per-project sinks are deletable by the admin the design defends against. **Two bugs the brief implied but did not name:** `enable_uk_resources` gated only the UK, so DARK `us-prod` was unconditionally active and the first apply would have built a ~$98/mo Cloud SQL instance and an undeletable KMS key ring — replaced with symmetric `var.active_stacks`; and `DEPLOYMENT_MODE` was hard-coded `hipaa` per lane against the locked `standard`-everywhere decision — now `var.deployment_mode`, which also gates `speech.tf`. `cpu_idle = true` (false is ~$70/mo = the whole budget, and the cost is UNMEASURED). P2 resolved: `GIT_COMMIT_SHA` on both services. UBLA needed no change — both GCS buckets already set it and `logging.tf` creates **Cloud Logging** buckets, which the constraint does not reach. Gates: fmt exit 0, validate Success, **npm test 2352/125 unchanged**, and the derived model plus **six deliberately-failed validations** checked in `terraform console`. **One disclosure: the first `init -backend=false` reached GCS** — it reuses the cached backend, and the residue named the deleted `vetra-tfstate-c3a3bd`; 403, nothing read, cache moved aside. **Nothing pushed, `main` untouched, nothing created.** | **Phase 3 — concurrency and cost.** Application code only, no Terraform, no GCP. Start with 3a: `lib/callStateStore.js` is an in-process Map and that is a LIVE correctness bug the single instance is hiding. Park anything Terraform-shaped. Four new findings P5-P8 recorded above; **P7 is why `max_instance_count`/`DB_POOL_MAX` were left alone — `max_connections` is unmeasured** |
+| A2-3 | 2026-08-28 | `feat/gcp-2` | **PHASE 3 CLOSED — commits `f3a7680`, `bb63652`, `8810538`. Application code only; `infra/terraform/` untouched, no GCP contact, nothing pushed, `main` untouched.** **3a:** `createPgStore()` on migration **038**, selected by `CALL_STATE_STORE`, sharing `services/db.js`'s pool so shared call state costs **zero extra connections** (P7). `call_state` has no RLS and no grant to `vetra_app` — it is read before the tenant is known, so a tenant policy would return zero rows and defeat the fix while looking careful — and `app_call_state_merge` **RAISES on any field outside SHARED_FIELDS**, enforcing the property the no-Memorystore costing rests on. **The Postgres store then exposed a PRE-EXISTING bug the Map was hiding:** both boundary writes are fire-and-forget, and a pool does not preserve issue order, so the pickup write (carrying `sawCallerFinal:false`) could land after the latch and re-tag a short real call as spam — through the fix for it. `writeShared` now serialises per call SID; deliberately not a latch in SQL, which would make the two stores behave differently. Contract extracted and run **twice**, file store and **two real pools in two OS processes**, with **two sabotage cases**. **3b:** `scripts/load-test-calls.js` + `docs/capacity.md`. **The binding cap is ElevenLabs at 10 concurrent, quoted from the vendor's own 1008 close reason**, and the knee is exactly there: p50 762ms at N=10, p50 4,617ms and max 8,393ms at N=30. **Gate E's "caller 11 is undefined behaviour" is now measured and is not undefined** — nothing is dropped, the greeting falls back to the Google voice after 4-8s of silence, and the breaker then does that to everyone for 60s. **Also measured: ONE INSTANCE REACHES `DB_POOL_MAX`** (10 connections at 10, 20 and 30 concurrent calls), so `instances × DB_POOL_MAX` is reached, not pessimistic. Deepgram >30 with zero errors; Twilio and Vertex left **UNKNOWN rather than estimated**; **Cloud SQL row left as an explicit Phase 4 fill-in**. **3c:** hit rate **measured on the real prompt at 86.9% / 86.7%, zero misses in 407 turns** — and the contradictory record is explained, because "94%" and "98.8%" were measured on **synthetic filler with a tiny dynamic tail**. **The function-calling gate was a coin flip:** one request per arm, no control; adding a control gave BROKEN and then its exact inverse on the next run. Now N trials per arm — **uncached 3/8, cached 4/8, indistinguishable, so tool calling is NOT broken under a cache and mutual exclusivity is not the blocker.** Eval two runs per mode: every metric overlaps, within-arm spread exceeds between-arm. **Stays OFF, for a new reason.** Gates: **2362/126, 211/16, applied 37 pending none, sim 3, dashboards 126/13 and 36/6, ZERO snapshots moved** | **Phase 4 — provision. THE OWNER MUST BE PRESENT.** All nine Phase 4 preconditions still stand and none is done. Three handoffs from Phase 3: size `DB_POOL_MAX`/`max_instance_count` from `max_connections` read off the instance (P7, half-measured now); **`var.call_state_store` is not wired to a service env var, so `CALL_STATE_STORE=pg` would not reach Cloud Run**; and 038 must be applied before the store is selected. **New parked P9-P12 — P9 (a control migration 033 claims and does not have) and P10 (`/twilio/media-stream` takes no authentication at all) are security-shaped: raise them, do not bundle them into the apply** |
+| A2-4 | 2026-08-28 | `feat/gcp-2` | **SAME SESSION AS A2-3, after Phase 3 closed. P10 FIXED + PHASE 4 PREP + THE FIRST GCP CONTACT OF ATTEMPT 2.** **P10 resolved (`60d1afa`)** at the owner's request once it turned out not to be a Phase 4 concern: `origin/main:server.js:837` carries the identical unauthenticated media-stream upgrade, Railway autodeploys `main`, so it was **live in production while being written down as a future item**. Per-call token in the `<Stream url>` PATH (Twilio drops query strings on the WS handshake), verified before the handshake, with the token's call SID bound to the `start` frame — without that second half one valid token authorises a session for any other call. Key **derived from `TWILIO_AUTH_TOKEN`**, so nothing needed provisioning in Terraform or Secret Manager. Verified both ways: `--no-token` → 0/5 opened, 5×403, **zero `stt_open`**; with token → 5/5, p50 685ms; swapped SID → closed 1008. **`main` is still exposed — nothing pushed.** **Phase 4 prep (`78ddb61`):** attempt-1 residue deleted after proving it was attempt-1 (it named the dead org, dead billing and `c3a3bd`, and is **auto-loaded by every plan**, so the first Phase 4 plan would have run against the suspended estate) — `terraform init -backend=false` now completes **without reaching GCS**, closing the Phase 2 trap; **`project_id_suffix` PINNED to `edc8ca`** (`vetra-{uk,us,core}-edc8ca`), evaluated in `terraform console` and **sabotage-verified** — unpinned it returns `(known after apply)`; **`CALL_STATE_STORE` now rendered onto the service**, which it never was — same shape as the `DEEPGRAM_REGION` bug, and unset it would have silently un-done Phase 3a; **precondition 8 closed early** because the pinned suffix makes the core project ID deterministic. **Owner preconditions, first GCP contact:** the **19 quota APIs enabled and verified 19/19** on `project-b147bdfa-d267-426a-8c7` — and the precondition's "the whole `local.terraform_quota_apis` list (19 APIs)" was **wrong, that local is FOURTEEN**; the 19 is its union with `common_apis`, corrected in place. **Essential contacts set** (`nithinjd06@gmail.com`, `josh.tite@vetratd.com`), closing a HARD gate — `terraform console` refused to evaluate the module at all with exactly one. **`@vetratd.com` IS NOT A GOOGLE IDENTITY DOMAIN** — measured: both IAM grants refused `User ... does not exist`, and the org has **no `directoryCustomerId`**. An Essential Contact needs no Google account; an IAM principal does. `nithinjd06@gmail.com` granted `billing.admin` + `organizationAdmin`, read back. **That is a second ACCOUNT, not a second PERSON, and attempt 1's suspension was scoped to the OWNER with the cause never disclosed — so it is unproven against the exact event it insures against.** Gates: **2377/127**, 211/16, sim 3, dashboards 126/13 and 36/6, fmt 0, validate Success, ZERO snapshots moved | **PHASE 4 — THE APPLY. It is not one command:** first apply (local state) → **build both images** (`image_tag`/`dashboard_image_tag` are `"0000000"`, a tag that DOES NOT EXIST, so a full apply before the build fails on a missing image) → **apply the migrate job with `-target` and EXECUTE it** before serving code, or 038 is missing under a running service → apply the rest → read `max_connections`, set `DB_POOL_MAX`, re-apply → **`init -migrate-state` to GCS** → repoint `bootstrap_project_id` at `core` **and enable the same 19 APIs on it**. Precondition 6 is still OPEN: it closes when a Google account belonging to **Josh** holds `billing.admin` and `organizationAdmin` |
+| A2-5 | 2026-08-29 | `feat/gcp-2` | **PHASE 4 CLOSED — THE FIRST APPLY OF ATTEMPT 2. THE ESTATE EXISTS.** `vetra-uk-edc8ca` (462445274080), `vetra-us-edc8ca` (1050513323476, dark and empty), `vetra-core-edc8ca` (427725568491); **the pinned suffix `edc8ca` held.** 156 resources in state, Cloud SQL `vetra-uk` RUNNABLE on `db-g1-small` in europe-west2, migrate job executed, both Cloud Run services serving, **state migrated to `gs://vetra-tfstate-edc8ca`**, `bootstrap_project_id` repointed at `core` with 19/19 APIs verified on it. **Nothing pushed, `main` untouched, no Twilio repoint, no live call.** **THREE CONFIG BUGS BLOCKED THE FIRST PLAN AND `validate` SAW NONE OF THEM:** parentheses are illegal in a GCP project display name (and the `for_each` abort hid ~130 resources behind an 8-resource plan); `network_cidr` is STACK-keyed while `private_services` iterates PROJECT keys — Phase 2's reshape broke it and attempt 1's coincidence had hidden it; and the README pointed at the dead org `564252011558` twice. **A TENTH PRECONDITION NOBODY HAD WRITTEN DOWN:** `resourcemanager.organizationAdmin` grants org-policy READ, not WRITE — measured off both role definitions — so the first apply died at the graph's first node with **5 resources and NO PROJECTS**, because `google_project.this` deliberately depends on `skipDefaultNetworkCreation`. Fixed by granting `roles/orgpolicy.policyAdmin`; now README bootstrap item 3. The control held: no `default` network exists. **`roles/owner` FOR AN EXTERNAL GMAIL CANNOT BE GRANTED BY API** (`ORG_MUST_INVITE_EXTERNAL_OWNERS`) — the owner used the Console invitation flow, Terraform adopted the result (P14). **THE APPLY WAS SIX APPLIES**, because `enable_prod_databases` also pulls the migrate job and dashboard in on a nonexistent image tag and Terraform 1.15.8 has no `-exclude`. **P7 CLOSED: `max_connections = 50` READ OFF THE INSTANCE** (superuser reserve 3, cloudsqladmin 3) — **`DB_POOL_MAX` was rendered onto NEITHER service**, the third `CALL_STATE_STORE`/`DEEPGRAM_REGION`-shaped hole, worst case 400 against 50. Now voice 10 / dashboard 5 / `max_instances` 2 = **38 of 50**, with the raise ORDER recorded (ElevenLabs → Twilio → tier → these). **The tier was a decision, not a default:** the module default is $98.62/mo and the `db-g1-small` override was COMMENTED OUT, so the expensive default would have won by inaction. **`VERTEX_LOCATION` was `eu` defended by a comment P1 had already superseded** — now `var.vertex_location = "global"`, the honest label. **The image was verified by reading it, and the first attempt was wrong:** Cloud Build overrides WORKDIR with `/workspace`, so relative paths read the SOURCE — which is also **P13, `cloudbuild.yaml`'s own migration guard cannot see the image it claims to check.** Re-run against `/app` with three controls: 38 migrations, `038_call_state`, `mediaStreamToken.js`, `createPgStore`. **GATE MET on `voice-uk-prod-00001-r6c`:** `GET /` **200** with `Build: b7de0dd` (P2 confirmed on a live service), `Deepgram nova-3 (DEPLOYMENT_MODE=standard)`, `db_backend cloudsql/IAM`, **`call_state_store_selected store=pg shared=True`**, `DEEPGRAM_REGION=eu`, `VERTEX_LOCATION=global`. **Traps verified against LIVE resources, not config:** effective org policy expands to 71 values INCLUDING `europe-west2` with zero US values; instance backups pinned to `europe-west2`; CMEK UK-resident. **`smtp_config` defaulted to `{}` and would have broken the deploy** (bootChecks makes a half-configured pair FATAL). Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success — nothing moved.** New parked **P13-P17**; P7 closed | **PHASE 5 — VERIFY. THE OWNER, THEIR PHONE AND THEIR EARS.** Positive control FIRST on the Twilio signature. **The webhook is `twilio_webhook_base`, never `.uri`.** **Smoke-test `api.eu.deepgram.com` BEFORE the live call** — nothing has yet proved the key works there, and the failure would arrive as silence on a real caller. Then tenant import, live call, 10-concurrent with all 10 resolving `businessId`, latency against a Railway baseline taken FIRST (`cpu_idle` and shared-core CPU are both unmeasured, both one-line fixes), RLS 58/58, eval against the **37-40 of 40** band, restore, DSR. **Precondition 6 still OPEN — it closes when a Google account belonging to JOSH holds `billing.admin` + `organizationAdmin`; `nithinjd06@gmail.com` is a second ACCOUNT, not a second PERSON** |
+| A2-6 | 2026-08-29 | `feat/gcp-2` | **PHASE 5 — EIGHT GATES OF NINE, AND THE ESTATE SERVED ITS FIRST TRAFFIC. GATE 4 (THE LIVE CALL) IS STILL OPEN.** No apply, no new revision, nothing pushed, `main` untouched — everything measured against the same serving revision `voice-uk-prod-00001-r6c`. **The live-call problem turned out to be a TWO-ACCOUNT problem:** `+441372656055` is on account A whose token GCP holds; the owner's US number is on account B, and pointing it at GCP would have 403'd every request — P20's failure exactly. **The owner supplied the fix: a friend on a UK handset dials the real number.** Number repointed at `twilio_webhook_base` 18:38Z and LEFT there. **Gate 1 Deepgram EU** 10/10 finals WER 0.0000 through the real seam, EU host 200 from Frankfurt, garbage key 401. **Gate 2 signature** — P20's trap reproduced under Node (`import *` gives `undefined`, default gives `function`), then signed **200**, tampered **403**, unsigned **403**, and a signature over the `.uri` host **403**, proving the URL trap is real. **Gate 3 tenant import FAILED FIRST** on `voice_style`, a column migration 002 added and **012 deleted** while the importer still names it (P21); second run created `55c7c8c4-…` with `business_directory` routing. **Gate 5 concurrency 10/10, and 4 of 10 status callbacks landed on a DIFFERENT INSTANCE and still resolved `businessId`** — Phase 3a's pg store proved in production against the case an in-process Map fails silently. Zero errors above WARNING at N=10. **Gate 6 latency `voice_to_voice_ms` p50 2825 vs A0 Railway 2980 — no regression**, after two instrument bugs were separated: the missing `turn_latency` lines were THE PROBE's fault (Twilio echoes marks; the driver did not), while turn-0's negative `true_v2v_ms`/`playout_ms`/`tts_ttfb_ms` are REAL and greeting-caused (P24). **`cpu_idle` MEASURED at last: the first cold pair's 6797ms `llm_ttfb` did NOT reproduce (2531ms on the second); what reproduces is greeting 500-523ms cold vs 271-275ms warm, ~240ms.** **Gate 7 RLS 58 passed / 1 by-design fail / rolled back — but as `postgres`, not `vetra_app`, so the GRANT surface was never exercised and P9 remains unsettled on Cloud SQL (P23).** **Gate 8 eval 39/40, inside the 37-40 band.** **Gate 9a restore 591s, content verified against the clone, drift itemised, clone deleted** — and it has no path back into service (P26). **Gate 9b DSR BLOCKED: an imported tenant has no dashboard user and no flow to attach one (P25).** `npm install` was required, as predicted. Gates: **2377/127, 211/16, 3, 126/13, 36/6, fmt 0, validate Success.** New parked **P21-P26** | **FINISH GATE 4 — the friend's UK handset. Call 1 must be the COLD one.** Book, reschedule, barge in. It is the first real test of every receptionist fix since early August, none of which has answered a phone. Confirm P24 on that call, then decide whether to keep or revert the repoint. **Then PHASE 6** — DNS, `app.<domain>` (P18 decides there), Railway warm one week, ROPA/DPIA/privacy notice, ICO. Precondition 6 still OPEN and still needs a Google account belonging to **JOSH** |
+| A2-7 | 2026-09-01 | `feat/gcp-2` | **THE ESTATE NOW RUNS CURRENT CODE — `voice-uk-prod-00002-kfc`, `Build: 5564fb6`.** Opened on a status question and the load-bearing finding was that **GCP was serving a 2026-08-29 build while `main` had moved to `13265a3`**, so Railway was AHEAD of GCP on receptionist behaviour and a cutover would have been a downgrade. Ported `dev` into `feat/gcp-2` (`chore/port-dev-2026-09-01`, fast-forwarded, both pushed): 52 conflicts, 48 of them snapshots. **`services/gemini.js` and `promptSplit.test.js` resolved to dev** because gcp-2's `THE LETTERS WIN` sat in a block gated on `!callerHasNameOnFile` and never rendered for a returning caller; **`.env.example` was NOT a clean add/add** (gcp-2's block ends on the line dev changed 1->3); **`session.test.js` kept both bodies and only one pair of closing braces**, and vitest reported that as `vite:import-analysis` "invalid JS syntax" at 1:1 rather than as an unterminated block. 110 snapshots regenerated and checked against BOTH parents — vs dev, 170 insertions and ZERO deletions, all `record_sms_consent`; vs gcp-2, every deletion has a newer replacement. Gates **2604/135, 224/18, 3, 126/13, 36/6**, plan 0/3/0. **The build failed first on the DEFAULT compute SA** (`storage.objects.get` on the cloudbuild source bucket) — the working `--service-account=vetra-deployer` form was already written at line 1447. **TWO migrations were pending on the live database and nothing had said so:** 039 (P23/P9) and 040 (P25), applied via the migrate job with `-target` BEFORE the service rolled. Verified on the serving revision: `store=pg shared=True`, `cloudsql/IAM`, `DEEPGRAM_REGION=eu`, `VERTEX_LOCATION=global`, min1/max2, and signature signed 200 / unsigned 403 / tampered 403 with routing intact. `dashboard_image_tag` deliberately unchanged — zero dashboard diff | **GATE 4 — THE LIVE CALL, and it no longer needs a UK handset:** a US local number on **account A** (`address_requirements: none`, ~$1.15/mo) can do it. The owner's existing US number CANNOT — it is on account B and the two are unrelated top-level accounts. Route it with a `business_directory` row from inside the VPC. **Then PHASE 6.** Railway/Supabase retirement is blocked on account B's two US numbers, not on the migration |

@@ -1,0 +1,236 @@
+{
+  "at": "2026-09-02T06:10:59.141Z",
+  "n": 5,
+  "models": [
+    "gpt"
+  ],
+  "rows": [
+    {
+      "scenario": "T7",
+      "model": "gpt",
+      "passes": 17,
+      "total": 20,
+      "leaks": 0,
+      "errs": 0,
+      "detail": [
+        {
+          "trial": 1,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability at most 2x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "book_appointment at most 1x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Sure thing, let me check that time for Tuesday and see what’s available.Of course. Are you a new patient or an existing patient?Of course. Is there anything else I can help you with? If not, thank you for calling Brightwork Family Dental, and I hope you have a great rest of your day.",
+          "turnSaid": [
+            "Sure thing, let me check that time for Tuesday and see what’s available.",
+            "Of course. Are you a new patient or an existing patient?",
+            "Of course. Is there anything else I can help you with? If not, thank you for calling Brightwork Family Dental, and I hope you have a great rest of your day."
+          ],
+          "usd": 0.04468
+        },
+        {
+          "trial": 2,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability at most 2x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "book_appointment at most 1x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "end_call",
+              "args": {
+                "reason": "Caller ended the conversation."
+              }
+            }
+          ],
+          "said": "Sure thing, let me check that time and see what’s available for Tuesday.Of course. Are you a new patient or an existing patient?Thank you for calling Brightwork Family Dental. Have a great rest of your day.",
+          "turnSaid": [
+            "Sure thing, let me check that time and see what’s available for Tuesday.",
+            "Of course. Are you a new patient or an existing patient?",
+            "Thank you for calling Brightwork Family Dental. Have a great rest of your day."
+          ],
+          "usd": 0.0355896
+        },
+        {
+          "trial": 3,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability at most 2x",
+              "pass": true,
+              "detail": "called 1x"
+            },
+            {
+              "name": "book_appointment at most 1x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, I can check that time for you.Of course. Before I can book it, I need to confirm a couple details: are you a new patient or an existing patient, and what kind of appointment is this for?",
+          "turnSaid": [
+            "Sure thing, I can check that time for you.",
+            "",
+            "Of course. Before I can book it, I need to confirm a couple details: are you a new patient or an existing patient, and what kind of appointment is this for?"
+          ],
+          "usd": 0.0490824
+        },
+        {
+          "trial": 4,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": false,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability at most 2x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "book_appointment at most 1x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            }
+          ],
+          "said": "Sure, let me check what's available for Tuesday at that time.Of course. Before we go any further, are you a new patient or an existing patient?",
+          "turnSaid": [
+            "Sure, let me check what's available for Tuesday at that time.",
+            "Of course. Before we go any further, are you a new patient or an existing patient?",
+            ""
+          ],
+          "usd": 0.0352168
+        },
+        {
+          "trial": 5,
+          "model": "gpt",
+          "checks": [
+            {
+              "name": "called check_appointment_availability",
+              "pass": true,
+              "detail": ""
+            },
+            {
+              "name": "check_appointment_availability at most 2x",
+              "pass": true,
+              "detail": "called 1x"
+            },
+            {
+              "name": "book_appointment at most 1x",
+              "pass": true,
+              "detail": "called 0x"
+            },
+            {
+              "name": "no tool blob spoken aloud",
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "calls": [
+            {
+              "name": "set_call_intent",
+              "args": {
+                "intent": "book_appointment"
+              }
+            },
+            {
+              "name": "check_appointment_availability",
+              "args": {
+                "requested_at": "2026-09-08T15:00:00"
+              }
+            }
+          ],
+          "said": "Sure thing, I’ll check whether that time is open and then we can go from there.Of course. I’m still waiting on the availability check for Tuesday at 3 PM, so I can’t book anything yet. While we wait, are you a new patient or an existing patient?Of course. Before I wrap up, is there anything else I can help you with? If not, I can end the call.",
+          "turnSaid": [
+            "Sure thing, I’ll check whether that time is open and then we can go from there.",
+            "Of course. I’m still waiting on the availability check for Tuesday at 3 PM, so I can’t book anything yet. While we wait, are you a new patient or an existing patient?",
+            "Of course. Before I wrap up, is there anything else I can help you with? If not, I can end the call."
+          ],
+          "usd": 0.065084
+        }
+      ]
+    }
+  ]
+}

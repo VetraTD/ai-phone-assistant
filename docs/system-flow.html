@@ -1,0 +1,394 @@
+<title>AI Receptionist — How It All Works</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ground:#F4F6F5; --surface:#FFFFFF; --surface-2:#FAFBFB; --inset:#F0F3F2;
+    --ink:#131C1A; --muted:#54625D; --faint:#8B9994; --hair:#E0E6E3;
+    --accent:#0D6B67; --accent-2:#0A4F4C; --accent-soft:#E4F1F0;
+    --live:#1C7C46; --dorm:#9A6410; --off:#8892; --wire:#B7C2BE;
+    --shadow:0 1px 2px rgba(19,28,26,.04),0 10px 28px -14px rgba(19,28,26,.12);
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
+    --sans:"Helvetica Neue","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0C1211; --surface:#131B1A; --surface-2:#101716; --inset:#0E1514;
+      --ink:#E7ECEA; --muted:#93A29D; --faint:#5D6D68; --hair:#24302D;
+      --accent:#3DAAA3; --accent-2:#8FD6D1; --accent-soft:#16302E;
+      --live:#5BC585; --dorm:#E0A94A; --off:#667; --wire:#33403C;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px -16px rgba(0,0,0,.65);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F4F6F5; --surface:#FFFFFF; --surface-2:#FAFBFB; --inset:#F0F3F2;
+    --ink:#131C1A; --muted:#54625D; --faint:#8B9994; --hair:#E0E6E3;
+    --accent:#0D6B67; --accent-2:#0A4F4C; --accent-soft:#E4F1F0;
+    --live:#1C7C46; --dorm:#9A6410; --off:#8892; --wire:#B7C2BE;
+    --shadow:0 1px 2px rgba(19,28,26,.04),0 10px 28px -14px rgba(19,28,26,.12);
+  }
+  :root[data-theme="dark"]{
+    --ground:#0C1211; --surface:#131B1A; --surface-2:#101716; --inset:#0E1514;
+    --ink:#E7ECEA; --muted:#93A29D; --faint:#5D6D68; --hair:#243D2D;
+    --accent:#3DAAA3; --accent-2:#8FD6D1; --accent-soft:#16302E;
+    --live:#5BC585; --dorm:#E0A94A; --off:#667; --wire:#33403C;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px -16px rgba(0,0,0,.65);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+    line-height:1.55;font-size:15.5px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:880px;margin:0 auto;padding:0 22px}
+  h1,h2,h3{text-wrap:balance;letter-spacing:-.02em}
+  a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--inset);padding:1px 6px;border-radius:5px;
+    border:1px solid var(--hair)}
+
+  header.hero{background:
+      radial-gradient(120% 90% at 88% -10%,var(--accent-soft),transparent 60%),
+      var(--surface);
+    border-bottom:1px solid var(--hair)}
+  .hero-in{max-width:880px;margin:0 auto;padding:46px 22px 38px}
+  .kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 12px}
+  .hero h1{font-size:34px;font-weight:820;margin:0 0 12px;line-height:1.05}
+  .hero p{font-size:16.5px;color:var(--muted);margin:0;max-width:60ch}
+  .quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+  .quick a{font-family:var(--mono);font-size:12px;padding:6px 12px;border-radius:99px;border:1px solid var(--hair);
+    background:var(--surface-2);color:var(--muted);transition:.15s}
+  .quick a:hover{border-color:var(--accent);color:var(--ink);text-decoration:none}
+
+  main{padding:14px 0 90px}
+  section{padding:34px 0 4px;scroll-margin-top:20px;border-top:1px solid var(--hair)}
+  section:first-child{border-top:none}
+  .snum{font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:600}
+  h2{font-size:22px;font-weight:760;margin:6px 0 6px}
+  .lede{color:var(--muted);font-size:15px;margin:0 0 20px;max-width:68ch}
+  p{margin:0 0 14px}
+  strong{color:var(--ink)}
+
+  /* status legend + pills */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
+    letter-spacing:.04em;text-transform:uppercase;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .pill .d{width:7px;height:7px;border-radius:50%}
+  .pill.live{background:color-mix(in srgb,var(--live) 15%,transparent);color:var(--live)}
+  .pill.live .d{background:var(--live)}
+  .pill.dorm{background:color-mix(in srgb,var(--dorm) 16%,transparent);color:var(--dorm)}
+  .pill.dorm .d{background:var(--dorm)}
+  .pill.off{background:color-mix(in srgb,var(--off) 18%,transparent);color:var(--muted)}
+  .pill.off .d{background:var(--off)}
+  .statusbar{display:flex;flex-wrap:wrap;gap:16px;background:var(--surface);border:1px solid var(--hair);
+    border-radius:12px;padding:13px 16px;box-shadow:var(--shadow);font-size:13px;color:var(--muted)}
+  .statusbar span{display:inline-flex;align-items:center;gap:8px}
+
+  /* diagrams */
+  .diagram{background:var(--surface);border:1px solid var(--hair);border-radius:14px;padding:20px;margin:18px 0 22px;
+    box-shadow:var(--shadow);overflow-x:auto}
+  .mermaid{display:flex;justify-content:center;min-width:min-content}
+  .cap{font-size:12.5px;color:var(--faint);font-family:var(--mono);margin:0 2px 14px}
+
+  /* the turn-loop custom diagram */
+  .loop{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:18px 0 8px}
+  .node{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:13px 14px;box-shadow:var(--shadow);
+    position:relative}
+  .node .n{font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:.08em}
+  .node h4{margin:5px 0 4px;font-size:14px;font-weight:700}
+  .node p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.45}
+  .node .prov{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:6px;display:block}
+
+  /* flow cards */
+  .cards{display:grid;gap:12px;margin:6px 0 8px}
+  .card{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:16px 17px;box-shadow:var(--shadow);
+    display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start}
+  .card .ic{width:38px;height:38px;border-radius:10px;background:var(--accent-soft);color:var(--accent);
+    display:grid;place-items:center;font-size:19px;flex:none}
+  .card h3{margin:0 0 3px;font-size:15.5px;font-weight:720;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .card p{margin:0;font-size:13.5px;color:var(--muted)}
+  .card p+p{margin-top:7px}
+  .trigger{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--inset);border:1px solid var(--hair);
+    border-radius:7px;padding:2px 8px;display:inline-block;margin-top:8px}
+
+  /* task table */
+  .tasks{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 8px}
+  @media(max-width:640px){.tasks{grid-template-columns:1fr}.card{grid-template-columns:1fr}.card .ic{display:none}}
+  .tgroup{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:15px 16px;box-shadow:var(--shadow)}
+  .tgroup h4{margin:0 0 4px;font-size:13.5px;font-weight:720;display:flex;align-items:center;gap:8px}
+  .tgroup ul{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+  .tgroup li{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:baseline}
+  .tgroup li b{color:var(--ink);font-weight:600;font-family:var(--mono);font-size:12px;white-space:nowrap}
+
+  /* data model */
+  .db{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:4px 0;box-shadow:var(--shadow);
+    overflow:hidden;margin:6px 0 8px}
+  .row{display:grid;grid-template-columns:170px 1fr;gap:14px;padding:11px 16px;border-bottom:1px solid var(--hair);font-size:13.5px}
+  .row:last-child{border-bottom:none}
+  .row b{font-family:var(--mono);font-size:12.5px;color:var(--accent)}
+  .row span{color:var(--muted)}
+  @media(max-width:560px){.row{grid-template-columns:1fr;gap:2px}}
+
+  .note{background:var(--inset);border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;
+    padding:13px 16px;margin:8px 0 6px;font-size:13.5px;color:var(--muted)}
+  .note b{color:var(--ink)}
+
+  footer{border-top:1px solid var(--hair);color:var(--faint);font-size:12.5px;padding:24px 0 44px;margin-top:30px;text-align:center}
+</style>
+
+<header class="hero">
+  <div class="hero-in">
+    <p class="kicker">System walkthrough · voice pipeline v2</p>
+    <h1>How the AI Receptionist Works</h1>
+    <p>The whole thing, end to end — what happens when the phone rings, how it answers, when it hands off to a human, what it can do, and where every piece of data goes. Read top to bottom or jump around.</p>
+    <nav class="quick">
+      <a href="#big">The 30-second version</a>
+      <a href="#call">One call, start to finish</a>
+      <a href="#loop">The listen–think–speak loop</a>
+      <a href="#branches">Transfers & fallbacks</a>
+      <a href="#tasks">What it can do</a>
+      <a href="#after">After the call</a>
+      <a href="#arch">The two apps & the database</a>
+      <a href="#not">Not built (yet)</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section id="big">
+    <p class="snum">01</p><h2>The 30-second version</h2>
+    <p class="lede">Two programs share one database. One answers phones; one is the website where businesses set up their receptionist.</p>
+    <p>A customer calls a business's number. <strong>Twilio</strong> (the phone company) answers and opens a live audio pipe to your <strong>voice server</strong>. The server streams the caller's speech to <strong>Deepgram</strong> (which turns speech into text), sends that text to <strong>Gemini</strong> (Google's AI, which decides what to say and whether to do anything — book, take a message, transfer), and streams the reply to <strong>ElevenLabs</strong> (which turns it back into a human voice) and out to the caller. That loop repeats every time the caller speaks. Everything — who called, the transcript, any appointment or message — is written to <strong>Supabase</strong> (the database). The business owner sees all of it, and configures their receptionist, in the <strong>dashboard</strong>.</p>
+    <div class="statusbar">
+      <span><span class="pill live"><span class="d"></span>Live</span> working now</span>
+      <span><span class="pill dorm"><span class="d"></span>Built · off</span> coded but not switched on</span>
+      <span><span class="pill off"><span class="d"></span>Not built</span> doesn't exist yet</span>
+    </div>
+  </section>
+
+  <section id="call">
+    <p class="snum">02</p><h2>One call, start to finish</h2>
+    <p class="lede">Every inbound call follows this path. The dashed steps only happen if the conversation calls for them.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontfamily':'monospace','primaryColor':'#E4F1F0','primaryBorderColor':'#0D6B67','primaryTextColor':'#131C1A','lineColor':'#7d928d','secondaryColor':'#F0F3F2','tertiaryColor':'#FAFBFB'}}}%%
+sequenceDiagram
+  autonumber
+  participant C as Caller
+  participant TW as Twilio
+  participant S as Voice Server
+  participant AI as Deepgram·Gemini·ElevenLabs
+  participant DB as Supabase
+  C->>TW: dials the business number
+  TW->>S: webhook /twilio/voice
+  S->>TW: "Connect this call's audio to me" (Media Stream)
+  S->>DB: look up business by number
+  S-->>C: greeting (spoken immediately)
+  Note over S,DB: call record + knowledge/FAQ load in background
+  loop every time the caller speaks
+    C->>S: speech (live audio)
+    S->>AI: speech → text → decide → text → voice
+    AI-->>C: spoken reply
+    S->>DB: save each line of the transcript
+  end
+  Note over C,DB: caller finishes — books, leaves a message, or is transferred
+  TW->>S: webhook /twilio/status (call ended)
+  S->>DB: summary, outcome, notify the business
+      </pre>
+    </div>
+    <div class="note"><b>Why the greeting is instant:</b> the server only waits to identify the business before speaking. Loading the FAQ, past-caller history, and creating the call record all happen in the background while it's already saying hello — so the caller never hears dead air at pickup.</div>
+  </section>
+
+  <section id="loop">
+    <p class="snum">03</p><h2>The listen–think–speak loop</h2>
+    <p class="lede">This is the engine. One trip through it = one back-and-forth. It's built to feel like talking to a person, which mostly comes down to speed and knowing when it's your turn.</p>
+    <div class="loop">
+      <div class="node"><span class="n">HEAR</span><h4>Speech → text</h4><p>Caller's audio is transcribed live, word by word, as they talk.</p><span class="prov">Deepgram Nova-3</span></div>
+      <div class="node"><span class="n">YIELD</span><h4>Whose turn?</h4><p>Decides when the caller has actually finished — and lets "wait/stop" interrupt but ignores "uh-huh."</p><span class="prov">turn manager + VAD</span></div>
+      <div class="node"><span class="n">THINK</span><h4>Decide reply</h4><p>The AI reads the conversation + the business's info and writes a short answer, calling a tool if needed.</p><span class="prov">Gemini 2.5 Flash</span></div>
+      <div class="node"><span class="n">SPEAK</span><h4>Text → voice</h4><p>The reply streams out as a human voice as it's being written — no waiting for the whole sentence.</p><span class="prov">ElevenLabs Flash</span></div>
+    </div>
+    <p>Three design choices make it feel human rather than robotic. <strong>It streams at every stage</strong> — the AI starts talking before it has finished thinking, so first sound comes back in a fraction of a second. <strong>It handles interruptions honestly</strong> — say "wait" and it stops; say "yeah, mm-hmm" and it keeps going, because those are just you nodding along. And <strong>it protects against its own echo</strong> — on speakerphone the AI can hear itself, so it cross-checks the audio energy with what you actually said before deciding you interrupted it.</p>
+    <div class="note"><b>Every turn is timed.</b> The server records how long each stage took (heard → thought → spoke → played) so you can see, per call, whether it's hitting the sub-second target. That's the <code>/api/debug/latency</code> endpoint.</div>
+  </section>
+
+  <section id="branches">
+    <p class="snum">04</p><h2>Transfers, fallbacks & safety nets</h2>
+    <p class="lede">The loop above handles a normal conversation. These are the branches for when something needs a human, or when a piece breaks.</p>
+    <div class="cards">
+      <div class="card"><div class="ic">↗</div><div>
+        <h3>Transfer to a human <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>The AI briefly says it's transferring, <em>then</em> Twilio dials the business's transfer number and bridges the caller to a real person. Works in any language (the AI decides to transfer), with an instant English keyword shortcut for "representative/manager/human."</p>
+        <span class="trigger">caller asks for a person · or AI can't help</span>
+        <p style="margin-top:9px;font-size:12.5px">Billing note: a transferred call runs two phone legs at once (caller + the human) until someone hangs up.</p>
+      </div></div>
+      <div class="card"><div class="ic">✎</div><div>
+        <h3>Take a message <span class="pill live"><span class="d"></span>Live · always on</span></h3>
+        <p>The universal safety net. Any time the AI can't help — unknown answer, after hours, caller just wants to leave word — it captures name, callback number (read back digit by digit), reason, and urgency, then promises a callback. The message lands in the database and notifies the business.</p>
+        <span class="trigger">"can I leave a message" · or any dead end</span>
+      </div></div>
+      <div class="card"><div class="ic">◈</div><div>
+        <h3>Brain-down fallback <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>If the AI itself fails twice in a call (Gemini errors or times out), the receptionist switches to a <strong>scripted, no-AI message-taker</strong> — fixed questions, no thinking required — so the caller still gets to leave their details instead of hearing "sorry, try again" on a loop.</p>
+        <span class="trigger">2 consecutive AI failures</span>
+      </div></div>
+      <div class="card"><div class="ic">♪</div><div>
+        <h3>Voice fallback <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>If ElevenLabs fails (or you run out of credits), speech automatically falls back to Google's voice for the rest of the call. The caller hears a more robotic voice, but the call never drops.</p>
+        <span class="trigger">ElevenLabs error / no credits</span>
+      </div></div>
+      <div class="card"><div class="ic">⏱</div><div>
+        <h3>Silence & max-length <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>If the caller goes quiet, it nudges ("are you still there?") at 8s and 15s, then gently ends the call at 24s. Any call is hard-capped at 30 minutes.</p>
+        <span class="trigger">no speech · or 30-min cap</span>
+      </div></div>
+      <div class="card"><div class="ic">☂</div><div>
+        <h3>Degraded / voicemail <span class="pill dorm"><span class="d"></span>Built · off</span></h3>
+        <p>A last-resort mode: if the whole voice stack is down, play an apology and record a plain voicemail into the message inbox. <strong>It's coded but nothing triggers it automatically yet</strong> — a known gap on the fix list.</p>
+        <span class="trigger">voice stack unavailable (not wired)</span>
+      </div></div>
+    </div>
+  </section>
+
+  <section id="tasks">
+    <p class="snum">05</p><h2>What the receptionist can actually do</h2>
+    <p class="lede">The AI is given a set of "tools" per call. Some are always on for every business; others are switches the business flips in settings; a third kind connects to outside systems.</p>
+    <div class="tasks">
+      <div class="tgroup"><h4><span class="pill live"><span class="d"></span>Core</span> always on</h4>
+        <ul>
+          <li><b>answer</b> questions from the FAQ / business info</li>
+          <li><b>message</b> take a message with callback details</li>
+          <li><b>callback</b> log a callback request</li>
+          <li><b>transfer</b> hand off to a human</li>
+        </ul>
+      </div>
+      <div class="tgroup"><h4><span class="pill live"><span class="d"></span>Modules</span> per-business toggles</h4>
+        <ul>
+          <li><b>book</b> create an appointment</li>
+          <li><b>check</b> look up the caller's appointments</li>
+          <li><b>cancel/resched</b> change one (with identity check)</li>
+          <li><b>quote</b> request a quote</li>
+          <li><b>directions</b> · <b>forms</b> info requests</li>
+        </ul>
+      </div>
+      <div class="tgroup"><h4><span class="pill dorm"><span class="d"></span>Integrations</span> coded, no UI</h4>
+        <ul>
+          <li><b>webhook</b> call a business's own API as a tool</li>
+          <li><b>Athena</b> EHR: real appointment slots for medical offices</li>
+          <li style="color:var(--faint)">backend works; no dashboard screen to set them up yet</li>
+        </ul>
+      </div>
+      <div class="tgroup"><h4>Identity &amp; safety</h4>
+        <ul>
+          <li>cancel/reschedule needs <b>name + last-4</b> of the number on file</li>
+          <li>bookings are validated: no past dates, no closed hours</li>
+          <li>won't invent prices, hours, or coverage it doesn't know</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note"><b>How a "tool" works:</b> when the AI decides to, say, book an appointment, it doesn't just talk about it — it emits a structured tool call that the server runs against the database, gets back success or failure, and speaks the honest result. It's told never to claim success unless the tool actually returned it.</div>
+  </section>
+
+  <section id="after">
+    <p class="snum">06</p><h2>After the call hangs up</h2>
+    <p class="lede">When Twilio reports the call ended, a second flow runs to wrap it up.</p>
+    <div class="cards">
+      <div class="card"><div class="ic">▤</div><div>
+        <h3>Transcript &amp; summary <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>The full transcript is already saved line-by-line during the call. On hang-up, the AI writes a one-line summary, a sentiment, and an outcome (booked / message / transferred / spam) onto the call record.</p>
+      </div></div>
+      <div class="card"><div class="ic">✉</div><div>
+        <h3>Notify the business <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>If enabled, the owner gets an email and/or SMS when a message or booking comes in — to the notification address set in the dashboard.</p>
+      </div></div>
+      <div class="card"><div class="ic">↩</div><div>
+        <h3>SMS follow-up to the caller <span class="pill dorm"><span class="d"></span>Built · off</span></h3>
+        <p>Text the <em>caller</em> after the call: an appointment confirmation, a "we got your message" receipt, or a missed-call text-back. <strong>Fully coded, but there's no dashboard toggle to turn it on yet</strong>, so it stays dormant until that switch is added (it's on the fix list).</p>
+        <span class="trigger">needs the settings toggle wired</span>
+      </div></div>
+      <div class="card"><div class="ic">◔</div><div>
+        <h3>Spam handling <span class="pill live"><span class="d"></span>Live</span></h3>
+        <p>A call that connects but no one ever speaks, and ends in under 8 seconds, is marked spam — it skips the AI summary (saves cost) and is flagged in the call list.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <section id="arch">
+    <p class="snum">07</p><h2>The two apps & the database</h2>
+    <p class="lede">Everything is these three boxes. The voice server and the dashboard never talk to each other directly — they meet in the database.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'monospace','primaryColor':'#E4F1F0','primaryBorderColor':'#0D6B67','primaryTextColor':'#131C1A','lineColor':'#7d928d','clusterBkg':'#FAFBFB','clusterBorder':'#E0E6E3'}}}%%
+flowchart TB
+  subgraph PHONE[" Phone side "]
+    TW["Twilio<br/>(numbers, calls, SMS)"]
+    VS["Voice Server<br/>server.js + lib/voice/*"]
+    TW <--> VS
+  end
+  subgraph AIP[" AI providers "]
+    DG["Deepgram<br/>speech→text"]
+    GM["Gemini<br/>the brain"]
+    EL["ElevenLabs<br/>text→voice"]
+  end
+  VS --> DG & GM & EL
+  DB[("Supabase<br/>businesses · calls · transcripts<br/>appointments · messages · FAQ")]
+  VS --> DB
+  subgraph WEB[" Web side "]
+    DASH["Dashboard Backend<br/>settings, calls, calendar API"]
+    FE["Dashboard Frontend<br/>what the owner sees"]
+    FE <--> DASH
+  end
+  DASH --> DB
+  OWNER(["Business owner"]) --> FE
+      </pre>
+    </div>
+    <p><strong>Voice server</strong> (the root project) — answers calls, runs the whole listen-think-speak loop, writes call data. This is what you run with <code>node server.js</code>. <strong>Dashboard</strong> (in <code>AI-phone-dashboard/</code>) — a separate web app where a business sets its greeting, hours, FAQ, which tasks are on, its voice, and reads its calls, messages, and analytics. <strong>Supabase</strong> — the shared Postgres database both write to.</p>
+    <div class="db">
+      <div class="row"><b>businesses</b><span>one row per receptionist — name, number, hours, greeting, tasks, voice, custom rules, notification settings</span></div>
+      <div class="row"><b>calls</b><span>every call — caller, times, duration, summary, sentiment, outcome</span></div>
+      <div class="row"><b>call_transcripts</b><span>every spoken line, caller and AI, in order</span></div>
+      <div class="row"><b>appointments</b><span>bookings, with a uniqueness guard so one slot can't double-book</span></div>
+      <div class="row"><b>customer_requests</b><span>messages & callback requests the AI took</span></div>
+      <div class="row"><b>business_knowledge</b><span>the FAQ / Q&amp;A the AI answers from</span></div>
+      <div class="row"><b>integrations · calendar_connections · oauth_states</b><span>webhook/EHR configs and Google Calendar tokens</span></div>
+    </div>
+    <div class="note"><b>Getting a number:</b> during onboarding, the dashboard asks the voice server to buy a Twilio number and wire its webhooks automatically, then saves it on the business row. That's the one time the two apps talk — through a small API on the voice server.</div>
+  </section>
+
+  <section id="not">
+    <p class="snum">08</p><h2>What's not built — so you're not surprised</h2>
+    <p class="lede">Being straight about the edges of the system.</p>
+    <div class="cards">
+      <div class="card"><div class="ic">📵</div><div>
+        <h3>Outbound calls <span class="pill off"><span class="d"></span>Not built</span></h3>
+        <p>The receptionist only <em>answers</em> calls. It never places one on its own. The only "outward" actions are transferring a caller who's already on the line, and sending SMS. There's no outbound campaign / reminder-call system.</p>
+      </div></div>
+      <div class="card"><div class="ic">📅</div><div>
+        <h3>Real-time Google Calendar <span class="pill dorm"><span class="d"></span>Manual only</span></h3>
+        <p>Phone bookings write to the database. They only appear in the owner's Google Calendar when someone clicks "sync" in the dashboard — not automatically. A decision to make, not a bug.</p>
+      </div></div>
+      <div class="card"><div class="ic">🌐</div><div>
+        <h3>Multilingual scripts <span class="pill dorm"><span class="d"></span>Partial</span></h3>
+        <p>The AI can understand and answer in other languages, but the fixed lines (greeting, nudges, goodbye, the whole brain-down script) are English-only. A Spanish caller hears English at those moments.</p>
+      </div></div>
+      <div class="card"><div class="ic">⚙</div><div>
+        <h3>Integrations & SMS UI <span class="pill dorm"><span class="d"></span>No screen</span></h3>
+        <p>Webhook/EHR integrations and caller SMS follow-up work in code but have no dashboard screen to turn on — so they're effectively off until those settings are added.</p>
+      </div></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  VetraTD · AI Receptionist · voice pipeline v2 — status reflects branch <code>feat/voice-v2</code> as built.
+</footer>
+
+<script>
+  // theme-adaptive mermaid: re-init on theme change so diagram text stays legible
+  (function(){
+    function isDark(){
+      const t=document.documentElement.getAttribute('data-theme');
+      if(t) return t==='dark';
+      return window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches;
+    }
+    // mermaid renders islands of light on both grounds; the initup theme in each block
+    // uses light fills with dark text, which reads on either page background.
+  })();
+</script>

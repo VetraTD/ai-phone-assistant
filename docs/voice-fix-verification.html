@@ -1,0 +1,568 @@
+<title>Voice Fix Verification — feat/voice-v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ground:#F5F7F6; --surface:#FFFFFF; --surface-2:#FBFCFC;
+    --ink:#141D1B; --muted:#57655F; --faint:#869590; --hair:#E1E7E4;
+    --accent:#0D6B67; --accent-ink:#0A4F4C; --accent-wash:#E8F1F0;
+    --pass:#1C7C46; --warn:#9A6410; --crit:#B42318; --was:#8A5A54;
+    --pass-bg:#E7F3EC; --warn-bg:#F6EEDD; --crit-bg:#F8E7E4; --was-bg:#F5EAE8;
+    --shadow:0 1px 2px rgba(20,29,27,.04),0 8px 24px -12px rgba(20,29,27,.10);
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
+    --sans:"Helvetica Neue","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0D1312; --surface:#141C1B; --surface-2:#111817;
+      --ink:#E8EDEB; --muted:#93A29D; --faint:#5E6E69; --hair:#25302D;
+      --accent:#39A9A2; --accent-ink:#8FD6D1; --accent-wash:#15292A;
+      --pass:#5BC585; --warn:#E0A94A; --crit:#F08B7E; --was:#C79A93;
+      --pass-bg:#12241A; --warn-bg:#241E11; --crit-bg:#2A1613; --was-bg:#251A18;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F5F7F6; --surface:#FFFFFF; --surface-2:#FBFCFC;
+    --ink:#141D1B; --muted:#57655F; --faint:#869590; --hair:#E1E7E4;
+    --accent:#0D6B67; --accent-ink:#0A4F4C; --accent-wash:#E8F1F0;
+    --pass:#1C7C46; --warn:#9A6410; --crit:#B42318; --was:#8A5A54;
+    --pass-bg:#E7F3EC; --warn-bg:#F6EEDD; --crit-bg:#F8E7E4; --was-bg:#F5EAE8;
+    --shadow:0 1px 2px rgba(20,29,27,.04),0 8px 24px -12px rgba(20,29,27,.10);
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1312; --surface:#141C1B; --surface-2:#111817;
+    --ink:#E8EDEB; --muted:#93A29D; --faint:#5E6E69; --hair:#25302D;
+    --accent:#39A9A2; --accent-ink:#8FD6D1; --accent-wash:#15292A;
+    --pass:#5BC585; --warn:#E0A94A; --crit:#F08B7E; --was:#C79A93;
+    --pass-bg:#12241A; --warn-bg:#241E11; --crit-bg:#2A1613; --was-bg:#251A18;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+       font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:0 20px}
+
+  /* ---- header ---- */
+  .top{background:var(--surface);border-bottom:1px solid var(--hair);padding:34px 0 20px}
+  .head-inner{max-width:920px;margin:0 auto;padding:0 20px}
+  .eyebrow{display:flex;align-items:center;gap:8px;margin:0 0 10px;
+           font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+           color:var(--accent);font-weight:600}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+  h1{margin:0 0 10px;font-size:clamp(26px,4.4vw,38px);line-height:1.12;
+     letter-spacing:-.022em;font-weight:650;text-wrap:balance}
+  .sub{margin:0 0 20px;color:var(--muted);font-size:15.5px;max-width:66ch}
+  .sub b{color:var(--ink);font-weight:600}
+
+  .progwrap{display:flex;align-items:center;gap:12px;margin:0 0 16px}
+  .progbar{flex:1;height:6px;border-radius:3px;background:var(--hair);overflow:hidden}
+  .progfill{height:100%;width:0;background:var(--accent);border-radius:3px;
+            transition:width .25s ease}
+  .progtxt{font-family:var(--mono);font-size:12px;color:var(--muted);
+           font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  .filters{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
+        border:1px solid var(--hair);border-radius:999px;background:var(--surface-2);
+        color:var(--muted);font-family:var(--sans);font-size:12.5px;font-weight:550;
+        cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+  .chip:hover{border-color:var(--accent);color:var(--ink)}
+  .chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .chip[aria-pressed="true"]{background:var(--accent-wash);border-color:var(--accent);
+                             color:var(--accent-ink);font-weight:650}
+  .chip .sw{width:8px;height:8px;border-radius:2px;flex:none}
+  .chip.reset{margin-left:auto;color:var(--faint)}
+
+  /* ---- intro ---- */
+  .intro{background:var(--surface);border:1px solid var(--hair);border-radius:12px;
+         padding:18px 20px;margin:26px 0 30px;box-shadow:var(--shadow)}
+  .intro p{margin:0 0 12px;font-size:14.5px;color:var(--muted);max-width:70ch}
+  .intro p:last-of-type{margin-bottom:14px}
+  .intro strong{color:var(--ink)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 18px;padding-top:13px;
+          border-top:1px solid var(--hair);font-size:12.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+
+  /* ---- category ---- */
+  .cat{margin:0 0 34px}
+  .cat-head{display:flex;align-items:baseline;gap:11px;margin:0 0 5px}
+  .cat-num{font-family:var(--mono);font-size:12px;color:var(--accent);
+           font-weight:600;letter-spacing:.04em}
+  .cat-head h2{margin:0;font-size:19px;letter-spacing:-.014em;font-weight:640;flex:1}
+  .cat-count{font-family:var(--mono);font-size:11.5px;color:var(--faint);
+             font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cat-desc{margin:0 0 14px;color:var(--muted);font-size:14px;max-width:72ch}
+
+  .tests{display:flex;flex-direction:column;gap:9px}
+
+  /* ---- test card ---- */
+  .test{display:flex;background:var(--surface);border:1px solid var(--hair);
+        border-radius:10px;overflow:hidden;box-shadow:var(--shadow);
+        transition:opacity .18s,border-color .18s}
+  .stripe{width:3px;flex:none;background:var(--faint)}
+  .test.crit .stripe{background:var(--crit)}
+  .test.major .stripe{background:var(--warn)}
+  .test.minor .stripe{background:var(--faint)}
+  .test.done{opacity:.5}
+  .test.done .say{text-decoration:line-through;text-decoration-color:var(--faint)}
+  .tbody{flex:1;padding:13px 15px;min-width:0}
+
+  .test-top{display:flex;gap:11px;align-items:flex-start}
+  .cbx{appearance:none;-webkit-appearance:none;width:19px;height:19px;flex:none;
+       margin:1px 0 0;border:1.5px solid var(--hair);border-radius:5px;
+       background:var(--surface-2);cursor:pointer;position:relative;
+       transition:background .15s,border-color .15s}
+  .cbx:hover{border-color:var(--accent)}
+  .cbx:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .cbx:checked{background:var(--accent);border-color:var(--accent)}
+  .cbx:checked::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;
+                      border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+  .test-main{flex:1;min-width:0}
+  .say{font-size:14.8px;line-height:1.5;color:var(--ink)}
+  .say .q{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+          color:var(--accent);font-weight:600;margin-right:2px}
+  .say code{font-family:var(--mono);font-size:13px;background:var(--surface-2);
+            border:1px solid var(--hair);border-radius:4px;padding:1px 5px}
+
+  .tagrow{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .tag{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10.5px;
+       font-weight:650;letter-spacing:.055em;text-transform:uppercase;
+       font-family:var(--sans)}
+  .tag.crit{background:var(--crit-bg);color:var(--crit)}
+  .tag.major{background:var(--warn-bg);color:var(--warn)}
+  .tag.minor{background:var(--surface-2);color:var(--faint);border:1px solid var(--hair)}
+  .tag.fix{background:var(--accent-wash);color:var(--accent-ink)}
+  .tag.guard{background:var(--surface-2);color:var(--muted);border:1px solid var(--hair)}
+  .tag.pass{background:var(--pass-bg);color:var(--pass)}
+
+  .pass,.was,.look{margin-top:9px;padding:8px 11px;border-radius:7px;
+                   font-size:13.8px;line-height:1.5}
+  .pass{background:var(--pass-bg);color:var(--ink)}
+  .pass b{color:var(--pass);font-weight:650;margin-right:7px;
+          font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+  .was{background:var(--was-bg);color:var(--muted)}
+  .was b{color:var(--was);font-weight:650;margin-right:7px;
+         font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+  .look{background:var(--surface-2);border:1px solid var(--hair);color:var(--muted);
+        font-size:13.2px}
+  .look b{color:var(--faint);font-weight:650;margin-right:7px;
+          font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+  .look code,.pass code,.was code{font-family:var(--mono);font-size:12.4px;
+        background:var(--surface);border:1px solid var(--hair);border-radius:4px;
+        padding:1px 5px;white-space:nowrap}
+
+  .empty{display:none;text-align:center;color:var(--faint);padding:30px 0;font-size:14px}
+
+  footer{border-top:1px solid var(--hair);margin-top:12px;padding:20px 0 44px;
+         color:var(--faint);font-size:13px;line-height:1.7}
+  footer code{font-family:var(--mono);font-size:12.4px}
+
+  @media (max-width:560px){
+    .chip.reset{margin-left:0}
+    .cat-count{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none!important}
+  }
+</style>
+
+<header class="top">
+  <div class="head-inner">
+    <p class="eyebrow"><span class="dot"></span>Post-fix verification · feat/voice-v2</p>
+    <h1>What to test now</h1>
+    <p class="sub">Every issue you found in testing is fixed across 5 commits. This is the list that proves it — each item names <b>what you should hear now</b> and <b>what it did before</b>, so a failure is unambiguous. Work top to bottom; the setup section is not optional.</p>
+    <div class="progwrap">
+      <div class="progbar"><div class="progfill" id="fill"></div></div>
+      <span class="progtxt" id="ptxt">0 / 0</span>
+    </div>
+    <div class="filters" id="filters">
+      <button class="chip" data-f="all" aria-pressed="true">All</button>
+      <button class="chip" data-f="crit" aria-pressed="false"><span class="sw" style="background:var(--crit)"></span>Must pass</button>
+      <button class="chip" data-f="major" aria-pressed="false"><span class="sw" style="background:var(--warn)"></span>Should pass</button>
+      <button class="chip" data-f="fix" aria-pressed="false">Verifies a fix</button>
+      <button class="chip" data-f="guard" aria-pressed="false">Didn't break</button>
+      <button class="chip" data-f="open" aria-pressed="false">Unchecked</button>
+      <button class="chip reset" id="reset">Reset</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="intro">
+    <p><strong>How to read an item.</strong> The <span style="font-family:var(--mono);color:var(--accent)">mono label</span> tells you whether to say something, do something, or check something. <span class="tag pass">Pass</span> is the new correct behavior. <span class="tag" style="background:var(--was-bg);color:var(--was)">Was</span> is the bug you reported — if you see that again, the fix didn't take. The grey line tells you exactly where to look when something fails.</p>
+    <p><strong>Method.</strong> Short calls, one section at a time — a marathon call makes failures impossible to isolate. Keep the server window visible. Test the barge-in section twice: once on a handset held to your ear, once on speakerphone, because speakerphone echo is a completely different problem. Note the item number of anything that fails and what you actually heard.</p>
+    <div class="legend">
+      <span><span class="tag crit">Must pass</span> the fix is broken if this fails</span>
+      <span><span class="tag major">Should pass</span> quality regression</span>
+      <span><span class="tag fix">Verifies a fix</span> from this round</span>
+      <span><span class="tag guard">Didn't break</span> worked before, confirm still works</span>
+    </div>
+  </div>
+
+  <div id="cats"></div>
+  <p class="empty" id="empty">Nothing matches this filter.</p>
+</main>
+
+<footer class="wrap">
+  VetraTD · voice pipeline v2 · commits <code>768e0d4 … 43b4988</code> · progress saves in this browser only.<br>
+  Send back: the numbers that failed, what you actually heard, the <code>/api/debug/latency</code> JSON, and any red lines from the server.
+</footer>
+
+<script>
+const T = [
+  // ---- 00 SETUP ----
+  {cat:0, sev:'crit', kind:'fix', do:'DO', say:'Top up ElevenLabs credits and confirm the account has quota.',
+   pass:'Account shows available characters.',
+   was:'Credits ran out mid-test. That single event caused the 2-3s replies, the wrong-accent nudges, and the "Google voice" you heard — testing without credits re-tests the fallback path, not the real one.',
+   look:'If you would rather test the fallback deliberately, do item 09.3 instead — do not test the whole system on an empty account.'},
+  {cat:0, sev:'crit', kind:'guard', do:'DO', say:'Confirm <code>PIPELINE_V2</code> is unset or <code>true</code> in <code>.env</code>.',
+   pass:'v2 pipeline is live — the server logs <code>"pipeline":"v2"</code> on the first call.',
+   was:'', look:'The legacy v1 pipeline deliberately received only 2 of these fixes (transfer regex, ringback). If PIPELINE_V2=false, nearly every item below will fail by design.'},
+  {cat:0, sev:'major', kind:'guard', do:'DO', say:'For this test session only, set <code>DEBUG_ENDPOINTS=true</code> and <code>LOG_LEVEL=DEBUG</code>, then restart the server.',
+   pass:'<code>GET /api/debug/latency</code> returns JSON instead of 404.',
+   was:'', look:'Barge-in and dropped-transcript lines are debug level — at the default INFO you will not see why something was ignored.'},
+  {cat:0, sev:'crit', kind:'guard', do:'DO', say:'Dashboard → Settings → Voice: pick an ElevenLabs voice. Write down whether it is American (Bella, Sarah, Matilda, Eric, Roger, River) or British (Alice, Daniel).',
+   pass:'Voice saved.',
+   was:'', look:'Your choice now drives three things: the AI voice, the Google fallback accent, and the transfer ringback tone (US vs UK). Section 09 checks all three agree.'},
+  {cat:0, sev:'crit', kind:'guard', do:'DO', say:'Dashboard → Settings → Transfer rules: set a transfer number you can answer, policy = <em>always</em>.',
+   pass:'Saved.',
+   was:'', look:'Section 08 needs a phone you can pick up to hear the ringback.'},
+  {cat:0, sev:'major', kind:'guard', do:'DO', say:'Dashboard → Settings → Languages: English only for now.',
+   pass:'Only English checked.',
+   was:'', look:'Section 10 turns Spanish on. Leave it off until then so you are testing one variable.'},
+  {cat:0, sev:'major', kind:'guard', do:'CHECK', say:'Run <code>npm test</code>.',
+   pass:'480 tests pass, 0 fail.',
+   was:'', look:'Baseline. If this is red before you dial, the phone results mean nothing.'},
+  {cat:0, sev:'major', kind:'guard', do:'DO', say:'Restart the server, and open your database to the <code>appointments</code>, <code>customer_requests</code>, and <code>transcripts</code> tables.',
+   pass:'Fresh server, DB visible on a second screen.',
+   was:'', look:'Several items below are only provable in the DB — "it said it booked" is not the same as "it booked".'},
+
+  // ---- 01 LATENCY ----
+  {cat:1, sev:'crit', kind:'fix', do:'SAY', say:'Ask 5–6 ordinary questions in a row — hours, address, parking, what services you offer.',
+   pass:'It starts answering roughly a second after you stop talking, every turn, with no dead gap.',
+   was:'Every reply took 2–3 seconds.',
+   look:'Then hit <code>GET /api/debug/latency</code>: <code>voice_to_voice_ms</code> p50 should sit comfortably under 2000. If it does not, send me that JSON before changing anything.'},
+  {cat:1, sev:'major', kind:'fix', do:'LISTEN', say:'During those turns, listen for a "One moment." filler.',
+   pass:'You never hear it on a normal turn — it only fires when the model genuinely takes over 2 seconds.',
+   was:'Filler fired constantly because every turn was slow.',
+   look:'Frequent fillers now mean the model itself is slow, not the voice stack. Worth telling me.'},
+  {cat:1, sev:'crit', kind:'fix', do:'CHECK', say:'In that same <code>/api/debug/latency</code> response, look at <code>elBreaker</code>.',
+   pass:'<code>{"open":false}</code> for the whole session.',
+   was:'No such signal existed — a dead ElevenLabs was invisible and cost 3 seconds per turn forever.',
+   look:'If <code>open:true</code> with reason <code>quota_or_auth</code>, your credits are out again and every voice test below is invalid.'},
+
+  // ---- 02 SILENCE ----
+  {cat:2, sev:'crit', kind:'fix', do:'DO', say:'Let it greet you, then say absolutely nothing.',
+   pass:'A nudge at about 6 seconds, a second nudge at about 12, a goodbye and hang-up at about 20.',
+   was:'Roughly 30 seconds of complete dead air.',
+   look:'Server log: <code>silence_nudge</code> with <code>nudgeNumber:1</code> then <code>2</code>, then <code>silence_hangup</code>. No nudge line at all means the timer was orphaned — that is the exact bug that was fixed.'},
+  {cat:2, sev:'crit', kind:'fix', do:'LISTEN', say:'Listen closely to the voice of those nudges.',
+   pass:'Identical voice to the greeting — same person, same accent.',
+   was:'Nudges came back in a British Google voice, totally different from the call.',
+   look:'A different voice now means ElevenLabs failed mid-call. Check <code>elBreaker</code> and the <code>tts_fallback</code> log line.'},
+  {cat:2, sev:'crit', kind:'fix', do:'SAY', say:'Interrupt it mid-sentence with "wait" — then stay completely silent.',
+   pass:'It stops immediately, and a nudge arrives within about 10 seconds.',
+   was:'It stopped, then nothing ever happened again. The call was dead until you hung up.',
+   look:'This was the single worst hang: the interrupt cleared the silence timer and nothing re-armed it. Log should show <code>barge_in</code> followed later by <code>silence_nudge</code>.'},
+  {cat:2, sev:'major', kind:'fix', do:'DO', say:'While it talks, cough or say just "um", then go silent.',
+   pass:'It keeps its composure and a nudge still comes.',
+   was:'Same orphaned-timer hang as above.',
+   look:'Log: <code>transcript_discarded reason:filler_only</code>, then a <code>silence_nudge</code>. The discard is correct; the nudge is the fix.'},
+  {cat:2, sev:'minor', kind:'guard', do:'DO', say:'Start booking, then go silent in the middle of giving details.',
+   pass:'Nudges here are slower — about 10s, 18s, then hang up at 28s.',
+   was:'', look:'That is intentional: a caller checking a calendar deserves more room than a caller who has said nothing at all. Not a bug.'},
+
+  // ---- 03 BARGE-IN ----
+  {cat:3, sev:'crit', kind:'fix', do:'SAY', say:'While it is talking, say "mm-hmm". Then on the next turn "mm". Then "hmm". Then "uh-huh", "yeah", "okay", "right".',
+   pass:'It keeps talking through every one of them. No pause, no stutter.',
+   was:'"mm-hmm" made it pause, but "yeah" and "uh-huh" were fine — inconsistent and confusing.',
+   look:'The cause was speech-to-text writing that sound as "mm" or "hmm", spellings the ignore-list did not have. If a new one still stops it, tell me the exact word — the fix is one line.'},
+  {cat:3, sev:'crit', kind:'guard', do:'SAY', say:'While it is talking, say "wait". Then on another call, "hold on". Then "stop".',
+   pass:'Stops within about half a second, every time.',
+   was:'', look:'These must stay instant — the backchannel work must not have made real interruptions sluggish.'},
+  {cat:3, sev:'crit', kind:'fix', do:'DO', say:'Repeat both tests above on <em>speakerphone</em>, in a room with some noise.',
+   pass:'Still stops for you, and never interrupts itself by hearing its own voice.',
+   was:'', look:'Speakerphone echo is the hardest case and the most likely thing to still need tuning. If it talks over itself here, that is the highest-value failure you can report.'},
+  {cat:3, sev:'crit', kind:'fix', do:'SAY', say:'"I need to book an appointment for…" — pause a full 2–3 seconds as if thinking — "…Thursday."',
+   pass:'It waits through the pause and responds to the whole request once.',
+   was:'It jumped in during the pause, then cut itself off when it realized you were not done.',
+   look:'It now recognizes a trailing lead-in as unfinished and holds briefly. Crucially this costs a normal, complete sentence nothing — confirm section 01 still feels fast.'},
+  {cat:3, sev:'major', kind:'fix', do:'SAY', say:'"My name is…" [pause 2s] "…Jason." And separately: "The number is…" [pause] "…817…"',
+   pass:'Waits both times.',
+   was:'Cut in on the pause.',
+   look:'These specific lead-ins ("my name is", "the number is", "I\'d like", "how about") are now treated as mid-thought.'},
+  {cat:3, sev:'crit', kind:'guard', do:'SAY', say:'Read a 10-digit number slowly with gaps: "eight one seven … five five five … one two one two".',
+   pass:'Waits for all ten digits, then reads them back.',
+   was:'', look:'Classic failure — answering after the first group. Should be unaffected but it is worth re-proving after endpointing changes.'},
+
+  // ---- 04 SHORT ANSWERS ----
+  {cat:4, sev:'crit', kind:'fix', do:'SAY', say:'Get it to ask a yes/no question, then answer with just "no". Nothing else.',
+   pass:'It acts on the "no" immediately.',
+   was:'Completely ignored. Silence, then eventually a nudge.',
+   look:'Anything under two words was being thrown away as a misfire. Log: you should NOT see <code>transcript_discarded</code> for this.'},
+  {cat:4, sev:'crit', kind:'fix', do:'SAY', say:'When it asks morning or afternoon, answer with the single word "morning".',
+   pass:'Picks the morning slot and moves on.',
+   was:'Ignored.', look:''},
+  {cat:4, sev:'crit', kind:'fix', do:'SAY', say:'When it asks a question with a numeric answer, reply with one number only — "three".',
+   pass:'Picked up. It may wait about a second first in case more digits are coming, then act.',
+   was:'Single numbers were dropped entirely.',
+   look:'That one-second pause is deliberate — it is how a partly-spoken phone number is kept together. If it waits and then still does nothing, that is a failure.'},
+  {cat:4, sev:'major', kind:'guard', do:'SAY', say:'Answer a booking confirmation with just "yes".',
+   pass:'Books it.',
+   was:'', look:'Confirms the short-answer fix reaches the tool path, not just chat.'},
+  {cat:4, sev:'minor', kind:'guard', do:'SAY', say:'Answer a question with just "okay" or just "um".',
+   pass:'It does not treat these as an answer — it waits or re-asks.',
+   was:'', look:'Correct by design: pure filler is still discarded. Only meaningful short words got un-blocked.'},
+
+  // ---- 05 BOOKING ----
+  {cat:5, sev:'crit', kind:'fix', do:'SAY', say:'Book an appointment end to end. Let it finish confirming.',
+   pass:'It says booked, and stops. No "there was an error booking", no "that time is already booked" afterwards.',
+   was:'It said it booked, then immediately claimed an error or that the slot was taken — while the row sat in the database perfectly fine.',
+   look:'Check the DB: exactly ONE row in <code>appointments</code>. Two rows, or an error message with a row present, means the fix failed.'},
+  {cat:5, sev:'crit', kind:'fix', do:'SAY', say:'Right after it confirms, ask "sorry, is that actually booked?"',
+   pass:'It confirms the same appointment calmly. It does not re-book, and it does not deny it.',
+   was:'It forgot the booking had happened and could contradict itself.',
+   look:'The booking is now written into the conversation memory as a note the model trusts. In the DB there must still be only ONE row.'},
+  {cat:5, sev:'crit', kind:'fix', do:'DO', say:'Book something, then interrupt it deliberately while it is speaking the confirmation — talk over it with "actually—".',
+   pass:'The appointment still exists, it still knows about it on the next turn, and you still get the confirmation text message.',
+   was:'Interrupting at that exact moment silently lost everything except the database row — so the next turn it would try to book again and hit an error.',
+   look:'Server log: <code>turn_effects_salvaged</code>. This is the subtlest fix in the batch and worth doing twice.'},
+  {cat:5, sev:'crit', kind:'fix', do:'SAY', say:'In one call, book a slot, then say "actually cancel that", then say "you know what, book me back in for that same time".',
+   pass:'The re-booking is real — a new active row appears in the database.',
+   was:'It would wrongly reply "that is already booked" and create nothing, leaving you with a cancelled appointment and a false confirmation.',
+   look:'DB: the first row shows <code>cancelled</code>, and a second active row exists for the same slot. One cancelled row and nothing else is a failure.'},
+  {cat:5, sev:'major', kind:'guard', do:'SAY', say:'Try to book a date in the past, a day you are closed, and 3am.',
+   pass:'Refused each time, with a real alternative offered.',
+   was:'', look:'Existing guard. Re-prove it — the booking path changed underneath it.'},
+  {cat:5, sev:'major', kind:'guard', do:'DO', say:'Book a slot, hang up, call back, book the exact same slot.',
+   pass:'Second attempt is refused as unavailable.',
+   was:'', look:'Different from the same-call case above: across calls the database guard is what must catch it, and the caller should hear a genuine "pick another time".'},
+
+  // ---- 06 NAMES ----
+  {cat:6, sev:'crit', kind:'fix', do:'SAY', say:'Book under the name "Jason Nguyen". Do not spell it unless asked.',
+   pass:'It repeats the name back to you, and asks you to spell it because Nguyen is unusual.',
+   was:'It silently stored "Jason Winn" and never checked.',
+   look:'Check <code>client_name</code> in the database afterwards. A wrong name that was never confirmed is the failure; a wrong name it asked about and you corrected is a success.'},
+  {cat:6, sev:'major', kind:'fix', do:'SAY', say:'Book under a plain name — "John Smith".',
+   pass:'It repeats it back naturally in conversation but does NOT make you spell it.',
+   was:'', look:'The point of the fix is confirmation without friction. If it spells every name letter by letter, that is over-correction — tell me.'},
+  {cat:6, sev:'major', kind:'fix', do:'SAY', say:'Mumble an unusual name deliberately.',
+   pass:'Asks you to spell it, then reads the spelling back.',
+   was:'Guessed silently.', look:''},
+
+  // ---- 07 CANCEL / RESCHEDULE ----
+  {cat:7, sev:'crit', kind:'fix', do:'SAY', say:'From the same phone the appointment is booked under, call and say "I need to cancel my appointment".',
+   pass:'It finds it, confirms which one, cancels. It never asks for the last four digits of your number.',
+   was:'It knew who you were, then asked you to confirm your number anyway, then went in circles forever and never completed anything.',
+   look:'DB: status becomes <code>cancelled</code>. Log: <code>tool_result cancel_appointment_db success:true</code> followed by <code>step_transition toStep:confirm</code>. A missing step_transition is what caused the loop.'},
+  {cat:7, sev:'crit', kind:'fix', do:'SAY', say:'Same thing for a reschedule — "can I move my Thursday appointment to Friday?"',
+   pass:'Moves it, confirms the new time, no identity interrogation.',
+   was:'Endless back-and-forth confirming it was really your appointment.',
+   look:'DB: <code>scheduled_at</code> actually updated on the same row.'},
+  {cat:7, sev:'crit', kind:'fix', do:'SAY', say:'After it cancels, say "no that\'s all, thanks".',
+   pass:'It says goodbye and hangs up cleanly.',
+   was:'It could refuse to end the call because the conversation state never advanced past "gathering details".',
+   look:''},
+  {cat:7, sev:'major', kind:'fix', do:'SAY', say:'In one call: cancel an appointment, then ask to book a new one.',
+   pass:'It never re-challenges who you are.',
+   was:'Identity was re-checked from scratch on every action.',
+   look:'Once you are verified on a call, you stay verified for that appointment.'},
+  {cat:7, sev:'crit', kind:'guard', do:'SAY', say:'From a DIFFERENT phone, give only the name on the booking and ask to cancel.',
+   pass:'It asks for the last four digits of the number the appointment is under — once — then proceeds.',
+   was:'', look:'The security check must still exist. Asking repeatedly is the old bug; never asking is a security hole. Exactly once is correct.'},
+  {cat:7, sev:'crit', kind:'guard', do:'SAY', say:'From that different phone, give the WRONG last four digits.',
+   pass:'Refused. Nothing changes in the database.',
+   was:'', look:'Non-negotiable — this is what stops a stranger cancelling someone else\'s appointment.'},
+
+  // ---- 08 TRANSFER & DISCLOSURE ----
+  {cat:8, sev:'crit', kind:'fix', do:'SAY', say:'"Are you a real person or a robot?"',
+   pass:'It tells you honestly that it is the AI assistant, says what it can do, and carries on helping. It does NOT transfer you.',
+   was:'It transferred the call instantly without answering.',
+   look:'The phrase "real person" was matching a transfer trigger before the AI ever saw your question.'},
+  {cat:8, sev:'crit', kind:'fix', do:'SAY', say:'"Am I talking to a human?" and "Is this a bot?"',
+   pass:'Same honest answer, still no transfer.',
+   was:'"Human" also force-transferred.', look:''},
+  {cat:8, sev:'crit', kind:'guard', do:'SAY', say:'"Can I speak to a person please?" Then on another call, "get me the manager".',
+   pass:'Transfers, both times.',
+   was:'', look:'Narrowing the trigger must not have broken real transfer requests. If either fails to transfer, tell me the exact wording.'},
+  {cat:8, sev:'crit', kind:'fix', do:'LISTEN', say:'During that transfer, listen between "transferring you now" and the person answering.',
+   pass:'You hear a normal ringing tone.',
+   was:'Total silence — callers assumed the call had dropped.',
+   look:'If it is still silent, check the log line <code>transfer_outcome success:true</code> and tell me; the ring tone is a one-word attribute.'},
+  {cat:8, sev:'major', kind:'fix', do:'CHECK', say:'Look at the phone that receives the transfer.',
+   pass:'It shows the original caller\'s number.',
+   was:'Showed nothing useful.',
+   look:'Lets whoever picks up call back if the transfer drops.'},
+  {cat:8, sev:'major', kind:'guard', do:'DO', say:'Set transfer policy to "never" in the dashboard, then ask for a person.',
+   pass:'It says it cannot transfer and offers to take a message instead. Remember to set the policy back.',
+   was:'', look:''},
+
+  // ---- 09 VOICE & ACCENT ----
+  {cat:9, sev:'crit', kind:'fix', do:'LISTEN', say:'With an American voice selected, listen across a whole call — greeting, a nudge, the "one moment" filler, the goodbye.',
+   pass:'Every single line is the same American voice.',
+   was:'Nudges and fillers came out in a British Google voice mid-call.',
+   look:'Any accent change mid-call is a failure worth reporting immediately.'},
+  {cat:9, sev:'major', kind:'fix', do:'DO', say:'Switch the voice to Alice or Daniel (British) and call again.',
+   pass:'The whole call is British — and the transfer ringback becomes the UK ring tone.',
+   was:'The fallback voice was always British regardless, so an American business would flip accents.',
+   look:'The ringback tone following the voice is the tell that locale is wired end to end.'},
+  {cat:9, sev:'major', kind:'fix', do:'DO', say:'Deliberately break ElevenLabs: put a junk value in <code>ELEVENLABS_API_KEY</code>, restart, and make a call.',
+   pass:'The call still works in a Google voice matching your chosen accent. The first turn is slow; every turn after it is fast.',
+   was:'Every turn stayed slow, forever, because it retried ElevenLabs each time.',
+   look:'Log: <code>tts_el_breaker_open</code> once, then <code>tts_el_skipped_breaker_open</code> on later turns. Put your real key back afterwards.'},
+  {cat:9, sev:'minor', kind:'guard', do:'DO', say:'Restore the real key, restart, call again.',
+   pass:'Back to the ElevenLabs voice on the first turn.',
+   was:'', look:'Confirms the breaker resets and does not strand you on the fallback.'},
+
+  // ---- 10 SPANISH ----
+  {cat:10, sev:'crit', kind:'fix', do:'DO', say:'Dashboard → Settings → Languages: check Spanish, uncheck English. Save, then call.',
+   pass:'It greets you in Spanish and holds the whole conversation in Spanish.',
+   was:'Spanish never worked — the language code sent to speech recognition was invalid, so it silently failed.',
+   look:'This is the answer to "how do I enable Spanish": that checkbox, nothing else. If the greeting is English, tell me — that means the config is not reaching the call.'},
+  {cat:10, sev:'crit', kind:'fix', do:'DO', say:'On that Spanish call, go silent and wait.',
+   pass:'The nudges and the goodbye are in Spanish too.',
+   was:'', look:'Every fixed line was translated, not just the greeting. An English nudge on a Spanish call is a miss — tell me which line.'},
+  {cat:10, sev:'crit', kind:'fix', do:'SAY', say:'Book an appointment entirely in Spanish.',
+   pass:'Books correctly; the row appears in the database with your name.',
+   was:'', look:'Proves Spanish reaches the tools, not just the small talk.'},
+  {cat:10, sev:'major', kind:'fix', do:'DO', say:'Now check BOTH English and Spanish. Call, start in English, then switch to Spanish mid-sentence.',
+   pass:'It follows you into Spanish and stays there.',
+   was:'', look:'With two languages it auto-detects per utterance; with one it commits to that language.'},
+  {cat:10, sev:'minor', kind:'guard', do:'CHECK', say:'Known gap, no action needed — verify you can live with it.',
+   pass:'If the AI brain fails twice on a Spanish call, the emergency "let me take a message" script is still English.',
+   was:'', look:'Rare path. Tell me if you want it translated and it is a small job.'},
+
+  // ---- 11 REGRESSION ----
+  {cat:11, sev:'crit', kind:'guard', do:'SAY', say:'Leave a message: name, callback number, reason.',
+   pass:'Asks name, reads the number back digit by digit, asks the reason, asks if it is urgent, promises a callback. Row lands in <code>customer_requests</code>.',
+   was:'', look:'This path shares the short-answer and turn-taking code that changed — re-prove it end to end.'},
+  {cat:11, sev:'major', kind:'guard', do:'SAY', say:'Ask your hours, your address, and a question you put in the knowledge base.',
+   pass:'Correct answers, no invention.',
+   was:'', look:''},
+  {cat:11, sev:'crit', kind:'guard', do:'SAY', say:'"I\'m having chest pain."',
+   pass:'Immediately tells you to call 911 — does not try to book you.',
+   was:'', look:'Safety rule. Must survive every prompt change.'},
+  {cat:11, sev:'major', kind:'guard', do:'SAY', say:'Ask the price of something.',
+   pass:'Declines to quote, offers a callback with a real answer.',
+   was:'', look:'The prompt gained several new rules this round; confirm none of them loosened this.'},
+  {cat:11, sev:'major', kind:'guard', do:'DO', say:'Make two calls back to back from the same number.',
+   pass:'The second call does not remember the first call\'s booking as if it just happened.',
+   was:'', look:'Booking memory is deliberately per-call. It may still greet you as a returning caller — that is different and correct.'},
+  {cat:11, sev:'minor', kind:'guard', do:'CHECK', say:'After the batch, run <code>npm test</code> once more.',
+   pass:'Still 480 passing.',
+   was:'', look:'Catches anything you changed in settings or env that broke an assumption.'},
+];
+
+const CATS = [
+  {n:'00', title:'Before you dial', desc:'Not phone calls — setup. Skipping these means testing the wrong build or the wrong voice path, and every result below becomes meaningless.'},
+  {n:'01', title:'Speed', desc:'Your first complaint. Most of the 2-3s was ElevenLabs being retried on every turn after your credits ran out.'},
+  {n:'02', title:'Silence and nudges', desc:'The 30-second dead air, and the worse version of it: saying "wait" and never hearing from it again.'},
+  {n:'03', title:'Interrupting and being interrupted', desc:'Backchannels that should not stop it, interruptions that should, and thinking pauses it must sit through. Do this section twice — handset, then speakerphone.'},
+  {n:'04', title:'Short answers', desc:'"No." "Morning." "Three." Everything under two words was being silently thrown away.'},
+  {n:'05', title:'Booking', desc:'The "it booked, then said it failed" bug, plus the two subtler variants found in review. The database is the referee here, not what you heard.'},
+  {n:'06', title:'Getting your name right', desc:'Jason Nguyen became Jason Winn with no confirmation. The fix has to catch that without making every caller spell their name.'},
+  {n:'07', title:'Cancel and reschedule', desc:'The circles. It knew who you were from your number and still could not act on it. Security must survive the fix.'},
+  {n:'08', title:'Transfer and "are you a robot?"', desc:'Asking what it is should get an honest answer, not a transfer. Asking for a person should get a transfer, with a ring you can hear.'},
+  {n:'09', title:'Voice and accent', desc:'One voice for the whole call, matched to your business, including when ElevenLabs is down.'},
+  {n:'10', title:'Spanish', desc:'You asked how to turn it on: it is one checkbox — which was silently broken until now.'},
+  {n:'11', title:'Things that already worked', desc:'The prompt, the turn-taking, and the booking path all changed underneath these. Confirm nothing regressed.'},
+];
+
+// ---- render ----
+const root = document.getElementById('cats');
+CATS.forEach((c,ci)=>{
+  const tests = T.filter(t=>t.cat===ci);
+  if(!tests.length) return;
+  const sec = document.createElement('section');
+  sec.className='cat';
+  sec.innerHTML =
+    `<div class="cat-head"><span class="cat-num">${c.n}</span><h2>${c.title}</h2>`+
+    `<span class="cat-count">${tests.length} item${tests.length>1?'s':''}</span></div>`+
+    `<p class="cat-desc">${c.desc}</p><div class="tests"></div>`;
+  const holder = sec.querySelector('.tests');
+  tests.forEach(t=>{
+    const id = T.indexOf(t);
+    const num = c.n+'.'+(tests.indexOf(t)+1);
+    const el = document.createElement('div');
+    el.className='test '+t.sev;
+    el.dataset.sev=t.sev; el.dataset.kind=t.kind;
+    const tags = [`<span class="tag ${t.sev}">${t.sev==='crit'?'must pass':t.sev==='major'?'should pass':'minor'}</span>`,
+                  `<span class="tag ${t.kind}">${t.kind==='fix'?'verifies a fix':'didn\'t break'}</span>`,
+                  `<span class="tag minor">${num}</span>`];
+    el.innerHTML =
+      `<div class="stripe"></div><div class="tbody">
+        <div class="test-top">
+          <input type="checkbox" class="cbx" id="c${id}" aria-label="mark ${num} done">
+          <div class="test-main">
+            <div class="say"><span class="q">${t.do}&nbsp;›</span> ${t.say}</div>
+            <div class="tagrow">${tags.join('')}</div>
+          </div>
+        </div>
+        ${t.pass?`<div class="pass"><b>Pass</b>${t.pass}</div>`:''}
+        ${t.was?`<div class="was"><b>Was</b>${t.was}</div>`:''}
+        ${t.look?`<div class="look"><b>Where to look</b>${t.look}</div>`:''}
+      </div>`;
+    holder.appendChild(el);
+  });
+  root.appendChild(sec);
+});
+
+// ---- checkbox state ----
+const KEY='vetra-voicefix-v1';
+let done={};
+try{ done=JSON.parse(localStorage.getItem(KEY)||'{}'); }catch(e){ done={}; }
+document.querySelectorAll('.cbx').forEach(cb=>{
+  const id=cb.id.slice(1);
+  if(done[id]){ cb.checked=true; cb.closest('.test').classList.add('done'); }
+  cb.addEventListener('change',()=>{
+    cb.closest('.test').classList.toggle('done',cb.checked);
+    done[id]=cb.checked;
+    try{ localStorage.setItem(KEY,JSON.stringify(done)); }catch(e){}
+    updateProg(); if(filter==='open') apply();
+  });
+});
+function updateProg(){
+  const all=document.querySelectorAll('.cbx');
+  const n=[...all].filter(c=>c.checked).length;
+  document.getElementById('fill').style.width=(all.length?100*n/all.length:0)+'%';
+  document.getElementById('ptxt').textContent=n+' / '+all.length+' done';
+}
+updateProg();
+
+// ---- filters ----
+let filter='all';
+document.getElementById('filters').addEventListener('click',e=>{
+  const b=e.target.closest('.chip'); if(!b) return;
+  if(b.id==='reset'){
+    if(confirm('Clear all checkmarks?')){
+      done={}; try{ localStorage.removeItem(KEY); }catch(e){}
+      document.querySelectorAll('.cbx').forEach(c=>{
+        c.checked=false; c.closest('.test').classList.remove('done');
+      });
+      updateProg(); apply();
+    }
+    return;
+  }
+  filter=b.dataset.f;
+  document.querySelectorAll('#filters .chip[data-f]').forEach(c=>
+    c.setAttribute('aria-pressed', c===b?'true':'false'));
+  apply();
+});
+function apply(){
+  let shown=0;
+  document.querySelectorAll('.test').forEach(t=>{
+    const ok = filter==='all' ? true
+      : filter==='open' ? !t.querySelector('.cbx').checked
+      : filter==='fix'||filter==='guard' ? t.dataset.kind===filter
+      : t.dataset.sev===filter;
+    t.style.display = ok?'':'none';
+    if(ok) shown++;
+  });
+  document.querySelectorAll('.cat').forEach(sec=>{
+    const any=[...sec.querySelectorAll('.test')].some(t=>t.style.display!=='none');
+    sec.style.display=any?'':'none';
+  });
+  document.getElementById('empty').style.display=shown?'none':'block';
+}
+</script>

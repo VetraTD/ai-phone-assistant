@@ -1,0 +1,92 @@
+[
+  {
+    "question": "How much does it cost? What are your prices, fees, or packages priced at?",
+    "answer": "We don't publish pricing — it depends on your goals, your market and the ad budget you're working with. The team puts a number to it on the strategy call, once they understand what you're trying to achieve. I can get that call booked for you now if you'd like.",
+    "category": "pricing",
+    "priority": 100
+  },
+  {
+    "question": "Do you guarantee results? Can you promise me leads, sales, or a return on ad spend?",
+    "answer": "The team does offer a performance guarantee, and they go through exactly what it covers on the strategy call. I'm not able to give you the terms or any figures over the phone — I'd rather you hear it accurately from them than have me get it slightly wrong.",
+    "category": "guarantees",
+    "priority": 100
+  },
+  {
+    "question": "How long until I see results? How quickly do the ads start working?",
+    "answer": "I can't give you a timeframe — that depends on your market, your budget and where you're starting from, and I don't want to quote you something that turns out not to hold. It's one of the things the team covers properly on the strategy call.",
+    "category": "guarantees",
+    "priority": 95
+  },
+  {
+    "question": "What services do you offer? What do you actually do?",
+    "answer": "Three things. Meta Ads management — Facebook and Instagram. Google Ads management — search campaigns, with SEO support alongside. And an All-In-One package that runs Meta and Google together with the strategy, funnel and reporting around them.",
+    "category": "services",
+    "priority": 90
+  },
+  {
+    "question": "What is included? What do I get for that?",
+    "answer": "Campaign strategy and development, ad copywriting, sales funnel work, ongoing analysis and monitoring, and performance reports. Enquiry takeover and international campaign management are in there too, with translation if you need it.",
+    "category": "services",
+    "priority": 85
+  },
+  {
+    "question": "Do you do TikTok ads, LinkedIn ads, X ads, YouTube, or any other platform?",
+    "answer": "No — we run Meta, so Facebook and Instagram, and Google. Those are the platforms we manage, and I don't want to tell you we cover something we don't.",
+    "category": "services",
+    "priority": 85
+  },
+  {
+    "question": "Do you build websites, do branding, logos, video production, or social media content?",
+    "answer": "Not as separate services, no. We're a paid advertising agency — Meta and Google campaigns, the funnel and strategy around them, and the ad copy itself. Anything wider than that would be worth raising on the strategy call so the team can tell you straight whether they can help.",
+    "category": "services",
+    "priority": 80
+  },
+  {
+    "question": "What do I need to provide? What do you need from me to get started?",
+    "answer": "Three things from your side: the ad spend budget, photos and videos we can use, and access to your ad accounts. Everything else — the strategy, the copy, the funnel, the reporting — sits with us.",
+    "category": "onboarding",
+    "priority": 80
+  },
+  {
+    "question": "How do I get started? What is the next step?",
+    "answer": "A free strategy call with the team, no obligation. There's a short questionnaire to fill in first so both sides can check it's a fit before you spend time on a call. I can book that in for you now.",
+    "category": "onboarding",
+    "priority": 90
+  },
+  {
+    "question": "Do you work with my industry? What kind of businesses do you work with?",
+    "answer": "Businesses of any size, from startups through to larger firms. There's a particular focus on renewable energy, but that's a specialism rather than a limit. Tell the team about your sector on the strategy call and they'll be straight with you about fit.",
+    "category": "clients",
+    "priority": 80
+  },
+  {
+    "question": "How does it work? What is the process?",
+    "answer": "In-depth discovery first, then a tailored strategy, then launch. After that it's data-driven optimisation with ongoing collaboration and reporting — it isn't set-and-forget.",
+    "category": "process",
+    "priority": 75
+  },
+  {
+    "question": "How can I contact you? What is your email or website? Where are you based or what is your address?",
+    "answer": "We're a UK agency. Email is info at digile-media.com and the website is digile-media.com — we're on Instagram as @digilemedia too. I don't have an office address to give you over the phone. The team works Monday to Friday, nine to five UK time, though this line is answered any time.",
+    "category": "contact",
+    "priority": 75
+  },
+  {
+    "question": "Can I speak to a real person? Can you put me through to someone?",
+    "answer": "The team works Monday to Friday, nine to five UK time. I can take your name and number and have them come back to you, or get you booked onto a strategy call with them directly — whichever is easier.",
+    "category": "contact",
+    "priority": 75
+  },
+  {
+    "question": "Do you have case studies, testimonials, or examples of results from other clients?",
+    "answer": "I don't have client results I can quote you — I'd only be guessing at numbers, and that's not something to guess at. The team can talk you through relevant work on the strategy call.",
+    "category": "clients",
+    "priority": 70
+  },
+  {
+    "question": "Is there a contract? How long am I tied in for? Can I cancel?",
+    "answer": "I don't have the contract terms to hand, so I'm not going to describe them and risk getting it wrong. The team covers exactly that on the strategy call, before anything is signed.",
+    "category": "billing",
+    "priority": 75
+  }
+]

@@ -1,0 +1,88 @@
+{
+  "_README": [
+    "Copy to config/rates.json, fill in the eight numbers, set `verified`, then:",
+    "  node scripts/call-report.js <callSid> --rates config/rates.json",
+    "",
+    "Every field here is a PRICE, which is an assumption. Every number the report",
+    "prints beside them is a MEASURED quantity. Keeping the two apart is the whole",
+    "point of this file: a rate baked into the script would become indistinguishable",
+    "from a result the moment it went stale.",
+    "",
+    "Set `verified` to the date you last checked these against the vendors' pricing",
+    "pages. Until it is set, the report marks every dollar figure with ~ and prints",
+    "a warning. That is deliberate — an unverified total is arithmetic, not a cost.",
+    "",
+    "config/rates.json is gitignored: prices are account-specific, and a committed",
+    "rate is one nobody re-checks."
+  ],
+
+  "verified": null,
+  "currency": "USD",
+
+  "vertex": {
+    "model": "gemini-3.6-flash",
+    "input_per_1m_tokens": null,
+    "cached_input_per_1m_tokens": null,
+    "output_per_1m_tokens": null,
+    "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+    "_note": [
+      "Three rates, not one. Cached input bills at a discount, and the report",
+      "already splits prompt_tokens into cached and uncached — putting the same",
+      "number in both fields silently deletes the cache's entire value.",
+      "prompt_tokens INCLUDES the cached portion; the report subtracts rather",
+      "than adds, so do not pre-net these."
+    ]
+  },
+
+  "deepgram": {
+    "per_minute": null,
+    "source": "https://deepgram.com/pricing",
+    "_note": "Streaming nova-3 rate. Billed on audio duration, so it tracks call length, not turn count."
+  },
+
+  "elevenlabs": {
+    "per_1k_chars": null,
+    "source": "https://elevenlabs.io/pricing",
+    "_note": [
+      "Derive from your plan: monthly price divided by the plan's character",
+      "quota gives an effective per-character rate. Overage is priced separately",
+      "and is usually dearer, so a call that pushes you past the quota costs more",
+      "than this figure suggests."
+    ]
+  },
+
+  "google_tts": {
+    "per_1m_chars": null,
+    "source": "https://cloud.google.com/text-to-speech/pricing",
+    "_note": "Only charged on the ElevenLabs fallback path. Usually 0 chars; non-zero means the voice was degraded, which tts_fallback_turns also counts."
+  },
+
+  "twilio": {
+    "inbound_per_minute": null,
+    "media_stream_per_minute": null,
+    "billing_increment_seconds": 60,
+    "source": "https://www.twilio.com/en-us/voice/pricing",
+    "_note": [
+      "TWO line items, not one: the inbound leg and Media Streams are billed",
+      "separately, and forgetting the second understates every call.",
+      "Rates differ by country — a UK number and a US number are not the same",
+      "price, so this file is per-deployment.",
+      "billing_increment_seconds drives round-UP: at 60, a 180.3s call bills as",
+      "4 minutes. Set it to your actual increment."
+    ]
+  },
+
+  "fixed_monthly": {
+    "cloud_run_min_instance": null,
+    "cloud_sql": null,
+    "other": null,
+    "_note": [
+      "The estate, which costs the same at zero calls as at a thousand. Used ONLY",
+      "for the fully-loaded figure, and only when --calls-this-month is passed.",
+      "Never price a customer off fully-loaded at low volume: it is dominated by",
+      "a fixed cost that does not grow with usage, and it will tell you a viable",
+      "product is hopeless.",
+      "`other` covers Artifact Registry, KMS, logging and anything else standing."
+    ]
+  }
+}

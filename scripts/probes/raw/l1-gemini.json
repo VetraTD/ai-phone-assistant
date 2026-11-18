@@ -1,0 +1,671 @@
+{
+  "summary": {
+    "probe": "L1",
+    "model": "gemini-3.1-flash-live-preview",
+    "n": 5,
+    "prompt": {
+      "chars": 13704,
+      "approx_tokens": 3426,
+      "tools": 6,
+      "business": "Brightwork Family Dental",
+      "fixture": "appointments-availability"
+    },
+    "model_leg_ms": {
+      "p50": 1043,
+      "p95": 1756,
+      "mean": 1188,
+      "n": 25,
+      "samples": [
+        1627,
+        1629,
+        1027,
+        1462,
+        1737,
+        1043,
+        966,
+        990,
+        1120,
+        1038,
+        1053,
+        1006,
+        1003,
+        977,
+        1014,
+        1049,
+        1013,
+        997,
+        1108,
+        1761,
+        1070,
+        1024,
+        990,
+        1105,
+        1902
+      ]
+    },
+    "barge": {
+      "trials": 5,
+      "interrupted_count": 5,
+      "stop_latency_ms": {
+        "p50": 490,
+        "p95": 500,
+        "samples": [
+          494,
+          502,
+          479,
+          474,
+          490
+        ]
+      },
+      "audio_after_interrupt_count": 0
+    },
+    "usd": 0.19588200000000003
+  },
+  "conversations": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1627,
+          "padded_ms": 1627,
+          "audio_chunks": 18,
+          "audio_bytes": 190562,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "I'd be happy to help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1629,
+          "padded_ms": 1651,
+          "audio_chunks": 25,
+          "audio_bytes": 231390,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "A Tuesday morning could potentially work. Are you a new or existing patient?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1027,
+          "padded_ms": 1028,
+          "audio_chunks": 22,
+          "audio_bytes": 218882,
+          "heard": "It's 5551234.",
+          "said": "Thanks, I can search with that phone number. Are you a new or existing patient?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1462,
+          "padded_ms": 1463,
+          "audio_chunks": 35,
+          "audio_bytes": 413282,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Perfect, I can reserve Tuesday at ten in the morning once I have your full name and date of birth. What's your name, and would you mind confirming you're an existing patient?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1737,
+          "padded_ms": 1742,
+          "audio_chunks": 17,
+          "audio_bytes": 141602,
+          "heard": "Thanks, bye.",
+          "said": "Thanks for calling Brightwork Family Dental. Have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "turn_complete": true
+        }
+      ],
+      "usage": {
+        "text_in": 27512,
+        "audio_in": 2948,
+        "text_out": 0,
+        "audio_out": 652,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.037302,
+      "usage_raw": {
+        "text_in": 27512,
+        "audio_in": 2948,
+        "text_out": 0,
+        "audio_out": 652,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1043,
+          "padded_ms": 1061,
+          "audio_chunks": 18,
+          "audio_bytes": 186722,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "```json\n{\n  \"intent\": \"book_appointment\"\n}\n```Sure, I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 966,
+          "padded_ms": 993,
+          "audio_chunks": 29,
+          "audio_bytes": 341790,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I can definitely check for next Tuesday, but before I look at the calendar, could you let me know if you're a new or existing patient?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 990,
+          "padded_ms": 1000,
+          "audio_chunks": 17,
+          "audio_bytes": 183362,
+          "heard": "It's 5551234.",
+          "said": "Thanks. Could you also tell me if you're a new or existing patient?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1120,
+          "padded_ms": 1121,
+          "audio_chunks": 38,
+          "audio_bytes": 483870,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "I understand, but I just need to confirm if you're a new or existing patient before I can check availability for that time. Are you a returning patient or would this be your first visit?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1038,
+          "padded_ms": 1041,
+          "audio_chunks": 19,
+          "audio_bytes": 191522,
+          "heard": "Thanks, bye.",
+          "said": "Not a problem. Thanks for calling Brightwork Family Dental, and have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "turn_complete": true
+        }
+      ],
+      "usage": {
+        "text_in": 19739,
+        "audio_in": 2209,
+        "text_out": 0,
+        "audio_out": 742,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03033525,
+      "usage_raw": {
+        "text_in": 19739,
+        "audio_in": 2209,
+        "text_out": 0,
+        "audio_out": 742,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "error": null
+    },
+    {
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1053,
+          "padded_ms": 1061,
+          "audio_chunks": 14,
+          "audio_bytes": 139230,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1006,
+          "padded_ms": 1030,
+          "audio_chunks": 23,
+          "audio_bytes": 220350,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Just to confirm, you're an existing patient then? And could you tell me what service you're looking for?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 1003,
+          "padded_ms": 1024,
+          "audio_chunks": 30,
+          "audio_bytes": 346562,
+          "heard": "It's 5551234.",
+          "said": "Thank you. To make sure I'm helping the best way I can, could you let me know if you're a new or existing patient? Also, what service are you looking for?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 977,
+          "padded_ms": 982,
+          "audio_chunks": 29,
+          "audio_bytes": 334110,
+          "heard": "Tuesday at 10 works for me.",
+          "said": "I understand, but to ensure I get you scheduled correctly, are you a new or existing patient with us? And what service do you need today?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1014,
+          "padded_ms": 1034,
+          "audio_chunks": 14,
+          "audio_bytes": 113282,
+          "heard": "Thanks, bye.",
+          "said": "Thanks for calling Brightwork Family Dental. Have a great day.",
+          "tools": [
+            "end_call"
+          ],
+          "turn_complete": true
+        }
+      ],
+      "usage": {
+        "text_in": 19727,
+        "audio_in": 2016,
+        "text_out": 0,
+        "audio_out": 622,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.02830725,
+      "usage_raw": {
+        "text_in": 19727,
+        "audio_in": 2016,
+        "text_out": 0,
+        "audio_out": 622,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "error": null
+    },
+    {
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1049,
+          "padded_ms": 1062,
+          "audio_chunks": 18,
+          "audio_bytes": 159900,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1013,
+          "padded_ms": 1028,
+          "audio_chunks": 19,
+          "audio_bytes": 165122,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you looking for an appointment this Tuesday, or next Tuesday?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 997,
+          "padded_ms": 1010,
+          "audio_chunks": 25,
+          "audio_bytes": 248162,
+          "heard": "It's 5551234.",
+          "said": "Got it, thank you. And were you looking for an appointment this Tuesday, or next Tuesday?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1108,
+          "padded_ms": 1108,
+          "audio_chunks": 30,
+          "audio_bytes": 326882,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Just to confirm, you mean next Tuesday, September eighth, at ten in the morning? Also, could you tell me your full name and date of birth?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1761,
+          "padded_ms": 1792,
+          "audio_chunks": 15,
+          "audio_bytes": 125762,
+          "heard": "Thanks, bye.",
+          "said": "Thanks for calling Brightwork Family Dental. Have a great day.",
+          "tools": [
+            "end_call"
+          ],
+          "turn_complete": true
+        }
+      ],
+      "usage": {
+        "text_in": 27573,
+        "audio_in": 2760,
+        "text_out": 0,
+        "audio_out": 564,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03572775,
+      "usage_raw": {
+        "text_in": 27573,
+        "audio_in": 2760,
+        "text_out": 0,
+        "audio_out": 564,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "error": null
+    },
+    {
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "seconds": 1.920625,
+          "model_leg_ms": 1070,
+          "padded_ms": 1088,
+          "audio_chunks": 19,
+          "audio_bytes": 200190,
+          "heard": "Hi, I'd like to book an appointment.",
+          "said": "Of course, I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent",
+            "record_sms_consent"
+          ],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_time_q",
+          "seconds": 2.13625,
+          "model_leg_ms": 1024,
+          "padded_ms": 1054,
+          "audio_chunks": 24,
+          "audio_bytes": 251550,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I might. Before I check the schedule, can you tell me your full name and date of birth?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_digits",
+          "seconds": 2.74,
+          "model_leg_ms": 990,
+          "padded_ms": 1009,
+          "audio_chunks": 30,
+          "audio_bytes": 322082,
+          "heard": "It's 5551234.",
+          "said": "Thanks. I see your phone number, but I actually need your full name and date of birth before I can check for appointments.",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_confirm",
+          "seconds": 2.043375,
+          "model_leg_ms": 1105,
+          "padded_ms": 1104,
+          "audio_chunks": 30,
+          "audio_bytes": 328802,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "I understand, but I can't check for appointments until I have your details. Could you please provide your full name and date of birth?",
+          "tools": [],
+          "turn_complete": true
+        },
+        {
+          "label": "rep_close",
+          "seconds": 0.882375,
+          "model_leg_ms": 1902,
+          "padded_ms": 1902,
+          "audio_chunks": 16,
+          "audio_bytes": 142562,
+          "heard": "Thanks, bye.",
+          "said": "Thanks for calling Brightwork Family Dental. Have a great day.",
+          "tools": [
+            "end_call"
+          ],
+          "turn_complete": true
+        }
+      ],
+      "usage": {
+        "text_in": 23737,
+        "audio_in": 3021,
+        "text_out": 0,
+        "audio_out": 674,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "usd": 0.03495375,
+      "usage_raw": {
+        "text_in": 23737,
+        "audio_in": 3021,
+        "text_out": 0,
+        "audio_out": 674,
+        "cached_in": 0,
+        "turns_billed": 5
+      },
+      "error": null
+    }
+  ],
+  "barges": [
+    {
+      "trial": 1,
+      "barged": true,
+      "opener_model_leg_ms": 1097,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 494,
+      "barge_to_last_audio_ms": 344,
+      "chunks_before_barge": 10,
+      "chunks_at_interrupt": 16,
+      "audio_after_interrupt": false,
+      "audio_still_arriving_1s_later": false,
+      "said": "I can definitely help with that. Are you a new or existing patient?",
+      "heard": "Hi, I'd like to book an appointment.",
+      "barge_send_ms": 3494,
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 86,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.0040680000000000004,
+      "usage_raw": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 86,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "error": null
+    },
+    {
+      "trial": 2,
+      "barged": true,
+      "opener_model_leg_ms": 1057,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 502,
+      "barge_to_last_audio_ms": 294,
+      "chunks_before_barge": 11,
+      "chunks_at_interrupt": 15,
+      "audio_after_interrupt": false,
+      "audio_still_arriving_1s_later": false,
+      "said": "I'd be happy to. Are you a new or existing patient?",
+      "heard": "Hi, I'd like to book an appointment.",
+      "barge_send_ms": 3490,
+      "usage": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 78,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.003972,
+      "usage_raw": {
+        "text_in": 3856,
+        "audio_in": 48,
+        "text_out": 0,
+        "audio_out": 78,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "error": null
+    },
+    {
+      "trial": 3,
+      "barged": true,
+      "opener_model_leg_ms": 1741,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 479,
+      "barge_to_last_audio_ms": 422,
+      "chunks_before_barge": 9,
+      "chunks_at_interrupt": 17,
+      "audio_after_interrupt": false,
+      "audio_still_arriving_1s_later": false,
+      "said": "I'd be happy to help with that. Are you a new or existing",
+      "heard": "Hi, I'd like to book an appointment.",
+      "barge_send_ms": 3488,
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 84,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007092,
+      "usage_raw": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 84,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "error": null
+    },
+    {
+      "trial": 4,
+      "barged": true,
+      "opener_model_leg_ms": 1679,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 474,
+      "barge_to_last_audio_ms": 433,
+      "chunks_before_barge": 9,
+      "chunks_at_interrupt": 17,
+      "audio_after_interrupt": false,
+      "audio_still_arriving_1s_later": false,
+      "said": "I can help with that. Are you a new or existing",
+      "heard": "Hi, I'd like to book an appointment.",
+      "barge_send_ms": 3489,
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 81,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007056,
+      "usage_raw": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 81,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "error": null
+    },
+    {
+      "trial": 5,
+      "barged": true,
+      "opener_model_leg_ms": 1640,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 490,
+      "barge_to_last_audio_ms": 404,
+      "chunks_before_barge": 10,
+      "chunks_at_interrupt": 18,
+      "audio_after_interrupt": false,
+      "audio_still_arriving_1s_later": false,
+      "said": "I can help with that. Are you a new or existing patient?",
+      "heard": "Hi, I'd like to book an appointment.",
+      "barge_send_ms": 3499,
+      "usage": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 82,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "usd": 0.007068,
+      "usage_raw": {
+        "text_in": 7728,
+        "audio_in": 96,
+        "text_out": 0,
+        "audio_out": 82,
+        "cached_in": 0,
+        "turns_billed": 1
+      },
+      "error": null
+    }
+  ]
+}

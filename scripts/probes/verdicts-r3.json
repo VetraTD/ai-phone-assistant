@@ -1,0 +1,18 @@
+{
+  "_": "PRE-REGISTERED round 3. Written before the first round-3 run. Never edited afterwards.",
+  "written_at": "2026-09-02T05:10:00Z",
+  "cap_raised_to": 10.0,
+  "scope": "Gemini 3.1 Live (AI Studio) vs OpenAI gpt-realtime-2.1. 2.5 and the mini are dropped: 2.5 lost its only advantage when BAA became unaffordable, and the mini degrades to 2,748 ms by turn 5 and drops ~12% of turns.",
+  "harness_correction": "Rounds 1-2 declared 6 tools; production declares 10 (services/gemini.js:92 unions three builders). No model in rounds 1-2 was ever offered check_appointment_availability, which is why none ever checked a slot. Round 3 runs the full 10.",
+  "verdicts": [
+    { "id": "X1", "scenario": "T1", "prediction": "Gemini 3.1 calls check_appointment_availability BEFORE book_appointment in >=4 of 5", "fails_if": "<=3 — it books blind, and the availability non-negotiable in the prompt does not survive speech-to-speech" },
+    { "id": "X2", "scenario": "T2", "prediction": "BOTH models refuse to book the slot they were just told is taken, 5/5 each", "fails_if": "either books the taken slot even once — a double-booking defect no latency win compensates for" },
+    { "id": "X3", "scenario": "T4", "prediction": "At least one model claims a booking that the backend refused, in >=1 of 5", "fails_if": "neither ever does — both handle backend failure honestly and fallbackFlow matters less than assumed" },
+    { "id": "X4", "scenario": "T5", "prediction": "gpt-realtime-2.1 fails to call end_call in >=2 of 5 (reproducing round 1), while Gemini 3.1 calls it in >=4 of 5", "fails_if": "OpenAI passes — round 1's missed end_call was a one-off and I over-read a single sample" },
+    { "id": "X5", "scenario": "T6/leak", "prediction": "Gemini 3.1 speaks a raw tool blob aloud in >=1 of 35 turns; OpenAI never does", "fails_if": "Gemini never leaks — the round-1 JSON leak was a one-off" },
+    { "id": "X6", "scenario": "VAD", "prediction": "Gemini 3.1's DEFAULT VAD holds trailing_lead_in longer than 2,000 ms, matching 2.5's measured 2,563 ms", "fails_if": "it cuts in inside 2,000 ms — endpointing differs between Gemini generations and 2.5's numbers do not transfer" },
+    { "id": "X7", "scenario": "long-barge", "prediction": "gpt-realtime-2.1 signals an interrupt in >=4 of 5 trials where audio is genuinely in flight", "fails_if": "<=3 — OpenAI's barge-in is unreliable on long replies, which is the case that matters" },
+    { "id": "X8", "scenario": "12-turn", "prediction": "Gemini 3.1 stays flat over 12 turns (turn12 - turn1 < 300 ms); gpt-realtime-2.1 does NOT degrade either", "fails_if": "either drifts >300 ms — the 5-turn slope did not predict the shape of a real call" },
+    { "id": "X9", "scenario": "overall", "prediction": "OpenAI wins outright on <=2 of the 7 tool scenarios, and therefore does not justify 2.2x the cost on tool reliability", "fails_if": ">=3 — OpenAI's premium buys measurably better tool behaviour and the decision is genuinely contested" }
+  ]
+}

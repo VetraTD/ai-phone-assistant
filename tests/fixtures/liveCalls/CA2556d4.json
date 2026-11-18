@@ -1,0 +1,140 @@
+{
+  "callSid": "CA2556d4",
+  "model": "gemini-3.8-live",
+  "note": "3.8. A cancellation, and the call whose closing turn asked a question and then hung up 1.6 s later.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 5,
+    "probes": 2,
+    "write_order_refused": 1,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 0
+  },
+  "claim_audit": {
+    "claimed": 1,
+    "note_sent": 0,
+    "suppressed_existing_report": 0,
+    "suppressed_guard_off": 0,
+    "suppressed_readback": 0,
+    "suppressed_signoff": 0,
+    "turns_audited": 5,
+    "turns_reply_empty": 0,
+    "unbacked_action": 0,
+    "unbacked_any": 0
+  },
+  "guards": {
+    "availability_allowed": 0,
+    "availability_blocked": 0,
+    "availability_day_listed": 0,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 0
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T05:05:19.659Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T05:05:27.453Z",
+      "step": "identify_intent",
+      "caller": "I need to cancel my Friday appointment.",
+      "assistant": "I can help with that. May I please have your name?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T05:05:38.513Z",
+      "step": "gather_details",
+      "caller": "Marcus Bell",
+      "assistant": "Thank you, Marcus. To confirm, are you looking to cancel your appointment scheduled for Friday, September eighteenth at twelve forty-five PM?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T05:05:51.503Z",
+      "step": "gather_details",
+      "caller": "It's a 12:45.",
+      "assistant": "To confirm, shall I go ahead and cancel your appointment for Friday, September eighteenth at twelve forty-five PM?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T05:06:09.300Z",
+      "step": "gather_details",
+      "caller": "Yeah, yeah, cancel it.",
+      "assistant": "Your appointment on Friday, September eighteenth at twelve forty-five PM is now cancelled. Is there anything else I can help you with today?"
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T05:05:44.921Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": false,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "held",
+      "refused_by": "write_order",
+      "budget_released": false,
+      "expect": "refuse",
+      "why": "the model proposed the cancellation and called the tool before the caller answered. Their reply was 'It's a 12:45' -- a correction, not consent.",
+      "standing_turn": 2,
+      "agreed_turn": 2,
+      "standing_read_back": "Thank you, Marcus. To confirm, are you looking to cancel your appointment scheduled for Friday, September eighteenth at twelve forty-five PM?",
+      "agreed_read_back": "Thank you, Marcus. To confirm, are you looking to cancel your appointment scheduled for Friday, September eighteenth at twelve forty-five PM?",
+      "target": "2026-09-18T17:00:00",
+      "target_candidates": [
+        "2026-09-18T17:00:00"
+      ],
+      "target_from": "Thank you, Marcus. To confirm, are you looking to cancel your appointment scheduled for Friday, September eighteenth at twelve forty-five PM?",
+      "target_derived": true,
+      "caller_text": "It's a 12:45.",
+      "caller_text_source": "logged"
+    },
+    {
+      "at": "2026-09-17T05:06:02.058Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "re-asked properly, agreed on the turn, cancelled.",
+      "standing_turn": 3,
+      "agreed_turn": 3,
+      "standing_read_back": "To confirm, shall I go ahead and cancel your appointment for Friday, September eighteenth at twelve forty-five PM?",
+      "agreed_read_back": "To confirm, shall I go ahead and cancel your appointment for Friday, September eighteenth at twelve forty-five PM?",
+      "target": "2026-09-18T17:00:00",
+      "target_candidates": [
+        "2026-09-18T17:00:00"
+      ],
+      "target_from": "To confirm, shall I go ahead and cancel your appointment for Friday, September eighteenth at twelve forty-five PM?",
+      "target_derived": true,
+      "caller_text": "Yeah, yeah, cancel it.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

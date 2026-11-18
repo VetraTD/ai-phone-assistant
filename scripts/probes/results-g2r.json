@@ -1,0 +1,102 @@
+{
+  "at": "2026-09-15T05:20:41.455Z",
+  "fixture": "name_spelling",
+  "control": "clean_open",
+  "n": 3,
+  "rows": [
+    {
+      "fixture": "name_spelling",
+      "take": 1,
+      "started_ms": 758,
+      "in_frags": 10,
+      "out_frags": 7,
+      "audio_bytes": 66560,
+      "heard": " My name is Nithin. That's N-I-T-H-I-N",
+      "spoke": " Okay. Hi Nithin. How can I help",
+      "wer": 0,
+      "turns_800": 2,
+      "usd": 0.00874
+    },
+    {
+      "fixture": "clean_open",
+      "take": 1,
+      "started_ms": 455,
+      "in_frags": 5,
+      "out_frags": 10,
+      "audio_bytes": 42880,
+      "heard": " Hi, I'd like to book an appointment",
+      "spoke": " Sure, I can help you with that. May I have your name?",
+      "wer": 0,
+      "turns_800": 1,
+      "usd": 0.00585
+    },
+    {
+      "fixture": "name_spelling",
+      "take": 2,
+      "started_ms": 485,
+      "in_frags": 11,
+      "out_frags": 11,
+      "audio_bytes": 78080,
+      "heard": " My name is Nathan That's N-I-T-H-I-N",
+      "spoke": " Hi, Nathan! Got it, Nithin. How can I help you today?",
+      "wer": 0.091,
+      "turns_800": 2,
+      "usd": 0.00991
+    },
+    {
+      "fixture": "clean_open",
+      "take": 2,
+      "started_ms": 537,
+      "in_frags": 5,
+      "out_frags": 6,
+      "audio_bytes": 42720,
+      "heard": " Hi. I'd like to book an appointment",
+      "spoke": " Sure, um, let me pull up the schedule.",
+      "wer": 0,
+      "turns_800": 1,
+      "usd": 0.0059
+    },
+    {
+      "fixture": "name_spelling",
+      "take": 3,
+      "started_ms": 414,
+      "in_frags": 11,
+      "out_frags": 7,
+      "audio_bytes": 67520,
+      "heard": " My name is Nathan. That's N I T H I N",
+      "spoke": " Thanks, Nathan. Go ahead. How can I help?",
+      "wer": 0.091,
+      "turns_800": 2,
+      "usd": 0.00844
+    },
+    {
+      "fixture": "clean_open",
+      "take": 3,
+      "started_ms": 445,
+      "in_frags": 5,
+      "out_frags": 5,
+      "audio_bytes": 42240,
+      "heard": " Hi, I'd like to book an appointment",
+      "spoke": " Hi, sure, let me check that.",
+      "wer": 0,
+      "turns_800": 1,
+      "usd": 0.00585
+    }
+  ],
+  "subject_blank_transcripts": "0/3",
+  "control_blank_transcripts": "0/3",
+  "subject_median_wer": 0.091,
+  "slow_starts_over_4s": [],
+  "reading": "TRANSIENT: the g2 blank was a degraded session, not a property of the fixture",
+  "spend": {
+    "cap": 5,
+    "spent": 0.126096,
+    "remaining": 4.873904,
+    "sessions": 17,
+    "byProbe": {
+      "G1b": 0.007576,
+      "G2": 0.073825,
+      "G2r": 0.044693
+    }
+  }
+}

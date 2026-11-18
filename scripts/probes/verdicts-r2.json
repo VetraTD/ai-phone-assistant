@@ -1,0 +1,66 @@
+{
+  "_": "PRE-REGISTERED round 2. Written before any round-2 measurement except phase-A discovery, which is enumeration rather than prediction and is recorded as a finding (F1) not a verdict. Never edited after the first run.",
+  "written_at": "2026-09-02T03:45:00Z",
+  "why": "Round 1 was asymmetric by design: it tested OpenAI's headline feature (semantic_vad, 45 trials) and Gemini's headline risks (barge bug, EU, reseed). Gemini never faced the trail-off fixtures, no generation/endpointing split existed for either vendor, no barge-in tested a long reply, and OpenAI's latency carried a silence_duration_ms the harness chose. Round 2 closes those gaps so the recommendation rests on symmetric evidence.",
+
+  "findings_already_measured": [
+    {
+      "id": "F1",
+      "measured_at": "2026-09-02T03:40:00Z",
+      "finding": "europe-west2 (London) serves NO Gemini Live model. Every candidate fails the WebSocket upgrade with an HTTP 400 from the Google frontend; the bidi path is not routed in that region. europe-west1 (Belgium) and us-central1 serve exactly one: gemini-live-2.5-flash-native-audio. AI Studio serves only gemini-3.1-flash-live-preview.",
+      "consequence": "There is exactly ONE production-viable Gemini candidate: gemini-live-2.5-flash-native-audio on Vertex europe-west1. The 3.1 preview measured in round 1 is AI-Studio-only, which is neither a residency nor a BAA surface. A UK-data-stays-in-the-UK promise cannot be met by Gemini Live at all."
+    }
+  ],
+
+  "verdicts": [
+    {
+      "id": "W1",
+      "arm": "gemini-endpointing",
+      "prediction": "At its most patient VAD setting (END_SENSITIVITY_LOW, silenceDurationMs 1200), Gemini holds BOTH no_terminal_punct and trailing_lead_in in >=4 of 5 — i.e. it beats OpenAI, which failed trailing_lead_in at every eagerness.",
+      "fails_if": "either fixture is held in <=3 of 5 — Gemini has the same endpointing weakness and neither vendor solves our measured failure case",
+      "threshold": 4, "of": 5
+    },
+    {
+      "id": "W2",
+      "arm": "gemini-endpointing",
+      "prediction": "At Gemini's DEFAULT VAD — the setting every round-1 number was measured with — it cuts into trailing_lead_in in >=3 of 5.",
+      "fails_if": "<=2 — the default is already patient and W1's tuning is unnecessary",
+      "threshold": 3, "of": 5
+    },
+    {
+      "id": "W3",
+      "arm": "generation-split",
+      "prediction": "With automatic VAD disabled and an explicit activityEnd, Gemini's pure generation time (activityEnd -> first audio) p50 is < 700 ms.",
+      "fails_if": ">= 700 ms — Gemini's speed advantage is endpointing, not generation, and OpenAI's ~790 ms generation is competitive",
+      "threshold": 700
+    },
+    {
+      "id": "W4",
+      "arm": "openai-silence-sweep",
+      "prediction": "At silence_duration_ms=200, OpenAI mini's model leg p50 drops below 1,500 ms — confirming most of round 1's 1,983 ms was a harness configuration choice, not model speed.",
+      "fails_if": ">= 1,500 ms — the mini is genuinely slow and V5 stands unqualified",
+      "threshold": 1500
+    },
+    {
+      "id": "W5",
+      "arm": "long-barge",
+      "prediction": "Against a deliberately LONG reply, model audio keeps arriving after the vendor's interrupt signal in >=3 of 5 trials, on at least one vendor.",
+      "fails_if": "<=2 on both — the vendor stops cleanly, our playout queue has nothing left to clear, and turnManager's queue half is smaller than claimed",
+      "threshold": 3, "of": 5
+    },
+    {
+      "id": "W6",
+      "arm": "openai-full",
+      "prediction": "At N=5 the full model's model leg p50 stays < 1,600 ms and it drops 0 turns, holding its N=1 round-1 result.",
+      "fails_if": ">= 1,600 ms or any dropped turn — the N=1 reference ceiling was luck",
+      "threshold": 1600
+    },
+    {
+      "id": "W7",
+      "arm": "gemini-conversation",
+      "prediction": "On the identical 5-turn script, Gemini 2.5 native audio on Vertex costs LESS per turn than OpenAI mini ($0.00481).",
+      "fails_if": ">= $0.00481 — round 1's $0.00444 was an artefact of L5's shorter 4-turn script and the cheapest-and-fastest convergence is not real",
+      "threshold": 0.00481
+    }
+  ]
+}

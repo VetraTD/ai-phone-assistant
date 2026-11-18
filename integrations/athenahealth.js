@@ -8,7 +8,13 @@
 
 import { log } from "../lib/logger.js";
 
-const ATHENA_TIMEOUT_MS = 10_000;
+// Must stay comfortably inside the LLM turn budget that wraps it
+// (lib/voice/llmTurn.js: 8s base, extended per tool round). At the old 10s a
+// slow endpoint blew the whole turn before its own timeout could fire, so the
+// caller heard "Sorry, I'm taking a bit longer. Could you repeat that?"
+// instead of the answer — a worse outcome than a clean tool failure, which
+// the model can at least explain. Env-overridable for a slow integration.
+const ATHENA_TIMEOUT_MS = Number.parseInt(process.env.ATHENA_TIMEOUT_MS, 10) || 6_000;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
 
 /** @type {Record<string, { access_token: string, expiresAt: number, api_base: string }>} */
@@ -42,7 +48,7 @@ function getAthenaEnv(config = {}) {
 export async function getAthenaAccessToken(config = {}) {
   const env = getAthenaEnv(config);
   if (!env) {
-    log("athena_token", { error: "missing_config" });
+    log.error("athena_token", { error: "missing_config" });
     return null;
   }
 
@@ -71,7 +77,7 @@ export async function getAthenaAccessToken(config = {}) {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      log("athena_token", { error: "token_failed", status: res.status });
+      log.error("athena_token", { error: "token_failed", status: res.status });
       return null;
     }
 
@@ -82,12 +88,12 @@ export async function getAthenaAccessToken(config = {}) {
       expiresAt: now + expires_in * 1000,
       api_base: env.apiBase,
     };
-    log("athena_token", { refreshed: true });
+    log.info("athena_token", { refreshed: true });
     return { access_token, api_base: env.apiBase };
   } catch (e) {
     clearTimeout(timeoutId);
     const isTimeout = e?.name === "AbortError";
-    log("athena_token", { error: isTimeout ? "timeout" : "request_failed" });
+    log.error("athena_token", { error: isTimeout ? "timeout" : "request_failed" });
     return null;
   }
 }
@@ -589,7 +595,7 @@ export async function getCallerAppointments(apiBase, practiceId, accessToken, ar
 
   const patient = await resolvePatient(apiBase, practiceId, accessToken, { name, dob, phone });
   if (!patient.patientId) {
-    log("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: patient.message };
   }
 
@@ -599,7 +605,7 @@ export async function getCallerAppointments(apiBase, practiceId, accessToken, ar
   const endDate = toAthenaDate(new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const apptRes = await athenaGet(apiBase, practiceId, accessToken, `patients/${patient.patientId}/appointments`, { startdate: startDate, enddate: endDate });
   if (!apptRes.ok) {
-    log("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: apptRes.status });
+    log.error("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: apptRes.status });
     return { success: false, message: "I couldn't retrieve your appointments. Please try again or call the office." };
   }
 
@@ -614,7 +620,7 @@ export async function getCallerAppointments(apiBase, practiceId, accessToken, ar
   }).slice(0, 5);
 
   if (upcoming.length === 0) {
-    log("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+    log.info("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
     return { success: true, message: "You don't have any upcoming appointments on the schedule.", data: { appointments: [] } };
   }
 
@@ -622,7 +628,7 @@ export async function getCallerAppointments(apiBase, practiceId, accessToken, ar
   const message = parts.length === 1
     ? `Your next appointment is ${parts[0]}.`
     : `Your upcoming appointments are: ${parts.join("; ")}.`;
-  log("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+  log.info("athena_tool", { tool: "get_caller_appointments", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
   return { success: true, message, data: { appointments: upcoming.map(normalizeAppointment) } };
 }
 
@@ -645,7 +651,7 @@ export async function getAvailableSlots(apiBase, practiceId, accessToken, args) 
 
   const res = await athenaGet(apiBase, practiceId, accessToken, "appointments/open", params);
   if (!res.ok) {
-    log("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: res.status });
+    log.error("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: res.status });
     return { success: false, message: "I couldn't load available times right now. Please try again or call the office." };
   }
 
@@ -654,12 +660,12 @@ export async function getAvailableSlots(apiBase, practiceId, accessToken, args) 
   const available = list.filter(Boolean).slice(0, 10);
 
   if (available.length === 0) {
-    log("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+    log.info("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
     return { success: true, message: `There are no available slots on ${date}. Would you like to try a different date?`, data: { slots: [] } };
   }
 
   const times = available.map((s) => s.starttime ?? s.time ?? s.slotstart ?? "").filter(Boolean);
-  log("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+  log.info("athena_tool", { tool: "get_available_slots", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
   return {
     success: true,
     message: `Available times on ${date}: ${times.join(", ")}.`,
@@ -685,7 +691,7 @@ export async function bookAppointment(apiBase, practiceId, accessToken, args) {
 
   const patient = await resolvePatient(apiBase, practiceId, accessToken, { name, dob, phone });
   if (!patient.patientId) {
-    log("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: patient.message };
   }
 
@@ -700,7 +706,7 @@ export async function bookAppointment(apiBase, practiceId, accessToken, args) {
 
   const slotRes = await athenaGet(apiBase, practiceId, accessToken, "appointments/open", slotParams);
   if (!slotRes.ok) {
-    log("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: slotRes.status });
+    log.error("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: slotRes.status });
     return { success: false, message: "I couldn't check availability. Please try again or call the office." };
   }
 
@@ -731,14 +737,14 @@ export async function bookAppointment(apiBase, practiceId, accessToken, args) {
 
   const bookRes = await athenaPut(apiBase, practiceId, accessToken, `appointments/${appointmentId}`, bookBody);
   if (!bookRes.ok) {
-    log("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: bookRes.status });
+    log.error("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: bookRes.status });
     return { success: false, message: "Booking didn't go through. Please try again or call the office." };
   }
 
   const bookedDate = targetSlot.date ?? targetSlot.appointmentdate ?? scheduledAt.slice(0, 10);
   const bookedTime = targetSlot.starttime ?? targetSlot.time ?? requestedTime;
   const friendlyDate = formatFriendlyDateTime(bookedDate, bookedTime);
-  log("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+  log.info("athena_tool", { tool: "book_appointment_in_ehr", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
   return {
     success: true,
     message: `You're all set! Your appointment is confirmed for ${friendlyDate}.`,
@@ -764,7 +770,7 @@ export async function cancelAppointment(apiBase, practiceId, accessToken, args) 
 
   const patient = await resolvePatient(apiBase, practiceId, accessToken, { name, dob, phone });
   if (!patient.patientId) {
-    log("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: patient.message };
   }
 
@@ -773,7 +779,7 @@ export async function cancelAppointment(apiBase, practiceId, accessToken, args) 
     appointmentTime,
   });
   if (!found.appointment) {
-    log("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: found.message };
   }
 
@@ -785,7 +791,7 @@ export async function cancelAppointment(apiBase, practiceId, accessToken, args) 
 
   const cancelRes = await athenaPut(apiBase, practiceId, accessToken, `appointments/${apptId}/cancel`, cancelBody);
   if (!cancelRes.ok) {
-    log("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: cancelRes.status });
+    log.error("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: cancelRes.status });
     let message = "I wasn't able to cancel that appointment. Please try again or call the office.";
     if (cancelRes.status === 404) {
       message = "I couldn't find that appointment in the schedule. It may have already been cancelled.";
@@ -794,7 +800,7 @@ export async function cancelAppointment(apiBase, practiceId, accessToken, args) 
   }
 
   const brief = formatAppointmentBrief(found.appointment);
-  log("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+  log.info("athena_tool", { tool: "cancel_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
   return {
     success: true,
     message: `Your appointment on ${brief} has been cancelled.`,
@@ -826,7 +832,7 @@ export async function rescheduleAppointment(apiBase, practiceId, accessToken, ar
   // 1. Resolve patient
   const patient = await resolvePatient(apiBase, practiceId, accessToken, { name, dob, phone });
   if (!patient.patientId) {
-    log("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: patient.message };
   }
 
@@ -836,7 +842,7 @@ export async function rescheduleAppointment(apiBase, practiceId, accessToken, ar
     appointmentTime: currentTime,
   });
   if (!found.appointment) {
-    log("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
+    log.error("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false });
     return { success: false, message: found.message };
   }
 
@@ -868,7 +874,7 @@ export async function rescheduleAppointment(apiBase, practiceId, accessToken, ar
   });
   const slotRes = await athenaGet(apiBase, practiceId, accessToken, "appointments/open", slotParams);
   if (!slotRes.ok) {
-    log("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: slotRes.status });
+    log.error("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: slotRes.status });
     return { success: false, message: "I couldn't check availability for the new date. Please try again or call the office." };
   }
 
@@ -978,7 +984,7 @@ export async function rescheduleAppointment(apiBase, practiceId, accessToken, ar
   );
 
   if (!rescheduleRes.ok) {
-    log("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: rescheduleRes.status });
+    log.error("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: false, status: rescheduleRes.status });
     let message = "I wasn't able to reschedule the appointment. Please try again or call the office.";
     if (rescheduleRes.status === 400) {
       message = "The scheduling system rejected that change. Please call the office so they can help reschedule.";
@@ -991,7 +997,7 @@ export async function rescheduleAppointment(apiBase, practiceId, accessToken, ar
   }
 
   const newBrief = formatAppointmentBrief(targetSlot);
-  log("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
+  log.info("athena_tool", { tool: "reschedule_appointment", practice_id: practiceId, duration_ms: Date.now() - start, success: true });
   return {
     success: true,
     message: `Done! Your appointment has been rescheduled to ${newBrief}.`,

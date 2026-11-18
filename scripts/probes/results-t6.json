@@ -1,0 +1,139 @@
+{
+  "at": "2026-09-16T04:48:42.571Z",
+  "sources": [
+    "results-t1.json",
+    "results-t3.json"
+  ],
+  "wer": {
+    "n": 10,
+    "median": 0.334,
+    "blank_transcripts": 0,
+    "by_fixture": {
+      "no_terminal_punct": {
+        "n": 5,
+        "median": 0,
+        "truth": "Next Tuesday afternoon works",
+        "sample_heard": "Next Tuesday afternoon works."
+      },
+      "trailing_lead_in": {
+        "n": 5,
+        "median": 0.667,
+        "truth": "It's for, uh",
+        "sample_heard": "It's 4:00."
+      }
+    },
+    "rows": [
+      {
+        "fixture": "no_terminal_punct",
+        "take": 1,
+        "truth": "Next Tuesday afternoon works",
+        "heard": "Next Tuesday afternoon works.",
+        "wer": 0,
+        "blank": false
+      },
+      {
+        "fixture": "no_terminal_punct",
+        "take": 2,
+        "truth": "Next Tuesday afternoon works",
+        "heard": "Next Tuesday afternoon works.",
+        "wer": 0,
+        "blank": false
+      },
+      {
+        "fixture": "no_terminal_punct",
+        "take": 3,
+        "truth": "Next Tuesday afternoon works",
+        "heard": "Next Tuesday afternoon works.",
+        "wer": 0,
+        "blank": false
+      },
+      {
+        "fixture": "no_terminal_punct",
+        "take": 4,
+        "truth": "Next Tuesday afternoon works",
+        "heard": "Next Tuesday afternoon works.",
+        "wer": 0,
+        "blank": false
+      },
+      {
+        "fixture": "no_terminal_punct",
+        "take": 5,
+        "truth": "Next Tuesday afternoon works",
+        "heard": "Next Tuesday afternoon works.",
+        "wer": 0,
+        "blank": false
+      },
+      {
+        "fixture": "trailing_lead_in",
+        "take": 1,
+        "truth": "It's for, uh",
+        "heard": "It's 4:00.",
+        "wer": 0.667,
+        "blank": false
+      },
+      {
+        "fixture": "trailing_lead_in",
+        "take": 2,
+        "truth": "It's for, uh",
+        "heard": "It's 4:00.",
+        "wer": 0.667,
+        "blank": false
+      },
+      {
+        "fixture": "trailing_lead_in",
+        "take": 3,
+        "truth": "It's for, uh",
+        "heard": "It's 4:00.",
+        "wer": 0.667,
+        "blank": false
+      },
+      {
+        "fixture": "trailing_lead_in",
+        "take": 4,
+        "truth": "It's for, uh",
+        "heard": "It's 4:00.",
+        "wer": 0.667,
+        "blank": false
+      },
+      {
+        "fixture": "trailing_lead_in",
+        "take": 5,
+        "truth": "It's for, uh",
+        "heard": "It's 4:00.",
+        "wer": 0.667,
+        "blank": false
+      }
+    ]
+  },
+  "repetition": {
+    "gptlive": {
+      "conversations": 1,
+      "max_repeat": 1,
+      "median_repeat": 1,
+      "looped_3plus": 0,
+      "worst_example": "what day were you hoping to come in"
+    },
+    "_rows": [
+      {
+        "gate": "T3",
+        "vendor": "gptlive",
+        "scenario": "S1_happy",
+        "take": 1,
+        "questions": 4,
+        "repeat_count": 1,
+        "most_repeated": "what day were you hoping to come in"
+      }
+    ]
+  },
+  "verdict": {
+    "predicted": "median WER at or below 0.10; repetition between 2.5's 7 and GPT-Live's 3, under 5",
+    "measured_wer": 0.334,
+    "measured_max_repeat": 1,
+    "fails": true,
+    "baselines": {
+      "gpt-live-1": "median WER 0.000 on these fixtures; worst max_repeat 3",
+      "gemini-live-2.5-flash-native-audio": "max_repeat 7 in one session; looped 3+ in 4 of 15",
+      "gemini-3.1-flash-live-preview": "transcript lossy, 1,500ms of voiced speech logged as zero characters"
+    }
+  }
+}

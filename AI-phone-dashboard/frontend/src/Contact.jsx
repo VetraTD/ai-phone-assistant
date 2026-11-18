@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import axios from "axios";
 import VetraLogo from "./components/VetraLogo";
 import "./Contact.css";
+import { MARKETING_URL } from "./siteUrl";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
@@ -35,8 +35,8 @@ export default function Contact() {
     <div className="contact-page">
       <header className="contact-header">
         <div className="contact-header-inner">
-          <VetraLogo to="/" />
-          <Link to="/" className="contact-back">← Back to home</Link>
+          <VetraLogo href={MARKETING_URL} />
+          <a href={MARKETING_URL} className="contact-back">← Back to vetratd.com</a>
         </div>
       </header>
 

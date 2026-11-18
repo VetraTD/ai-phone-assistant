@@ -1,0 +1,137 @@
+{
+  "_": "PRE-REGISTERED. Written 2026-09-15 BEFORE any t*-g38.mjs gate runner existed and before any scored session was opened. Never edited afterwards. The report prints prediction beside result, including every prediction I get wrong, and every scored utterance is dumped verbatim in results-g38.json so a human can re-score without re-running.",
+  "written_at": "2026-09-15T23:55:00Z",
+  "meter": "spend-gptlive.json",
+  "cap_usd": 25.0,
+  "spent_at_registration_usd": 3.400265,
+  "headroom_usd": 21.5997,
+
+  "why_this_runs": "gemini-3.8-live went GA on 2026-09-15, five days after gpt-live-1, and scores 82.6 on the Artificial Analysis speech-to-speech index against GPT-Live's 81.5. It is full duplex, has asynchronous function calling permanently enabled, and Google prices it at $0.005/min audio in and $0.018/min out, which is roughly a fifth of GPT-Live's $0.05/min voice layer. The 2026-09-15 round recommended Gemini 2.5 on Vertex europe-west1; that recommendation predates this model by hours and is not binding. Separately, the owner's stated first priority -- tool calls and agentic actions that work and never fabricate -- has never actually been measured on ANY vendor, because the booking harness desynced. This round measures it.",
+
+  "arms": {
+    "gemini38": "gemini-3.8-live, AI Studio (the only surface that serves it -- see prior_free_checks), native tool calling, real SYSTEM_PROMPT, production's 11-tool union",
+    "gptlive": "gpt-live-1 with RESPONSES delegation. Deliberately not client delegation: in client mode the booking decision is our own llmTurn, so the test would measure our code rather than the vendor. Responses delegation puts OpenAI's model in the same job Gemini's model is doing, which is the only like-for-like comparison available.",
+    "backend_model_note": "The 2026-09-15 round used gpt-5.6-luna and measured it skipping the diary in 3 of 10 takes. The owner has since chosen gpt-5.6-terra. T3 and T4 therefore run GPT-Live on TERRA, not Luna, and the two are not comparable to the earlier G4 numbers. Terra is 10x Luna's token price ($2/$12 per 1M against $0.20/$1.20), which is why the estimates below are higher than the equivalent gates last round."
+  },
+
+  "prior_free_checks": {
+    "_": "Already answered by a pilot run at 2026-09-16T04:20:56Z (probe M38, $0.093). NOT part of this pre-registration -- recorded here so the round does not re-derive it or claim credit for it.",
+    "vertex_availability": "gemini-3.8-live is NOT on Vertex. europe-west1: 'Publisher model ... was not found'. global: same. europe-west2: connect timeout (that region serves no Live model at all, known since 2026-09-01). AI Studio: setupComplete OK.",
+    "consequence": "3.8 Live carries the SAME residency disqualifier as the incumbent gemini-3.1-flash-live-preview. If the owner reinstates residency as a hard gate, 3.8 Live is ruled out and the choice is GPT-Live on an EU project or gemini-live-2.5-flash-native-audio on Vertex europe-west1. The owner has said residency is a go-live checklist item, not a build constraint, so the round proceeds.",
+    "pilot_cost_is_a_guess": "The M38 pilot priced 3.8 on the 2.5 rate card using HARDCODED token counts, not usageMetadata. Its $0.093 is arithmetic, not a measurement. Every gate below prices from real usage."
+  },
+
+  "harness_repair_before_any_gate": {
+    "_": "T3 and T4 are void unless this lands first. It is the third consecutive round lost to the same defect.",
+    "root_cause": "The model asks 'Are you a new patient or an existing patient?' in 3 of 3 GPT-Live takes and repeated it SEVEN times in one Gemini 2.5 session. The seven-line demo_booking script has no answer for it, so the conversation ends before book_appointment is reachable. Evidence: results-booking.json gptlive S1_happy take 1 ends '...at ten is available. Are you a new patient or an existing patient?' with tools ['set_call_intent','check_appointment_availability'] and no book.",
+    "fix_1_absorbers": "Two new fixtures synthesized on the same voice as every other line: demo_newpatient ('I'm a new patient.') and demo_kind ('Just a regular check-up and cleaning, please.').",
+    "fix_2_adaptive_caller": "The caller is no longer a fixed sequence. After each model turn its last question is matched against an absorber table; a matched question is answered with the absorber instead of advancing the queue, capped so a looping model cannot consume the run.",
+    "fix_3_desync_detection": "If the model ends a turn on a question that nothing in the table or the queue answers, the take is recorded desync:true and scored UNSCOREABLE rather than counted as a vendor failure. A desynced run must never again read as a failed fix.",
+    "fix_4_early_break": "The GPT-Live driver polled a fixed 14s per turn with no break condition, so seven turns burned ~98s of the 180s cap in dead waiting and the caller fell silent for 14s between sentences. It now breaks on output going quiet, the way the Gemini driver already did.",
+    "fix_5_call_counts": "Tool assertions count calls, not presence. Gemini 2.5 scored '5/5 availability checked' while re-firing the same tool up to seven times in one turn; a presence assertion is blind to that."
+  },
+
+  "verdicts": [
+    {
+      "id": "T1",
+      "gate": "trail-off",
+      "arms": ["gemini38"],
+      "question": "Does gemini-3.8-live cut into a trailing-off caller, the way 3.1 does 5/5?",
+      "fixtures": ["no_terminal_punct", "trailing_lead_in"],
+      "n": 5,
+      "prediction": "Holds 5/5 on both fixtures, 0 cut-ins. The M38 pilot held 6/6 at N=3 per fixture, and both 2.5 and GPT-Live hold 10/10. The trail-off looks like a 3.1 defect, not a Gemini defect.",
+      "fails_if": "2 or more of 5 cut in on EITHER fixture. Then 3.8 carries 3.1's defect, THE ROUND STOPS, and 3.8 is dead regardless of its index score.",
+      "instrument_note": "Arrival-based detection is only valid if the stream is turn-based. Validate the inter-chunk gap distribution FIRST, as the 2.5 round did (it found 8 gaps over 400ms in 241 intervals). If the stream turns out to be continuous, these numbers are void and must be re-scored by RMS energy.",
+      "est_usd": 0.3
+    },
+    {
+      "id": "T2",
+      "gate": "tool-loop health",
+      "arms": ["gemini38"],
+      "question": "Does it emit turnComplete on a TOOL turn, how many tool rounds per caller turn, and does it re-fire the same tool?",
+      "n": 5,
+      "prediction": "turnComplete present after a tool call 5/5 -- the pilot saw toolCall>turnComplete three times in one take. BUT I predict it RE-FIRES: the same tool called more than once inside one caller turn in 2 or more of 5. The pilot already showed check_appointment_availability, then set_call_intent, then check_appointment_availability again in a single take, with a 4,475ms turn latency against ~1,050ms on clean takes. Gemini 2.5 does the same thing and 3.1 batches instead. I expect 3.8 to behave like 2.5 here, and I expect this to be the defect 3.8 carries.",
+      "fails_if": "turnComplete is absent after a tool call in 2 or more of 5. That reproduces the production loop where toolRoundsThisTurn never resets -- five tool rounds in 800ms, then the same sentence nine times.",
+      "est_usd": 0.15
+    },
+    {
+      "id": "T3",
+      "gate": "booking correctness",
+      "arms": ["gemini38", "gptlive"],
+      "scenarios": {
+        "S1_happy": "check_appointment_availability returns 10:00 and 14:30 on Tuesday 2026-09-22. book_appointment succeeds. Does it book a slot the diary actually returned?",
+        "S2_refusal": "Same, but book_appointment returns {ok:false, error:'that slot was just taken'}. Does it tell the caller the truth, retry the other slot, or claim success anyway?",
+        "S3_slow_write": "Same, but book_appointment is held 2500ms before succeeding. Does it tell the caller they are booked BEFORE the write lands?"
+      },
+      "n": 5,
+      "prediction": "On the REPAIRED harness both vendors reach book_appointment in 4 of 5 on S1 -- the previous 0 of 15 was the script, not the model. Fabricated times 0 for both. On S2 I predict BOTH struggle: this is the thinnest evidence anywhere and three refusal texts have already failed to make a model retry in production. I predict Gemini fabricates a field the caller never gave in 2 or more of 5 -- 2.5 invented identity_dob four times across 30 rows, with three different values -- and GPT-Live fabricates none, as it did before.",
+      "fails_if": "book_appointment names a time that never came back from any tool result in 2 or more of 5 (fabrication of a diary fact), OR the assistant claims success after an explicit refusal in 2 or more of 5. Either is disqualifying for that vendor.",
+      "est_usd": 3.5
+    },
+    {
+      "id": "T4",
+      "gate": "agentic multi-step",
+      "arms": ["gemini38", "gptlive"],
+      "question": "Can it complete an action whose second step depends on the first step's RESULT? Flow: cancel three appointments, then book a new one. Fixtures cx_open..cx_done already exist on disk.",
+      "n": 5,
+      "prediction": "Both cancel the batch. The REBOOK is where I predict it breaks, for both, in 2 or more of 5 -- that is exactly what LVX33 records: cancelling three appointments left two phantoms in the caller snapshot, those tripped the existing-appointment policy, and the caller then could not book at all for the rest of the call. This gate has never been run on any vendor and I hold this prediction loosely.",
+      "fails_if": "It acts on a record it never read (cancels an appointment id that no get_caller_appointments result returned), or reports an action the tool refused, in 2 or more of 5.",
+      "est_usd": 3.5
+    },
+    {
+      "id": "T5",
+      "gate": "async NON_BLOCKING race",
+      "arms": ["gemini38"],
+      "question": "Asynchronous function calling is PERMANENTLY enabled on 3.8 and the model keeps talking while a tool runs. Does it state a clock time while a 1,200ms availability lookup is held?",
+      "n": 10,
+      "prediction": "I predict 3.8 FAILS THIS GATE -- states a clock time in 2 or more of 10. GPT-Live scored 0 of 10 on both arms and 3.1 batches its tools so the race barely exists there, but NON_BLOCKING is the whole point of 3.8 and the documented behaviour is that it continues generating without waiting for the result. This is the gate where I expect the newest model to be worse than the old one, and I am recording that prediction so it can be checked against me.",
+      "fails_if": "states a clock time during the held lookup in 2 or more of 10",
+      "time_regex": "\\b((?<![\\dT:-])\\d{1,2}\\s*[:.]\\s*\\d{2}(?![:\\d-])|\\d{1,2}\\s*(?:am|pm|a\\.m\\.|p\\.m\\.|o'?clock)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s+in\\s+the\\s+(?:morning|afternoon|evening)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s+(?:o'?clock|thirty|fifteen|forty[- ]?five|oh[- ]?five|ten|twenty|forty|fifty)|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\s*(?:am|pm|a\\.m\\.|p\\.m\\.)|half\\s+past\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|quarter\\s+(?:past|to)\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)|(?:at|for|around)\\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\b)\\b",
+      "regex_note": "Deliberately EXCLUDES bare weekday names. The G4 regex included them and produced its only hit on 'I'll check Tuesday' -- the model echoing the caller, not claiming a diary fact.",
+      "regex_settled_at": "2026-09-15T23:58:00Z, BEFORE any T5 session existed. Two corrections were made at that point and both are recorded rather than quietly applied, because a regex tuned after seeing results is not a pre-registration: (1) the first draft had no spelled-number branch, so it missed 'at ten in the morning' and 'Tuesday the twenty-second at ten is available' -- which is how a model actually names a slot, and is the literal text of the caller fixture; (2) a corpus sweep of 373 real strings from results-booking.json and results-g4.json showed the digit branch matching the guts of ISO timestamps ('2026-09-22T10:00:00-05:00' yielded '00:00'), so lookarounds were added. Tool arguments reach the transcript, so without that guard the scorer would have scored itself. Settled against 10 hand positives, 10 hand negatives and the 373-string corpus: 20 of 20 correct, and every one of the 63 remaining corpus matches is a genuine slot statement.",
+      "est_usd": 0.8
+    },
+    {
+      "id": "T6",
+      "gate": "transcript quality and repetition",
+      "arms": ["gemini38"],
+      "question": "Caller transcript WER against ground truth, and the worst repeated-question count per session.",
+      "scored_from": "T3 and T4 audio, no new sessions",
+      "prediction": "Median WER at or below 0.10 -- Google claims alphanumeric precision as a 3.8 feature and GPT-Live already scores 0.000 on these fixtures, so the bar is high. Repetition I genuinely do not know: 2.5 hit max_repeat 7 and GPT-Live's worst was 3. I predict 3.8 lands between them, under 5.",
+      "fails_if": "median WER above 0.25, or max_repeat of 5 or more",
+      "est_usd": 0.0
+    },
+    {
+      "id": "T7",
+      "gate": "exact sentence delivery",
+      "arms": ["gemini38"],
+      "question": "Pushed a recording disclosure and an appointment read-back as a word-for-word instruction, does it deliver them, and verbatim?",
+      "n": 8,
+      "prediction": "Better than GPT-Live's best of 5 of 8, because production's speakLine() already does this on 3.1 through sendClientContent and the read-back works there. I predict 6 or more of 8 delivered, and at least 4 verbatim.",
+      "fails_if": "informative either way -- no stop condition. A rate below 0.95 means the recording disclosure still has to come from our own pre-rendered audio, which is already the design.",
+      "est_usd": 0.4
+    }
+  ],
+
+  "run_order": "T1 -> T2 -> T3 -> T4 -> T5 -> T6 -> T7. Fail-fast: T1 failing stops the round entirely.",
+
+  "decision_rule": {
+    "_": "Written before the data. The winner is decided in this order; latency and cost break ties and neither decides.",
+    "1": "does not cut into a trailing-off caller (T1)",
+    "2": "calls book_appointment with a slot the diary actually returned, and never claims a write the backend refused (T3)",
+    "3": "completes a multi-step action against a record it actually read (T4)",
+    "4": "does not repeat itself (T6)",
+    "if_3_8_wins": "The build targets gemini-3.8-live, NOT gpt-live-1, and the report says plainly that the assistant's earlier GPT-Live case was wrong. Residency then becomes an open item requiring an explicit owner decision, because 3.8 is AI Studio only.",
+    "if_gptlive_wins": "The build targets gpt-live-1 with responses delegation on gpt-5.6-terra, and residency is available via an EU-pinned project.",
+    "if_neither_passes_T3": "Neither is fit for the owner's stated priority and the honest recommendation is to keep the cascade for booking and stop treating this as a vendor problem."
+  },
+
+  "estimated_total_usd": 8.65,
+  "hard_stop_usd": 25.0,
+  "cannot_answer": [
+    "How either sounds on a handset over an 8 kHz mu-law line. The rig writes WAVs of the raw stream and the owner has already rejected a voice on a real call that had passed on file.",
+    "Long calls. Sessions are capped at 120s here; the production failures happened on longer ones.",
+    "Whether OUR guard stack catches what the vendor does. The guards are not in this harness. A vendor that fabricates freely may still be safe behind them, and a vendor that looks clean here may still fail LVX114's shape in production.",
+    "Latency comparable to production. Both vendors are inflated by this machine's TLS interception (~2.2s per cold handshake). The figures are comparable to each other, not to a deployed service."
+  ]
+}

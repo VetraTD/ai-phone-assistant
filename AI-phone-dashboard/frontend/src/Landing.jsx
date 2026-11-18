@@ -17,6 +17,7 @@ import {
 import VetraLogo from "./components/VetraLogo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { LANDING_TRANSLATIONS, useLandingTranslations } from "./landingTranslations";
+import { APP_URL } from "./siteUrl";
 import "./Landing.css";
 
 const BRAND_NAME = "VetraTD";
@@ -415,11 +416,11 @@ export default function Landing() {
           </nav>
           <div className="lp-header-actions">
             <LanguageSwitcher lang={lang} onChange={handleLangChange} />
-            <Link to="/app" className="lp-header-login">
+            <a href={`${APP_URL}/login`} className="lp-header-login">
               {t.navLogin}
-            </Link>
-            <Link to="/app" className="lp-btn lp-btn-primary lp-btn-sm lp-header-cta">
-              {t.getStarted}
+            </a>
+            <Link to="/contact" className="lp-btn lp-btn-primary lp-btn-sm lp-header-cta">
+              {t.requestAccess}
             </Link>
           </div>
         </div>
@@ -434,8 +435,8 @@ export default function Landing() {
               </h1>
               <p className="lp-hero-sub">{t.heroSub}</p>
               <div className="lp-hero-ctas">
-                <Link to="/app" className="lp-btn lp-btn-primary">
-                  {t.getStarted}
+                <Link to="/contact" className="lp-btn lp-btn-primary">
+                  {t.requestAccess}
                 </Link>
                 <a href="#listen" className="lp-btn lp-btn-ghost" onClick={scrollToListen}>
                   <Play size={16} strokeWidth={2.6} aria-hidden="true" />
@@ -585,8 +586,8 @@ export default function Landing() {
             </h2>
             <p className="lp-lead">{t.ctaSub}</p>
             <div className="lp-final-ctas">
-              <Link to="/app" className="lp-btn lp-btn-primary">
-                {t.getStarted}
+              <Link to="/contact" className="lp-btn lp-btn-primary">
+                {t.requestAccess}
               </Link>
               <a href={DEMO_TEL} className="lp-btn lp-btn-ghost">
                 {t.ctaDemo}
@@ -600,7 +601,7 @@ export default function Landing() {
         <div className="lp-footer-inner">
           <VetraLogo to="/" className="lp-logo vetra-logo-footer" name={BRAND_NAME} />
           <nav className="lp-footer-links" aria-label="Footer">
-            <Link to="/app">{t.navLogin}</Link>
+            <a href={`${APP_URL}/login`}>{t.navLogin}</a>
             <Link to="/contact">{t.footerContact}</Link>
             <a href={`${privacyOrigin}/legal`}>{t.footerPrivacy}</a>
             <Link to="/legal">{t.footerTerms}</Link>

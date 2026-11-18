@@ -1,0 +1,336 @@
+{
+  "slope": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "label": "rep_open",
+          "model_leg_ms": 1544,
+          "said": "I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_reason",
+          "model_leg_ms": 989,
+          "said": "I understand. In order to book that appointment, are you a new or existing patient? And just so you're aware, this is no",
+          "tools": []
+        },
+        {
+          "label": "rep_avail_q",
+          "model_leg_ms": 2002,
+          "said": "We don't have anything for the rest of this week. The earliest appointments are next Tuesday, September eighth, at ten i",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1875,
+          "said": "Yes, 10 am next Tuesday is open. Can I get your full name and date of birth to reserve that?",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "name_spelling",
+          "model_leg_ms": 1132,
+          "said": "Thanks, Nitin. And your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 977,
+          "said": "Thank you — but I also need your date of birth to book the appointment. What is that, please?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1106,
+          "said": "That's great — but before I can book that for you, I do need your date of birth. What is it?",
+          "tools": []
+        },
+        {
+          "label": "rep_repeat_q",
+          "model_leg_ms": 978,
+          "said": "Of course. To book the appointment for next Tuesday at ten, I just need your date of birth to confirm your details.",
+          "tools": []
+        },
+        {
+          "label": "no_terminal_punct",
+          "model_leg_ms": 1161,
+          "said": "I understand — but to book that appointment, I first need your date of birth. And are you a new or existing patient?",
+          "tools": []
+        },
+        {
+          "label": "digits_continuation",
+          "model_leg_ms": 1037,
+          "said": "Thanks, Nitin — but I need your date of birth, not your phone number, to schedule that. What's your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_done",
+          "model_leg_ms": 965,
+          "said": "Wait, before I can book that appointment, I still need your date of birth. What's your birth date?",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1562,
+          "said": "Thanks for calling Brightwork Family Dental. Have a great day.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.10109925,
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "label": "rep_open",
+          "model_leg_ms": 1537,
+          "said": "I can help with that. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_reason",
+          "model_leg_ms": 1477,
+          "said": "I'm sorry to hear that. Tooth pain can be uncomfortable. Regarding your appointment, are you a new or existing patient?",
+          "tools": []
+        },
+        {
+          "label": "rep_avail_q",
+          "model_leg_ms": 2212,
+          "said": "I don't have anything available this week. The next times I have are on Tuesday, September 8th, at ten in the morning or",
+          "tools": [
+            "check_appointment_availability",
+            "check_appointment_availability",
+            "check_appointment_availability",
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1814,
+          "said": "Yes, I have an opening at 10 in the morning or at 2 30 in the afternoon on Tuesday. Which works better for you? Please n",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "name_spelling",
+          "model_leg_ms": 1293,
+          "said": "Thanks, Nithin — and what's your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1052,
+          "said": "Sorry, I need your date of birth, not your phone number. What is your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1259,
+          "said": "Tuesday at 10 am sounds good. Could you please tell me your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_repeat_q",
+          "model_leg_ms": 1011,
+          "said": "Sure thing. We're looking at booking you for Tuesday, September 8th at 10 am. Now, can you please confirm your date of b",
+          "tools": []
+        },
+        {
+          "label": "no_terminal_punct",
+          "model_leg_ms": 1111,
+          "said": "Okay, Tuesday at 2 30 pm works. Could you please tell me your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "digits_continuation",
+          "model_leg_ms": 1038,
+          "said": "I'm sorry, I only caught part of that. To confirm, we're looking at next Tuesday, September 8th at 2 30 pm — is that rig",
+          "tools": []
+        },
+        {
+          "label": "rep_done",
+          "model_leg_ms": 1650,
+          "said": "Thanks for calling Brightwork Family Dental, have a great day.",
+          "tools": [
+            "end_call"
+          ]
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 980,
+          "said": "Thanks for calling Brightwork Family Dental, have a great day.",
+          "tools": []
+        }
+      ],
+      "usd": 0.11140575000000001,
+      "error": null
+    },
+    {
+      "run": 3,
+      "turns": [
+        {
+          "label": "rep_open",
+          "model_leg_ms": 1540,
+          "said": "Of course. Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ]
+        },
+        {
+          "label": "rep_reason",
+          "model_leg_ms": 1107,
+          "said": "Thanks for sharing that. I'm sorry to hear you're in pain. We recommend seeing a healthcare professional for any health ",
+          "tools": []
+        },
+        {
+          "label": "rep_avail_q",
+          "model_leg_ms": 2154,
+          "said": "I'm sorry, we don't have any availability until next week. The earliest openings we have are on Tuesday, September eight",
+          "tools": [
+            "check_appointment_availability",
+            "check_appointment_availability",
+            "check_appointment_availability",
+            "check_appointment_availability",
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1886,
+          "said": "We do have an opening next Tuesday, September eighth, at ten in the morning. Would that work for you?",
+          "tools": [
+            "check_appointment_availability"
+          ]
+        },
+        {
+          "label": "name_spelling",
+          "model_leg_ms": 1219,
+          "said": "Thanks, Nithin N — I T H I N — and for confirmation, can you provide your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 1163,
+          "said": "Thank you, Nithin. I have 5551234. Now, may I have your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1093,
+          "said": "Perfect. To get that scheduled, could you please tell me your date of birth?",
+          "tools": []
+        },
+        {
+          "label": "rep_repeat_q",
+          "model_leg_ms": 1014,
+          "said": "Sure thing. I was just asking for your date of birth so I can get that appointment booked for Tuesday at ten in the morn",
+          "tools": []
+        },
+        {
+          "label": "no_terminal_punct",
+          "model_leg_ms": 1253,
+          "said": "I'm sorry, we were looking at Tuesday morning. Did that still work for you, or would you like an afternoon instead? We a",
+          "tools": []
+        },
+        {
+          "label": "digits_continuation",
+          "model_leg_ms": 1098,
+          "said": "Thanks for clarifying. Did you mean Tuesday afternoon at three forty five, or just that the morning works for you? I als",
+          "tools": []
+        },
+        {
+          "label": "rep_done",
+          "model_leg_ms": 1164,
+          "said": "Just to confirm, did you want the appointment next Tuesday at three forty five, or something else? Once we have that and",
+          "tools": []
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1965,
+          "said": "Thank you for calling Brightwork Family Dental. Have a great day.",
+          "tools": [
+            "end_call"
+          ]
+        }
+      ],
+      "usd": 0.1065825,
+      "error": null
+    }
+  ],
+  "meta": {
+    "model": "gemini-live-2.5-flash-native-audio",
+    "surface": "vertex",
+    "location": "europe-west1",
+    "n": 5,
+    "at": "2026-09-02T06:00:16.957Z"
+  },
+  "endpointing": [
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "It's for a",
+      "said": "text",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "It's for a",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "window_ms": 2000,
+      "cut_in": true,
+      "first_audio_ms": 1958,
+      "heard": "It's for a",
+      "said": "I understand.",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 4,
+      "window_ms": 2000,
+      "cut_in": true,
+      "first_audio_ms": 1451,
+      "heard": "It's for a",
+      "said": "Thanks for calling Brightwork Family Dental. I wasn't able to get all of",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 5,
+      "window_ms": 2000,
+      "cut_in": true,
+      "first_audio_ms": 1419,
+      "heard": "It's for a",
+      "said": "I want to make sure I understand you properly. Let me connect you to",
+      "usd": 0
+    }
+  ]
+}

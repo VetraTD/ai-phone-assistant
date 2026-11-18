@@ -1,0 +1,192 @@
+# Build the voice image and push it to the shared Artifact Registry.
+#
+# ---------------------------------------------------------------------------
+# Why this is built in Cloud Build and not on a workstation
+# ---------------------------------------------------------------------------
+#
+# Norton intercepts TLS on the development machine, including inside containers,
+# so `npm ci` in Docker fails there with "Exit handler never called!" — which
+# reads as an npm bug and is really UNABLE_TO_VERIFY_LEAF_SIGNATURE three layers
+# down. The Dockerfile carries an `NPM_CA` build-arg accommodation for that.
+#
+# Cloud Build has no Norton and passes nothing, so the arg is empty and the same
+# Dockerfile reduces to a plain `npm ci`. Building here is not a convenience: it
+# is the only place the build is uncomplicated.
+#
+# That accommodation used to be `RUN --mount=type=secret`, which is BuildKit-only
+# and broke Railway outright — Railway prefers a Dockerfile when it finds one,
+# and its builder could not parse the line. A CA certificate is public, so the
+# secret mount bought nothing that a build arg does not.
+#
+# ---------------------------------------------------------------------------
+# Running it
+# ---------------------------------------------------------------------------
+#
+#   CLOUDSDK_CONFIG=~/.gcloud-vetra2 gcloud builds submit \
+#     --config=cloudbuild.yaml \
+#     --project=vetra-core-edc8ca \
+#     --service-account=projects/vetra-core-edc8ca/serviceAccounts/vetra-deployer@vetra-core-edc8ca.iam.gserviceaccount.com \
+#     --substitutions=_TAG=$(git rev-parse --short HEAD)
+#
+# CORRECTED 2026-09-02. The previous version of these four lines was wrong in
+# three independent ways, and every one of them fails with an error naming
+# something else:
+#
+#   ~/.gcloud-vetratd    admin@vetratd.com now returns `access_denied: Account
+#                        Restricted` -- restricted at Google, not logged out.
+#                        Use ~/.gcloud-vetra2 (vetratd@gmail.com).
+#   vetra-shared-c3a3bd  an ATTEMPT-1 project that no longer exists.
+#                        cloudbuild.frontend.yaml:74 already records being
+#                        bitten by this exact name. It is vetra-core-edc8ca.
+#   no --service-account Cloud Build now defaults to the COMPUTE service
+#                        account, which holds no roles here, and the failure
+#                        reads `does not have storage.objects.get access to the
+#                        Google Cloud Storage object ... (or it may not exist)`
+#                        -- which looks like a missing source archive. Every
+#                        build in this project's history ran as vetra-deployer.
+#
+# ---------------------------------------------------------------------------
+
+substitutions:
+  _REGION: us-central1
+  _REPO: vetra
+  _IMAGE: voice
+  # Overridden with the git SHA. `dev` is a deliberately unhelpful default:
+  # an untagged build should be obviously untagged rather than quietly
+  # overwriting something meaningful.
+  _TAG: dev
+
+options:
+  # The default Cloud Build service account writes logs to a bucket it creates.
+  # Logging to Cloud Logging only keeps that bucket from existing at all, which
+  # is one fewer place build output — and anything a build prints — can sit.
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest"
+
+steps:
+  # -------------------------------------------------------------------------
+  # BuildKit, explicitly.
+  #
+  # NO LONGER for the Dockerfile's syntax — that is now plain Dockerfile any
+  # builder can read, which is what unbroke Railway. It stays for the LAYER
+  # CACHE below: `--build-arg=BUILDKIT_INLINE_CACHE=1` is a BuildKit feature,
+  # and without it `--cache-from` does nothing and every build reinstalls
+  # node_modules from scratch. Cloud Build's docker image supports BuildKit but
+  # does not enable it by default.
+  # -------------------------------------------------------------------------
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      # Reuse the previous image's layers. Without this every build reinstalls
+      # node_modules from scratch, which is most of the wall clock.
+      - --cache-from=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+
+  # -------------------------------------------------------------------------
+  # Prove the image can actually start before it is allowed to be `latest`.
+  #
+  # ~~`node --check` parses server.js and every module it would load at import
+  # time.~~ CORRECTED 2026-08-22: IT DOES NOT, AND NEVER DID. `node --check`
+  # syntax-checks the ONE file it is handed and never resolves an import or a
+  # require. Verified by pointing it at a file requiring a module that does not
+  # exist, which it passes cleanly.
+  #
+  # So the failure this step was written to catch — an image that builds,
+  # pushes, deploys and then crash-loops on Cloud Run because a file the
+  # Dockerfile forgot to COPY is imported at module scope — WOULD HAVE SAILED
+  # THROUGH IT. The guard described the right risk and did not cover it.
+  #
+  # A real dynamic import loads the whole module tree, so a missing file fails
+  # here. It is safe because server.js guards `assertBootConfig()`, the pool and
+  # `app.listen` behind `NODE_ENV !== "test"` — the same door its own test
+  # harness uses — so imported this way it binds no port and opens no
+  # connection.
+  #
+  # THE DUMMY VALUES ARE NOT CONFIGURATION. server.js exits at module scope
+  # without GEMINI_API_KEY (or the Vertex trio) and BASE_URL, before any of the
+  # NODE_ENV guards are reached. They exist only to get past those two checks so
+  # the imports resolve; nothing here reaches a vendor, and a real boot still
+  # needs the secrets from Secret Manager.
+  #
+  # Proven against the dashboard image, where the same change turned a passing
+  # build into a failing one the moment a source directory went missing.
+  # -------------------------------------------------------------------------
+  - id: smoke
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    env:
+      - NODE_ENV=test
+      - GEMINI_API_KEY=not-a-real-key
+      - BASE_URL=https://example.invalid
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/server.js'); console.log('module tree loaded, no port bound');"
+    waitFor: [build]
+
+  # The migration runner ships in this image too, so it gets the same treatment.
+  # A migration job that fails to parse is discovered here, not at D3 with a
+  # production restore half-finished.
+  #
+  # Imported rather than --check'd, for the reason above. scripts/migrate.js
+  # does its work inside main() behind an argv check, so importing it resolves
+  # every module without connecting to anything.
+  - id: smoke-migrate
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/scripts/migrate.js'); console.log('migration runner loaded');"
+    waitFor: [build]
+
+  # Lane C's verification scripts ship in this image too, and they are the only
+  # things in it that nothing else imports — so a forgotten COPY in the
+  # Dockerfile is invisible to every test in the repository and would surface as
+  # `Cannot find module` during a scheduled verification with the owner present.
+  # That is exactly what happened to both of these once.
+  #
+  # Imported rather than run: each guards its `main()` behind an
+  # argv[1] === import.meta.url check, so importing resolves the whole module
+  # tree — including lib/db/schemaFingerprint.js, which c7 needs and which
+  # arrives via `COPY lib` rather than by being named — without touching a
+  # database.
+  - id: smoke-verifiers
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: node
+    args:
+      - --input-type=module
+      - -e
+      - "await import('/app/scripts/c8-rls-proof.js'); await import('/app/scripts/c7-restore-parity.js'); await import('/app/scripts/import-tenant.js'); console.log('lane C verifiers + tenant import loaded');"
+    waitFor: [build]
+
+  # The migration files have to BE in the image. A `COPY database ./database`
+  # that silently matched nothing would leave a job that connects, finds zero
+  # migrations, reports "Nothing to apply", and exits 0 — a green run that did
+  # nothing, which is the worst possible outcome for a schema deploy.
+  - id: verify-migrations-present
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_IMAGE}:${_TAG}
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        count=$(ls database/*.sql 2>/dev/null | wc -l)
+        echo "migration files in image: $count"
+        if [ "$count" -lt 20 ]; then
+          echo "FAIL: expected at least 20 .sql files, found $count."
+          echo "The image would run a schema deploy that applies nothing."
+          exit 1
+        fi
+    waitFor: [build]
+
+timeout: 1200s

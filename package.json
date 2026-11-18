@@ -8,8 +8,31 @@
     "start": "node server.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:corpus": "vitest run tests/liveCorpusReplay.test.js",
+    "corpus:build": "node scripts/corpus/build-fixtures.mjs",
+    "corpus:check": "node scripts/corpus/build-fixtures.mjs --check",
+    "corpus:sabotage": "node scripts/corpus/sabotage.mjs",
     "test:appointments": "node scripts/test-appointments.js",
-    "test:athena-token": "node scripts/test-athena-token.js"
+    "test:athena-token": "node scripts/test-athena-token.js",
+    "chat": "node scripts/chat.js",
+    "eval": "node eval/run.js",
+    "eval:compare": "node scripts/eval-compare.js",
+    "stt:ab": "node scripts/stt-ab.js",
+    "stt:cmek": "node scripts/set-stt-cmek.js",
+    "sim:cutoff": "vitest run --config vitest.sim.config.js",
+    "probe:synth": "node scripts/latency-probe.js --synth",
+    "probe": "node scripts/latency-probe.js",
+    "probe:report": "node scripts/latency-probe.js --report-only",
+    "voice:ab": "node scripts/voice-ab-blind.js",
+    "voice:ab:call": "node scripts/voice-ab-call.js",
+    "db:up": "docker compose -f infra/docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "db:migrate": "node scripts/migrate.js",
+    "db:status": "node scripts/migrate.js --status",
+    "db:reset": "node scripts/migrate.js --reset",
+    "test:db": "vitest run --config vitest.db.config.js",
+    "check:credentials": "node scripts/check-credential-boundary.js",
+    "tts:readback": "node scripts/tts-readback.js"
   },
   "repository": {
     "type": "git",
@@ -27,19 +50,25 @@
   "homepage": "https://github.com/VetraTD/ai-phone-assistant#readme",
   "devDependencies": {
     "supertest": "^7.0.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@deepgram/sdk": "^5.0.0",
+    "@google-cloud/cloud-sql-connector": "^1.11.3",
+    "@google-cloud/speech": "^8.0.1",
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.0.0",
-    "@sentry/node": "^9.0.0",
-    "@supabase/supabase-js": "^2.97.0",
+    "@sentry/node": "^10.72.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
-    "nodemailer": "^8.0.2",
-    "twilio": "^5.0.0"
+    "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.1.0",
+    "nodemailer": "^9.0.6",
+    "pg": "^8.23.0",
+    "twilio": "^5.0.0",
+    "ws": "^8.20.0"
   }
 }

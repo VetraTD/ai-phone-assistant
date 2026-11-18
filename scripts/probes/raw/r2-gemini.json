@@ -1,0 +1,925 @@
+{
+  "conversations": [
+    {
+      "run": 1,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1092,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new patient, or an existing one?Are you a new patient, or have you been to us before?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "audio_bytes": 223828
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1050,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you a new patient or have you been to us before?",
+          "tools": [],
+          "audio_bytes": 116714
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 910,
+          "heard": "It's 555-1234.",
+          "said": "I'm sorry, I didn't catch that. Are you a new patient, or have you been to us before?",
+          "tools": [],
+          "audio_bytes": 170474
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 999,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Are you a new patient or have you been to us before?",
+          "tools": [],
+          "audio_bytes": 112874
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1129,
+          "heard": "Thanks. Bye.",
+          "said": "Thank you for calling Brightwork Family Dental. Have a great day.Thanks for calling Brightwork Family Dental. Have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "audio_bytes": 243028
+        }
+      ],
+      "usage": {
+        "text_in": 22112,
+        "audio_in": 2129,
+        "text_out": 165,
+        "audio_out": 453,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.023209,
+      "error": null
+    },
+    {
+      "run": 2,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1090,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "audio_bytes": 181588
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1044,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you an existing patient?",
+          "tools": [],
+          "audio_bytes": 70634
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 908,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I didn't catch that. Are you a new or existing patient?",
+          "tools": [],
+          "audio_bytes": 181994
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1006,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Are you an existing patient or a new one?",
+          "tools": [],
+          "audio_bytes": 105194
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1199,
+          "heard": "Thanks. Bye.",
+          "said": "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental. Have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "audio_bytes": 243028
+        }
+      ],
+      "usage": {
+        "text_in": 22161,
+        "audio_in": 2105,
+        "text_out": 136,
+        "audio_out": 409,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.022575500000000002,
+      "error": null
+    },
+    {
+      "run": 3,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1137,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or an existing patient?Are you a new or existing patient?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "audio_bytes": 187348
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 929,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you a new or existing patient?",
+          "tools": [],
+          "audio_bytes": 99434
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 979,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I didns't catch that. Are you a new or existing patient?",
+          "tools": [],
+          "audio_bytes": 180074
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1022,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "or existing patient?",
+          "tools": [],
+          "audio_bytes": 64874
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1129,
+          "heard": "Thanks. Bye.",
+          "said": "Thank you for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental. Have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "audio_bytes": 254548
+        }
+      ],
+      "usage": {
+        "text_in": 22182,
+        "audio_in": 2144,
+        "text_out": 135,
+        "audio_out": 411,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.022725000000000002,
+      "error": null
+    },
+    {
+      "run": 4,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1153,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new patient or an existing one?",
+          "tools": [
+            "set_call_intent"
+          ],
+          "audio_bytes": 204628
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 966,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "Are you a new patient or an existing patient?",
+          "tools": [],
+          "audio_bytes": 118634
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 922,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I didn't understand. Are you a new patient, or an existing one?",
+          "tools": [],
+          "audio_bytes": 218474
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1039,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Are you a new patient or an existing patient?",
+          "tools": [],
+          "audio_bytes": 122474
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1169,
+          "heard": "Thanks. Bye.",
+          "said": "Thanks for calling Brightwork Family Dental, have a great day.Thanks for calling Brightwork Family Dental, have a great day!",
+          "tools": [
+            "end_call"
+          ],
+          "audio_bytes": 260308
+        }
+      ],
+      "usage": {
+        "text_in": 22097,
+        "audio_in": 2132,
+        "text_out": 144,
+        "audio_out": 483,
+        "cached_in": 0,
+        "turns_billed": 7
+      },
+      "usd": 0.0235285,
+      "error": null
+    },
+    {
+      "run": 5,
+      "turns": [
+        {
+          "label": "clean_open",
+          "model_leg_ms": 1277,
+          "heard": "Hi. I like to book an appointment.",
+          "said": "Are you a new or existing patient?Are you a new patient or an existing one?Of course. Are you a new patient or an existing one?",
+          "tools": [
+            "set_call_intent",
+            "check_appointment_availability"
+          ],
+          "audio_bytes": 346302
+        },
+        {
+          "label": "rep_time_q",
+          "model_leg_ms": 1485,
+          "heard": "Do you have anything Tuesday morning?",
+          "said": "I have an opening at 10:00 AM on Tuesday.",
+          "tools": [
+            "check_appointment_availability"
+          ],
+          "audio_bytes": 109034
+        },
+        {
+          "label": "rep_digits",
+          "model_leg_ms": 961,
+          "heard": "It's 555-1234.",
+          "said": "Sorry, I didn't catch that. Are you interested in the 10:00 AM appointment for Tuesday?",
+          "tools": [],
+          "audio_bytes": 199274
+        },
+        {
+          "label": "rep_confirm",
+          "model_leg_ms": 1076,
+          "heard": "Tuesday at 10:00 works for me.",
+          "said": "Great, and are you a new patient or an existing one?",
+          "tools": [],
+          "audio_bytes": 143594
+        },
+        {
+          "label": "rep_close",
+          "model_leg_ms": 1428,
+          "heard": "Thanks. Bye.",
+          "said": "Thank you for calling Brightwork Family Dental, have a great day.",
+          "tools": [
+            "end_call"
+          ],
+          "audio_bytes": 133994
+        }
+      ],
+      "usage": {
+        "text_in": 29678,
+        "audio_in": 2735,
+        "text_out": 189,
+        "audio_out": 487,
+        "cached_in": 0,
+        "turns_billed": 9
+      },
+      "usd": 0.029266,
+      "error": null
+    }
+  ],
+  "meta": {
+    "model": "gemini-live-2.5-flash-native-audio",
+    "surface": "vertex",
+    "location": "europe-west1",
+    "n": 5,
+    "at": "2026-09-02T04:05:18.392Z"
+  },
+  "endpointing": [
+    {
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "no_terminal_punct",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 4,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "trailing_lead_in",
+      "trial": 5,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "patient",
+      "label": "partial_digits",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": true,
+      "first_audio_ms": 1456,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": true,
+      "first_audio_ms": 1426,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0.0017400000000000002
+    },
+    {
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": true,
+      "first_audio_ms": 1385,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0.0017400000000000002
+    },
+    {
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "no_terminal_punct",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon, work.",
+      "said": "Are you",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Is for a",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Is for a",
+      "said": "",
+      "usd": 0.0018484999999999999
+    },
+    {
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Is for a",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 4,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Is for a",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "trailing_lead_in",
+      "trial": 5,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Is for a",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019495
+    },
+    {
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": true,
+      "first_audio_ms": 1452,
+      "heard": "My number is 5552.",
+      "said": "Is there",
+      "usd": 0
+    },
+    {
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019495
+    },
+    {
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019495
+    },
+    {
+      "arm": "default",
+      "label": "partial_digits",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019495
+    },
+    {
+      "arm": "eager",
+      "label": "no_terminal_punct",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "",
+      "usd": 0.001753
+    },
+    {
+      "arm": "eager",
+      "label": "no_terminal_punct",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "",
+      "usd": 0.001753
+    },
+    {
+      "arm": "eager",
+      "label": "no_terminal_punct",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "",
+      "usd": 0.001753
+    },
+    {
+      "arm": "eager",
+      "label": "no_terminal_punct",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "",
+      "usd": 0.001753
+    },
+    {
+      "arm": "eager",
+      "label": "no_terminal_punct",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "Next Tuesday afternoon works.",
+      "said": "",
+      "usd": 0.001753
+    },
+    {
+      "arm": "eager",
+      "label": "trailing_lead_in",
+      "trial": 1,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "8:04",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "eager",
+      "label": "trailing_lead_in",
+      "trial": 2,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "8:04",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "eager",
+      "label": "trailing_lead_in",
+      "trial": 3,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "8:04",
+      "said": "",
+      "usd": 0.0018325
+    },
+    {
+      "arm": "eager",
+      "label": "trailing_lead_in",
+      "trial": 4,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "8:04",
+      "said": "",
+      "usd": 0.0018325
+    },
+    {
+      "arm": "eager",
+      "label": "trailing_lead_in",
+      "trial": 5,
+      "window_ms": 2000,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "8:04",
+      "said": "",
+      "usd": 0
+    },
+    {
+      "arm": "eager",
+      "label": "partial_digits",
+      "trial": 1,
+      "window_ms": 1500,
+      "cut_in": true,
+      "first_audio_ms": 1363,
+      "heard": "My number is 5552.",
+      "said": "Is there",
+      "usd": 0
+    },
+    {
+      "arm": "eager",
+      "label": "partial_digits",
+      "trial": 2,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019375
+    },
+    {
+      "arm": "eager",
+      "label": "partial_digits",
+      "trial": 3,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019375
+    },
+    {
+      "arm": "eager",
+      "label": "partial_digits",
+      "trial": 4,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019375
+    },
+    {
+      "arm": "eager",
+      "label": "partial_digits",
+      "trial": 5,
+      "window_ms": 1500,
+      "cut_in": false,
+      "first_audio_ms": null,
+      "heard": "My number is 5552.",
+      "said": "",
+      "usd": 0.0019375
+    }
+  ],
+  "split": [
+    {
+      "trial": 1,
+      "generation_ms": 953,
+      "tools": [
+        "set_call_intent"
+      ],
+      "heard": "Hi, I like to book an appointment.",
+      "said": "Are you",
+      "usd": 0.0045635
+    },
+    {
+      "trial": 2,
+      "generation_ms": 857,
+      "tools": [
+        "set_call_intent"
+      ],
+      "heard": "Hi, I like to book an appointment.",
+      "said": "Are you",
+      "usd": 0.0047375
+    },
+    {
+      "trial": 3,
+      "generation_ms": 898,
+      "tools": [
+        "set_call_intent"
+      ],
+      "heard": "Hi, I like to book an appointment.",
+      "said": "Sure, are",
+      "usd": 0.0048475
+    },
+    {
+      "trial": 4,
+      "generation_ms": 943,
+      "tools": [
+        "set_call_intent"
+      ],
+      "heard": "Hi, I like to book an appointment.",
+      "said": "Are you",
+      "usd": 0.0045795
+    },
+    {
+      "trial": 5,
+      "generation_ms": 880,
+      "tools": [
+        "set_call_intent"
+      ],
+      "heard": "Hi, I like to book an appointment.",
+      "said": "Are you",
+      "usd": 0.0047875
+    }
+  ],
+  "longbarge": [
+    {
+      "trial": 1,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 25,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 667,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "audio_arrived_after_settle": false,
+      "usd": 0.0050045
+    },
+    {
+      "trial": 2,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 26,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 664,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "audio_arrived_after_settle": false,
+      "usd": 0.0038439999999999998
+    },
+    {
+      "trial": 3,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 25,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 693,
+      "audio_after_interrupt": true,
+      "chunks_after_interrupt": 19,
+      "ms_of_audio_after_interrupt": 2879,
+      "audio_arrived_after_settle": true,
+      "usd": 0.0085145
+    },
+    {
+      "trial": 4,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 25,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 667,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "audio_arrived_after_settle": false,
+      "usd": 0.0034
+    },
+    {
+      "trial": 5,
+      "barged": true,
+      "audio_in_flight_at_barge": true,
+      "chunks_before_barge": 25,
+      "interrupted": true,
+      "barge_to_interrupted_ms": 671,
+      "audio_after_interrupt": false,
+      "chunks_after_interrupt": 0,
+      "ms_of_audio_after_interrupt": 0,
+      "audio_arrived_after_settle": false,
+      "usd": 0.0054145
+    }
+  ]
+}

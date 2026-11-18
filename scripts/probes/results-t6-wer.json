@@ -1,0 +1,122 @@
+{
+  "at": "2026-09-16T06:23:09.107Z",
+  "model": "gemini-3.8-live",
+  "fixtures": [
+    "clean_open",
+    "trailing_lead_in",
+    "no_terminal_punct",
+    "name_spelling",
+    "rep_time_q",
+    "rep_confirm",
+    "rep_digits",
+    "rep_close",
+    "barge_in",
+    "partial_digits"
+  ],
+  "rows": [
+    {
+      "fixture": "clean_open",
+      "truth": "Hi, I'd like to book an appointment.",
+      "heard": "Hi, I'd like to book an appointment.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00132
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "truth": "It's for, uh",
+      "heard": "It's 4:00.",
+      "blank": false,
+      "wer": 0.667,
+      "usd_estimated": true,
+      "usd": 0.00117
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "truth": "Next Tuesday afternoon works",
+      "heard": "Next Tuesday afternoon works.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.0016
+    },
+    {
+      "fixture": "name_spelling",
+      "truth": "My name is Nithin. That's N, I, T, H, I, N.",
+      "heard": "My name is Nathan. That's N I T H I N.",
+      "blank": false,
+      "wer": 0.091,
+      "usd_estimated": true,
+      "usd": 0.00185
+    },
+    {
+      "fixture": "rep_time_q",
+      "truth": "Do you have anything Tuesday morning?",
+      "heard": "Do you have anything Tuesday morning?",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00145
+    },
+    {
+      "fixture": "rep_confirm",
+      "truth": "Tuesday at ten works for me.",
+      "heard": "Tuesday at 10:00 works for me.",
+      "blank": false,
+      "wer": 0.333,
+      "usd": 0.00369
+    },
+    {
+      "fixture": "rep_digits",
+      "truth": "It's five five five, one two three four.",
+      "heard": "It's 5551234.",
+      "blank": false,
+      "wer": 0.875,
+      "usd_estimated": true,
+      "usd": 0.00151
+    },
+    {
+      "fixture": "rep_close",
+      "truth": "Thanks, bye.",
+      "heard": "Thanks, bye.",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00128
+    },
+    {
+      "fixture": "barge_in",
+      "truth": "Actually, could we make it Wednesday instead?",
+      "heard": "Actually, could we make it Wednesday instead?",
+      "blank": false,
+      "wer": 0,
+      "usd_estimated": true,
+      "usd": 0.00179
+    },
+    {
+      "fixture": "partial_digits",
+      "truth": "My number is five five five, two",
+      "heard": "My number is 5552.",
+      "blank": false,
+      "wer": 0.571,
+      "usd_estimated": true,
+      "usd": 0.00176
+    }
+  ],
+  "tally": {
+    "n": 10,
+    "median_wer": 0.091,
+    "mean_wer": 0.254,
+    "perfect": 5,
+    "blank_transcripts": 0,
+    "errored": 0
+  },
+  "verdict": {
+    "predicted": "median at or below 0.10",
+    "measured": 0.091,
+    "fails": false,
+    "gptlive_g2_median": 0,
+    "note": "trailing_lead_in is an ENDPOINTING fixture, two words of deliberate mumble. GPT-Live scored 1.000 on it. It is reported but it is not a transcription result."
+  }
+}

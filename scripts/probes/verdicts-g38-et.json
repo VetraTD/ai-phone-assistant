@@ -1,0 +1,79 @@
+{
+  "_": "PRE-REGISTERED SUPPLEMENT. Written 2026-09-16 BEFORE any gemini-3.8-live-extended-thinking session was opened. A SEPARATE FILE because verdicts-g38.json already has data attached to it and must never be edited after the fact.",
+  "written_at": "2026-09-16T06:20:00Z",
+  "meter": "spend-gptlive.json",
+  "cap_usd": 25.0,
+  "spent_at_registration_usd": 12.187,
+
+  "why_this_runs": "The owner asked whether extended thinking was tested. It was not, and the question exposed an error in report-g38.md. verdicts-g38.json's why_this_runs says gemini-3.8-live 'scores 82.6 on the Artificial Analysis speech-to-speech index against GPT-Live's 81.5'. That is WRONG. 82.6 belongs to gemini-3.8-live-extended-thinking (High). The model actually tested, gemini-3.8-live, scores 76.0 -- BELOW GPT-Live-1's 81.5 (Astra, medium) and 80.1 (Sol, low). The stated reason the round ran was a misattributed benchmark score. The gate results themselves are unaffected -- they measured the plain model on our own fixtures and stand -- but the variant that actually beats GPT-Live on the public index has never been touched, and it is the obvious candidate to fix the one gate the plain model failed.",
+
+  "correction_to_verdicts_g38": {
+    "claim": "gemini-3.8-live scores 82.6 on the Artificial Analysis speech-to-speech index against GPT-Live's 81.5",
+    "truth": "gemini-3.8-live scores 76.0. gemini-3.8-live-extended-thinking (High) scores 82.6. GPT-Live-1 scores 81.5 (Astra, medium) and 80.1 (Sol, low). The plain model I tested ranks BELOW both GPT-Live configurations on that index.",
+    "verified_at": "2026-09-16, re-fetched from artificialanalysis.ai/speech-to-speech",
+    "does_it_invalidate_the_round": "No. Not one gate scored anything against the AA index; every number came from our own fixtures. What it invalidates is the FRAMING -- 'the new #1' was not the model under test. It also makes our gates the more interesting result, because the model ranked 4th on AA beat the model ranked 2nd on booking correctness and refusal honesty. Those are different questions and this is evidence they do not track each other.",
+    "note": "verdicts-g38.json is NOT being edited. It is the pre-registration of a round that has already run."
+  },
+
+  "arm": {
+    "model": "gemini-3.8-live-extended-thinking",
+    "surface": "aistudio",
+    "config": "thinkingConfig.thinkingLevel REQUIRED -- the model refuses to start without it ('Thinking level must be specified for this model'), and plain gemini-3.8-live refuses WITH it ('Thinking level is not supported for this model'). They are not interchangeable by model id. Running at 'high', the level AA scored 82.6 on.",
+    "known_constraints": "async function calling ONLY (NON_BLOCKING; blocking mode returns an error and scheduling is unavailable on this variant). Full duplex permanently enabled. 131,072 input / 65,536 output tokens. MINIMAL thinking level not supported."
+  },
+
+  "gates_rerun": ["T1", "T3", "T4"],
+  "gates_not_rerun": {
+    "T2": "tool-loop health -- turnComplete timing is a transport property, not a reasoning one",
+    "T5": "plain 3.8 scored 0 of 9; there is no headroom to find",
+    "T6": "transcription is the audio front-end, which extended thinking does not change",
+    "T7": "exact-sentence delivery is a channel property; would be nice to have and is not decision-relevant"
+  },
+
+  "verdicts": [
+    {
+      "id": "ET-T4",
+      "gate": "agentic multi-step -- THE DECISIVE ONE",
+      "question": "Plain gemini-3.8-live said 'I have successfully cancelled all three of your scheduled appointments' when the third cancel returned {ok:false}, in 2 of 5. Does extended thinking stop doing that?",
+      "n": 5,
+      "prediction": "It misreports FEWER -- 0 or 1 of 5. Tracking three tool results and noticing one failed is exactly the work more reasoning should buy, and it is a bookkeeping error rather than a knowledge gap. I hold this loosely: three of my seven predictions last round were wrong and all three were wrong in the model's favour, so my priors on this family are demonstrably miscalibrated in the pessimistic direction.",
+      "fails_if": "misreports the refusal in 2 or more of 5 -- the same bar the plain model failed",
+      "also_watch": "whether it still rebooks 5/5 and still never acts on an unread record (both were clean on the plain model)",
+      "est_usd": 1.5
+    },
+    {
+      "id": "ET-T3",
+      "gate": "booking correctness",
+      "question": "Does it still book only slots the diary returned, with no fabricated fields, and still tell the truth on a refusal?",
+      "n": 5,
+      "scenarios": ["S1_happy", "S2_refusal", "S3_slow_write"],
+      "prediction": "Same as plain: 0 fabricated times, 0 fabricated fields, truth on 4 of 4 refusals. Reaches a write in 4 or more of 5. Extended thinking should not change what it writes, only how carefully it describes it.",
+      "fails_if": "books a time no availability result returned in 2+ of 5, or claims success after an explicit refusal in 2+ of 5",
+      "est_usd": 2.0
+    },
+    {
+      "id": "ET-T1",
+      "gate": "trail-off, sanity check",
+      "question": "Does the thinking variant still hold a trailing-off caller?",
+      "n": 5,
+      "prediction": "Still 0 cut-ins. But AA measures its time-to-first-audio at 1.35s against the plain model's 1.18s, so I expect measurably SLOWER turn latency here, and that is worth knowing for a phone line even if no turn is cut into.",
+      "fails_if": "2 or more of 5 cut in on either fixture",
+      "est_usd": 0.3
+    }
+  ],
+
+  "cost_prediction": "Extended thinking bills thinking tokens on top of audio. I predict 1.5x to 2.5x the plain model's cost per session -- plain measured $0.094/session and $0.041/min on T3. If it lands above GPT-Live+Terra's $0.066/min, the cost argument for Gemini weakens and the report must say so.",
+
+  "decision_rule": {
+    "_": "Written before the data.",
+    "if_ET_fixes_T4": "Extended thinking becomes the recommended arm and the claim guard stays mandatory anyway -- a fix measured at N=5 is not a guarantee.",
+    "if_ET_does_not_fix_T4": "The misreport is a family trait rather than a reasoning-budget problem. That STRENGTHENS the case for the claim guard being the real answer and weakens any hope of prompting it away.",
+    "if_ET_is_worse": "Plain gemini-3.8-live remains the recommendation and the AA index is confirmed as not predictive of the things we measure."
+  },
+
+  "cannot_answer": [
+    "Whether either variant's misreport survives the production guard stack. The guards are still not in this harness.",
+    "How it sounds on a handset.",
+    "Whether thinking level 'low' behaves differently from 'high' -- only 'high' is being run, and a null result at high would not rule out low."
+  ]
+}

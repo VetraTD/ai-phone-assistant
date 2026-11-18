@@ -1,0 +1,98 @@
+{
+  "callSid": "CA5b982c",
+  "model": "gemini-3.1-flash-live-preview",
+  "note": "3.1. A cancellation, correctly authorised and correctly written. No booking attempted.",
+  "date": "2026-09-18",
+  "counts": {
+    "turns": 5,
+    "probes": 1,
+    "write_order_refused": 0,
+    "write_refused_no_consent": 0,
+    "tool_rounds_capped": 0,
+    "attempt_budget_released": 0,
+    "claim_unbacked_by_action": 1
+  },
+  "claim_audit": null,
+  "guards": {
+    "availability_allowed": 0,
+    "availability_blocked": 0,
+    "availability_day_listed": 55,
+    "availability_point_open": 0,
+    "availability_point_taken": 0,
+    "availability_unarmed": 0,
+    "duplicate_suppressed": 0,
+    "point_verified_slots": 0,
+    "read_memo_hit": 0,
+    "verified_slots": 16
+  },
+  "turns": [
+    {
+      "i": 0,
+      "ts": "2026-09-17T01:33:47.023Z",
+      "step": "identify_intent",
+      "caller": "",
+      "assistant": "Thanks for calling Digile Media. You're through to our AI receptionist ? calls are recorded for quality. How can I help you today?"
+    },
+    {
+      "i": 1,
+      "ts": "2026-09-17T01:34:05.105Z",
+      "step": "identify_intent",
+      "caller": "Yeah, could could I So, 1 second. Uh what do you got free on Friday?",
+      "assistant": "Sure thing. On Friday, September eighteenth, we have times available at nine AM, twelve thirty PM, or four PM. Do any of those work for you?"
+    },
+    {
+      "i": 2,
+      "ts": "2026-09-17T01:34:31.556Z",
+      "step": "gather_details",
+      "caller": "Sorry, what are you up free on Friday and is Friday afternoon any good? Say after 3:00?",
+      "assistant": "After three o'clock on Friday, we have availability at three, three thirty, and four o'clock. Do any of those work? I also see you have an appointment already scheduled for that same Friday at four thirty PM ? were you looking to add something to that, or schedule a new one?"
+    },
+    {
+      "i": 3,
+      "ts": "2026-09-17T01:34:44.239Z",
+      "step": "gather_details",
+      "caller": "Can we go ahead and cancel that one appointment?",
+      "assistant": "Of course. I have an appointment under Elena Farrow on Friday, September eighteenth at four thirty PM. Is that the one you'd like to cancel?"
+    },
+    {
+      "i": 4,
+      "ts": "2026-09-17T01:34:53.514Z",
+      "step": "gather_details",
+      "caller": "Yeah.",
+      "assistant": "That appointment for Friday, September eighteenth at four thirty PM is officially cancelled. Is there anything else I can help you with?"
+    }
+  ],
+  "attempts": [
+    {
+      "at": "2026-09-17T01:34:47.006Z",
+      "tool": "cancel_appointment_db",
+      "probe": {
+        "gate_ran": true,
+        "readback_now": true,
+        "agreed_now": true,
+        "token_present": false,
+        "token_matches_current_readback": false,
+        "caller_turns_since_agreement": null,
+        "readback_ambiguous_ask": false,
+        "silent_turn_verdict": "gate_ran"
+      },
+      "observed": "written",
+      "refused_by": null,
+      "budget_released": false,
+      "expect": "write",
+      "why": "the caller heard the appointment read back in full and said yes on that turn. The row must move. This is the control: a fix that breaks this has broken the gate's whole purpose.",
+      "standing_turn": 3,
+      "agreed_turn": 3,
+      "standing_read_back": "Of course. I have an appointment under Elena Farrow on Friday, September eighteenth at four thirty PM. Is that the one you'd like to cancel?",
+      "agreed_read_back": "Of course. I have an appointment under Elena Farrow on Friday, September eighteenth at four thirty PM. Is that the one you'd like to cancel?",
+      "target": "2026-09-18T16:30:00",
+      "target_candidates": [
+        "2026-09-18T16:30:00"
+      ],
+      "target_from": "Of course. I have an appointment under Elena Farrow on Friday, September eighteenth at four thirty PM. Is that the one you'd like to cancel?",
+      "target_derived": true,
+      "caller_text": "Yeah.",
+      "caller_text_source": "logged"
+    }
+  ]
+}

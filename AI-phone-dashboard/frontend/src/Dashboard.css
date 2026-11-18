@@ -1865,3 +1865,43 @@
   border-color: rgba(58, 143, 242, 0.28);
   box-shadow: 0 22px 60px var(--vetra-shadow-strong);
 }
+
+/* ---------------------------------------------------------------------------
+   Automatic logoff warning (HIPAA 164.312(a)(2)(iii)).
+
+   Fixed to the top and above everything, because a session about to end is the
+   most important thing on the screen — a banner that scrolls out of view warns
+   nobody. role="alert" carries it to a screen reader at the same moment.
+   --------------------------------------------------------------------------- */
+.idle-warning {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: #7c2d12;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.idle-warning-button {
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: transparent;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.idle-warning-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}

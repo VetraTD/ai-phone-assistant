@@ -67,6 +67,26 @@ describe("gemini buildIntegrationTools", () => {
     expect(names).toEqual(["book_appointment_in_ehr", "cancel_appointment", "get_available_slots", "get_caller_appointments", "reschedule_appointment"]);
   });
 
+  it("suppresses athena tools when appointments capability is disabled", () => {
+    // The bypass fix: EHR booking tools keyed only off the integration list, so
+    // disabling appointments left them registered on an athena clinic's calls.
+    const integrations = [
+      { provider: "athenahealth", name: "athenahealth", enabled: true, config: { practice_id: "195900" } },
+    ];
+    const disabledConfig = { allowedTasks: ["general_question", "take_message"] };
+    const result = buildIntegrationTools(integrations, disabledConfig);
+    expect(result.functionDeclarations).toHaveLength(0);
+  });
+
+  it("keeps athena tools when appointments capability is enabled", () => {
+    const integrations = [
+      { provider: "athenahealth", name: "athenahealth", enabled: true, config: { practice_id: "195900" } },
+    ];
+    const enabledConfig = { allowedTasks: ["general_question", "book_appointment"] };
+    const result = buildIntegrationTools(integrations, enabledConfig);
+    expect(result.functionDeclarations).toHaveLength(5);
+  });
+
   it("skips mcp provider (no tool declarations)", () => {
     const integrations = [
       { provider: "mcp", name: "mcp_tool", enabled: true, config: {} },

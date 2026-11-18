@@ -1,0 +1,176 @@
+- generic [ref=f6e5]:
+  - banner [ref=f6e6]:
+    - generic [ref=f6e7]:
+      - generic [ref=f6e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f6e9]
+      - paragraph [ref=f6e10]: Your calls at a glance for today
+      - generic [ref=f6e11]:
+        - generic [ref=f6e12]: "+18175803291"
+        - generic [ref=f6e13]: America/Chicago
+    - generic [ref=f6e14]:
+      - button "🌐 EN" [ref=f6e16] [cursor=pointer]:
+        - generic [ref=f6e17]: 🌐
+        - generic [ref=f6e18]: EN
+      - generic [ref=f6e19]:
+        - button "Dashboard" [ref=f6e20] [cursor=pointer]
+        - button "Analytics" [ref=f6e21] [cursor=pointer]
+        - button "Appointments" [ref=f6e22] [cursor=pointer]
+        - button "Settings" [ref=f6e23] [cursor=pointer]
+        - button "Guide" [ref=f6e24] [cursor=pointer]
+      - button "Logout" [ref=f6e25] [cursor=pointer]
+  - main [ref=f6e26]:
+    - generic [ref=f6e27]:
+      - generic [ref=f6e28]:
+        - heading "Settings" [level=2] [ref=f6e30]
+        - generic [ref=f6e31]:
+          - status [ref=f6e32]: 1 unsaved change
+          - button "1 unsaved change" [ref=f6e383] [cursor=pointer]
+          - button "Save changes" [ref=f6e35] [cursor=pointer]
+      - generic [ref=f6e36]:
+        - tablist "Settings sections" [ref=f6e37]:
+          - tab "General Name, hours, timezone" [ref=f6e38] [cursor=pointer]:
+            - generic [ref=f6e44]:
+              - generic [ref=f6e45]: General
+              - generic [ref=f6e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language has unsaved changes" [selected] [ref=f6e387] [cursor=pointer]:
+            - generic [ref=f6e52]:
+              - generic [ref=f6e53]: Voice & Language
+              - generic [ref=f6e54]: 1 language
+            - generic [ref=f6e389]: has unsaved changes
+          - tab "Capabilities 3 of 7 turned on" [ref=f6e55] [cursor=pointer]:
+            - generic [ref=f6e60]:
+              - generic [ref=f6e61]: Capabilities
+              - generic [ref=f6e62]: 3 of 7 turned on
+          - tab "Knowledge Base Answers to questions" [ref=f6e63] [cursor=pointer]:
+            - generic [ref=f6e67]:
+              - generic [ref=f6e68]: Knowledge Base
+              - generic [ref=f6e69]: Answers to questions
+          - tab "Notifications Email and text alerts" [ref=f6e70] [cursor=pointer]:
+            - generic [ref=f6e75]:
+              - generic [ref=f6e76]: Notifications
+              - generic [ref=f6e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [ref=f6e78] [cursor=pointer]:
+            - generic [ref=f6e82]:
+              - generic [ref=f6e83]: Billing & Integrations
+              - generic [ref=f6e84]: Plan, usage, calendar
+        - tabpanel "Voice & Language 1 language has unsaved changes" [active] [ref=f6e498]:
+          - generic [ref=f6e86]:
+            - heading "Voice & Language" [level=2] [ref=f6e499]
+            - paragraph [ref=f6e88]: The voice callers hear, what it says first, and which languages it speaks.
+          - generic [ref=f6e500]:
+            - generic [ref=f6e501]:
+              - generic [ref=f6e502]:
+                - heading "Voice" [level=3] [ref=f6e503]
+                - paragraph [ref=f6e504]: The voice callers hear. There's no audio preview yet, so the descriptions are your guide.
+              - generic [ref=f6e505]: Bella
+            - group "Choose a voice" [ref=f6e508]:
+              - generic [ref=f6e510]:
+                - generic [ref=f6e511] [cursor=pointer]:
+                  - radio "Standard voice Our plain, neutral default. Clear, but less natural than the voices below." [ref=f6e512]
+                  - generic [ref=f6e513]: Standard voice
+                  - generic [ref=f6e514]: Our plain, neutral default. Clear, but less natural than the voices below.
+                - generic [ref=f6e515] [cursor=pointer]:
+                  - radio "Bella Warm and professional. A polished front-desk voice. female american" [checked] [ref=f6e516]
+                  - generic [ref=f6e517]: Bella
+                  - generic [ref=f6e518]: Warm and professional. A polished front-desk voice.
+                  - generic [ref=f6e519]:
+                    - generic [ref=f6e520]: female
+                    - generic [ref=f6e521]: american
+                - generic [ref=f6e522] [cursor=pointer]:
+                  - radio "Sarah Bright and professional, with a youthful energy — great for busy front desks. female american" [ref=f6e523]
+                  - generic [ref=f6e524]: Sarah
+                  - generic [ref=f6e525]: Bright and professional, with a youthful energy — great for busy front desks.
+                  - generic [ref=f6e526]:
+                    - generic [ref=f6e527]: female
+                    - generic [ref=f6e528]: american
+                - generic [ref=f6e529] [cursor=pointer]:
+                  - radio "Matilda Upbeat and energetic — a friendly voice that puts callers at ease. female american" [ref=f6e530]
+                  - generic [ref=f6e531]: Matilda
+                  - generic [ref=f6e532]: Upbeat and energetic — a friendly voice that puts callers at ease.
+                  - generic [ref=f6e533]:
+                    - generic [ref=f6e534]: female
+                    - generic [ref=f6e535]: american
+                - generic [ref=f6e536] [cursor=pointer]:
+                  - radio "Alice Polished and professional, with a crisp British accent. female british" [ref=f6e537]
+                  - generic [ref=f6e538]: Alice
+                  - generic [ref=f6e539]: Polished and professional, with a crisp British accent.
+                  - generic [ref=f6e540]:
+                    - generic [ref=f6e541]: female
+                    - generic [ref=f6e542]: british
+                - generic [ref=f6e543] [cursor=pointer]:
+                  - radio "Eric Smooth and classy — a confident voice for a professional front desk. male american" [ref=f6e544]
+                  - generic [ref=f6e545]: Eric
+                  - generic [ref=f6e546]: Smooth and classy — a confident voice for a professional front desk.
+                  - generic [ref=f6e547]:
+                    - generic [ref=f6e548]: male
+                    - generic [ref=f6e549]: american
+                - generic [ref=f6e550] [cursor=pointer]:
+                  - radio "Roger Warm and classy, with an easy confidence that puts callers at ease. male american" [ref=f6e551]
+                  - generic [ref=f6e552]: Roger
+                  - generic [ref=f6e553]: Warm and classy, with an easy confidence that puts callers at ease.
+                  - generic [ref=f6e554]:
+                    - generic [ref=f6e555]: male
+                    - generic [ref=f6e556]: american
+                - generic [ref=f6e557] [cursor=pointer]:
+                  - radio "Daniel Formal and precise, with a distinguished British accent. male british" [ref=f6e558]
+                  - generic [ref=f6e559]: Daniel
+                  - generic [ref=f6e560]: Formal and precise, with a distinguished British accent.
+                  - generic [ref=f6e561]:
+                    - generic [ref=f6e562]: male
+                    - generic [ref=f6e563]: british
+                - generic [ref=f6e564] [cursor=pointer]:
+                  - radio "River Calm and steady — an easygoing voice that keeps callers relaxed. neutral american" [ref=f6e565]
+                  - generic [ref=f6e566]: River
+                  - generic [ref=f6e567]: Calm and steady — an easygoing voice that keeps callers relaxed.
+                  - generic [ref=f6e568]:
+                    - generic [ref=f6e569]: neutral
+                    - generic [ref=f6e570]: american
+          - generic [ref=f6e571]:
+            - generic [ref=f6e573]:
+              - heading "What it says" [level=3] [ref=f6e574]
+              - paragraph [ref=f6e575]: The first thing callers hear, and the rules it follows after that.
+            - generic [ref=f6e576]:
+              - generic [ref=f6e577]:
+                - generic [ref=f6e578]: Greetingoptional
+                - textbox "Greetingoptional" [ref=f6e579]:
+                  - /placeholder: Leave blank to use the default greeting
+                - paragraph [ref=f6e580]: Spoken exactly as written — nothing is added in front of it.
+                - generic [ref=f6e581]: 1/500
+              - generic [ref=f6e582]:
+                - generic [ref=f6e583]: Tone of voice
+                - combobox "Tone of voice" [ref=f6e584]:
+                  - option "No set tone" [selected]
+                  - option "Professional"
+                  - option "Friendly"
+                  - option "Casual"
+                - paragraph [ref=f6e585]: Picking one writes a single tone line at the top of your house rules below, replacing any tone line already there.
+              - generic [ref=f6e586]:
+                - generic [ref=f6e587]: House rulesoptional
+                - textbox "House rulesoptional" [ref=f6e588]:
+                  - /placeholder: "e.g. We don't do same-day appointments.\nAlways ask whether they've been in before."
+                  - text: Never quote exact prices over the phone — costs depend on the exam and insurance, so offer to have the office follow up with a quote. We are not currently accepting Medicaid. For a dental emergency (severe pain, swelling, knocked-out tooth), reassure the caller, take their details, and mark it urgent so the office calls back right away. Always mention we have free parking behind the building when giving directions.
+                - paragraph [ref=f6e589]: Things your receptionist should always know. Written as instructions, one per line.
+                - generic [ref=f6e590]: 418/2000
+          - generic [ref=f6e591]:
+            - generic [ref=f6e593]:
+              - heading "Languages & recording" [level=3] [ref=f6e594]
+              - paragraph [ref=f6e595]: Which languages your receptionist can switch to mid-call, and whether callers are told the call is recorded.
+            - generic [ref=f6e596]:
+              - group "Languages spoken" [ref=f6e597]:
+                - generic [ref=f6e599]:
+                  - generic [ref=f6e600] [cursor=pointer]:
+                    - checkbox "English" [checked] [disabled] [ref=f6e601]
+                    - generic [ref=f6e602]: English
+                  - generic [ref=f6e603] [cursor=pointer]:
+                    - checkbox "Spanish" [ref=f6e604]
+                    - generic [ref=f6e605]: Spanish
+                  - generic [ref=f6e606] [cursor=pointer]:
+                    - checkbox "French" [ref=f6e607]
+                    - generic [ref=f6e608]: French
+                - paragraph [ref=f6e609]: At least one language has to stay on, so the last one can't be switched off.
+              - generic [ref=f6e610] [cursor=pointer]:
+                - checkbox "Tell callers the call may be recorded Some places require this by law. Check what applies where you are." [ref=f6e611]
+                - generic [ref=f6e612]:
+                  - text: Tell callers the call may be recorded
+                  - generic [ref=f6e613]: Some places require this by law. Check what applies where you are.
+  - contentinfo [ref=f6e265]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

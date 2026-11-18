@@ -1,44 +1,6 @@
 /* Vetra landing page.
-   This file is imported eagerly from main.jsx via Landing.jsx, so it is
-   loaded on every route. Everything below is scoped to .lp / .lp-* except
-   the compatibility block, which must stay as-is. */
-
-/* ── Dashboard compatibility ───────────────────────────────────────────────
-   App.jsx (Settings → Calendar sync) uses .landing-cta-primary for its
-   "Connect Google Calendar" button. These rules are carried over unchanged
-   from the previous landing stylesheet so the dashboard looks the same. */
-.landing-cta-primary {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px 34px;
-  border-radius: var(--radius-md);
-  background: var(--vetra-gradient);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  text-decoration: none;
-  box-shadow: 0 1px 2px rgba(14, 28, 44, 0.12);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.landing-cta-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(14, 28, 44, 0.16);
-}
-
-.landing-cta-primary:focus-visible {
-  outline: 2px solid var(--vetra-blue);
-  outline-offset: 2px;
-}
-
-@media (max-width: 480px) {
-  .landing-cta-primary {
-    width: 100%;
-    text-align: center;
-  }
-}
+   Imported via Landing.jsx from routes.jsx. Everything is scoped to
+   .lp / .lp-* so nothing leaks into the dashboard or other pages. */
 
 /* ── Tokens ──────────────────────────────────────────────────────────────── */
 .lp {

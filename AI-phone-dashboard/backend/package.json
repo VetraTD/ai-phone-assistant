@@ -5,15 +5,16 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@sendgrid/mail": "^8.1.0",
-    "@supabase/supabase-js": "^2.98.0",
+    "@google-cloud/cloud-sql-connector": "^1.11.3",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
@@ -23,9 +24,12 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "jwks-rsa": "^4.0.1",
+    "nodemailer": "^9.0.5",
     "pg": "^8.18.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,24 +1,19 @@
 import { useState } from "react";
 import { api } from "./api";
 import { numberApi } from "./numberAPI";
+import { AFTER_HOURS_POLICIES, TRANSFER_POLICIES } from "./settings/constants";
 import "./Onboarding.css";
 
 export default function Onboarding({ existingBusiness, onBack, onComplete }) {
   const [name, setName] = useState(existingBusiness?.name || "");
   const [timezone, setTimezone] = useState(existingBusiness?.timezone || "America/Chicago");
-  const [defaultLanguage, setDefaultLanguage] = useState("en");
-  const [greeting, setGreeting] = useState("Thank you for calling. How can I help you today?");
-  const [afterHoursMode, setAfterHoursMode] = useState("take-message");
   const [transferPolicy, setTransferPolicy] = useState("business_hours_only");
   const [transferPhoneNumber, setTransferPhoneNumber] = useState("");
   const [notificationEmail, setNotificationEmail] = useState("");
   const [notificationPhone, setNotificationPhone] = useState("");
+  const [greeting, setGreeting] = useState("");
+  const [afterHoursMode, setAfterHoursMode] = useState("take_message");
   const [generalInfo, setGeneralInfo] = useState("");
-  const [addressLine1, setAddressLine1] = useState("");
-  const [addressLine2, setAddressLine2] = useState("");
-  const [city, setCity] = useState("");
-  const [stateRegion, setStateRegion] = useState("");
-  const [postalCode, setPostalCode] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -59,23 +54,19 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
 
       setBusinessId(createdBusinessId);
 
-      // Save call settings (same fields as Settings page)
+      // Save call settings (same fields/keys as the Settings page — see
+      // AI-phone-dashboard/backend/src/settingsValidation.js
+      // SETTINGS_FIELD_VALIDATORS for the write whitelist this must match).
       await api.put(`/api/business/${createdBusinessId}/settings`, {
         name,
         timezone,
-        greeting_message: greeting,
+        greeting: greeting || "",
         after_hours_policy: afterHoursMode,
         transfer_policy: transferPolicy,
         transfer_phone_number: transferPhoneNumber || "",
         notification_email: notificationEmail || "",
         notification_phone: notificationPhone || "",
-        default_language: defaultLanguage,
         general_info: generalInfo || "",
-        address_line1: addressLine1 || "",
-        address_line2: addressLine2 || "",
-        city: city || "",
-        state_region: stateRegion || "",
-        postal_code: postalCode || "",
       });
 
       setBusinessCreated(true);
@@ -203,8 +194,8 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
               <div className="onboarding-step-label">
                 Step {formStep} of {TOTAL_FORM_STEPS}
                 {formStep === 1 && " — Basics"}
-                {formStep === 2 && " — Calls & greeting"}
-                {formStep === 3 && " — Details & address"}
+                {formStep === 2 && " — Call handling"}
+                {formStep === 3 && " — AI behavior"}
               </div>
 
               {/* Step 1: Basics */}
@@ -234,52 +225,12 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                       <option value="Europe/London">Europe/London</option>
                     </select>
                   </div>
-                  <div className="onboarding-field">
-                    <label htmlFor="default-language">Preferred language</label>
-                    <select
-                      id="default-language"
-                      value={defaultLanguage}
-                      onChange={(e) => setDefaultLanguage(e.target.value)}
-                    >
-                      <option value="en">English</option>
-                      <option value="es">Spanish</option>
-                      <option value="fr">French</option>
-                      <option value="de">German</option>
-                      <option value="pt">Portuguese</option>
-                      <option value="it">Italian</option>
-                      <option value="nl">Dutch</option>
-                      <option value="pl">Polish</option>
-                    </select>
-                  </div>
                 </div>
               )}
 
-              {/* Step 2: Calls & greeting */}
+              {/* Step 2: Call handling */}
               {formStep === 2 && (
                 <div className="onboarding-step-content">
-                  <div className="onboarding-field">
-                    <label htmlFor="greeting">Greeting message</label>
-                    <textarea
-                      id="greeting"
-                      rows={3}
-                      placeholder="What callers hear when they call"
-                      value={greeting}
-                      onChange={(e) => setGreeting(e.target.value)}
-                      className="onboarding-textarea"
-                    />
-                  </div>
-                  <div className="onboarding-field">
-                    <label htmlFor="after-hours">After-hours behaviour</label>
-                    <select
-                      id="after-hours"
-                      value={afterHoursMode}
-                      onChange={(e) => setAfterHoursMode(e.target.value)}
-                    >
-                      <option value="take-message">Take a message</option>
-                      <option value="book-later">Book for later</option>
-                      <option value="book_appointment">Book appointment</option>
-                    </select>
-                  </div>
                   <div className="onboarding-field">
                     <label htmlFor="transfer-policy">Transfer policy</label>
                     <select
@@ -287,9 +238,9 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                       value={transferPolicy}
                       onChange={(e) => setTransferPolicy(e.target.value)}
                     >
-                      <option value="never">Never transfer</option>
-                      <option value="always">Always transfer</option>
-                      <option value="business_hours_only">Business hours only</option>
+                      {TRANSFER_POLICIES.map((p) => (
+                        <option key={p.key} value={p.key}>{p.label}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="onboarding-field">
@@ -325,9 +276,32 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                 </div>
               )}
 
-              {/* Step 3: Details & address */}
+              {/* Step 3: AI behavior */}
               {formStep === 3 && (
                 <div className="onboarding-step-content">
+                  <div className="onboarding-field">
+                    <label htmlFor="greeting">Greeting message (optional)</label>
+                    <textarea
+                      id="greeting"
+                      rows={3}
+                      placeholder="Leave blank to use the default greeting"
+                      value={greeting}
+                      onChange={(e) => setGreeting(e.target.value)}
+                      className="onboarding-textarea"
+                    />
+                  </div>
+                  <div className="onboarding-field">
+                    <label htmlFor="after-hours">After-hours behaviour</label>
+                    <select
+                      id="after-hours"
+                      value={afterHoursMode}
+                      onChange={(e) => setAfterHoursMode(e.target.value)}
+                    >
+                      {AFTER_HOURS_POLICIES.map((p) => (
+                        <option key={p.key} value={p.key}>{p.label}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="onboarding-field">
                     <label htmlFor="general-info">General info (optional)</label>
                     <textarea
@@ -337,58 +311,6 @@ export default function Onboarding({ existingBusiness, onBack, onComplete }) {
                       value={generalInfo}
                       onChange={(e) => setGeneralInfo(e.target.value)}
                       className="onboarding-textarea"
-                    />
-                  </div>
-                  <div className="onboarding-field">
-                    <label htmlFor="address-line1">Address line 1 (optional)</label>
-                    <input
-                      id="address-line1"
-                      type="text"
-                      placeholder="e.g. 4400 Heritage Trace Pkwy, #208"
-                      value={addressLine1}
-                      onChange={(e) => setAddressLine1(e.target.value)}
-                    />
-                  </div>
-                  <div className="onboarding-field">
-                    <label htmlFor="address-line2">Address line 2 (optional)</label>
-                    <input
-                      id="address-line2"
-                      type="text"
-                      placeholder="Optional"
-                      value={addressLine2}
-                      onChange={(e) => setAddressLine2(e.target.value)}
-                    />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <div className="onboarding-field">
-                      <label htmlFor="city">City (optional)</label>
-                      <input
-                        id="city"
-                        type="text"
-                        placeholder="e.g. Keller"
-                        value={city}
-                        onChange={(e) => setCity(e.target.value)}
-                      />
-                    </div>
-                    <div className="onboarding-field">
-                      <label htmlFor="state-region">State / Region (optional)</label>
-                      <input
-                        id="state-region"
-                        type="text"
-                        placeholder="e.g. Texas"
-                        value={stateRegion}
-                        onChange={(e) => setStateRegion(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="onboarding-field">
-                    <label htmlFor="postal-code">Postal code (optional)</label>
-                    <input
-                      id="postal-code"
-                      type="text"
-                      placeholder="e.g. 76244"
-                      value={postalCode}
-                      onChange={(e) => setPostalCode(e.target.value)}
                     />
                   </div>
                 </div>

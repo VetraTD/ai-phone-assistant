@@ -1,0 +1,172 @@
+- generic [ref=f6e5]:
+  - banner [ref=f6e6]:
+    - generic [ref=f6e7]:
+      - generic [ref=f6e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f6e9]
+      - paragraph [ref=f6e10]: Your calls at a glance for today
+      - generic [ref=f6e11]:
+        - generic [ref=f6e12]: "+18175803291"
+        - generic [ref=f6e13]: America/Chicago
+    - generic [ref=f6e14]:
+      - button "🌐 EN" [ref=f6e16] [cursor=pointer]:
+        - generic [ref=f6e17]: 🌐
+        - generic [ref=f6e18]: EN
+      - generic [ref=f6e19]:
+        - button "Dashboard" [ref=f6e20] [cursor=pointer]
+        - button "Analytics" [ref=f6e21] [cursor=pointer]
+        - button "Appointments" [ref=f6e22] [cursor=pointer]
+        - button "Settings" [ref=f6e23] [cursor=pointer]
+        - button "Guide" [ref=f6e24] [cursor=pointer]
+      - button "Logout" [ref=f6e25] [cursor=pointer]
+  - main [ref=f6e26]:
+    - generic [ref=f6e27]:
+      - generic [ref=f6e28]:
+        - heading "Settings" [level=2] [ref=f6e30]
+        - generic [ref=f6e31]:
+          - status [ref=f6e32]: All changes saved
+          - generic [ref=f6e614]: Everything is saved
+          - button "Save changes" [disabled] [ref=f6e35]
+      - generic [ref=f6e36]:
+        - tablist "Settings sections" [ref=f6e37]:
+          - tab "General Name, hours, timezone" [ref=f6e38] [cursor=pointer]:
+            - generic [ref=f6e44]:
+              - generic [ref=f6e45]: General
+              - generic [ref=f6e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language" [ref=f6e616] [cursor=pointer]:
+            - generic [ref=f6e52]:
+              - generic [ref=f6e53]: Voice & Language
+              - generic [ref=f6e54]: 1 language
+          - tab "Capabilities 3 of 7 turned on" [ref=f6e55] [cursor=pointer]:
+            - generic [ref=f6e60]:
+              - generic [ref=f6e61]: Capabilities
+              - generic [ref=f6e62]: 3 of 7 turned on
+          - tab "Knowledge Base 8 answers saved" [selected] [ref=f6e618] [cursor=pointer]:
+            - generic [ref=f6e67]:
+              - generic [ref=f6e68]: Knowledge Base
+              - generic [ref=f6e69]: 8 answers saved
+          - tab "Notifications Email and text alerts" [ref=f6e70] [cursor=pointer]:
+            - generic [ref=f6e75]:
+              - generic [ref=f6e76]: Notifications
+              - generic [ref=f6e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [ref=f6e78] [cursor=pointer]:
+            - generic [ref=f6e82]:
+              - generic [ref=f6e83]: Billing & Integrations
+              - generic [ref=f6e84]: Plan, usage, calendar
+        - tabpanel "Knowledge Base 8 answers saved" [active] [ref=f6e619]:
+          - generic [ref=f6e86]:
+            - heading "Knowledge Base" [level=2] [ref=f6e620]
+            - paragraph [ref=f6e88]: Answers your receptionist can give when a caller asks something.
+          - generic [ref=f6e621]:
+            - generic [ref=f6e622]:
+              - generic [ref=f6e623]:
+                - heading "Answers" [level=3] [ref=f6e624]
+                - paragraph [ref=f6e625]: Questions callers ask, and what your receptionist should say back. Each one is saved on its own.
+              - generic [ref=f6e626]:
+                - generic [ref=f6e627]: 8 saved
+                - button "Add Q&A" [ref=f6e628] [cursor=pointer]
+            - generic [ref=f6e631]:
+              - generic [ref=f6e632]:
+                - generic [ref=f6e633]:
+                  - strong [ref=f6e634]: What are your hours?
+                  - generic [ref=f6e635]:
+                    - generic [ref=f6e636]: hours
+                    - generic [ref=f6e637]: Priority 100
+                - paragraph [ref=f6e638]: We are open Monday through Wednesday 8 to 5, Thursday 8 to 7, Friday 8 to 4, and Saturday 9 to 2. We are closed on Sunday.
+                - generic [ref=f6e639]:
+                  - generic [ref=f6e640] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e641]
+                    - generic [ref=f6e642]: Enabled
+                  - button "Edit" [ref=f6e643] [cursor=pointer]
+                  - button "Delete" [ref=f6e647] [cursor=pointer]
+              - generic [ref=f6e651]:
+                - generic [ref=f6e652]:
+                  - strong [ref=f6e653]: Do you do emergencies?
+                  - generic [ref=f6e654]:
+                    - generic [ref=f6e655]: emergency
+                    - generic [ref=f6e656]: Priority 95
+                - paragraph [ref=f6e657]: Yes. If you have severe pain, swelling, or a knocked-out tooth, let me take your details and we will have someone call you back right away.
+                - generic [ref=f6e658]:
+                  - generic [ref=f6e659] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e660]
+                    - generic [ref=f6e661]: Enabled
+                  - button "Edit" [ref=f6e662] [cursor=pointer]
+                  - button "Delete" [ref=f6e666] [cursor=pointer]
+              - generic [ref=f6e670]:
+                - generic [ref=f6e671]:
+                  - strong [ref=f6e672]: Where are you located?
+                  - generic [ref=f6e673]:
+                    - generic [ref=f6e674]: location
+                    - generic [ref=f6e675]: Priority 90
+                - paragraph [ref=f6e676]: We are at 2400 West 7th Street, Suite 120, in Fort Worth. There is free parking in the lot behind the building.
+                - generic [ref=f6e677]:
+                  - generic [ref=f6e678] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e679]
+                    - generic [ref=f6e680]: Enabled
+                  - button "Edit" [ref=f6e681] [cursor=pointer]
+                  - button "Delete" [ref=f6e685] [cursor=pointer]
+              - generic [ref=f6e689]:
+                - generic [ref=f6e690]:
+                  - strong [ref=f6e691]: Do you accept new patients?
+                  - generic [ref=f6e692]:
+                    - generic [ref=f6e693]: patients
+                    - generic [ref=f6e694]: Priority 80
+                - paragraph [ref=f6e695]: Yes, we are happily accepting new patients and families. For a first visit, please bring a photo ID and your insurance card if you have one.
+                - generic [ref=f6e696]:
+                  - generic [ref=f6e697] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e698]
+                    - generic [ref=f6e699]: Enabled
+                  - button "Edit" [ref=f6e700] [cursor=pointer]
+                  - button "Delete" [ref=f6e704] [cursor=pointer]
+              - generic [ref=f6e708]:
+                - generic [ref=f6e709]:
+                  - strong [ref=f6e710]: What services do you offer?
+                  - generic [ref=f6e711]:
+                    - generic [ref=f6e712]: services
+                    - generic [ref=f6e713]: Priority 80
+                - paragraph [ref=f6e714]: We offer cleanings, exams, fillings, crowns, root canals, teeth whitening, veneers, and Invisalign.
+                - generic [ref=f6e715]:
+                  - generic [ref=f6e716] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e717]
+                    - generic [ref=f6e718]: Enabled
+                  - button "Edit" [ref=f6e719] [cursor=pointer]
+                  - button "Delete" [ref=f6e723] [cursor=pointer]
+              - generic [ref=f6e727]:
+                - generic [ref=f6e728]:
+                  - strong [ref=f6e729]: What is your cancellation policy?
+                  - generic [ref=f6e730]:
+                    - generic [ref=f6e731]: policy
+                    - generic [ref=f6e732]: Priority 60
+                - paragraph [ref=f6e733]: We ask for at least 24 hours notice to change or cancel an appointment so we can offer the time to someone else.
+                - generic [ref=f6e734]:
+                  - generic [ref=f6e735] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e736]
+                    - generic [ref=f6e737]: Enabled
+                  - button "Edit" [ref=f6e738] [cursor=pointer]
+                  - button "Delete" [ref=f6e742] [cursor=pointer]
+              - generic [ref=f6e746]:
+                - generic [ref=f6e747]:
+                  - strong [ref=f6e748]: Do you offer teeth whitening?
+                  - generic [ref=f6e749]:
+                    - generic [ref=f6e750]: services
+                    - generic [ref=f6e751]: Priority 50
+                - paragraph [ref=f6e752]: Yes, we offer both in-office and take-home teeth whitening. A dentist will recommend the best option at your visit.
+                - generic [ref=f6e753]:
+                  - generic [ref=f6e754] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e755]
+                    - generic [ref=f6e756]: Enabled
+                  - button "Edit" [ref=f6e757] [cursor=pointer]
+                  - button "Delete" [ref=f6e761] [cursor=pointer]
+              - generic [ref=f6e765]:
+                - generic [ref=f6e766]:
+                  - strong [ref=f6e767]: Do you take walk-ins?
+                  - generic [ref=f6e768]:
+                    - generic [ref=f6e769]: patients
+                    - generic [ref=f6e770]: Priority 50
+                - paragraph [ref=f6e771]: We see patients by appointment, but if you are having an emergency, call us and we will do our best to fit you in the same day.
+                - generic [ref=f6e772]:
+                  - generic [ref=f6e773] [cursor=pointer]:
+                    - checkbox "Enabled" [checked] [ref=f6e774]
+                    - generic [ref=f6e775]: Enabled
+                  - button "Edit" [ref=f6e776] [cursor=pointer]
+                  - button "Delete" [ref=f6e780] [cursor=pointer]
+  - contentinfo [ref=f6e265]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

@@ -1,0 +1,123 @@
+{
+  "at": "2026-09-16T04:20:56.283Z",
+  "reach": [
+    {
+      "model": "gemini-3.8-live",
+      "surface": "vertex",
+      "location": "europe-west1",
+      "ok": false,
+      "error": "Publisher model `projects/vetra-uk-edc8ca/locations/europe-west1/publishers/google/models/gemini-3.8-live` was not found or"
+    },
+    {
+      "model": "gemini-3.8-live",
+      "surface": "vertex",
+      "location": "europe-west2",
+      "ok": false,
+      "error": "timeout 20000ms connect"
+    },
+    {
+      "model": "gemini-3.8-live",
+      "surface": "vertex",
+      "location": "global",
+      "ok": false,
+      "error": "Publisher model `projects/vetra-uk-edc8ca/locations/global/publishers/google/models/gemini-3.8-live` was not found or your "
+    },
+    {
+      "model": "gemini-3.8-live",
+      "surface": "aistudio",
+      "location": null,
+      "ok": true,
+      "error": null
+    }
+  ],
+  "behave": [
+    {
+      "fixture": "no_terminal_punct",
+      "take": 1,
+      "toolRounds": 0,
+      "toolNames": [],
+      "turnCompletes": 0,
+      "firstAudioAt": 1789532481094,
+      "audioChunks": 12,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 1029,
+      "events": ""
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 2,
+      "toolRounds": 3,
+      "toolNames": [
+        [
+          "check_appointment_availability"
+        ],
+        [
+          "set_call_intent"
+        ],
+        [
+          "check_appointment_availability"
+        ]
+      ],
+      "turnCompletes": 3,
+      "firstAudioAt": 1789532490738,
+      "audioChunks": 8,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 4475,
+      "events": "toolCall>turnComplete>toolCall>turnComplete>toolCall>turnComplete"
+    },
+    {
+      "fixture": "no_terminal_punct",
+      "take": 3,
+      "toolRounds": 0,
+      "toolNames": [],
+      "turnCompletes": 0,
+      "firstAudioAt": 1789532495800,
+      "audioChunks": 10,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 1078,
+      "events": ""
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "toolRounds": 0,
+      "toolNames": [],
+      "turnCompletes": 0,
+      "firstAudioAt": 1789532502157,
+      "audioChunks": 17,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 1141,
+      "events": ""
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "toolRounds": 0,
+      "toolNames": [],
+      "turnCompletes": 0,
+      "firstAudioAt": 1789532508525,
+      "audioChunks": 15,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 1226,
+      "events": ""
+    },
+    {
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "toolRounds": 0,
+      "toolNames": [],
+      "turnCompletes": 0,
+      "firstAudioAt": 1789532514853,
+      "audioChunks": 13,
+      "err": null,
+      "chunksDuringSpeech": 0,
+      "turnLatencyMs": 1279,
+      "events": ""
+    }
+  ]
+}

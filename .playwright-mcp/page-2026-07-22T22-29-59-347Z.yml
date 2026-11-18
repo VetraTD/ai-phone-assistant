@@ -1,0 +1,91 @@
+- generic [ref=f7e5]:
+  - banner [ref=f7e6]:
+    - generic [ref=f7e7]:
+      - generic [ref=f7e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f7e9]
+      - paragraph [ref=f7e10]: Your calls at a glance for today
+      - generic [ref=f7e11]:
+        - generic [ref=f7e12]: "+18175803291"
+        - generic [ref=f7e13]: America/Chicago
+    - generic [ref=f7e14]:
+      - button "🌐 EN" [ref=f7e16] [cursor=pointer]:
+        - generic [ref=f7e17]: 🌐
+        - generic [ref=f7e18]: EN
+      - generic [ref=f7e19]:
+        - button "Dashboard" [ref=f7e20] [cursor=pointer]
+        - button "Analytics" [ref=f7e21] [cursor=pointer]
+        - button "Appointments" [ref=f7e22] [cursor=pointer]
+        - button "Settings" [ref=f7e23] [cursor=pointer]
+        - button "Guide" [ref=f7e24] [cursor=pointer]
+      - button "Logout" [ref=f7e25] [cursor=pointer]
+  - main [ref=f7e26]:
+    - generic [ref=f7e27]:
+      - generic [ref=f7e28]:
+        - heading "Settings" [level=2] [ref=f7e30]
+        - generic [ref=f7e31]:
+          - status [ref=f7e32]: 1 unsaved change
+          - generic [ref=f7e530]:
+            - button "1 unsaved change" [expanded] [active] [ref=f7e531] [cursor=pointer]
+            - generic [ref=f7e566]:
+              - generic [ref=f7e567]: Not saved yet
+              - button "Business name General" [ref=f7e568] [cursor=pointer]:
+                - generic [ref=f7e569]: Business name
+                - generic [ref=f7e570]: General
+          - button "Save changes" [ref=f7e35] [cursor=pointer]
+      - generic [ref=f7e36]:
+        - tablist "Settings sections" [ref=f7e37]:
+          - tab "General Name, hours, timezone has unsaved changes" [ref=f7e535] [cursor=pointer]:
+            - generic [ref=f7e44]:
+              - generic [ref=f7e45]: General
+              - generic [ref=f7e46]: Name, hours, timezone
+            - generic [ref=f7e537]: has unsaved changes
+          - tab "Voice & Language 1 language" [ref=f7e47] [cursor=pointer]:
+            - generic [ref=f7e52]:
+              - generic [ref=f7e53]: Voice & Language
+              - generic [ref=f7e54]: 1 language
+          - tab "Capabilities 3 of 7 turned on" [ref=f7e250] [cursor=pointer]:
+            - generic [ref=f7e60]:
+              - generic [ref=f7e61]: Capabilities
+              - generic [ref=f7e62]: 3 of 7 turned on
+          - tab "Knowledge Base Answers to questions" [ref=f7e63] [cursor=pointer]:
+            - generic [ref=f7e67]:
+              - generic [ref=f7e68]: Knowledge Base
+              - generic [ref=f7e69]: Answers to questions
+          - tab "Notifications Email and text alerts" [selected] [ref=f7e70] [cursor=pointer]:
+            - generic [ref=f7e75]:
+              - generic [ref=f7e76]: Notifications
+              - generic [ref=f7e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [ref=f7e78] [cursor=pointer]:
+            - generic [ref=f7e82]:
+              - generic [ref=f7e83]: Billing & Integrations
+              - generic [ref=f7e84]: Plan, usage, calendar
+        - tabpanel "Notifications Email and text alerts" [ref=f7e539]:
+          - generic [ref=f7e86]:
+            - heading "Notifications" [level=2] [ref=f7e540]
+            - paragraph [ref=f7e88]: How you hear about calls, and what callers get texted afterwards.
+          - generic [ref=f7e541]:
+            - generic [ref=f7e543]:
+              - heading "How we reach you" [level=3] [ref=f7e544]
+              - paragraph [ref=f7e545]: Where alerts about your calls are sent.
+            - generic [ref=f7e546]:
+              - generic [ref=f7e547]:
+                - generic [ref=f7e548]: Notification emailoptional
+                - textbox "Notification emailoptional" [ref=f7e549]:
+                  - /placeholder: you@business.com
+              - generic [ref=f7e550]:
+                - generic [ref=f7e551]: Notification phoneoptional
+                - textbox "Notification phoneoptional" [ref=f7e552]:
+                  - /placeholder: "+447700900123"
+              - generic [ref=f7e553] [cursor=pointer]:
+                - checkbox "Send notifications for new appointments, messages, and callbacks" [checked] [ref=f7e554]
+                - generic [ref=f7e555]: Send notifications for new appointments, messages, and callbacks
+          - generic [ref=f7e556]:
+            - generic [ref=f7e558]:
+              - heading "What callers get afterwards" [level=3] [ref=f7e559]
+              - paragraph [ref=f7e560]: An automatic text message once the call ends, so the caller has something in writing.
+            - generic [ref=f7e562] [cursor=pointer]:
+              - checkbox "Text callers a follow-up SMS Covers appointment confirmations, message receipts and missed calls." [ref=f7e563]
+              - generic [ref=f7e564]:
+                - text: Text callers a follow-up SMS
+                - generic [ref=f7e565]: Covers appointment confirmations, message receipts and missed calls.
+  - contentinfo [ref=f7e189]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

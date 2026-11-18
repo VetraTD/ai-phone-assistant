@@ -1,0 +1,707 @@
+{
+  "at": "2026-09-16T20:35:15.562Z",
+  "model": "gemini-3.1-flash-live-preview",
+  "n": 5,
+  "arms": [
+    {
+      "key": "default",
+      "cfg": null
+    },
+    {
+      "key": "silence1200",
+      "cfg": {
+        "silenceDurationMs": 1200
+      }
+    },
+    {
+      "key": "silence2500",
+      "cfg": {
+        "silenceDurationMs": 2500
+      }
+    },
+    {
+      "key": "endsens_low",
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      }
+    }
+  ],
+  "fixtures": [
+    "trailing_lead_in",
+    "rep_confirm"
+  ],
+  "rows": [
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1686,
+      "transcript_at_ms": 1162,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00057
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1686,
+      "transcript_at_ms": 1160,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00052
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1826,
+      "transcript_at_ms": 1149,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.0005
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "trailing_lead_in",
+      "take": 4,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1696,
+      "transcript_at_ms": 1186,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00062
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "trailing_lead_in",
+      "take": 5,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1796,
+      "transcript_at_ms": 1183,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00054
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 2029,
+      "transcript_at_ms": 1503,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00058
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1471,
+      "transcript_at_ms": 1470,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00093
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1516,
+      "transcript_at_ms": 1522,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00117
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "trailing_lead_in",
+      "take": 4,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 2006,
+      "transcript_at_ms": 1486,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00054
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "trailing_lead_in",
+      "take": 5,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1460,
+      "transcript_at_ms": 1460,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00112
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3425,
+      "transcript_at_ms": 2825,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00081
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3373,
+      "transcript_at_ms": 2811,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00072
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3307,
+      "transcript_at_ms": 2785,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00066
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "trailing_lead_in",
+      "take": 4,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3295,
+      "transcript_at_ms": 2816,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00069
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "trailing_lead_in",
+      "take": 5,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3420,
+      "transcript_at_ms": 2824,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00078
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "trailing_lead_in",
+      "take": 1,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1808,
+      "transcript_at_ms": 1143,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00049
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "trailing_lead_in",
+      "take": 2,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1156,
+      "transcript_at_ms": 1162,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00087
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "trailing_lead_in",
+      "take": 3,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1140,
+      "transcript_at_ms": 1143,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00077
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "trailing_lead_in",
+      "take": 4,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1145,
+      "transcript_at_ms": 1145,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00075
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "trailing_lead_in",
+      "take": 5,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1713,
+      "transcript_at_ms": 1162,
+      "transcript": "It's for a",
+      "has_terminal_punct": false,
+      "usd": 0.00066
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "rep_confirm",
+      "take": 1,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1580,
+      "transcript_at_ms": 984,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00052
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "rep_confirm",
+      "take": 2,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1502,
+      "transcript_at_ms": 963,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00058
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "rep_confirm",
+      "take": 3,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1511,
+      "transcript_at_ms": 989,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00053
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "rep_confirm",
+      "take": 4,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1527,
+      "transcript_at_ms": 993,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00056
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "default",
+      "fixture": "rep_confirm",
+      "take": 5,
+      "cfg": null,
+      "spoke": true,
+      "spoke_at_ms": 1580,
+      "transcript_at_ms": 993,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.0005
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "rep_confirm",
+      "take": 1,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1846,
+      "transcript_at_ms": 1323,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00059
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "rep_confirm",
+      "take": 2,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1909,
+      "transcript_at_ms": 1301,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00056
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "rep_confirm",
+      "take": 3,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1897,
+      "transcript_at_ms": 1288,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00058
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "rep_confirm",
+      "take": 4,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1856,
+      "transcript_at_ms": 1292,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00052
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence1200",
+      "fixture": "rep_confirm",
+      "take": 5,
+      "cfg": {
+        "silenceDurationMs": 1200
+      },
+      "spoke": true,
+      "spoke_at_ms": 1873,
+      "transcript_at_ms": 1326,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00059
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "rep_confirm",
+      "take": 1,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3196,
+      "transcript_at_ms": 2693,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00067
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "rep_confirm",
+      "take": 2,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3176,
+      "transcript_at_ms": 2624,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00072
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "rep_confirm",
+      "take": 3,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3194,
+      "transcript_at_ms": 2621,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.0007
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "rep_confirm",
+      "take": 4,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3359,
+      "transcript_at_ms": 2640,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00086
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "silence2500",
+      "fixture": "rep_confirm",
+      "take": 5,
+      "cfg": {
+        "silenceDurationMs": 2500
+      },
+      "spoke": true,
+      "spoke_at_ms": 3161,
+      "transcript_at_ms": 2627,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00065
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "rep_confirm",
+      "take": 1,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1518,
+      "transcript_at_ms": 982,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.0005
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "rep_confirm",
+      "take": 2,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1521,
+      "transcript_at_ms": 1013,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00055
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "rep_confirm",
+      "take": 3,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1546,
+      "transcript_at_ms": 994,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00062
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "rep_confirm",
+      "take": 4,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1525,
+      "transcript_at_ms": 1012,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00064
+    },
+    {
+      "model": "gemini-3.1-flash-live-preview",
+      "arm": "endsens_low",
+      "fixture": "rep_confirm",
+      "take": 5,
+      "cfg": {
+        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW"
+      },
+      "spoke": true,
+      "spoke_at_ms": 1552,
+      "transcript_at_ms": 1025,
+      "transcript": "Tuesday at 10:00 works for me.",
+      "has_terminal_punct": true,
+      "usd": 0.00055
+    }
+  ],
+  "tally": {
+    "trailing_lead_in / default": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1696,
+      "min_spoke_at_ms": 1686,
+      "p50_transcript_at_ms": 1162,
+      "transcripts_seen": 5,
+      "punctuated": 0
+    },
+    "trailing_lead_in / silence1200": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1516,
+      "min_spoke_at_ms": 1460,
+      "p50_transcript_at_ms": 1486,
+      "transcripts_seen": 5,
+      "punctuated": 0
+    },
+    "trailing_lead_in / silence2500": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 3373,
+      "min_spoke_at_ms": 3295,
+      "p50_transcript_at_ms": 2816,
+      "transcripts_seen": 5,
+      "punctuated": 0
+    },
+    "trailing_lead_in / endsens_low": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1156,
+      "min_spoke_at_ms": 1140,
+      "p50_transcript_at_ms": 1145,
+      "transcripts_seen": 5,
+      "punctuated": 0
+    },
+    "rep_confirm / default": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1527,
+      "min_spoke_at_ms": 1502,
+      "p50_transcript_at_ms": 989,
+      "transcripts_seen": 5,
+      "punctuated": 5
+    },
+    "rep_confirm / silence1200": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1873,
+      "min_spoke_at_ms": 1846,
+      "p50_transcript_at_ms": 1301,
+      "transcripts_seen": 5,
+      "punctuated": 5
+    },
+    "rep_confirm / silence2500": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 3194,
+      "min_spoke_at_ms": 3161,
+      "p50_transcript_at_ms": 2627,
+      "transcripts_seen": 5,
+      "punctuated": 5
+    },
+    "rep_confirm / endsens_low": {
+      "of": 5,
+      "spoke": 5,
+      "p50_spoke_at_ms": 1525,
+      "min_spoke_at_ms": 1518,
+      "p50_transcript_at_ms": 1012,
+      "transcripts_seen": 5,
+      "punctuated": 5
+    }
+  },
+  "enforcement": {
+    "trailing_lead_in": {
+      "default": 1696,
+      "silence1200": 1516,
+      "silence2500": 3373,
+      "delta_1200": -180,
+      "delta_2500": 1677,
+      "ENFORCED": true
+    },
+    "rep_confirm": {
+      "default": 1527,
+      "silence1200": 1873,
+      "silence2500": 3194,
+      "delta_1200": 346,
+      "delta_2500": 1667,
+      "ENFORCED": true
+    }
+  }
+}

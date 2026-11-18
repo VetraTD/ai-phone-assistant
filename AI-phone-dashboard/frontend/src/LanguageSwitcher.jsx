@@ -158,7 +158,10 @@ export const TRANSLATIONS = {
     transcript: "Transcript",
     aiReceptionist: "Vetra",
     caller: "Caller",
-    noTranscript: "No transcript was captured for this call.",
+    // Reads as a fault otherwise, and for every call taken before transcripts
+    // were switched on it would keep reading as one forever. Says what is
+    // true without implying something broke.
+    noTranscript: "No transcript for this call. Calls answered before transcripts were switched on don't have one.",
     appointments: "Appointments",
     scheduled: "Scheduled",
     status: "Status",
@@ -237,15 +240,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "This saves your business name, timezone, preferred language, greeting, after-hours policy, transfer settings, and notifications to the database.",
 
-    calendarSync: "Calendar sync",
-    calendarSyncDescription: "Sync appointments to Google Calendar so they appear in your calendar app.",
-    connectGoogleCalendar: "Connect Google Calendar",
-    disconnectCalendar: "Disconnect",
-    syncToCalendarNow: "Sync upcoming to Google Calendar",
-    calendarConnected: "Google Calendar connected",
-    calendarNotConnected: "Google Calendar not connected",
-    calendarSyncSuccess: "Appointments synced to Google Calendar.",
-    calendarSyncError: "Failed to sync to calendar.",
 
     // Auth / loading
     checkingSession: "Checking your session",
@@ -345,7 +339,7 @@ export const TRANSLATIONS = {
     transcript: "Transcripción",
     aiReceptionist: "Vetra",
     caller: "Llamante",
-    noTranscript: "No se capturó transcripción para esta llamada.",
+    noTranscript: "No hay transcripción de esta llamada. Las llamadas atendidas antes de activar las transcripciones no tienen una.",
     appointments: "Citas",
     scheduled: "Programada",
     status: "Estado",
@@ -423,15 +417,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "Guarda el nombre, zona horaria, idioma, saludo, política fuera de horario, transferencia y notificaciones.",
 
-    calendarSync: "Sincronización con calendario",
-    calendarSyncDescription: "Sincroniza las citas con Google Calendar para que aparezcan en tu calendario.",
-    connectGoogleCalendar: "Conectar Google Calendar",
-    disconnectCalendar: "Desconectar",
-    syncToCalendarNow: "Sincronizar próximas con Google Calendar",
-    calendarConnected: "Google Calendar conectado",
-    calendarNotConnected: "Google Calendar no conectado",
-    calendarSyncSuccess: "Citas sincronizadas con Google Calendar.",
-    calendarSyncError: "Error al sincronizar con el calendario.",
 
     checkingSession: "Verificando tu sesión",
     checkingSubtitle:
@@ -529,7 +514,7 @@ export const TRANSLATIONS = {
     transcript: "Transcription",
     aiReceptionist: "Vetra",
     caller: "Appelant",
-    noTranscript: "Aucune transcription capturée pour cet appel.",
+    noTranscript: "Pas de transcription pour cet appel. Les appels reçus avant l'activation des transcriptions n'en ont pas.",
     appointments: "Rendez-vous",
     scheduled: "Programmé",
     status: "Statut",
@@ -607,15 +592,6 @@ export const TRANSLATIONS = {
     saveDescription:
       "Enregistre le nom, le fuseau horaire, la langue, le message d'accueil, la politique hors horaires, les transferts et les notifications.",
 
-    calendarSync: "Synchronisation calendrier",
-    calendarSyncDescription: "Synchronisez les rendez-vous avec Google Calendar pour les voir dans votre calendrier.",
-    connectGoogleCalendar: "Connecter Google Calendar",
-    disconnectCalendar: "Déconnecter",
-    syncToCalendarNow: "Synchroniser les prochains vers Google Calendar",
-    calendarConnected: "Google Calendar connecté",
-    calendarNotConnected: "Google Calendar non connecté",
-    calendarSyncSuccess: "Rendez-vous synchronisés avec Google Calendar.",
-    calendarSyncError: "Échec de la synchronisation avec le calendrier.",
 
     checkingSession: "Vérification de la session",
     checkingSubtitle:

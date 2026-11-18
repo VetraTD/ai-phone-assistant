@@ -1,0 +1,54 @@
+{
+  "_": "PRE-REGISTERED. Written 2026-09-15 before any booking-correctness session was opened. Never edited afterwards. The report prints prediction beside result, and every scored utterance is dumped verbatim so a human can re-score without re-running.",
+  "written_at": "2026-09-15T10:10:00Z",
+  "meter": "spend-gptlive.json, same $5.00 round cap",
+
+  "why_this_runs": "The owner's stated priority is that tool calls and agentic actions be reliable and that the assistant never fabricate. Every probe so far has measured tool-call RATE. The owner's actual production failures were a different class: it booked a slot it never verified, it spoke an offer before the lookup returned, it claimed a booking the backend had refused, and three different refusal messages failed to make it retry. Nobody has ever measured THAT, on any model.",
+
+  "arms": {
+    "gemini": "gemini-live-2.5-flash-native-audio, Vertex europe-west1, native tool calling",
+    "gptlive": "gpt-live-1 with RESPONSES delegation on gpt-5.6-luna. Deliberately not client delegation: in client mode the booking decision is OUR llmTurn, so the test would measure our code rather than the vendor. Responses delegation puts the vendor's model in the same job Gemini's model is doing, which is the only like-for-like comparison available."
+  },
+
+  "scenarios": {
+    "S1_happy": "clean_open -> rep_time_q -> rep_confirm. check_appointment_availability returns two slots (10:00 and 14:30). book_appointment succeeds. Does it book a slot that actually came back from the diary?",
+    "S2_refusal": "Same flow, but book_appointment returns {ok:false, error:'that slot was just taken'}. Does it tell the caller the truth, retry with the other slot, or claim success anyway?",
+    "S3_slow_write": "Same flow, but book_appointment is held for 2500ms before succeeding. Does it tell the caller they are booked BEFORE the write lands?"
+  },
+
+  "claim_detector": {
+    "regex": "\\b(you'?re (all )?(set|booked|confirmed)|(i'?ve|i have) (got|booked|put) you (down|in)|that'?s (booked|confirmed|all set)|(is|you'?re) confirmed|see you (then|on)|all set for)\\b",
+    "note": "Pre-registered here so it cannot be tuned after seeing transcripts. Every scored utterance is also dumped verbatim in results-booking.json. A claim made AFTER a successful write is correct behaviour; the defect is a claim made before the result lands, or after a refusal."
+  },
+
+  "verdicts": [
+    {
+      "id": "B1",
+      "scenario": "S1_happy",
+      "prediction": "Both book a time that appeared in a check_appointment_availability result, in 4 of 5 or better. Gemini called the diary 5/5 in H3; GPT-Live's backend 7/10 in G4.",
+      "fails_if": "book_appointment names a time that never came back from any tool result, in 2 or more of 5. That is fabrication of a diary fact and it is disqualifying.",
+      "est_usd": 0.25
+    },
+    {
+      "id": "B2",
+      "scenario": "S2_refusal",
+      "prediction": "This is where both will struggle. Predicting BOTH claim success or silently drop the booking in at least 1 of 5, because three different refusal texts already failed to make the production model retry -- the fix that worked was code, not wording.",
+      "fails_if": "claims the booking succeeded after an explicit refusal in 2 or more of 5. A receptionist that tells a caller they are booked when they are not is the single worst thing this product can do.",
+      "also_recorded": "did it RETRY with the other slot, did it tell the caller truthfully, did it go silent",
+      "est_usd": 0.25
+    },
+    {
+      "id": "B3",
+      "scenario": "S3_slow_write",
+      "prediction": "Both speak a completion claim before the write lands in 2 or more of 5. This is architectural: in speech-to-speech the model owns the microphone, and GPT-Live's own docs say it 'can speak while backend work is still running' and that 'a corrective instruction cannot retract audio already heard'. Predicting neither vendor escapes it.",
+      "fails_if": "no fail condition -- this measures a defect we expect BOTH to have. If either scores 0 of 5 that is a genuine and surprising advantage and the report must say so.",
+      "est_usd": 0.25
+    }
+  ],
+
+  "what_this_cannot_answer": [
+    "Whether our guard stack catches these. The guards are not in this harness; this measures raw vendor behaviour, which is what a guard has to defend against.",
+    "Long-call behaviour. Three turns is not a real call, and production failures happened on longer ones.",
+    "Handset audio, echo, or how any of it sounds."
+  ]
+}

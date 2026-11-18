@@ -1,0 +1,165 @@
+- generic [ref=f4e5]:
+  - banner [ref=f4e6]:
+    - generic [ref=f4e7]:
+      - generic [ref=f4e8]: Vetra Dashboard
+      - heading "Brightwork Family Dental" [level=1] [ref=f4e9]
+      - paragraph [ref=f4e10]: Your calls at a glance for today
+      - generic [ref=f4e11]:
+        - generic [ref=f4e12]: "+18175803291"
+        - generic [ref=f4e13]: America/Chicago
+    - generic [ref=f4e14]:
+      - button "🌐 EN" [ref=f4e16] [cursor=pointer]:
+        - generic [ref=f4e17]: 🌐
+        - generic [ref=f4e18]: EN
+      - generic [ref=f4e19]:
+        - button "Dashboard" [ref=f4e20] [cursor=pointer]
+        - button "Analytics" [ref=f4e21] [cursor=pointer]
+        - button "Appointments" [ref=f4e22] [cursor=pointer]
+        - button "Settings" [active] [ref=f4e23] [cursor=pointer]
+        - button "Guide" [ref=f4e24] [cursor=pointer]
+      - button "Logout" [ref=f4e25] [cursor=pointer]
+  - main [ref=f4e26]:
+    - generic [ref=f4e27]:
+      - generic [ref=f4e28]:
+        - heading "Settings" [level=2] [ref=f4e30]
+        - generic [ref=f4e31]:
+          - status [ref=f4e32]: All changes saved
+          - generic [ref=f4e33]: Everything is saved
+          - button "Save changes" [disabled] [ref=f4e35]
+      - generic [ref=f4e36]:
+        - tablist "Settings sections" [ref=f4e37]:
+          - tab "General Name, hours, timezone" [selected] [ref=f4e38] [cursor=pointer]:
+            - generic [ref=f4e44]:
+              - generic [ref=f4e45]: General
+              - generic [ref=f4e46]: Name, hours, timezone
+          - tab "Voice & Language 1 language" [ref=f4e47] [cursor=pointer]:
+            - generic [ref=f4e52]:
+              - generic [ref=f4e53]: Voice & Language
+              - generic [ref=f4e54]: 1 language
+          - tab "Capabilities What it can handle" [ref=f4e55] [cursor=pointer]:
+            - generic [ref=f4e60]:
+              - generic [ref=f4e61]: Capabilities
+              - generic [ref=f4e62]: What it can handle
+          - tab "Knowledge Base Answers to questions" [ref=f4e63] [cursor=pointer]:
+            - generic [ref=f4e67]:
+              - generic [ref=f4e68]: Knowledge Base
+              - generic [ref=f4e69]: Answers to questions
+          - tab "Notifications Email and text alerts" [ref=f4e70] [cursor=pointer]:
+            - generic [ref=f4e75]:
+              - generic [ref=f4e76]: Notifications
+              - generic [ref=f4e77]: Email and text alerts
+          - tab "Billing & Integrations Plan, usage, calendar" [ref=f4e78] [cursor=pointer]:
+            - generic [ref=f4e82]:
+              - generic [ref=f4e83]: Billing & Integrations
+              - generic [ref=f4e84]: Plan, usage, calendar
+        - tabpanel "General Name, hours, timezone" [ref=f4e85]:
+          - generic [ref=f4e86]:
+            - heading "General" [level=2] [ref=f4e87]
+            - paragraph [ref=f4e88]: Who you are and when you're open. Your receptionist uses this on every call.
+          - generic [ref=f4e89]:
+            - generic [ref=f4e91]:
+              - heading "Business info" [level=3] [ref=f4e92]
+              - paragraph [ref=f4e93]: The basics your receptionist mentions when it answers.
+            - generic [ref=f4e94]:
+              - generic [ref=f4e95]:
+                - generic [ref=f4e96]: Business name
+                - textbox "Business name" [ref=f4e97]: Brightwork Family Dental
+              - generic [ref=f4e98]:
+                - generic [ref=f4e99]: Timezone
+                - combobox "Timezone" [ref=f4e100]:
+                  - option "America/Chicago" [selected]
+                  - option "America/New_York"
+                  - option "America/Los_Angeles"
+                  - option "Europe/London"
+                - paragraph [ref=f4e101]: Your opening hours are read in this timezone.
+              - generic [ref=f4e102]:
+                - generic [ref=f4e103]: Main phoneoptional
+                - textbox "Main phoneoptional" [ref=f4e104]:
+                  - /placeholder: Public office number, if different
+                  - text: "+18175803291"
+                - paragraph [ref=f4e105]: Your own office number, if it's different from the one Vetra answers. Vetra answers +18175803291.
+              - generic [ref=f4e106]:
+                - generic [ref=f4e107]: About your businessRecommended
+                - textbox "About your businessRecommended" [ref=f4e108]:
+                  - /placeholder: e.g. We're a family dental practice. We accept most major insurance and offer free first consultations.
+                  - text: Brightwork Family Dental is a family and cosmetic dental practice in Fort Worth, Texas. We offer cleanings, exams, fillings, crowns, root canals, teeth whitening, veneers, and Invisalign. We welcome new patients and families. Free parking is available in the lot behind the building. We are located at 2400 West 7th Street, Suite 120, Fort Worth, TX 76107.
+                - paragraph [ref=f4e109]: Anything a caller might ask about — what you do, who works there, which insurance you take.
+                - generic [ref=f4e110]: 356/2000
+          - generic [ref=f4e111]:
+            - generic [ref=f4e112]:
+              - generic [ref=f4e113]:
+                - heading "Opening hours" [level=3] [ref=f4e114]
+                - paragraph [ref=f4e115]: Read in your business timezone.
+              - generic [ref=f4e116]: Open 6 days a week
+            - generic [ref=f4e119]:
+              - generic [ref=f4e120]:
+                - generic [ref=f4e121]: Monday
+                - generic [ref=f4e122] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e123]
+                  - generic [ref=f4e124]: Closed
+                - textbox "Monday opening time" [ref=f4e125]: 08:00
+                - generic [ref=f4e126]: –
+                - textbox "Monday closing time" [ref=f4e127]: 17:00
+              - generic [ref=f4e128]:
+                - generic [ref=f4e129]: Tuesday
+                - generic [ref=f4e130] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e131]
+                  - generic [ref=f4e132]: Closed
+                - textbox "Tuesday opening time" [ref=f4e133]: 08:00
+                - generic [ref=f4e134]: –
+                - textbox "Tuesday closing time" [ref=f4e135]: 17:00
+              - generic [ref=f4e136]:
+                - generic [ref=f4e137]: Wednesday
+                - generic [ref=f4e138] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e139]
+                  - generic [ref=f4e140]: Closed
+                - textbox "Wednesday opening time" [ref=f4e141]: 08:00
+                - generic [ref=f4e142]: –
+                - textbox "Wednesday closing time" [ref=f4e143]: 17:00
+              - generic [ref=f4e144]:
+                - generic [ref=f4e145]: Thursday
+                - generic [ref=f4e146] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e147]
+                  - generic [ref=f4e148]: Closed
+                - textbox "Thursday opening time" [ref=f4e149]: 08:00
+                - generic [ref=f4e150]: –
+                - textbox "Thursday closing time" [ref=f4e151]: 19:00
+              - generic [ref=f4e152]:
+                - generic [ref=f4e153]: Friday
+                - generic [ref=f4e154] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e155]
+                  - generic [ref=f4e156]: Closed
+                - textbox "Friday opening time" [ref=f4e157]: 08:00
+                - generic [ref=f4e158]: –
+                - textbox "Friday closing time" [ref=f4e159]: 16:00
+              - generic [ref=f4e160]:
+                - generic [ref=f4e161]: Saturday
+                - generic [ref=f4e162] [cursor=pointer]:
+                  - checkbox "Closed" [ref=f4e163]
+                  - generic [ref=f4e164]: Closed
+                - textbox "Saturday opening time" [ref=f4e165]: 09:00
+                - generic [ref=f4e166]: –
+                - textbox "Saturday closing time" [ref=f4e167]: 14:00
+              - generic [ref=f4e168]:
+                - generic [ref=f4e169]: Sunday
+                - generic [ref=f4e170] [cursor=pointer]:
+                  - checkbox "Closed" [checked] [ref=f4e171]
+                  - generic [ref=f4e172]: Closed
+                - textbox "Sunday opening time" [disabled] [ref=f4e173]
+                - generic [ref=f4e174]: –
+                - textbox "Sunday closing time" [disabled] [ref=f4e175]
+          - generic [ref=f4e176]:
+            - generic [ref=f4e178]:
+              - heading "When you're closed" [level=3] [ref=f4e179]
+              - paragraph [ref=f4e180]: What happens on a call that arrives outside the hours above.
+            - generic [ref=f4e181]:
+              - paragraph [ref=f4e182]:
+                - generic [ref=f4e185]: Your receptionist still answers every call. This only decides what it offers the caller once it knows you're closed.
+              - generic [ref=f4e186]:
+                - generic [ref=f4e187]: Handle out-of-hours calls by
+                - combobox "Handle out-of-hours calls by" [ref=f4e188]:
+                  - option "Take a message" [selected]
+                  - option "Offer a callback"
+                  - option "Offer to book for later"
+                  - option "Transfer if possible"
+  - contentinfo [ref=f4e189]: Your data is encrypted and stored on industry-standard infrastructure. Only your account can access your calls and business details.

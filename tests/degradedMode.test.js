@@ -1,0 +1,291 @@
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
+import request from "supertest";
+
+// Twilio signature validation is orthogonal to what this file tests — disable
+// it so requests don't need a real X-Twilio-Signature header. Must be set
+// before server.js is first imported (it reads this at module-eval time).
+process.env.TWILIO_VALIDATE_SIGNATURE = "false";
+
+const mockIsEnabled = vi.fn(() => true);
+const mockLookupBusinessByPhone = vi.fn();
+const mockCreateCustomerRequest = vi.fn();
+const mockNotifyCustomerRequest = vi.fn(async () => {});
+const mockSendCallerSms = vi.fn(async () => {});
+
+// Ledger O32. The voicemail write ran with NO TENANT SCOPE, which against the
+// local superuser works and against Cloud SQL is a refused INSERT reported as
+// a 200. The fake records which tenant the scope was opened for, and the write
+// only runs inside it — so a regression that dropped the scope would show up
+// here as "createCustomerRequest was never called" rather than passing quietly.
+// The real refusal is exercised against a real database in
+// tests/db/degradedVoicemail.test.js; this is the wiring.
+const mockWithTenantSafe = vi.fn(async (businessId, fn) => (businessId ? fn() : null));
+
+vi.mock("../services/db.js", () => ({
+  isEnabled: (...args) => mockIsEnabled(...args),
+  lookupBusinessByPhone: (...args) => mockLookupBusinessByPhone(...args),
+  createCustomerRequest: (...args) => mockCreateCustomerRequest(...args),
+  withTenantSafe: (...args) => mockWithTenantSafe(...args),
+  loadConfig: (business) => (business ? { businessName: business.name || "Test Biz", smsFollowupEnabled: false, smsTemplates: {} } : null),
+}));
+
+vi.mock("../services/notifications.js", () => ({
+  notifyCustomerRequest: (...args) => mockNotifyCustomerRequest(...args),
+  notifyCallMissed: vi.fn(async () => {}),
+  sendCallerSms: (...args) => mockSendCallerSms(...args),
+  MESSAGE_SLA_TEXT: "as soon as possible",
+}));
+
+import { buildDegradedVoicemailTwiml } from "../lib/twiml.js";
+import { setDegraded, clearDegraded, isDegraded } from "../lib/voice/health.js";
+
+// server.js's cold import pulls in a large dependency graph (express, twilio,
+// ws, gemini/mediaStream/session, etc.) — ~2s+ even outside vitest, more
+// under concurrent worker load. Importing it lazily inside whichever `it()`
+// happens to run first left that test racing the default 5000ms test
+// timeout (observed flaky: intermittent "Test timed out in 5000ms" here and
+// in tests/phone-numbers-api.test.js). Hoist to a beforeAll with a generous
+// hookTimeout so the cost is paid once, during setup, deterministically.
+let app;
+beforeAll(async () => {
+  ({ app } = await import("../server.js"));
+}, 20000);
+
+describe("lib/voice/health.js — degraded-mode flag", () => {
+  afterEach(() => clearDegraded());
+
+  it("starts non-degraded, flips on setDegraded, clears on clearDegraded", () => {
+    expect(isDegraded()).toBe(false);
+    setDegraded("stt_down");
+    expect(isDegraded()).toBe(true);
+    clearDegraded();
+    expect(isDegraded()).toBe(false);
+  });
+});
+
+describe("buildDegradedVoicemailTwiml", () => {
+  it("shapes: apology <Say>, <Record> with the callback URL, then <Hangup/>", () => {
+    const twiml = buildDegradedVoicemailTwiml("https://example.com/twilio/voicemail");
+
+    expect(twiml).toContain("<Response>");
+    expect(twiml).toContain("<Say");
+    expect(twiml).toContain("leave your name, number, and a brief message");
+    expect(twiml).toContain('<Record maxLength="120"');
+    expect(twiml).toContain('recordingStatusCallback="https://example.com/twilio/voicemail"');
+    expect(twiml).toContain("<Hangup/>");
+    // Record must come after the apology and before Hangup.
+    expect(twiml.indexOf("<Say")).toBeLessThan(twiml.indexOf("<Record"));
+    expect(twiml.indexOf("<Record")).toBeLessThan(twiml.indexOf("<Hangup/>"));
+  });
+
+  it("escapes the callback URL for XML safety", () => {
+    const twiml = buildDegradedVoicemailTwiml("https://example.com/x?a=1&b=2");
+    expect(twiml).toContain("a=1&amp;b=2");
+    expect(twiml).not.toContain("a=1&b=2");
+  });
+});
+
+describe("POST /twilio/voice — degraded mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => clearDegraded());
+
+  it("returns the voicemail-fallback TwiML instead of <Connect><Stream> when degraded", async () => {
+    setDegraded("tts_down");
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_degraded_1", To: "+15550001111", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Record");
+    expect(res.text).toContain("/twilio/voicemail");
+    expect(res.text).not.toContain("<Connect>");
+  });
+
+  it("returns <Connect><Stream> as normal when not degraded", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-normal", name: "Test Biz" });
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_normal_1", To: "+15550001111", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Connect><Stream");
+    expect(res.text).not.toContain("<Record");
+  });
+
+  it("escapes the dialed and caller numbers in the Stream parameters", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-normal" });
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_escape_1", To: '+1555"><Hangup/>', From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('"><Hangup/>');
+    expect(res.text).toContain("&quot;&gt;&lt;Hangup/&gt;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unrouted calls. Before this existed, a dialed number matching no business
+// still connected the media stream and ran the assistant on loadConfig(null):
+// it greeted as "our office", offered booking that refused at execution, and
+// said "I'll make sure they get your message" while persisting nothing and
+// notifying nobody. An assistant that cannot name the business it answers for
+// must not answer for it.
+// ---------------------------------------------------------------------------
+describe("POST /twilio/voice — no business matches the dialed number", () => {
+  const savedUnrouted = process.env.UNROUTED_TRANSFER_NUMBER;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEnabled.mockReturnValue(true);
+    mockLookupBusinessByPhone.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    clearDegraded();
+    if (savedUnrouted === undefined) delete process.env.UNROUTED_TRANSFER_NUMBER;
+    else process.env.UNROUTED_TRANSFER_NUMBER = savedUnrouted;
+  });
+
+  it("takes a message when no unrouted transfer number is configured", async () => {
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_1", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Record");
+    expect(res.text).toContain("/twilio/voicemail");
+    // The caller must never reach the assistant with no business context.
+    expect(res.text).not.toContain("<Connect>");
+    // …and must not be promised a callback from a business we cannot identify.
+    expect(res.text).not.toContain("our office");
+  });
+
+  it("forwards to a human when UNROUTED_TRANSFER_NUMBER is set", async () => {
+    process.env.UNROUTED_TRANSFER_NUMBER = "+18005550123";
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_2", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Dial");
+    expect(res.text).toContain("+18005550123");
+    // The original caller's number is passed through so whoever picks up sees
+    // who is actually calling.
+    expect(res.text).toContain('callerId="+15559998888"');
+    expect(res.text).not.toContain("<Connect>");
+    expect(res.text).not.toContain("<Record");
+  });
+
+  it("normalizes a damaged UNROUTED_TRANSFER_NUMBER and ignores an unusable one", async () => {
+    process.env.UNROUTED_TRANSFER_NUMBER = "\n+1 800 555 0123";
+    let res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_3", To: "+15550002222", From: "+15559998888" });
+    expect(res.text).toContain("+18005550123");
+
+    // A number Twilio could never dial must fall back to taking a message
+    // rather than emitting a <Dial> that fails after the caller is committed.
+    process.env.UNROUTED_TRANSFER_NUMBER = "555-0123";
+    res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_4", To: "+15550002222", From: "+15559998888" });
+    expect(res.text).toContain("<Record");
+    expect(res.text).not.toContain("<Dial");
+  });
+
+  it("still connects the stream when the lookup throws (a blip is not a missing business)", async () => {
+    mockLookupBusinessByPhone.mockRejectedValue(new Error("supabase timeout"));
+
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({ CallSid: "CA_unrouted_5", To: "+15550002222", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("<Connect><Stream");
+  });
+});
+
+describe("POST /twilio/voicemail — degraded-mode recording callback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEnabled.mockReturnValue(true);
+  });
+
+  it("looks up the business by the dialed number and records a customer request + notifies", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue({ id: "biz-123" });
+    mockCreateCustomerRequest.mockResolvedValue("req-1");
+
+    const res = await request(app)
+      .post("/twilio/voicemail")
+      .type("form")
+      .send({
+        CallSid: "CA_vm_1",
+        To: "+15550001111",
+        From: "+15559998888",
+        RecordingUrl: "https://api.twilio.com/recordings/RE123",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockLookupBusinessByPhone).toHaveBeenCalledWith("+15550001111");
+    // The write is inside a unit of work scoped to the tenant it belongs to.
+    expect(mockWithTenantSafe).toHaveBeenCalledWith(
+      "biz-123",
+      expect.any(Function),
+      expect.objectContaining({ operation: "createCustomerRequest", callSid: "CA_vm_1" })
+    );
+    expect(mockCreateCustomerRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: "biz-123",
+        requestType: "message",
+        callbackNumber: "+15559998888",
+        message: expect.stringContaining("https://api.twilio.com/recordings/RE123"),
+      })
+    );
+    expect(mockNotifyCustomerRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: "biz-123",
+        customerRequest: expect.objectContaining({
+          request_type: "message",
+          callback_number: "+15559998888",
+        }),
+      })
+    );
+    // Caller SMS follow-up (Part 2) — gating itself is sendCallerSms's job
+    // (unit-tested in tests/notifications.sms.test.js); here just confirm
+    // the voicemail webhook wires it up with the right kind/number.
+    expect(mockSendCallerSms).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: "Test Biz" }),
+      "+15559998888",
+      "message_received",
+      expect.any(Object)
+    );
+  });
+
+  it("skips gracefully (still 200) when no business matches the dialed number", async () => {
+    mockLookupBusinessByPhone.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post("/twilio/voicemail")
+      .type("form")
+      .send({ CallSid: "CA_vm_2", To: "+15550009999", From: "+15559998888" });
+
+    expect(res.status).toBe(200);
+    expect(mockCreateCustomerRequest).not.toHaveBeenCalled();
+    expect(mockNotifyCustomerRequest).not.toHaveBeenCalled();
+  });
+});

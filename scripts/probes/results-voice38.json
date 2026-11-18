@@ -1,0 +1,70 @@
+{
+  "at": "2026-09-16T15:30:10.394Z",
+  "model": "gemini-3.8-live",
+  "rows": [
+    {
+      "voiceName": "Kore",
+      "ok": true,
+      "bytes": 124802,
+      "seconds": 2.6,
+      "err": null,
+      "usd": 0.00078
+    },
+    {
+      "voiceName": "Aoede",
+      "ok": true,
+      "bytes": 125280,
+      "seconds": 2.61,
+      "err": null,
+      "usd": 0.00078
+    },
+    {
+      "voiceName": "Puck",
+      "ok": true,
+      "bytes": 130562,
+      "seconds": 2.72,
+      "err": null,
+      "usd": 0.00082
+    },
+    {
+      "voiceName": "Charon",
+      "ok": true,
+      "bytes": 127682,
+      "seconds": 2.66,
+      "err": null,
+      "usd": 0.0008
+    },
+    {
+      "voiceName": "Leda",
+      "ok": true,
+      "bytes": 137280,
+      "seconds": 2.86,
+      "err": null,
+      "usd": 0.00086
+    },
+    {
+      "voiceName": "Fenrir",
+      "ok": true,
+      "bytes": 110400,
+      "seconds": 2.3,
+      "err": null,
+      "usd": 0.00069
+    },
+    {
+      "voiceName": "Zephyr",
+      "ok": true,
+      "bytes": 120002,
+      "seconds": 2.5,
+      "err": null,
+      "usd": 0.00075
+    },
+    {
+      "voiceName": "Orus",
+      "ok": true,
+      "bytes": 130562,
+      "seconds": 2.72,
+      "err": null,
+      "usd": 0.00082
+    }
+  ]
+}

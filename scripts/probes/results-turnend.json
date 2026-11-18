@@ -1,0 +1,112 @@
+[
+  {
+    "target": {
+      "name": "2.5 native audio (Vertex europe-west1)",
+      "model": "gemini-live-2.5-flash-native-audio",
+      "vertex": true,
+      "location": "europe-west1"
+    },
+    "seen": [
+      {
+        "at": 1789524245091,
+        "e": "setupComplete"
+      },
+      {
+        "at": 1789524245402,
+        "e": "toolCall",
+        "names": [
+          "set_call_intent"
+        ]
+      },
+      {
+        "at": 1789524245556,
+        "e": "toolCall",
+        "names": [
+          "check_appointment_availability"
+        ]
+      },
+      {
+        "at": 1789524246469,
+        "e": "generationComplete"
+      },
+      {
+        "at": 1789524246470,
+        "e": "turnComplete"
+      },
+      {
+        "at": 1789524246817,
+        "e": "toolCall",
+        "names": [
+          "check_appointment_availability"
+        ]
+      },
+      {
+        "at": 1789524246818,
+        "e": "generationComplete"
+      },
+      {
+        "at": 1789524246818,
+        "e": "turnComplete"
+      },
+      {
+        "at": 1789524247131,
+        "e": "toolCall",
+        "names": [
+          "check_appointment_availability"
+        ]
+      },
+      {
+        "at": 1789524247133,
+        "e": "generationComplete"
+      },
+      {
+        "at": 1789524247133,
+        "e": "turnComplete"
+      },
+      {
+        "at": 1789524248134,
+        "e": "close",
+        "reason": ""
+      }
+    ],
+    "marks": {
+      "toolCallAt": 1789524247131,
+      "genCompleteAfterTool": 913,
+      "turnCompleteAfterTool": 914
+    }
+  },
+  {
+    "target": {
+      "name": "3.1 flash live (AI Studio)",
+      "model": "gemini-3.1-flash-live-preview",
+      "vertex": false
+    },
+    "seen": [
+      {
+        "at": 1789524248229,
+        "e": "setupComplete"
+      },
+      {
+        "at": 1789524248702,
+        "e": "toolCall",
+        "names": [
+          "set_call_intent",
+          "check_appointment_availability"
+        ]
+      },
+      {
+        "at": 1789524250994,
+        "e": "generationComplete"
+      },
+      {
+        "at": 1789524255452,
+        "e": "turnComplete"
+      }
+    ],
+    "marks": {
+      "toolCallAt": 1789524248702,
+      "genCompleteAfterTool": 2292,
+      "turnCompleteAfterTool": 6750
+    }
+  }
+]

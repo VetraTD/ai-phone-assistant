@@ -1,0 +1,5 @@
+[     124ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2563aab5:20102
+[  348423ms] [ERROR] AxiosError: Network Error
+    at XMLHttpRequest.handleError (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:1669:19)
+    at Axios.request (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2563aab5:2255:41) @ http://localhost:5173/src/App.jsx?t=1784768618520:980
+[  348426ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/api/analytics/1c2021e1-f44f-4066-8d8d-86cd089d8e04:0
