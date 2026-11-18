@@ -71,7 +71,6 @@ export default function Login() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
-          {/* Brand only, not a link: to={null} renders a plain span. */}
           <VetraLogo to={null} name="VetraTD" className="login-logo" />
           {/* External. This origin is the app now; its root is the dashboard. */}
           <a href={MARKETING_URL} className="login-back-home">

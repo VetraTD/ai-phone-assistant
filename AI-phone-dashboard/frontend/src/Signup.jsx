@@ -36,7 +36,6 @@ export default function Signup({ onSwitchToLogin }) {
     <div className="signup-page">
       <div className="signup-shell">
         <div className="signup-top-row">
-          {/* Brand only, not a link: to={null} renders a plain span. */}
           <VetraLogo to={null} name="VetraTD" className="signup-logo" />
           <a href={MARKETING_URL} className="signup-back-home">
             ← Back to website
