@@ -980,9 +980,6 @@ export default function Landing() {
               <PreviewTabs />
             </div>
           </div>
-          <a href={`${APP_URL}/?demo=1`} className="landing-cta-secondary landing-preview-cta">
-            Try the guided dashboard demo
-          </a>
         </div>
       </section>
 

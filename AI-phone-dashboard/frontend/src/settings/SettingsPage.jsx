@@ -129,9 +129,6 @@ export default function SettingsPage({
   usage,
   usageLoading,
   usageError,
-  planName,
-  billingStatus,
-  t,
 }) {
   const [baseline, setBaseline] = useState(() => snapshotFromBusiness(business));
   const [draft, setDraft] = useState(() => snapshotFromBusiness(business));
@@ -374,10 +371,7 @@ export default function SettingsPage({
               usage={usage}
               usageLoading={usageLoading}
               usageError={usageError}
-              planName={planName}
-              billingStatus={billingStatus}
               phoneNumber={business?.phone_number}
-              t={t}
             />
           ) : null}
         </div>

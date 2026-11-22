@@ -1,7 +1,8 @@
 import Panel from "./Panel";
 
 /**
- * Usage and plan.
+ * Usage and the business's VetraTD number. No plan or billing panel: billing is
+ * not built, so showing one would be a control that reaches nothing.
  *
  * Lifted out of App.jsx's settings branch so it can sit inside the group rail
  * instead of floating above the rest of the page in the old visual style. The
@@ -12,16 +13,13 @@ export default function AccountSection({
   usage,
   usageLoading,
   usageError,
-  planName,
-  billingStatus,
   phoneNumber,
-  t,
 }) {
   return (
     <>
       <Panel
         title="Usage this month"
-        description="Resets on the 1st. Useful for keeping an eye on your plan."
+        description="Resets on the 1st."
       >
         {usageLoading ? (
           <p className="set-hint">Loading…</p>
@@ -43,30 +41,11 @@ export default function AccountSection({
         )}
       </Panel>
 
-      <Panel title={t?.billingPlan || "Billing & plan"}>
+      <Panel title="Your VetraTD number">
         <dl className="set-defs">
-          <dt>{t?.currentPlan || "Current plan"}</dt>
-          <dd>
-            <span className="set-pill set-pill-locked">{planName}</span>
-          </dd>
-
-          <dt>{t?.billingStatus || "Billing status"}</dt>
-          <dd>{billingStatus}</dd>
-
-          <dt>{t?.usageThisMonth || "Usage this month"}</dt>
-          <dd>
-            {usage
-              ? `${usage.calls_this_month ?? 0} calls, ${usage.minutes_this_month ?? 0} min`
-              : t?.comingSoon || "Coming soon"}
-          </dd>
-
-          <dt>{t?.phoneNumber || "Phone number"}</dt>
-          <dd>{phoneNumber || t?.notConnectedYet || "Not connected yet"}</dd>
+          <dt>Number callers ring</dt>
+          <dd>{phoneNumber || "No number set up yet"}</dd>
         </dl>
-
-        <p className="set-alert set-alert-info">
-          <span>{t?.stripeComing || "Card payments are coming soon."}</span>
-        </p>
       </Panel>
     </>
   );

@@ -84,8 +84,8 @@ describe("buildCallsCsv", () => {
 });
 
 describe("translations", () => {
-  it("has every new key in en, es and fr", () => {
+  it("has every new key in English (the only interface language)", () => {
     const keys = ["filterDirection", "filterInbound", "filterOutbound", "directionInbound", "directionOutbound", "infoDirection", "outcomeAnswersTitle", "outcomeLabel", "outcomeNoteLabel"];
-    for (const lang of ["en", "es", "fr"]) for (const k of keys) expect(TRANSLATIONS[lang][k], `${lang}.${k}`).toBeTruthy();
+    for (const k of keys) expect(TRANSLATIONS.en[k], `en.${k}`).toBeTruthy();
   });
 });
