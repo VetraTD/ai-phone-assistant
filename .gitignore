@@ -81,3 +81,11 @@ voice-drift/
 # Fixtures derived from these get pseudonymised names before they go in tests.
 call-corpus/
 scripts/corpus/.sabotage-in-progress
+
+# Local tool workspaces. .superpowers/ holds production revision backups (env
+# and secret refs) and client tenant configs (business names, numbers,
+# instructions). The repo is PUBLIC, so these stay on this machine and are
+# NEVER COMMITTED. Plans and specs that belong in git live in docs/superpowers/.
+# .impeccable/ is design-review screenshots and a local hook cache.
+.superpowers/
+.impeccable/

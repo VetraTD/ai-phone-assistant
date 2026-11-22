@@ -17438,3 +17438,66 @@ thinking." Seen in the logs:
   40 ms noise. Turn end is sound-and-silence (`silenceDurationMs` default ~800 ms), not meaning; the model then
   chose to act. Untested here: `endOfSpeechSensitivity` LOW, a modest silence bump (1000–1200 ms, not 1600), and a
   prompt line for "after a question, a lone um/uh is not an answer".
+
+## Owner test calls 2026-10-22 evening (Digile US +18176011171, 00112-boh, owner handset ..8887)
+
+Two role-play calls as a confused "car insurance" caller (test-plan E4, wrong number), after hours.
+`CA86103cd1c5b22589cbb05f29ceac3405` (00:46:03Z, 58 s) and `CAe52b7580e9093fec682bb6711bf0857b` (00:47:18Z, 161 s).
+Nothing written on either (postcall_verify ok, 0 rows) -- correct, nothing was agreed.
+
+### LVX185 · Hung up on a caller whose answer to "anything else?" was a question · **NEW 2026-10-22 · P1** `[cheap]` ~1–1.5 h
+- CA86103cd: gate refused end_call once (`no_ask`), the reply then asked "Before you go — is there anything else I can
+  help you with?". Caller: "Wait, what? Wait, hold on. Wait, so this isn't the car insurance company number?" Reply:
+  "No, this is Digile Media, a digital marketing agency, and not a car insurance company." + end_call (tool at
+  00:46:54, words after) -> exit ran on the mark 1.6 s later. No goodbye; the caller was still mid-confusion and
+  started speaking as the line dropped (utterance 7, voiced 480 ms, flushed at close).
+- Cause: both doors (`services/tools.js` end_call gate and `lib/voice/live/index.js` ~4266 `askStillOutstanding`)
+  treat ANY caller words after the ask as its answer (`callerSaidThisCall.length` grew). A question back is not a no.
+- Shape: the ask is answered only by a close/decline (`callerClosesCall`) or by a turn that is not a question; a
+  caller question after the ask keeps the exit held for one more turn. Red-first + sabotage row.
+
+### LVX186 · Wrong-number caller: a blocked hang-up makes it repeat itself, then "are you still there?" after a goodbye · **NEW 2026-10-22 · P2** `[cheap]` ~1–1.5 h
+- CAe52b758: on the caller's FIRST turn the model said a farewell and called end_call twice; both refused `generic`
+  (fewer than two caller turns, nothing done). The turn text holds "You've reached Digile Media, so this isn't a car
+  insurance company." THREE times plus "Thanks for calling, and I wish you well." twice; `live_repeat_cut` cut one
+  copy (109 chars). Then silence -> ladder nudge "Hello? Are you still there?" Caller: "Did you just say goodbye?"
+- Two defects: (1) the refusal makes the model regenerate its line (refusal text read as "say it again", the LVX76 /
+  [[refusal-message-is-a-request]] family); (2) a spoken goodbye that was not followed by a hang-up leaves the caller
+  in limbo, then the ladder asks if they are there.
+- Shape to weigh: a clear wrong-number turn ("I called about car insurance", "is this X?") answered with who we are
+  + "anything else?" is the natural close; the generic refusal's wording must say do-not-repeat; after a spoken
+  goodbye that was held, the next line should be "Is there anything else I can help with?" not the silence nudge.
+
+### LVX187 · "This line operates in English" to a caller speaking English · **NEW 2026-10-22 · P1** `[cheap]` ~1–2 h + ~$0.30–0.50 probe
+- CAe52b758: the model (its own ASR) heard English as Spanish ("¿Tienes que ayudarme a ponerlo a mí?", "tengo que",
+  "breath") and said "This line operates in English…" twice, then "I'm sorry, I'm not able to assist in that
+  language." Caller: "No, I'm not speaking a language. I'm speaking English."
+- The prompt already forbids exactly this (`services/gemini.js:1283`: "that is the transcription mis-hearing an
+  English speaker … Never apologise for the language"). Ignored. Its first sentence, "This business operates in
+  English", is the phrase the model spoke back -- the rule handed it the line.
+- Shape: reword so there is no speakable sentence (only "reply in English; a non-English transcript means you
+  misheard -- say 'Sorry, I didn't catch that, could you say it again?'"); measure on a probe with Spanish-transcribed
+  English before/after (pre-register the rule). Related: [[live-api-no-input-language]], [[assistant-language-counter]].
+
+### LVX188 · Assumed the caller is the on-file name ("Thanks, Jonathan") · **NEW 2026-10-22 · needs owner ruling** `[cheap]`
+- CAe52b758: the caller never gave a name. The only upcoming booking from ..8887 is "Jonathan Daniel" (Fri 23 Oct
+  16:00Z, booked 2026-10-22 17:12Z); set_call_intent(book) handed it over and the model said "Thanks, Jonathan."
+- A different person on the same phone hears someone else's name (and learns it is booked). Owner ruled earlier that
+  an on-file name is said, never spelled, and kept "Is that under <most-booked>?" on shared numbers -- this was a
+  statement, not that question. Owner to decide: confirm ("Am I speaking with Jonathan?") or accept as is.
+
+### LVX189 · Contact number asked 7 times in a row, caller's questions ignored · **NEW 2026-10-22 · P1** — same defect as LVX169, worse shape
+- CAe52b758 00:48:33–00:49:31Z: "What's the best contact number…" on 7 consecutive turns (`live_repeated_phrase`
+  ×5) while caller ID was present. Caller asked "What are you talking about?" / "Did I ask for an appointment?"; each
+  answer ended with the same ask. Only "use the number you're calling from" (said by the caller) ended it.
+- Fold into LVX169's code counter: one ask per need, offer the caller-ID number on the first ask, never re-ask in a
+  turn that answers a caller question.
+
+### Also on these calls (tone, fold into the trust session)
+- "I'm sorry, but helping with car insurance is not something we can assist with on this line." -- did not say who
+  we are / that it is probably a wrong number (it did one turn later).
+- After the caller reacted to the unexplained goodbye ("What, you kind of b… out like that?" per the lossy
+  transcript): "I'm sorry, I must ask you to keep the conversation professional." A person would apologise.
+- "What are you looking to come in for?" for a marketing agency -- `services/gemini.js:1530` uses "come in for
+  something" as its example of a vague reason; the model mirrored it.
+- "Yes, it's completely safe." to "is it safe to use my number?" -- a promise nothing backs.
