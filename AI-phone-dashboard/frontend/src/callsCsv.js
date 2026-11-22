@@ -1,5 +1,17 @@
+// A cell starting with = + - @ (or a tab/CR) is read by Excel and Sheets as a
+// formula. Caller-influenced text (names, summaries) must never become one, so
+// such a cell gets a leading apostrophe and opens as plain text. Phone numbers
+// and plain numbers are left alone so they still read as written.
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^[+-]?[\d\s().-]+$/;
+
+export function neutraliseFormula(str) {
+  if (FORMULA_LEAD.test(str) && !PLAIN_NUMBER.test(str)) return `'${str}`;
+  return str;
+}
+
 function escapeCsvCell(s) {
-  const str = s == null ? "" : String(s);
+  const str = neutraliseFormula(s == null ? "" : String(s));
   if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
   return str;
 }
