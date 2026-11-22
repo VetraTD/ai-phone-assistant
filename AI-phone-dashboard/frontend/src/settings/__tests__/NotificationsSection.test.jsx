@@ -2,11 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import NotificationsSection from "../NotificationsSection";
-import { SMS_TEMPLATE_KINDS, SMS_TEMPLATE_META } from "../constants";
 
 const BASE = {
-  notification_email: "owner@biz.com",
-  notification_phone: "+447700900123",
+  notification_email: "owner@brightwork.example",
+  notification_phone: "+15550100199",
   notifications_enabled: true,
   sms_followup_enabled: false,
   sms_templates: {},
@@ -18,65 +17,36 @@ function setup(overrides = {}) {
   return { onChange };
 }
 
-describe("NotificationsSection — caller SMS follow-ups", () => {
-  it("renders the follow-up toggle reflecting sms_followup_enabled", () => {
-    setup({ sms_followup_enabled: true });
-    expect(screen.getByRole("checkbox", { name: /text callers/i })).toBeChecked();
-  });
-
-  it("toggling it emits a sms_followup_enabled patch (the key the backend whitelist accepts)", async () => {
-    const user = userEvent.setup();
-    const { onChange } = setup();
-
-    await user.click(screen.getByRole("checkbox", { name: /text callers/i }));
-
-    expect(onChange).toHaveBeenCalledWith({ sms_followup_enabled: true });
-  });
-
-  it("hides the template overrides until follow-ups are switched on", () => {
+// Texts are off in production (no SMS sender is configured), so nothing on this
+// panel may offer them: the alert phone and the caller follow-up text would be
+// controls that reach nothing. tests/dashboardSettingsEffects.test.js lists
+// them under NOT_SHOWN.
+describe("NotificationsSection: only what works while texts are off", () => {
+  it("shows no alert phone and no caller texts", () => {
     setup({ sms_followup_enabled: false });
-    expect(screen.queryByRole("button", { name: /customise message wording/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/notification phone/i)).toBeNull();
+    expect(screen.queryByRole("heading", { name: /what callers get afterwards/i })).toBeNull();
+    expect(screen.queryByText(/what callers get afterwards/i)).toBeNull();
   });
 
-  it("reveals one override field per known template kind once expanded", async () => {
-    const user = userEvent.setup();
+  it("stays hidden for a business whose follow-up flag was switched on before", () => {
     setup({ sms_followup_enabled: true });
-
-    await user.click(screen.getByRole("button", { name: /customise message wording/i }));
-
-    // Exact label match: the enable-toggle's own copy also mentions
-    // "appointment confirmations"/"missed calls", so a loose regex would be
-    // ambiguous.
-    for (const kind of SMS_TEMPLATE_KINDS) {
-      expect(screen.getByLabelText(SMS_TEMPLATE_META[kind].label)).toBeInTheDocument();
-    }
+    expect(screen.queryByLabelText(/notification phone/i)).toBeNull();
+    expect(screen.queryByText(/what callers get afterwards/i)).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /text callers/i })).toBeNull();
   });
 
-  it("editing an override emits a whole sms_templates object, merged with existing overrides", async () => {
-    const user = userEvent.setup();
-    const { onChange } = setup({
-      sms_followup_enabled: true,
-      sms_templates: { message_received: "Got it!" },
-    });
-
-    await user.click(screen.getByRole("button", { name: /customise message wording/i }));
-    await user.type(screen.getByLabelText(SMS_TEMPLATE_META.missed_call.label), "H");
-
-    expect(onChange).toHaveBeenCalledWith({
-      sms_templates: { message_received: "Got it!", missed_call: "H" },
-    });
+  it("the alert switch promises email, not texts", () => {
+    setup();
+    const box = screen.getByRole("checkbox", { name: /email me when a caller/i });
+    expect(box).toBeChecked();
+    expect(screen.queryByText(/text me/i)).toBeNull();
   });
 
-  it("clearing an override drops the key rather than sending an empty string", async () => {
+  it("editing the alert email emits a notification_email patch", async () => {
     const user = userEvent.setup();
-    const { onChange } = setup({
-      sms_followup_enabled: true,
-      sms_templates: { missed_call: "X" },
-    });
-
-    await user.click(screen.getByRole("button", { name: /customise message wording/i }));
-    await user.clear(screen.getByLabelText(SMS_TEMPLATE_META.missed_call.label));
-
-    expect(onChange).toHaveBeenCalledWith({ sms_templates: {} });
+    const { onChange } = setup({ notification_email: "" });
+    await user.type(screen.getByLabelText(/notification email/i), "a");
+    expect(onChange).toHaveBeenCalledWith({ notification_email: "a" });
   });
 });
