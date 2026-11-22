@@ -53,10 +53,14 @@ const ON_A_CALL = [
   "locale",
 ];
 
-/** Keys read after the call ends, with the test that proves the reader. */
+/**
+ * Keys read after the call ends: the code that reads the column, and the
+ * real-database test that drives that code end to end.
+ */
+const OWNER_EMAIL = { reader: "services/notifications.js", proof: "tests/db/ownerNotifications.test.js" };
 const AFTER_A_CALL = {
-  notification_email: "tests/db/ownerNotifications.test.js",
-  notifications_enabled: "tests/db/ownerNotifications.test.js",
+  notification_email: OWNER_EMAIL,
+  notifications_enabled: OWNER_EMAIL,
 };
 
 /** Writable keys the dashboard does not show, and why. */
@@ -90,9 +94,10 @@ describe("TRIPWIRE: every writable dashboard setting has a home", () => {
     expect(KNOWN_UNWIRED).toEqual({});
   });
 
-  for (const [key, file] of Object.entries(AFTER_A_CALL)) {
-    it(`${key} is read by the owner email (${file})`, () => {
-      expect(readFileSync(new URL(`../${file}`, import.meta.url), "utf8")).toContain(key);
+  for (const [key, { reader, proof }] of Object.entries(AFTER_A_CALL)) {
+    it(`${key} is read by the owner email (${reader}, proved in ${proof})`, () => {
+      expect(readFileSync(new URL(`../${reader}`, import.meta.url), "utf8")).toContain(`business.${key}`);
+      expect(readFileSync(new URL(`../${proof}`, import.meta.url), "utf8")).toContain(key);
     });
   }
 });

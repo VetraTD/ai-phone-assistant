@@ -251,6 +251,11 @@ VITE_BUILD_TARGET=app VITE_API_URL=<dashboard-api url> \
 VITE_FIREBASE_API_KEY=... VITE_FIREBASE_AUTH_DOMAIN=... VITE_FIREBASE_PROJECT_ID=... \
   npx vite build
 
+# The app build FAILS if the origin of VITE_API_URL (or VITE_NUMBER_API_URL) is
+# not in connect-src of the Content-Security-Policy in firebase.json
+# (cspGuard.js). Moving the API to a new address means changing both together,
+# or the dashboard loads and then has every request blocked.
+
 # Two guards worth running before publishing:
 grep -rl "landing-hero-cta" dist/assets/*.js && echo "ABORT: marketing build"
 grep -rl "localhost:3001"   dist/assets/*.js && echo "ABORT: localhost baked in"

@@ -10,6 +10,13 @@ describe("CSV formula guard", () => {
       expect(neutraliseFormula(`${lead}HYPERLINK("http://x")`)).toBe(`'${lead}HYPERLINK("http://x")`);
     });
   }
+  it("guards sums and odd punctuation that only look numeric", () => {
+    expect(neutraliseFormula("-1+1")).toBe("'-1+1");
+    // Control characters inside an otherwise numeric cell are not "a number".
+    expect(neutraliseFormula("+1\t2")).toBe("'+1\t2");
+    // Not code: a spreadsheet reads it as a syntax error, so it stays as typed.
+    expect(neutraliseFormula("+1)(2")).toBe("+1)(2");
+  });
   it("leaves phone numbers and plain numbers alone", () => {
     for (const v of ["+1 (555) 010-0199", "+15550100", "-3", "42"]) expect(neutraliseFormula(v)).toBe(v);
   });

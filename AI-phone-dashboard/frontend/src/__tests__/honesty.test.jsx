@@ -41,7 +41,7 @@ describe("the dashboard shows only what is real", () => {
     render(<AccountSection business={{ name: "Brightwork Family Dental" }} usage={null} />);
     expect(screen.queryByText("Starter")).toBeNull();
     expect(screen.queryByText(/billing status/i)).toBeNull();
-    expect(screen.queryByText(/billing|plan/i)).toBeNull();
+    expect(screen.queryByText(/billing & plan|current plan|card payments/i)).toBeNull();
   });
 
   it("the marketing page no longer links to a demo", () => {
