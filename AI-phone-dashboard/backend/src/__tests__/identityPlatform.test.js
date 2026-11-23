@@ -82,9 +82,10 @@ describe("createResetCodeMinter", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("a 200 without a usable link is a flagged skip, not a throw", async () => {
-    // Only real accounts get a 200, so answering this one differently (503)
-    // would tell real accounts apart.
+  it("a 200 without a usable link is a skip, not a throw", async () => {
+    // With email-enumeration protection on, an unknown address gets a 200 with
+    // no link, so this is the ordinary "no account" answer, and answering it
+    // differently (503) would tell real accounts apart.
     const fetchImpl = vi.fn(async () => json(200, { email: "a@example.com" }));
     expect(await minterWith(fetchImpl).mint("a@example.com")).toEqual({ skip: true, reason: "no_link", refusal: null });
   });

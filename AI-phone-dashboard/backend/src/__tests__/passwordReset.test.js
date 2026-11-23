@@ -103,6 +103,16 @@ describe("POST /api/auth/password-reset", () => {
     expect(errors).toContain("OPERATION_NOT_ALLOWED");
   });
 
+  it("no link on a 200 is routine: Identity Platform's email-enumeration protection answers unknown addresses that way", async () => {
+    // Measured on prod 2026-11-23: enableImprovedEmailPrivacy is on, and an
+    // unknown address gets 200 with no oobLink rather than EMAIL_NOT_FOUND.
+    const { app } = buildApp({ mint: vi.fn(async () => ({ skip: true, reason: "no_link", refusal: null })) });
+    const res = await post(app, { email: "nobody@example.com" });
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(logSpies[1].mock.calls)).toContain("no_link");
+    expect(logSpies[3]).not.toHaveBeenCalled();
+  });
+
   it("a routine skip (no account) is logged with its reason, not as an error", async () => {
     const { app } = buildApp({ mint: vi.fn(async () => ({ skip: true, reason: "EMAIL_NOT_FOUND" })) });
     await post(app, { email: "nobody@example.com" });

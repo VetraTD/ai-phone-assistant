@@ -140,7 +140,12 @@ function createPasswordResetRouter({
       return answer(503, { error: "Password reset is not available right now. Please try again later." });
     }
     if (minted?.skip || !minted?.code) {
-      if (minted?.reason === "unexpected" || minted?.reason === "no_link") {
+      // "no_link" is routine: with Identity Platform's email-enumeration
+      // protection on (enableImprovedEmailPrivacy, measured on prod
+      // 2026-11-23) an unknown address gets 200 with no link instead of
+      // EMAIL_NOT_FOUND. A healthy service therefore shows password_reset_sent
+      // lines for real accounts; their absence is the alarm, not this line.
+      if (minted?.reason === "unexpected") {
         // Probably refusing EVERY address: reset is off until someone reads this.
         console.error("password_reset_unexpected", { reason: minted.reason, refusal: minted.refusal ?? null });
       } else {

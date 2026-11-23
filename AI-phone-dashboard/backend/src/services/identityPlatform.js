@@ -118,8 +118,9 @@ function createResetCodeMinter({ projectId, getAccessToken, fetchImpl = (...a) =
     }
     if (!response.ok) throw closed("idp_refused");
 
-    // Only a real account reaches here, so a missing link is a flagged skip,
-    // not a throw: a 503 on this path alone would tell real accounts apart.
+    // A 200 with no link is how Identity Platform answers an UNKNOWN address
+    // when email-enumeration protection is on (it is, on prod). So it is a
+    // skip, never a throw: a 503 here would tell accounts apart.
     let code = null;
     try {
       const body = await response.json();
