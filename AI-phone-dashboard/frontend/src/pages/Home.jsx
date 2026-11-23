@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
-import { callerLabel, formatTime, telHref } from "../calls/format";
+import { callerLabel, dayHeading, formatTime, telHref } from "../calls/format";
 import { needText } from "../calls/callStatus";
 import "./home.css";
 
@@ -191,7 +191,12 @@ export default function Home() {
                 const href = telHref(item.request?.callbackNumber) || telHref(item.callerNumber);
                 return (
                   <li key={item.callId} className="vt-task">
-                    <span className="vt-when vt-num">{formatTime(item.startedAt, tz)}</span>
+                    <span className="vt-when vt-num">
+                      {dayHeading(item.startedAt, tz) !== "Today" ? (
+                        <span className="vt-when-day">{dayHeading(item.startedAt, tz)}</span>
+                      ) : null}
+                      {formatTime(item.startedAt, tz)}
+                    </span>
                     <Link className="vt-task-body" to={`/inbox/${item.callId}`}>
                       <span className="vt-kind">{needText(item.request || {})}</span>
                       <span className="vt-nm">{callerLabel(item)}</span>

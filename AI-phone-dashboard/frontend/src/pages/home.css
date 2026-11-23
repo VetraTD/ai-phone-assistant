@@ -308,3 +308,11 @@ a.vt-tl-row:hover .vt-tl-name {
     bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* An item left on an earlier day says which day above its time. */
+.vt-when-day {
+  display: block;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: normal;
+}

@@ -212,7 +212,7 @@
   color: var(--muted);
 }
 
-.vt-state {
+.vt-status {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -220,21 +220,21 @@
   padding: 12px 16px;
   font-weight: 600;
 }
-.vt-state svg {
+.vt-status svg {
   flex: none;
 }
-.vt-state-needs {
+.vt-status-needs {
   background: var(--amber-bg);
   color: #5c3300;
 }
-.vt-state-needs svg {
+.vt-status-needs svg {
   color: var(--amber);
 }
-.vt-state-done {
+.vt-status-done {
   background: var(--green-bg);
   color: #0f4a2a;
 }
-.vt-state-quiet {
+.vt-status-quiet {
   background: var(--grey-bg);
   color: var(--muted);
 }
@@ -386,7 +386,7 @@ a.vt-ev:hover b {
   .vt-inbox-empty {
     display: none;
   }
-  .vt-inbox-has-call {
+  .vt-inbox.vt-inbox-has-call {
     grid-template-areas: "call" "ctx";
   }
   .vt-inbox-has-call .vt-ilist {
@@ -408,15 +408,26 @@ a.vt-ev:hover b {
   }
   /* Call back and Done stay in reach at the bottom, above the tab bar. */
   .vt-dacts {
-    position: sticky;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-    z-index: 5;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    z-index: 30;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    margin: 12px -16px 0;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
+    margin: 0;
     padding: 10px 16px;
     background: rgba(255, 255, 255, 0.97);
     border-top: 1px solid var(--line);
+  }
+  .vt-dacts:empty {
+    display: none;
+  }
+  /* Room under the call and the caller column for that bar. */
+  .vt-inbox-has-call .vt-ictx {
+    padding-bottom: 88px;
   }
   .vt-db {
     padding: 0 16px 24px;

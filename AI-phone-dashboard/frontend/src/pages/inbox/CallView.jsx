@@ -167,7 +167,7 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
         </header>
 
         <div className="vt-db">
-          <p className={`vt-state vt-state-${line.tone}`}>
+          <p className={`vt-status vt-status-${line.tone}`}>
             <StatusIcon tone={line.tone} />
             <span>{line.text}</span>
           </p>

@@ -89,6 +89,15 @@ describe("Home", () => {
     expect(within(rows[0]).getByRole("link", { name: /First Caller/ })).toHaveAttribute("href", "/inbox/old");
   });
 
+  it("an item left on an earlier day says which day, not just the time", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "long" }).format(new Date(twoDaysAgo));
+    api.get.mockResolvedValue({ data: home({ openItems: [item({ startedAt: twoDaysAgo })] }) });
+    renderHome();
+    const row = within(await screen.findByRole("list", { name: "Needs you" })).getByRole("listitem");
+    expect(within(row).getByText(new RegExp("^" + dayName))).toBeInTheDocument();
+  });
+
   it("Call back rings the number the caller left, else the one they called from", async () => {
     api.get.mockResolvedValue({
       data: home({
