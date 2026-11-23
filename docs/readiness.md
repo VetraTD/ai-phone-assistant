@@ -189,7 +189,8 @@ voicemail.
   launches. Found on the first test call: a business on the old book-only task
   list could book but not move or cancel while Bookings showed on; fixed in
   `1f919fc` (Bookings on = book, check, move, cancel). Owner then booked, moved
-  and cancelled on the test line; each change was written and counted.
+  and cancelled on the test line; each change was written and counted, and the
+  three alert emails arrived with links that opened the call.
 - [x] **DONE, live + verified on owner calls 2026-10-19/20 (now `voice-uk-prod-00112-boh`).** **LVX179 (P0): the receptionist booked a time the caller never chose**
   (2026-10-16 call b), then turned the correction into a second booking.
   Fix before first paying clients. See `docs/receptionist-backlog.md`.
