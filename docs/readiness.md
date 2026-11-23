@@ -176,6 +176,20 @@ voicemail.
   sign-in on phone and computer, Done / Reopen, a copied call link, the Voice
   agent tab, and a test call with a changed greeting. Calendar, Settings and
   Call trends are restyled in part 2.
+- [x] **DONE, live + owner-verified 2026-11-23 (dashboard overhaul part 2, `1f919fc`).**
+  New Calendar, Settings and Call trends; old pages removed. Booking moves and
+  cancellations are recorded against the call (migration 062
+  `appointment_changes`) and shown in the Inbox, Home and Calendar; alert emails
+  link to the call on app.vetratd.com, plus a "moved / cancelled" email. Live:
+  `voice-uk-prod-00120-qpn` on `voice:1f919fc` (rollback `00119-g5x`, or
+  `00136-zun` for pre-part-2; voice traffic is pinned, so move it with
+  `update-traffic`), `dashboard-api-uk-prod-00005-zz2` on `dashboard:e1953c4`
+  (rollback `00004-b6c`), website release `1795419173710000` (rollback
+  `1795400412884000`). Identity Platform self sign-up is off until self-serve
+  launches. Found on the first test call: a business on the old book-only task
+  list could book but not move or cancel while Bookings showed on; fixed in
+  `1f919fc` (Bookings on = book, check, move, cancel). Owner then booked, moved
+  and cancelled on the test line; each change was written and counted.
 - [x] **DONE, live + verified on owner calls 2026-10-19/20 (now `voice-uk-prod-00112-boh`).** **LVX179 (P0): the receptionist booked a time the caller never chose**
   (2026-10-16 call b), then turned the correction into a second booking.
   Fix before first paying clients. See `docs/receptionist-backlog.md`.
