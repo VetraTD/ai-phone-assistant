@@ -1,0 +1,458 @@
+/* Inbox (spec §8): list, call, and caller columns on a wide desktop; the
+ * caller column drops below the call under 1180 px; on phones the list and the
+ * call are separate screens. */
+
+.vt-inbox {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-areas: "list call" "list ctx";
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+@media (min-width: 1180px) {
+  .vt-inbox.vt-inbox-has-call {
+    grid-template-columns: 340px minmax(0, 1fr) 280px;
+    grid-template-areas: "list call ctx";
+    grid-template-rows: 1fr;
+  }
+}
+
+/* --- list --- */
+.vt-ilist {
+  grid-area: list;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+}
+.vt-ihead {
+  padding: 22px 20px 8px;
+}
+.vt-ihead h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.vt-seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--paper);
+  border-radius: var(--r-control);
+  margin-bottom: 10px;
+}
+.vt-seg button {
+  flex: 1;
+  min-height: 40px;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.vt-seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.vt-search {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-control);
+  background: var(--paper);
+  padding: 0 12px;
+}
+.vt-search:focus-within {
+  outline: var(--focus);
+}
+.vt-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  outline: 0;
+  font-size: 15px;
+}
+
+.vt-csv {
+  margin-top: 6px;
+}
+.vt-csv:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.vt-ilist-state {
+  padding: 20px;
+  color: var(--muted);
+}
+.vt-ilist-state p {
+  margin-bottom: 12px;
+}
+
+.vt-grp {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 14px 20px 6px;
+}
+.vt-irows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vt-irow {
+  display: block;
+  padding: 12px 20px 12px 17px;
+  border-left: 3px solid transparent;
+  color: inherit;
+  text-decoration: none;
+}
+.vt-irow:hover {
+  background: var(--hover);
+}
+.vt-irow-sel {
+  background: var(--tint);
+  border-left-color: var(--ink-blue);
+}
+.vt-irow-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+.vt-irow .vt-nm {
+  font-size: 15px;
+}
+.vt-tm {
+  font-size: 13px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.vt-kind-done {
+  color: var(--green);
+}
+.vt-irow .vt-kind {
+  margin: 3px 0 0;
+}
+.vt-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+/* --- call --- */
+.vt-idetail {
+  grid-area: call;
+  background: var(--surface);
+  min-width: 0;
+}
+.vt-inbox-empty {
+  grid-area: call;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  padding: 32px;
+}
+.vt-pback {
+  display: none;
+}
+.vt-dh {
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--line-2);
+}
+.vt-dh h2 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.vt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.vt-dacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.vt-inline-error p {
+  margin-top: 10px;
+  color: var(--red);
+  font-weight: 600;
+}
+
+.vt-db {
+  padding: 20px 28px 40px;
+  max-width: 780px;
+}
+.vt-db h3 {
+  font-size: 15.5px;
+  font-weight: 700;
+  margin: 24px 0 8px;
+}
+.vt-muted {
+  color: var(--muted);
+}
+
+.vt-state {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 600;
+}
+.vt-state svg {
+  flex: none;
+}
+.vt-state-needs {
+  background: var(--amber-bg);
+  color: #5c3300;
+}
+.vt-state-needs svg {
+  color: var(--amber);
+}
+.vt-state-done {
+  background: var(--green-bg);
+  color: #0f4a2a;
+}
+.vt-state-quiet {
+  background: var(--grey-bg);
+  color: var(--muted);
+}
+
+.vt-sum {
+  background: var(--paper);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 15.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.vt-msg {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.vt-msg-row {
+  display: contents;
+}
+.vt-msg dt {
+  color: var(--muted);
+  font-size: 14px;
+}
+.vt-msg dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.vt-did {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vt-did li {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+}
+.vt-did svg {
+  color: var(--green);
+  flex: none;
+  margin-top: 3px;
+}
+
+.vt-bkref {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 16px;
+  margin-top: 18px;
+}
+
+.vt-tx {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 2px 14px;
+  margin: 0;
+  line-height: 1.55;
+}
+.vt-tx-row {
+  display: contents;
+}
+.vt-who {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  padding-top: 2px;
+}
+.vt-who-ai {
+  color: var(--ink-blue);
+}
+.vt-tx dd {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* --- caller --- */
+.vt-ictx {
+  grid-area: ctx;
+  background: var(--paper);
+  padding: 24px 20px;
+  font-size: 14px;
+  min-width: 0;
+}
+@media (min-width: 1180px) {
+  .vt-ictx {
+    border-left: 1px solid var(--line);
+  }
+}
+.vt-ictx h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+.vt-blk {
+  margin-bottom: 24px;
+}
+.vt-ictx p {
+  color: var(--muted);
+}
+.vt-evs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vt-ev {
+  display: block;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-2);
+  color: inherit;
+  text-decoration: none;
+}
+.vt-ev b {
+  display: block;
+  font-weight: 600;
+}
+.vt-ev span {
+  color: var(--muted);
+}
+a.vt-ev:hover b {
+  text-decoration: underline;
+}
+
+/* --- phones: the list, or the call on its own screen --- */
+@media (max-width: 760px) {
+  .vt-inbox,
+  .vt-inbox.vt-inbox-has-call {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "list";
+    min-height: 0;
+  }
+  .vt-ilist {
+    position: static;
+    height: auto;
+    border-right: 0;
+  }
+  .vt-csv {
+    display: none;
+  }
+  .vt-inbox-empty {
+    display: none;
+  }
+  .vt-inbox-has-call {
+    grid-template-areas: "call" "ctx";
+  }
+  .vt-inbox-has-call .vt-ilist {
+    display: none;
+  }
+  .vt-pback {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 8px 12px 0;
+    color: var(--ink-blue);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .vt-dh {
+    padding: 4px 16px 14px;
+    border: 0;
+  }
+  /* Call back and Done stay in reach at the bottom, above the tab bar. */
+  .vt-dacts {
+    position: sticky;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    z-index: 5;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin: 12px -16px 0;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.97);
+    border-top: 1px solid var(--line);
+  }
+  .vt-db {
+    padding: 0 16px 24px;
+  }
+  .vt-tx {
+    grid-template-columns: 64px 1fr;
+  }
+  .vt-sum {
+    font-size: 16px;
+  }
+  .vt-ictx {
+    padding: 20px 16px;
+    font-size: 16px;
+  }
+  .vt-search input,
+  .vt-clamp,
+  .vt-tm {
+    font-size: 16px;
+  }
+}
+
+/* Answers recorded on the call (components/CallOutcomeAnswers). */
+.vt-answers .detail-card-title {
+  font-size: 15.5px;
+  font-weight: 700;
+  margin: 24px 0 8px;
+}
+.vt-answers .info-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+}
+.vt-answers .info-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.vt-answers .info-value {
+  overflow-wrap: anywhere;
+}

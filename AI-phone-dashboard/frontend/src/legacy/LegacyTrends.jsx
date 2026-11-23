@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { useTranslations } from "../LanguageSwitcher";
+import { useTranslations } from "./strings";
 import { useBusiness } from "../shell/BusinessContext";
 import "../Dashboard.css";
 

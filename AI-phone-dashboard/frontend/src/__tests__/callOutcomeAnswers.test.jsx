@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import CallOutcomeAnswers from "../components/CallOutcomeAnswers";
 import { buildCallsCsv } from "../callsCsv";
-import { TRANSLATIONS } from "../LanguageSwitcher";
 
 describe("CallOutcomeAnswers", () => {
   it("shows the humanised outcome and the answers as rows", () => {
@@ -80,12 +79,5 @@ describe("buildCallsCsv", () => {
 
   it("returns null for no calls", () => {
     expect(buildCallsCsv([])).toBeNull();
-  });
-});
-
-describe("translations", () => {
-  it("has every new key in English (the only interface language)", () => {
-    const keys = ["filterDirection", "filterInbound", "filterOutbound", "directionInbound", "directionOutbound", "infoDirection", "outcomeAnswersTitle", "outcomeLabel", "outcomeNoteLabel"];
-    for (const k of keys) expect(TRANSLATIONS.en[k], `en.${k}`).toBeTruthy();
   });
 });

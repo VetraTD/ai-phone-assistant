@@ -1,8 +1,7 @@
-// LanguageSwitcher.jsx
-// The dashboard interface is English only until it is fully translated (owner,
-// 2026-11-22). The language picker and the partial Spanish/French/other
-// dictionaries were removed; useTranslations() still returns the English
-// strings so App.jsx keeps working until the new shell replaces it.
+// English strings for the pages hosted from the old dashboard (legacy/*),
+// moved here when App.jsx and its language picker were deleted. The interface
+// is English only (owner, 2026-11-22). Part 2 replaces these pages, and this
+// file goes with them.
 
 export const TRANSLATIONS = {
   en: {

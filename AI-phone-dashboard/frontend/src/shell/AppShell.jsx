@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Suspense, useEffect, useRef } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useBusiness } from "./BusinessContext";
 import { calendarAvailable, navItems } from "./nav";
 import "./tokens.css";
@@ -17,6 +17,20 @@ export default function AppShell() {
   const main = items.filter((i) => i.to !== "/settings");
   const settings = items.find((i) => i.to === "/settings");
   const count = openCount > 0 ? openCount : 0;
+
+  // Moving to another tab (Home, Inbox, …) puts focus on the page, so keyboard
+  // and screen-reader users start at its content rather than back at the top of
+  // the navigation (WCAG 2.4.3). Moving within a tab — choosing a call, a
+  // setting, a search — leaves focus where the person put it.
+  const { pathname } = useLocation();
+  const section = pathname.split("/")[1] || "";
+  const mainRef = useRef(null);
+  const firstSection = useRef(section);
+  useEffect(() => {
+    if (section === firstSection.current) return;
+    firstSection.current = section;
+    mainRef.current?.focus();
+  }, [section]);
 
   const badge = (to, className) =>
     to === "/home" && count ? (
@@ -61,7 +75,7 @@ export default function AppShell() {
         </ul>
       </nav>
 
-      <main id="main" className="vt-main" tabIndex={-1}>
+      <main id="main" className="vt-main" tabIndex={-1} ref={mainRef}>
         {/* A page still loading keeps the navigation on screen. */}
         <Suspense
           fallback={

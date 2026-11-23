@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Link } from "react-router-dom";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AppShell from "../AppShell";
 import { BusinessContext } from "../BusinessContext";
@@ -67,5 +69,30 @@ describe("AppShell", () => {
     renderShell();
     expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
     expect(document.getElementById("main")).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("moving to another tab puts focus on the page, so a screen reader starts there", async () => {
+    const user = userEvent.setup();
+    renderShell({ path: "/home" });
+    await user.click(within(sideNav()).getByRole("link", { name: "Inbox" }));
+    expect(document.activeElement).toBe(document.getElementById("main"));
+  });
+
+  it("choosing a call inside the Inbox leaves focus where it was", async () => {
+    const user = userEvent.setup();
+    render(
+      <BusinessContext.Provider value={{ business: { name: "B" }, definitions: null, capabilityRows: [], openCount: 0 }}>
+        <MemoryRouter initialEntries={["/inbox"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/inbox" element={<Link to="/inbox/c1">open call</Link>} />
+              <Route path="/inbox/:id" element={<Link to="/inbox/c2">next call</Link>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </BusinessContext.Provider>
+    );
+    await user.click(screen.getByRole("link", { name: "open call" }));
+    expect(document.activeElement).not.toBe(document.getElementById("main"));
   });
 });
