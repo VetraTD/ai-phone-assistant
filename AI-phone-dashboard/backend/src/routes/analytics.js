@@ -304,27 +304,53 @@ router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (re
       [businessId]
     );
 
-    // Calls inside vs outside typical business hours (09:00–17:00, business timezone)
-    const bizTzRes = await pool.query(
-      `SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`,
+    // Calls inside vs outside the business's OWN opening hours, on its clock —
+    // the rule the receptionist uses on a call (services/gemini.js
+    // isBusinessOpen + lib/businessHours.js resolveDayHours): the weekly shape
+    // by day, the legacy {open_time, close_time} window every day, a closed or
+    // missing day is outside, [open, close), a day with no times is open all
+    // day, and an unreadable time is outside. No hours set = always open, so
+    // there is no "outside" figure to give (opening_hours_set: false).
+    const bizRes = await pool.query(
+      `SELECT timezone, business_hours FROM businesses WHERE id = $1 LIMIT 1`,
       [businessId]
     );
-    const businessTimezone = bizTzRes.rows[0]?.timezone || "America/Chicago";
+    const businessTimezone = bizRes.rows[0]?.timezone || "America/Chicago";
+    const openingHours = bizRes.rows[0]?.business_hours ?? null;
+    const openingHoursSet = !!openingHours && typeof openingHours === "object" && (
+      openingHours.mon !== undefined || !!(openingHours.open_time && openingHours.close_time)
+    );
 
     const businessHoursRes = await pool.query(
       `
+      WITH local_calls AS (
+        SELECT (started_at AT TIME ZONE $2) AS lt
+        FROM calls
+        WHERE business_id = $1 AND started_at >= ${since}
+      ),
+      call_days AS (
+        SELECT lt::time AS t,
+          CASE WHEN $3::jsonb ? 'mon' THEN $3::jsonb -> lower(to_char(lt, 'Dy'))
+               ELSE jsonb_build_object('open', $3::jsonb ->> 'open_time', 'close', $3::jsonb ->> 'close_time')
+          END AS day
+        FROM local_calls
+      ),
+      judged AS (
+        SELECT CASE
+          WHEN day IS NULL OR jsonb_typeof(day) <> 'object' OR COALESCE(day -> 'closed' = 'true'::jsonb, false) THEN false
+          WHEN NULLIF(day ->> 'open', '') IS NULL OR NULLIF(day ->> 'close', '') IS NULL THEN true
+          WHEN (day ->> 'open') !~ '^([01]?[0-9]|2[0-4]):[0-5][0-9]$'
+            OR (day ->> 'close') !~ '^([01]?[0-9]|2[0-4]):[0-5][0-9]$' THEN false
+          ELSE t >= (day ->> 'open')::time AND t < (day ->> 'close')::time
+        END AS is_open
+        FROM call_days
+      )
       SELECT
-        COUNT(*) FILTER (
-          WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE $2) BETWEEN 9 AND 16
-        ) AS in_hours,
-        COUNT(*) FILTER (
-          WHERE EXTRACT(HOUR FROM started_at AT TIME ZONE $2) < 9
-             OR EXTRACT(HOUR FROM started_at AT TIME ZONE $2) >= 17
-        ) AS out_hours
-      FROM calls
-      WHERE business_id = $1 AND started_at >= ${since}
+        COUNT(*) FILTER (WHERE is_open) AS in_hours,
+        COUNT(*) FILTER (WHERE NOT is_open) AS out_hours
+      FROM judged
       `,
-      [businessId, businessTimezone]
+      [businessId, businessTimezone, openingHoursSet ? JSON.stringify(openingHours) : null]
     );
 
     const totalCalls = Number(totalRes.rows[0]?.total ?? 0);
@@ -370,11 +396,12 @@ router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (re
       })(),
       business_hours: (() => {
         const r = businessHoursRes.rows[0];
-        if (!r) return { in_hours: 0, out_hours: 0, timezone: businessTimezone };
+        if (!r) return { in_hours: 0, out_hours: 0, timezone: businessTimezone, opening_hours_set: openingHoursSet };
         return {
           in_hours: Number(r.in_hours ?? 0),
           out_hours: Number(r.out_hours ?? 0),
           timezone: businessTimezone,
+          opening_hours_set: openingHoursSet,
         };
       })(),
       calls_by_weekday: byWeekday,

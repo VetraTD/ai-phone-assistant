@@ -79,12 +79,12 @@ function insights(data) {
     lines.push(`Busiest hour this period: ${hourWords(peak.hour)} to ${hourWords(peak.hour + 1)}`);
   }
   const bh = data.business_hours;
-  if (bh) {
+  // The business's own opening hours on its clock (analytics.js, the
+  // receptionist's rule). No hours set means always open: no figure to give.
+  if (bh?.opening_hours_set === true) {
     const total = n(bh.in_hours) + n(bh.out_hours);
-    // A fixed 9 am to 5 pm on the business's clock (analytics.js), not its
-    // opening hours; every time on the dashboard is already in business time.
     if (total > 0) {
-      lines.push(`${Math.round((n(bh.out_hours) / total) * 100)}% of calls came outside 9 am to 5 pm`);
+      lines.push(`${Math.round((n(bh.out_hours) / total) * 100)}% of calls came outside your opening hours`);
     }
   }
   return lines;

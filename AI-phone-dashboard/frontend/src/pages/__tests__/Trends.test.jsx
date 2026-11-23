@@ -17,7 +17,7 @@ const breakdown = (over) => ({
   appointment_conversion_percent: 24,
   caller_mix: { first_time: 21, returning: 16 },
   peak_hour: { hour: 10 },
-  business_hours: { in_hours: 30, out_hours: 7, timezone: "America/Chicago" },
+  business_hours: { in_hours: 30, out_hours: 7, timezone: "America/Chicago", opening_hours_set: true },
   calls_by_month: [
     { month_label: "Sep", total_calls: 10 },
     { month_label: "Oct", total_calls: 0 },
@@ -66,7 +66,7 @@ describe("Call trends", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Call trends" })).toBeInTheDocument();
     expect(screen.getByText("62%")).toBeInTheDocument();
     expect(screen.getByText("Busiest hour this period: 10 am to 11 am")).toBeInTheDocument();
-    expect(screen.getByText("19% of calls came outside 9 am to 5 pm")).toBeInTheDocument();
+    expect(screen.getByText("19% of calls came outside your opening hours")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("America/Chicago");
     expect(screen.getByRole("img", { name: /Nov: 27 calls/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Home/ })).toHaveAttribute("href", "/home");
@@ -82,6 +82,15 @@ describe("Call trends", () => {
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith("/api/analytics-breakdown", { params: { period: "30d" } })
     );
+  });
+
+  it("says nothing about opening hours when the business has none set", async () => {
+    api.get.mockResolvedValue({
+      data: breakdown({ business_hours: { in_hours: 37, out_hours: 0, timezone: "America/Chicago", opening_hours_set: false } }),
+    });
+    renderTrends();
+    await screen.findByText("37");
+    expect(document.body.textContent).not.toMatch(/opening hours|9 am to 5 pm/);
   });
 
   it("names the hour before midnight and noon in words", async () => {
