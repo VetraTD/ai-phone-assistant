@@ -224,7 +224,7 @@ describe("Voice agent after the final review", () => {
     const user = userEvent.setup();
     api.put.mockResolvedValue({ data: { ok: true } });
     const { value } = renderAgent("/voice-agent/actions/appointments", {
-      rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false, { configured: true })],
+      rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", true)],
     });
     const rules = screen.getByRole("textbox", { name: /Your booking rules/ });
     await user.type(rules, "Mornings only");
@@ -241,8 +241,24 @@ describe("Voice agent after the final review", () => {
     expect(await screen.findByText("Choose one of the offered options")).toBeInTheDocument();
   });
 
-  it("keeps Quotes listed after it is switched off, so it can be switched back on", () => {
+  it("does not show Quotes to a business that has it stored but off (live data: Digile)", () => {
     renderAgent("/voice-agent", { rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false, { configured: true })] });
+    expect(within(actions()).queryByRole("switch", { name: "Quotes" })).toBeNull();
+  });
+
+  it("keeps Quotes listed for the rest of the visit after it is switched off there", async () => {
+    const user = userEvent.setup();
+    api.put.mockResolvedValue({ data: { ok: true } });
+    const on = [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", true)];
+    const off = [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false)];
+    const value = {
+      business: BUSINESS, businessId: "b1", setBusiness: vi.fn(), definitions: DEFINITIONS, capabilityRows: on,
+      capabilitiesStatus: "ready", reloadCapabilities: vi.fn(), openCount: 0, setOpenCount: vi.fn(),
+    };
+    const router = createMemoryRouter([{ path: "/voice-agent", element: <VoiceAgent /> }], { initialEntries: ["/voice-agent"] });
+    const { rerender } = render(<BusinessContext.Provider value={value}><RouterProvider router={router} /></BusinessContext.Provider>);
+    await user.click(within(actions()).getByRole("switch", { name: "Quotes" }));
+    rerender(<BusinessContext.Provider value={{ ...value, capabilityRows: off }}><RouterProvider router={router} /></BusinessContext.Provider>);
     expect(within(actions()).getByRole("switch", { name: "Quotes" })).not.toBeChecked();
   });
 

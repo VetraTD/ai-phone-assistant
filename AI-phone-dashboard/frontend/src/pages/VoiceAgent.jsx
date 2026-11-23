@@ -41,7 +41,9 @@ export default function VoiceAgent() {
   const navigate = useNavigate();
   const { business, businessId, setBusiness, definitions, capabilityRows, capabilitiesStatus, reloadCapabilities } =
     useBusiness();
-  const sections = buildSections(definitions, capabilityRows);
+  // Actions switched during this visit stay listed even if now off.
+  const [touched, setTouched] = useState(() => new Set());
+  const sections = buildSections(definitions, capabilityRows, touched);
   const hasItem = !!params.item;
   const sectionId = params.section || DEFAULT_SECTION;
   const section = sections.find((s) => s.id === sectionId) || sections[0];
@@ -87,6 +89,7 @@ export default function VoiceAgent() {
     const current = rows.get(def.id) || {};
     setToggling(def.id);
     setToggleError("");
+    setTouched((prev) => new Set(prev).add(def.id));
     try {
       // Only the on/off changes. The action's settings go back as stored; the
       // booking system's connection settings are left for the server to keep.

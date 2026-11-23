@@ -21,31 +21,32 @@ export const INFO_ITEMS = [
 /**
  * The actions an inbound business is shown: never a pack marked "hidden"
  * (outbound calling, texts), an "optIn" pack only where the business has it
- * switched on, always-on packs first. Read from pack properties, never ids.
+ * switched on (or switched it off during this visit, so it can be switched back
+ * on: `keep`), always-on packs first. Read from pack properties, never ids.
+ * A stored-but-off row does not count: live businesses carry such rows for
+ * packs they never used.
  */
-export function listedCapabilities(definitions, capabilityRows) {
+export function listedCapabilities(definitions, capabilityRows, keep = new Set()) {
   const rows = new Map((capabilityRows || []).map((r) => [r.capability_id, r]));
   return (definitions?.capabilities || [])
     .filter((def) => {
       const listing = def.dashboardListing || "listed";
       if (listing === "hidden") return false;
-      // On, or set up once (so switching it off does not make it vanish
-      // with no way to switch it back on).
-      if (listing === "optIn") return rows.get(def.id)?.enabled === true || rows.get(def.id)?.configured === true;
+      if (listing === "optIn") return rows.get(def.id)?.enabled === true || keep.has(def.id);
       return true;
     })
     .sort((a, b) => Number(!!b.core) - Number(!!a.core));
 }
 
 /** The three sections, with Actions built from the business's packs. */
-export function buildSections(definitions, capabilityRows) {
+export function buildSections(definitions, capabilityRows, keep) {
   return [
     { id: "voice", label: "Voice & greeting", items: VOICE_ITEMS },
     { id: "info", label: "Business info", items: INFO_ITEMS },
     {
       id: "actions",
       label: "Actions",
-      items: listedCapabilities(definitions, capabilityRows).map((def) => ({ id: def.id, label: def.label, def })),
+      items: listedCapabilities(definitions, capabilityRows, keep).map((def) => ({ id: def.id, label: def.label, def })),
     },
   ];
 }
