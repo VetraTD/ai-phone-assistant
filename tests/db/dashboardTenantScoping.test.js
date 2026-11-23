@@ -477,3 +477,36 @@ describeDb("Done and Reopen only ever touch the caller's own business", () => {
     expect(await handled(own)).toEqual({ handled_at: null, handled_by: null });
   });
 });
+
+describeDb("Inbox search and the Needs-you view against real Postgres", () => {
+  it("a typed % or _ matches literally, and search never crosses tenants", async () => {
+    for (const [tenant, sid, summary] of [
+      [TENANT_A, "CA-search-pct", "Asked about the 50% off whitening offer."],
+      [TENANT_A, "CA-search-500", "Asked about the 500 pound implant."],
+      [TENANT_B, "CA-search-theirs", "Also asked about the 50% off offer."],
+    ]) {
+      await admin.query(
+        `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, summary) VALUES ($1, $2, '+15551230000', 'completed', $3)`,
+        [tenant, sid, summary]
+      );
+    }
+    const res = await request(app).get("/api/calls").query({ q: "50%" });
+    expect(res.status).toBe(200);
+    expect(res.body.calls.map((c) => c.twilio_call_sid)).toEqual(["CA-search-pct"]);
+  });
+
+  it("view=open lists only calls whose request nobody has marked done", async () => {
+    const { rows } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status) VALUES ($1, 'CA-open-1', '+15551230001', 'completed'),
+              ($1, 'CA-open-done', '+15551230002', 'completed') RETURNING id, twilio_call_sid`,
+      [TENANT_A]
+    );
+    for (const r of rows) {
+      await admin.query(`INSERT INTO customer_requests (business_id, call_id, request_type, caller_name) VALUES ($1, $2, 'message', 'Sample Caller')`, [TENANT_A, r.id]);
+    }
+    await admin.query(`UPDATE calls SET handled_at = now(), handled_by = 'x' WHERE twilio_call_sid = 'CA-open-done'`);
+    const res = await request(app).get("/api/calls").query({ view: "open" });
+    expect(res.body.calls.map((c) => c.twilio_call_sid)).toEqual(["CA-open-1"]);
+    expect(res.body.calls[0]).toMatchObject({ has_request: true, request_type: "message", caller_name_guess: "Sample Caller" });
+  });
+});

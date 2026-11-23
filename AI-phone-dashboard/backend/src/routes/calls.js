@@ -46,6 +46,28 @@ router.get("/api/calls", authenticate, withTenantHandler(async (req, res) => {
     // Always scope to the authenticated user's business
     where.push(`business_id = ${addParam(userBusinessId)}`);
 
+    // The Inbox's "Needs you": calls that left a message or call-back request
+    // nobody has marked done (migration 061). Any other value means all calls.
+    if (req.query.view === "open") {
+      where.push(
+        `handled_at IS NULL AND EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id)`
+      );
+    }
+
+    // Inbox search over the number, the summary and the names callers gave.
+    // The text is caller-influenced, so LIKE's own wildcards (and the escape
+    // character itself) are escaped and match literally.
+    const q = sanitizeString(req.query.q, 64);
+    if (q) {
+      const p = addParam(`%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`);
+      where.push(`(
+        calls.caller_number ILIKE ${p} ESCAPE '\\'
+        OR calls.summary ILIKE ${p} ESCAPE '\\'
+        OR EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.caller_name ILIKE ${p} ESCAPE '\\')
+        OR EXISTS (SELECT 1 FROM appointments a WHERE a.call_id = calls.id AND a.client_name ILIKE ${p} ESCAPE '\\')
+      )`);
+    }
+
     if (status && status !== "all") {
       // status is set authoritatively by markCallTransferred()/completeCall()
       // now (see services/db.js) — no summary-text inference needed.
@@ -129,7 +151,14 @@ if (needs_followup === "true") {
 
     const sql = `
       SELECT calls.*,
-        (SELECT a.client_name FROM appointments a WHERE a.call_id = calls.id ORDER BY a.created_at DESC LIMIT 1) AS caller_name_guess
+        COALESCE(
+          (SELECT cr.caller_name FROM customer_requests cr
+            WHERE cr.call_id = calls.id AND cr.caller_name IS NOT NULL AND btrim(cr.caller_name) <> ''
+            ORDER BY cr.created_at DESC LIMIT 1),
+          (SELECT a.client_name FROM appointments a WHERE a.call_id = calls.id ORDER BY a.created_at DESC LIMIT 1)
+        ) AS caller_name_guess,
+        EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id) AS has_request,
+        (SELECT cr.request_type FROM customer_requests cr WHERE cr.call_id = calls.id ORDER BY cr.created_at DESC LIMIT 1) AS request_type
       FROM calls
       ${whereSql}
       ORDER BY started_at DESC
@@ -159,6 +188,7 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
     const userBusinessId = req.businessId;
 
     const { id } = req.params;
+    if (!CALL_ID.test(id)) return res.status(404).json(CALL_NOT_FOUND);
 
     // Call (ensure it belongs to the user's business)
     const callRes = await pool.query(
@@ -189,6 +219,33 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
     );
 
     const call = callRes.rows[0];
+
+    // The caller's other calls and this week's bookings (the Inbox's caller
+    // column). Nothing to look up for a withheld or missing number.
+    const callerHistory = { calls: [], bookings: [] };
+    const number = typeof call.caller_number === "string" ? call.caller_number : "";
+    if (number.trim()) {
+      const otherCalls = await pool.query(
+        `/* caller_history_calls */
+         SELECT id, started_at, summary, status FROM calls
+          WHERE business_id = $1 AND caller_number = $2 AND id <> $3
+          ORDER BY started_at DESC
+          LIMIT 10`,
+        [userBusinessId, number, id]
+      );
+      const bookings = await pool.query(
+        `/* caller_history_bookings */
+         SELECT id, scheduled_at, status, client_name FROM appointments
+          WHERE business_id = $1 AND client_phone = $2
+            AND scheduled_at >= now() - interval '1 day' AND scheduled_at <= now() + interval '7 days'
+          ORDER BY scheduled_at ASC
+          LIMIT 20`,
+        [userBusinessId, number]
+      );
+      callerHistory.calls = otherCalls.rows;
+      callerHistory.bookings = bookings.rows;
+    }
+
     // See the /api/calls list handler above — mirrors the authoritative
     // status column rather than regexing the summary text.
     const inferredTransferred = call?.status === "transferred";
@@ -197,6 +254,7 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
       transcript: transcriptRes.rows,
       appointments: apptRes.rows,
       customer_requests: reqRes.rows,
+      caller_history: callerHistory,
     });
   } catch (err) {
     // The raw Postgres message used to go straight to the browser. It names
