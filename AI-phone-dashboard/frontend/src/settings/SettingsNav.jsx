@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { GROUPS } from "./groups";
+import { GROUPS as ALL_GROUPS } from "./groups";
 
 /**
  * The group rail.
@@ -14,7 +14,8 @@ import { GROUPS } from "./groups";
  * `dirtyGroups` is a Set of group ids holding unsaved page-level edits. The dot
  * is paired with visually-hidden text so it is not colour-only.
  */
-export default function SettingsNav({ active, onChange, dirtyGroups, captions }) {
+export default function SettingsNav({ groups, active, onChange, dirtyGroups, captions }) {
+  const GROUPS = groups || ALL_GROUPS;
   const railRef = useRef(null);
 
   const move = (delta, currentIndex) => {

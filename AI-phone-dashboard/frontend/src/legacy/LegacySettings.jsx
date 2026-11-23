@@ -39,6 +39,7 @@ export default function LegacySettings() {
         usage={usage}
         usageLoading={usageLoading}
         usageError={usageError}
+        groups={["notifications", "billing"]}
       />
       <button type="button" className="vt-btn vt-btn-quiet" onClick={() => signOut()}>
         Sign out
