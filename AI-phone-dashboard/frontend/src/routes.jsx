@@ -40,6 +40,9 @@ const AppLayout = lazy(() => import("./shell/AppLayout.jsx"));
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
+const LegacyAppointments = lazy(() => import("./legacy/LegacyAppointments.jsx"));
+const LegacyTrends = lazy(() => import("./legacy/LegacyTrends.jsx"));
+const LegacySettings = lazy(() => import("./legacy/LegacySettings.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
 const Contact = lazy(() => import("./Contact.jsx"));
 const ResetPassword = lazy(() => import("./resetPassword.jsx"));
@@ -102,11 +105,6 @@ export function NotFound() {
   );
 }
 
-// Placeholder for the pages part 1 hosts next (Task 7 moves the old ones in).
-function PageHeading({ title }) {
-  return <h1>{title}</h1>;
-}
-
 export default function AppRoutes() {
   const isApp = BUILD_TARGET === "app";
 
@@ -119,13 +117,13 @@ export default function AppRoutes() {
               <Route path="/home" element={<Home />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/inbox/:callId" element={<Inbox />} />
-              <Route path="/calendar" element={<PageHeading title="Calendar" />} />
+              <Route path="/calendar" element={<LegacyAppointments />} />
               <Route path="/voice-agent" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section/:item" element={<VoiceAgent />} />
-              <Route path="/settings" element={<PageHeading title="Settings" />} />
-              <Route path="/settings/:item" element={<PageHeading title="Settings" />} />
-              <Route path="/trends" element={<PageHeading title="Call trends" />} />
+              <Route path="/settings" element={<LegacySettings />} />
+              <Route path="/settings/:item" element={<LegacySettings />} />
+              <Route path="/trends" element={<LegacyTrends />} />
             </Route>
             {/*
               Every address an alert email has ever carried lands on Home: the
