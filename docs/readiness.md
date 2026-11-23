@@ -167,11 +167,15 @@ voicemail.
   request, missed call). Fix: read inside `withTenantSafe` (as `server.js` ~1507
   does), test that reproduces it first. On the test call also prove a blocked or
   bounced call sends NO "Missed call" email.
-- [ ] **Deploy the current dashboard** (2–3 h, rough). The live dashboard backend
-  is from 2026-09-08. Hide the outbound-only setting cards first. (2026-10-16:
-  only the D1 Calls-list date fix went live, as a backend hotfix on that base:
-  `dashboard-api-uk-prod-00003-hc7` @ `f130aee`, branch `hotfix/d1-dashboard-bounds`.
-  Its frontend half ships with this deploy.)
+- [x] **DONE, live + owner-verified 2026-11-23 (dashboard overhaul part 1, `d50c9b0`).**
+  **Deploy the current dashboard.** Shipped as part 1 of the dashboard overhaul
+  (branch `feat/dashboard-overhaul`): migration 061 (calls handled state),
+  `dashboard-api-uk-prod-00004-b6c` on `dashboard:d50c9b0` (rollback point
+  `00003-hc7`), and the new Home / Inbox / Voice agent frontend with security
+  headers on app.vetratd.com. Outbound-only actions are hidden. Owner checked
+  sign-in on phone and computer, Done / Reopen, a copied call link, the Voice
+  agent tab, and a test call with a changed greeting. Calendar, Settings and
+  Call trends are restyled in part 2.
 - [x] **DONE, live + verified on owner calls 2026-10-19/20 (now `voice-uk-prod-00112-boh`).** **LVX179 (P0): the receptionist booked a time the caller never chose**
   (2026-10-16 call b), then turned the correction into a second booking.
   Fix before first paying clients. See `docs/receptionist-backlog.md`.
