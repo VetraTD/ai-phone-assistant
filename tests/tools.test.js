@@ -30,8 +30,14 @@ vi.mock("../services/db.js", () => ({
   // map them onto the mocks above so the checks below keep their meaning.
   // tests/schedulingAdapters.test.js and tests/db/appointmentChanges.test.js
   // cover the call id and the change rows.
-  cancelAppointmentRecorded: (id, biz) => mockUpdateAppointmentStatus(id, "cancelled", biz),
-  rescheduleAppointmentRecorded: (id, at, biz) => mockUpdateAppointment(id, { scheduled_at: at }, biz),
+  cancelAppointmentRecorded: async (id, biz) => {
+    const ok = await mockUpdateAppointmentStatus(id, "cancelled", biz);
+    return { found: !!ok, recorded: !!ok };
+  },
+  rescheduleAppointmentRecorded: async (id, at, biz) => {
+    const ok = await mockUpdateAppointment(id, { scheduled_at: at }, biz);
+    return { found: !!ok, recorded: !!ok };
+  },
   getAppointmentById: (...args) => mockGetAppointmentById(...args),
 }));
 
@@ -73,8 +79,14 @@ const capabilityDepsFake = {
   // map them onto the mocks above so the checks below keep their meaning.
   // tests/schedulingAdapters.test.js and tests/db/appointmentChanges.test.js
   // cover the call id and the change rows.
-  cancelAppointmentRecorded: (id, biz) => mockUpdateAppointmentStatus(id, "cancelled", biz),
-  rescheduleAppointmentRecorded: (id, at, biz) => mockUpdateAppointment(id, { scheduled_at: at }, biz),
+  cancelAppointmentRecorded: async (id, biz) => {
+    const ok = await mockUpdateAppointmentStatus(id, "cancelled", biz);
+    return { found: !!ok, recorded: !!ok };
+  },
+  rescheduleAppointmentRecorded: async (id, at, biz) => {
+    const ok = await mockUpdateAppointment(id, { scheduled_at: at }, biz);
+    return { found: !!ok, recorded: !!ok };
+  },
   listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
   createAppointment: (...a) => mockCreateAppointment(...a),
   createAppointmentIfAvailable: async (p) => {

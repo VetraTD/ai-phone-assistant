@@ -64,7 +64,11 @@ const DID_REQUEST = {
  */
 export function didList({ call, appointments = [], requests = [], changes = [], tz }) {
   const out = [];
-  for (const a of appointments) out.push(`Booked an appointment for ${formatDateTime(a.scheduled_at, tz)}`);
+  // The time it was booked FOR: a later move is its own line below, or on the
+  // call that made it.
+  for (const a of appointments) {
+    out.push(`Booked an appointment for ${formatDateTime(a.booked_scheduled_at || a.scheduled_at, tz)}`);
+  }
   // Oldest first, as the API returns them: a move then a cancel reads in order.
   for (const c of changes) {
     const name = typeof c?.client_name === "string" ? c.client_name.trim() : "";

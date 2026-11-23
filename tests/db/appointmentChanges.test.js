@@ -88,8 +88,8 @@ d("appointment_changes: moves and cancellations recorded against the call", () =
   it("a move records the old and new time against the call", async () => {
     const call = await mkCall(BIZ_A);
     const id = await mkBooking(BIZ_A, T0, call);
-    const ok = await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(id, T1, BIZ_A, call));
-    expect(ok).toBe(true);
+    const res = await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(id, T1, BIZ_A, call));
+    expect(res).toEqual({ found: true, recorded: true });
     expect((await booking(id)).scheduled_at.toISOString()).toBe(T1);
     expect(await changes(id)).toEqual([
       { business_id: BIZ_A, call_id: call, kind: "moved", old_scheduled_at: T0, new_scheduled_at: T1 },
@@ -99,9 +99,11 @@ d("appointment_changes: moves and cancellations recorded against the call", () =
   it("a cancel records the old time once; cancelling again records nothing", async () => {
     const call = await mkCall(BIZ_A);
     const id = await mkBooking(BIZ_A, T0, call);
-    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, call))).toBe(true);
+    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, call))).toEqual({ found: true, recorded: true });
     expect((await booking(id)).status).toBe("cancelled");
-    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, call))).toBe(true);
+    // Found, but nothing changed: the caller can be told it is cancelled, and
+    // the owner is not emailed about it again.
+    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, call))).toEqual({ found: true, recorded: false });
     expect(await changes(id)).toEqual([
       { business_id: BIZ_A, call_id: call, kind: "cancelled", old_scheduled_at: T0, new_scheduled_at: null },
     ]);
@@ -120,17 +122,30 @@ d("appointment_changes: moves and cancellations recorded against the call", () =
     ]);
   });
 
+  it("a move to the time a booking already has changes nothing and records nothing", async () => {
+    const id = await mkBooking(BIZ_A, T0);
+    expect(await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(id, T0, BIZ_A, null))).toEqual({ found: true, recorded: false });
+    expect(await changes(id)).toEqual([]);
+  });
+
+  it("outside a tenant scope even a named business changes nothing", async () => {
+    const id = await mkBooking(BIZ_A, T0);
+    expect(await db.cancelAppointmentRecorded(id, BIZ_A, null)).toEqual({ found: false, recorded: false });
+    expect((await booking(id)).status).toBe("scheduled");
+    expect(await changes(id)).toEqual([]);
+  });
+
   it("a change made outside a call (a script) is recorded with no call", async () => {
     const id = await mkBooking(BIZ_A);
-    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, null))).toBe(true);
+    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(id, BIZ_A, null))).toEqual({ found: true, recorded: true });
     expect((await changes(id))[0].call_id).toBeNull();
   });
 
   it("another business's booking is neither changed nor recorded", async () => {
     const call = await mkCall(BIZ_A);
     const theirs = await mkBooking(BIZ_B, T0);
-    expect(await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(theirs, T1, BIZ_A, call))).toBe(false);
-    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(theirs, BIZ_A, call))).toBe(false);
+    expect(await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(theirs, T1, BIZ_A, call))).toEqual({ found: false, recorded: false });
+    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(theirs, BIZ_A, call))).toEqual({ found: false, recorded: false });
     const row = await booking(theirs);
     expect(row.scheduled_at.toISOString()).toBe(T0);
     expect(row.status).toBe("scheduled");
@@ -140,8 +155,8 @@ d("appointment_changes: moves and cancellations recorded against the call", () =
   it("an unknown booking writes no change row", async () => {
     const before = (await admin.query(`SELECT count(*)::int AS n FROM appointment_changes WHERE business_id = $1`, [BIZ_A])).rows[0].n;
     const unknown = "0d0d0000-0000-4000-8000-00000000dead";
-    expect(await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(unknown, T1, BIZ_A, null))).toBe(false);
-    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(unknown, BIZ_A, null))).toBe(false);
+    expect(await db.withTenant(BIZ_A, () => db.rescheduleAppointmentRecorded(unknown, T1, BIZ_A, null))).toEqual({ found: false, recorded: false });
+    expect(await db.withTenant(BIZ_A, () => db.cancelAppointmentRecorded(unknown, BIZ_A, null))).toEqual({ found: false, recorded: false });
     const after = (await admin.query(`SELECT count(*)::int AS n FROM appointment_changes WHERE business_id = $1`, [BIZ_A])).rows[0].n;
     expect(after).toBe(before);
   });
@@ -179,8 +194,8 @@ d("appointment_changes: moves and cancellations recorded against the call", () =
 
   it("refuses to run unscoped", async () => {
     const id = await mkBooking(BIZ_A);
-    expect(await db.rescheduleAppointmentRecorded(id, T1, null, null)).toBe(false);
-    expect(await db.cancelAppointmentRecorded(id, undefined, null)).toBe(false);
+    expect(await db.rescheduleAppointmentRecorded(id, T1, null, null)).toEqual({ found: false, recorded: false });
+    expect(await db.cancelAppointmentRecorded(id, undefined, null)).toEqual({ found: false, recorded: false });
     const row = await booking(id);
     expect(row.scheduled_at.toISOString()).toBe(T0);
     expect(row.status).toBe("scheduled");

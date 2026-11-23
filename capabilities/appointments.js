@@ -1910,13 +1910,13 @@ const CHECK_AVAILABILITY_DECLARATION = {
   },
 };
 
-/** @type {import("./_contract.js").CapabilityPack} */
 // The owner alert each completed booking change sends (notifyAppointmentChanged).
 const CHANGE_ALERT_KIND = {
   cancel_appointment_db: "cancelled",
   reschedule_appointment_db: "moved",
 };
 
+/** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "appointments",
   label: "Bookings",
@@ -2341,10 +2341,12 @@ export default {
       // Owner-facing, like the new-booking alert below (owner, 2026-11-23): a
       // booking this call moved or cancelled. Only those two: a rename or a
       // note is a change, but not one the owner is told about. This effect
-      // exists only when the change succeeded, whichever system holds it.
+      // exists only when the change succeeded, whichever system holds it, and
+      // `unchanged` marks one VetraTD's calendar found but did not change
+      // (already cancelled, same time): no email for that.
       const kind = CHANGE_ALERT_KIND[effect.data?.tool];
       const { businessId, callId, callSid } = engine.call || {};
-      if (kind && businessId && engine.deps?.notifications?.notifyAppointmentChanged) {
+      if (kind && !effect.data?.unchanged && businessId && engine.deps?.notifications?.notifyAppointmentChanged) {
         engine.deps.notifications
           .notifyAppointmentChanged({ businessId, kind, callId: callId || null })
           .catch((err) => engine.deps.log?.error?.("notify_appointment_changed_failed", { callSid, reason: err?.message }));
@@ -3451,7 +3453,7 @@ async function cancelAppointment(fc, ctx) {
   const cancelledWhen =
     upcomingForCaller(ctx).find((a) => String(a?.id) === String(appointmentId))?.scheduled_at ?? null;
 
-  const { ok } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
+  const { ok, changed } = await schedulingAdapter(ctx.config, ctx.integrations).cancel(ctx, {
     appointmentId,
   });
 
@@ -3518,7 +3520,12 @@ async function cancelAppointment(fc, ctx) {
               // caller snapshot. Without it the CALLER CONTEXT block keeps
               // asserting an appointment the caller just cancelled, and the
               // booking guard keeps refusing on the strength of it.
-              { capability: "appointments", type: "changed", data: { tool: fc.name, appointmentId } },
+              // unchanged: found but already cancelled, so no owner email.
+              {
+                capability: "appointments",
+                type: "changed",
+                data: { tool: fc.name, appointmentId, ...(changed === false ? { unchanged: true } : {}) },
+              },
             ],
           }
         : {}),
@@ -3979,8 +3986,9 @@ async function rescheduleAppointment(fc, ctx) {
   // availability check and the identity read — this is the one that costs the
   // caller an outcome.
   let ok = false;
+  let changed;
   try {
-    ({ ok } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
+    ({ ok, changed } = await schedulingAdapter(ctx.config, ctx.integrations).reschedule(ctx, {
       appointmentId,
       newScheduledAt: anchoredScheduledAt,
     }));
@@ -4040,7 +4048,13 @@ async function rescheduleAppointment(fc, ctx) {
               {
                 capability: "appointments",
                 type: "changed",
-                data: { tool: fc.name, appointmentId, newScheduledAt: anchoredScheduledAt },
+                // unchanged: moved to the time it already had, so no owner email.
+                data: {
+                  tool: fc.name,
+                  appointmentId,
+                  newScheduledAt: anchoredScheduledAt,
+                  ...(changed === false ? { unchanged: true } : {}),
+                },
               },
             ],
           }

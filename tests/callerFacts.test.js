@@ -294,7 +294,7 @@ describe("cancel/reschedule keep caller facts truthful", () => {
   it("cancel: a completed cancel drops 'Booked this call' but keeps other facts (e.g. Name)", async () => {
     const res = await appointments.execute(
       { id: "1", name: "cancel_appointment_db", args: { appointment_id: "appt-1" } },
-      baseCtx({ cancelAppointmentRecorded: vi.fn().mockResolvedValue(true) })
+      baseCtx({ cancelAppointmentRecorded: vi.fn().mockResolvedValue({ found: true, recorded: true }) })
     );
 
     expect(res.functionResponse.response.success).toBe(true);
@@ -314,7 +314,7 @@ describe("cancel/reschedule keep caller facts truthful", () => {
   it("cancel: a FAILED cancel leaves callerFacts untouched", async () => {
     const res = await appointments.execute(
       { id: "1", name: "cancel_appointment_db", args: { appointment_id: "appt-1" } },
-      baseCtx({ cancelAppointmentRecorded: vi.fn().mockResolvedValue(false) })
+      baseCtx({ cancelAppointmentRecorded: vi.fn().mockResolvedValue({ found: false, recorded: false }) })
     );
 
     expect(res.functionResponse.response.success).toBe(false);
@@ -337,7 +337,7 @@ describe("cancel/reschedule keep caller facts truthful", () => {
         name: "reschedule_appointment_db",
         args: { appointment_id: "appt-1", new_scheduled_at: RESCHEDULE_TARGET },
       },
-      baseCtx({ rescheduleAppointmentRecorded: vi.fn().mockResolvedValue(true) })
+      baseCtx({ rescheduleAppointmentRecorded: vi.fn().mockResolvedValue({ found: true, recorded: true }) })
     );
 
     expect(res.functionResponse.response.success).toBe(true);
@@ -368,7 +368,7 @@ describe("cancel/reschedule keep caller facts truthful", () => {
         name: "reschedule_appointment_db",
         args: { appointment_id: "appt-1", new_scheduled_at: RESCHEDULE_TARGET },
       },
-      baseCtx({ rescheduleAppointmentRecorded: vi.fn().mockResolvedValue(false) })
+      baseCtx({ rescheduleAppointmentRecorded: vi.fn().mockResolvedValue({ found: false, recorded: false }) })
     );
 
     expect(res.functionResponse.response.success).toBe(false);
@@ -378,7 +378,7 @@ describe("cancel/reschedule keep caller facts truthful", () => {
   it("reschedule: a time in the PAST is refused and never reaches the adapter", async () => {
     // Bypassing validateBookingTime also bypassed its past-date guard, so a
     // reschedule could previously move an appointment backwards in time.
-    const rescheduleAppointmentRecorded = vi.fn().mockResolvedValue(true);
+    const rescheduleAppointmentRecorded = vi.fn().mockResolvedValue({ found: true, recorded: true });
     const res = await appointments.execute(
       {
         id: "1",

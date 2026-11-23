@@ -107,20 +107,23 @@ export default {
 
   // Moves and cancellations are recorded against the call that made them
   // (migration 062), so the dashboard can show which call moved or cancelled
-  // a booking. A change outside a call records a null call.
+  // a booking. A change outside a call records a null call. `changed` is
+  // false when the booking was found but nothing changed (already cancelled,
+  // or moved to the time it had): the caller is told it is done, and the
+  // owner is not emailed about a change that did not happen.
   async cancel(ctx, { appointmentId }) {
-    const ok = await ctx.deps.cancelAppointmentRecorded(appointmentId, ctx.businessId, ctx.callId || null);
-    return { ok: !!ok };
+    const r = await ctx.deps.cancelAppointmentRecorded(appointmentId, ctx.businessId, ctx.callId || null);
+    return { ok: !!r?.found, changed: !!r?.recorded };
   },
 
   async reschedule(ctx, { appointmentId, newScheduledAt }) {
-    const ok = await ctx.deps.rescheduleAppointmentRecorded(
+    const r = await ctx.deps.rescheduleAppointmentRecorded(
       appointmentId,
       newScheduledAt,
       ctx.businessId,
       ctx.callId || null
     );
-    return { ok: !!ok };
+    return { ok: !!r?.found, changed: !!r?.recorded };
   },
 
   /**

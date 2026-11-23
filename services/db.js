@@ -1503,6 +1503,9 @@ export async function updateAppointment(appointmentId, updates, businessId) {
   return changed;
 }
 
+// What the recorded booking writers return when nothing was found or done.
+const NOT_FOUND = Object.freeze({ found: false, recorded: false });
+
 /**
  * Move a booking and record the move against the call that made it
  * (migration 062), in ONE statement: the booking changes and its change row is
@@ -1515,13 +1518,15 @@ export async function updateAppointment(appointmentId, updates, businessId) {
  * @param {string} businessId - REQUIRED; the tenant filter is unconditional
  *   (see getAppointmentById). Missing => no query at all.
  * @param {string|null} callId - the call that moved it; null outside a call
- * @returns {Promise<boolean>} true when the booking exists for this business
+ * @returns {Promise<{ found: boolean, recorded: boolean }>} found: the booking
+ *   exists for this business; recorded: it really moved, and the move is
+ *   recorded. Found but not recorded is a move to the time it already had.
  */
 export async function rescheduleAppointmentRecorded(appointmentId, newScheduledAt, businessId, callId) {
-  if (!pool || !appointmentId || !newScheduledAt) return false;
+  if (!pool || !appointmentId || !newScheduledAt) return NOT_FOUND;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "rescheduleAppointmentRecorded", appointmentId });
-    return false;
+    return NOT_FOUND;
   }
   const res = await q(
     `WITH old AS (
@@ -1535,16 +1540,17 @@ export async function rescheduleAppointmentRecorded(appointmentId, newScheduledA
         WHERE old_at IS DISTINCT FROM $3::timestamptz
        RETURNING appointment_id
      )
-     SELECT EXISTS (SELECT 1 FROM old) AS found`,
+     SELECT EXISTS (SELECT 1 FROM old) AS found, EXISTS (SELECT 1 FROM rec) AS recorded`,
     [appointmentId, businessId, newScheduledAt, callId || null]
   );
   if (res.error) {
     log.error("db_error", { operation: "rescheduleAppointmentRecorded", error: res.error.message });
-    return false;
+    return NOT_FOUND;
   }
-  const found = one(res)?.found === true;
+  const row = one(res);
+  const found = row?.found === true;
   noteAccess("rescheduleAppointmentRecorded", { resourceIds: [appointmentId], rowCount: found ? 1 : 0 });
-  return found;
+  return { found, recorded: found && row?.recorded === true };
 }
 
 /**
@@ -1557,13 +1563,15 @@ export async function rescheduleAppointmentRecorded(appointmentId, newScheduledA
  * @param {string} businessId - REQUIRED; the tenant filter is unconditional
  *   (see getAppointmentById). Missing => no query at all.
  * @param {string|null} callId - the call that cancelled it; null outside a call
- * @returns {Promise<boolean>} true when the booking exists for this business
+ * @returns {Promise<{ found: boolean, recorded: boolean }>} found: the booking
+ *   exists for this business; recorded: it was not already cancelled, and the
+ *   cancellation is recorded.
  */
 export async function cancelAppointmentRecorded(appointmentId, businessId, callId) {
-  if (!pool || !appointmentId) return false;
+  if (!pool || !appointmentId) return NOT_FOUND;
   if (!businessId) {
     log.error("db_unscoped_query_refused", { operation: "cancelAppointmentRecorded", appointmentId });
-    return false;
+    return NOT_FOUND;
   }
   const res = await q(
     `WITH old AS (
@@ -1577,16 +1585,17 @@ export async function cancelAppointmentRecorded(appointmentId, businessId, callI
         WHERE old_status IS DISTINCT FROM 'cancelled'
        RETURNING appointment_id
      )
-     SELECT EXISTS (SELECT 1 FROM old) AS found`,
+     SELECT EXISTS (SELECT 1 FROM old) AS found, EXISTS (SELECT 1 FROM rec) AS recorded`,
     [appointmentId, businessId, callId || null]
   );
   if (res.error) {
     log.error("db_error", { operation: "cancelAppointmentRecorded", error: res.error.message });
-    return false;
+    return NOT_FOUND;
   }
-  const found = one(res)?.found === true;
+  const row = one(res);
+  const found = row?.found === true;
   noteAccess("cancelAppointmentRecorded", { resourceIds: [appointmentId], rowCount: found ? 1 : 0 });
-  return found;
+  return { found, recorded: found && row?.recorded === true };
 }
 
 /**

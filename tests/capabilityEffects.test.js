@@ -710,6 +710,14 @@ describe("appointments.onEffect — owner alerts for a booking and its changes",
       { businessId: "biz-1", kind: "moved", callId: CALL_ID },
     ]);
 
+    // A cancel or move the booking system found but that changed nothing
+    // (already cancelled, same time) tells the caller it is done and emails no one.
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a1", unchanged: true } },
+      engine
+    );
+    expect(notifications.notifyAppointmentChanged).toHaveBeenCalledTimes(2);
+
     // A failed cancel returns no "changed" effect at all, so onEffect never runs.
     const failed = await appointments.execute(
       { id: "1", name: "cancel_appointment_db", args: { appointment_id: "missing" } },
@@ -728,5 +736,35 @@ describe("appointments.onEffect — owner alerts for a booking and its changes",
       }
     );
     expect(failed.stateEffects?.capabilityEffects || []).toEqual([]);
+  });
+});
+
+describe("appointments cancel: the effect says whether the booking really changed", () => {
+  it("a cancel the internal calendar found but did not change carries unchanged, so no email follows", async () => {
+    const appointments = (await import("../capabilities/appointments.js")).default;
+    const run = (recorded) =>
+      appointments.execute(
+        { id: "1", name: "cancel_appointment_db", args: { appointment_id: "a1" } },
+        {
+          businessId: "biz-1",
+          callId: "1c2021e1-f44f-4066-8d8d-86cd089d8e04",
+          callerPhone: "+15551112222",
+          config: { timezone: "America/Chicago" },
+          integrations: [],
+          capabilityState: { appointments: { identityVerifiedApptId: "a1", selectedAppointmentId: "a1" } },
+          callerContext: { upcomingAppointments: [{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z" }] },
+          deps: {
+            getAppointmentById: vi.fn(async () => ({ id: "a1", client_phone: "+15551112222", scheduled_at: "2026-09-10T15:00:00.000Z", status: "scheduled" })),
+            listAppointmentsByCaller: vi.fn(async () => [{ id: "a1", scheduled_at: "2026-09-10T15:00:00.000Z", status: "scheduled" }]),
+            cancelAppointmentRecorded: vi.fn(async () => ({ found: true, recorded })),
+          },
+        }
+      );
+    const changed = await run(true);
+    const unchanged = await run(false);
+    expect(changed.functionResponse.response.success).toBe(true);
+    expect(unchanged.functionResponse.response.success).toBe(true);
+    expect(changed.stateEffects.capabilityEffects[0].data.unchanged).toBeUndefined();
+    expect(unchanged.stateEffects.capabilityEffects[0].data.unchanged).toBe(true);
   });
 });

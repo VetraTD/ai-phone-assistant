@@ -233,10 +233,21 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
       [id]
     );
 
-    // Appointments linked to this call
+    // Appointments linked to this call, each with the time it was BOOKED for:
+    // the oldest change's old time when a call has since moved it (migration
+    // 062), so the call that booked it never claims the new time.
     const apptRes = await pool.query(
-      "select * from appointments where call_id = $1 order by created_at desc",
-      [id]
+      `select a.*,
+              coalesce(
+                (select ch.old_scheduled_at from appointment_changes ch
+                  where ch.appointment_id = a.id and ch.business_id = $2
+                  order by ch.created_at asc, ch.id asc limit 1),
+                a.scheduled_at
+              ) as booked_scheduled_at
+         from appointments a
+        where a.call_id = $1 and a.business_id = $2
+        order by a.created_at desc`,
+      [id, userBusinessId]
     );
 
     // Customer requests linked to this call

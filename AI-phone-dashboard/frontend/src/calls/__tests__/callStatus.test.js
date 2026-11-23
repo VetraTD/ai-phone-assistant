@@ -102,6 +102,20 @@ describe("booking changes a call made", () => {
     ]);
   });
 
+  it("a booking later moved still says the time it was booked for", () => {
+    expect(
+      didList({
+        call: call(),
+        appointments: [appt({ scheduled_at: "2026-11-24T15:00:00Z", booked_scheduled_at: "2026-11-25T15:00:00Z" })],
+        changes: [change()],
+        tz: TZ,
+      })
+    ).toEqual([
+      "Booked an appointment for Wednesday 25 November, 9:00 am",
+      "Moved Jane's booking from Wednesday 25 November, 9:00 am to Tuesday 24 November, 9:00 am",
+    ]);
+  });
+
   it("a change with no client name says a booking", () => {
     expect(
       didList({

@@ -607,6 +607,32 @@ describeDb("booking moves and cancellations on a call's detail (migration 062)",
     );
   });
 
+  it("a booking moved later still shows, on the call that booked it, the time it was booked for", async () => {
+    const { rows: [c] } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status) VALUES ($1, 'CA-chg-booked', '+15551230078', 'completed') RETURNING id`,
+      [TENANT_A]
+    );
+    // Booked on this call for 7 Dec, then moved (on this or a later call) to 8 Dec.
+    const { rows: [a] } = await admin.query(
+      `INSERT INTO appointments (business_id, call_id, client_name, scheduled_at) VALUES ($1, $2, 'Moved Patient', '2026-12-08T15:00:00Z') RETURNING id`,
+      [TENANT_A, c.id]
+    );
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at)
+       VALUES ($1, $2, $3, 'moved', '2026-12-07T15:00:00Z', '2026-12-08T15:00:00Z')`,
+      [TENANT_A, a.id, c.id]
+    );
+    const unmoved = await admin.query(
+      `INSERT INTO appointments (business_id, call_id, client_name, scheduled_at) VALUES ($1, $2, 'Kept Patient', '2026-12-09T15:00:00Z') RETURNING id`,
+      [TENANT_A, c.id]
+    );
+    const res = await request(app).get(`/api/calls/${c.id}`);
+    const byId = Object.fromEntries(res.body.appointments.map((x) => [x.id, x]));
+    expect(new Date(byId[a.id].booked_scheduled_at).toISOString()).toBe("2026-12-07T15:00:00.000Z");
+    expect(new Date(byId[a.id].scheduled_at).toISOString()).toBe("2026-12-08T15:00:00.000Z");
+    expect(new Date(byId[unmoved.rows[0].id].booked_scheduled_at).toISOString()).toBe("2026-12-09T15:00:00.000Z");
+  });
+
   it("business B's call detail never shows A's changes", async () => {
     // A change row of business A pointing at business B's call: only a bug or a
     // forged write could make one, and B must still never see it.
