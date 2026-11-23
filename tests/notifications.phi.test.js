@@ -130,6 +130,14 @@ const NOTIFICATIONS = [
       }),
   ],
   [
+    "booking moved",
+    (n) => n.notifyAppointmentChanged({ businessId: "biz-1", kind: "moved", callId: "1c2021e1-f44f-4066-8d8d-86cd089d8e04" }),
+  ],
+  [
+    "booking cancelled",
+    (n) => n.notifyAppointmentChanged({ businessId: "biz-1", kind: "cancelled", callId: "1c2021e1-f44f-4066-8d8d-86cd089d8e04" }),
+  ],
+  [
     "missed call",
     (n) =>
       n.notifyCallMissed({
@@ -170,7 +178,8 @@ describe.each(NOTIFICATIONS)("%s", (_label, invoke) => {
     await invoke(n);
     const out = sentText();
     expect(out).toContain("Excel Cardiac Care");
-    expect(out).toContain("https://dashboard.example/app");
+    // The bare address, or the call itself on the dashboard's origin.
+    expect(out).toMatch(/https:\/\/dashboard\.example\/(app|inbox\/[0-9a-f-]{36})/);
   });
 
   it("says enough to be worth opening — the subject names what happened", async () => {

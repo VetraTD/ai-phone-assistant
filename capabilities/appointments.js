@@ -1911,6 +1911,12 @@ const CHECK_AVAILABILITY_DECLARATION = {
 };
 
 /** @type {import("./_contract.js").CapabilityPack} */
+// The owner alert each completed booking change sends (notifyAppointmentChanged).
+const CHANGE_ALERT_KIND = {
+  cancel_appointment_db: "cancelled",
+  reschedule_appointment_db: "moved",
+};
+
 export default {
   id: "appointments",
   label: "Bookings",
@@ -2332,13 +2338,24 @@ export default {
       // already verified.
       engine.setStep(engine.STEPS.CONFIRM, effect.data?.tool || "appointment_changed");
       engine.addHistoryNote(`${effect.data?.tool} succeeded`);
+      // Owner-facing, like the new-booking alert below (owner, 2026-11-23): a
+      // booking this call moved or cancelled. Only those two: a rename or a
+      // note is a change, but not one the owner is told about. This effect
+      // exists only when the change succeeded, whichever system holds it.
+      const kind = CHANGE_ALERT_KIND[effect.data?.tool];
+      const { businessId, callId, callSid } = engine.call || {};
+      if (kind && businessId && engine.deps?.notifications?.notifyAppointmentChanged) {
+        engine.deps.notifications
+          .notifyAppointmentChanged({ businessId, kind, callId: callId || null })
+          .catch((err) => engine.deps.log?.error?.("notify_appointment_changed_failed", { callSid, reason: err?.message }));
+      }
       return;
     }
 
     if (effect.type !== "booked") return;
 
     const data = effect.data || {};
-    const { callSid, businessId, twilioNumber, config } = engine.call;
+    const { callSid, businessId, callId, twilioNumber, config } = engine.call;
     if (!businessId) return;
     // Task 18, owner decision D-c: the party's phone and whether it is
     // verified. Fix round 1, O-13: read through partyOfEffect, which prefers
@@ -2374,6 +2391,8 @@ export default {
         businessId,
         appointment: {
           scheduled_at: data.scheduled_at,
+          // The call that booked it, so the owner's email links to that call.
+          call_id: callId || null,
           client_name: data.client_name || null,
           client_phone: party.phone || null,
           notes,

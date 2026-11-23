@@ -638,3 +638,95 @@ describe("quotes pack: pending at save", () => {
     expect(notifyCustomerRequest.mock.calls[0][0].customerRequest.callback_number).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dashboard overhaul part 2, stage 6: owner alerts link to the call, and a
+// booking the call moved or cancelled emails the owner like a new booking.
+// ---------------------------------------------------------------------------
+describe("appointments.onEffect — owner alerts for a booking and its changes", () => {
+  const CALL_ID = "1c2021e1-f44f-4066-8d8d-86cd089d8e04";
+
+  function engineFor() {
+    const notifications = {
+      notifyAppointmentBooked: vi.fn(async () => {}),
+      notifyAppointmentChanged: vi.fn(async () => {}),
+      sendCallerSms: vi.fn(async () => {}),
+    };
+    return {
+      notifications,
+      engine: {
+        STEPS: { CONFIRM: "confirm" },
+        setStep: vi.fn(),
+        addHistoryNote: vi.fn(),
+        setCallerContext: vi.fn(),
+        call: {
+          callSid: "CA1",
+          callId: CALL_ID,
+          businessId: "biz-1",
+          callerNumber: "+15551112222",
+          twilioNumber: null,
+          config: { timezone: "America/Chicago" },
+          callerContext: null,
+        },
+        deps: { log: { error: vi.fn(), info: vi.fn(), debug: vi.fn() }, captureException: vi.fn(), notifications, db: {} },
+      },
+    };
+  }
+
+  it("the new-booking alert carries the call that booked it", async () => {
+    const { engine, notifications } = engineFor();
+    const appointments = (await import("../capabilities/appointments.js")).default;
+    appointments.onEffect(
+      { capability: "appointments", type: "booked", data: { scheduled_at: "2026-09-05T15:00:00.000Z", client_name: "Jane" } },
+      engine
+    );
+    expect(notifications.notifyAppointmentBooked).toHaveBeenCalledTimes(1);
+    expect(notifications.notifyAppointmentBooked.mock.calls[0][0].appointment.call_id).toBe(CALL_ID);
+  });
+
+  it("a successful cancel or move emails the owner once; a failed one sends nothing", async () => {
+    const { engine, notifications } = engineFor();
+    const appointments = (await import("../capabilities/appointments.js")).default;
+
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "cancel_appointment_db", appointmentId: "a1" } },
+      engine
+    );
+    appointments.onEffect(
+      {
+        capability: "appointments",
+        type: "changed",
+        data: { tool: "reschedule_appointment_db", appointmentId: "a2", newScheduledAt: "2026-09-12T15:00:00.000Z" },
+      },
+      engine
+    );
+    // A rename and a note are changes too, but not ones the owner is told about.
+    appointments.onEffect(
+      { capability: "appointments", type: "changed", data: { tool: "update_appointment_name", appointmentId: "a1", newClientName: "Jane" } },
+      engine
+    );
+    expect(notifications.notifyAppointmentChanged.mock.calls.map(([a]) => a)).toEqual([
+      { businessId: "biz-1", kind: "cancelled", callId: CALL_ID },
+      { businessId: "biz-1", kind: "moved", callId: CALL_ID },
+    ]);
+
+    // A failed cancel returns no "changed" effect at all, so onEffect never runs.
+    const failed = await appointments.execute(
+      { id: "1", name: "cancel_appointment_db", args: { appointment_id: "missing" } },
+      {
+        businessId: "biz-1",
+        callId: CALL_ID,
+        callerPhone: "+15551112222",
+        config: { timezone: "America/Chicago" },
+        integrations: [],
+        capabilityState: {},
+        deps: {
+          getAppointmentById: vi.fn(async () => null),
+          cancelAppointmentRecorded: vi.fn(async () => false),
+          listAppointmentsByCaller: vi.fn(async () => []),
+        },
+      }
+    );
+    expect(failed.stateEffects?.capabilityEffects || []).toEqual([]);
+  });
+});

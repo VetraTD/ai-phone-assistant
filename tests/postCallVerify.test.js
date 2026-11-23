@@ -216,6 +216,8 @@ describe("verifyCall - the fabrication case", () => {
     // and their appointment time.
     expect(written.message).toBeUndefined();
     expect(deps.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
+    // The owner email links to this call (dashboard overhaul part 2).
+    expect(deps.notifications.notifyUnconfirmedClaim.mock.calls[0][0].callId).toBe(CALL_ID);
     expect(getLatencyStats().turnTaking.postcall_claim_reconciled).toBe(1);
   });
 
@@ -1249,6 +1251,7 @@ describe("a message that was wanted and never attempted reaches a person", () =>
     expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledTimes(1);
     expect(d.notifications.notifyUnconfirmedClaim).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
+      callId: CALL_ID,
       callbackNumber: "+447700900123",
       kind: "message",
     });

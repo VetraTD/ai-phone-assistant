@@ -307,15 +307,40 @@ async function sendSms({ to, body }) {
 // announces the absence at boot.
 const DASHBOARD_URL = process.env.DASHBOARD_URL || null;
 
-function dashboardLine() {
-  return DASHBOARD_URL
+// A database call id: a UUID, and nothing else. A Twilio SID, "undefined" or
+// anything a caller could shape is not one, and gets the bare address.
+const CALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Where an owner alert sends them: the call itself in the dashboard
+ * (/inbox/<call id>, owner 2026-11-22), or the bare dashboard address when the
+ * call is not known, which opens Home. Built from DASHBOARD_URL's ORIGIN: the
+ * live value ends in /app, and /app/inbox/<id> would be a 404. Null when no
+ * dashboard address is configured.
+ *
+ * @param {string|null|undefined} callId
+ * @returns {string|null}
+ */
+export function dashboardLink(callId) {
+  if (!DASHBOARD_URL) return null;
+  if (typeof callId !== "string" || !CALL_ID.test(callId)) return DASHBOARD_URL;
+  try {
+    return new URL(`/inbox/${callId}`, DASHBOARD_URL).href;
+  } catch {
+    return DASHBOARD_URL;
+  }
+}
+
+function dashboardLine(callId) {
+  const link = dashboardLink(callId);
+  return link
     ? `Open your Vetra dashboard for the details:
-${DASHBOARD_URL}`
+${link}`
     : "Open your Vetra dashboard for the details.";
 }
 
-function ownerEmailBody(businessName, sentence) {
-  const where = dashboardLine();
+function ownerEmailBody(businessName, sentence, callId) {
+  const where = dashboardLine(callId);
   return (
     `${businessName}
 
@@ -329,8 +354,9 @@ ${where}
   );
 }
 
-function ownerSmsBody(businessName, sentence) {
-  const where = DASHBOARD_URL ? ` Details: ${DASHBOARD_URL}` : " Details in your Vetra dashboard.";
+function ownerSmsBody(businessName, sentence, callId) {
+  const link = dashboardLink(callId);
+  const where = link ? ` Details: ${link}` : " Details in your Vetra dashboard.";
   return `Vetra — ${businessName}: ${sentence}${where}`;
 }
 
@@ -416,7 +442,7 @@ export function renderCallRequestsEmail({ businessName, timezone = null, rows })
     `${name}\n\n` +
     list.map((r) => rowLines(r, timezone)).join("\n\n") +
     "\n\nDetails were taken by phone, so spellings may be off.\n\n" +
-    dashboardLine();
+    dashboardLine(list[0]?.call_id);
   return { subject: callRequestsSubject(name, list[0]), text };
 }
 
@@ -425,8 +451,9 @@ export function renderCallRequestsEmail({ businessName, timezone = null, rows })
 // ---------------------------------------------------------------------------
 
 /**
- * Notify when an appointment is booked.
- * @param {{ businessId: string, appointment: { scheduled_at: string, client_name?: string, client_phone?: string, notes?: string }, call?: { callerNumber?: string, twilioNumber?: string } }} opts
+ * Notify when an appointment is booked. The link goes to the call that booked
+ * it (appointment.call_id).
+ * @param {{ businessId: string, appointment: { scheduled_at: string, call_id?: string|null, client_name?: string, client_phone?: string, notes?: string }, call?: { callerNumber?: string, twilioNumber?: string } }} opts
  */
 export async function notifyAppointmentBooked({ businessId, appointment }) {
   if (!NOTIFICATIONS_ENABLED || !appointment) return;
@@ -436,10 +463,42 @@ export async function notifyAppointmentBooked({ businessId, appointment }) {
     if (!config) return;
     const sentence = "A new appointment was booked.";
     const subject = `New appointment — ${config.businessName}`;
-    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
-    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
+    const callId = appointment.call_id;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence, callId) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence, callId) });
   } catch (err) {
     log.error("notify_appointment", { message: err?.message });
+    captureException(err, { businessId });
+  }
+}
+
+const CHANGE_WORDS = {
+  moved: { sentence: "A caller moved their appointment.", subject: "Appointment moved" },
+  cancelled: { sentence: "A caller cancelled their appointment.", subject: "Appointment cancelled" },
+};
+
+/**
+ * Notify when a call moved or cancelled a booking (owner, 2026-11-23: until
+ * now only a new booking emailed the owner). The same gates and channels as
+ * notifyAppointmentBooked, and the same healthcare rule: no time, name or
+ * number, only what happened and a link to the call that did it. Sent for
+ * every booking system, because the booking code knows the change succeeded
+ * whichever system holds the booking.
+ *
+ * @param {{ businessId: string, kind: "moved"|"cancelled", callId?: string|null }} opts
+ */
+export async function notifyAppointmentChanged({ businessId, kind, callId = null }) {
+  const words = CHANGE_WORDS[kind];
+  if (!NOTIFICATIONS_ENABLED || !words) return;
+  try {
+    if (!checkRateLimit(businessId)) return;
+    const config = await loadBusinessNotificationConfig(businessId);
+    if (!config) return;
+    const subject = `${words.subject} — ${config.businessName}`;
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, words.sentence, callId) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, words.sentence, callId) });
+  } catch (err) {
+    log.error("notify_appointment_changed", { message: err?.message });
     captureException(err, { businessId });
   }
 }
@@ -473,9 +532,9 @@ export async function notifyAppointmentBooked({ businessId, appointment }) {
  * appointment sentence. The subject is the same either way and never carries a
  * name or number.
  *
- * @param {{ businessId: string, callbackNumber?: string|null, kind?: "message"|"appointment" }} opts
+ * @param {{ businessId: string, callbackNumber?: string|null, kind?: "message"|"appointment", callId?: string|null }} opts
  */
-export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null, kind = "appointment" }) {
+export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null, kind = "appointment", callId = null }) {
   if (!NOTIFICATIONS_ENABLED) return;
   try {
     if (!checkRateLimit(businessId)) return;
@@ -487,8 +546,8 @@ export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null
         : "A caller may need a quick call back to confirm their appointment" +
           (callbackNumber ? ` (${callbackNumber}).` : ".");
     const subject = `A caller may need a call back — ${config.businessName}`;
-    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) });
-    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) });
+    if (config.email) await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence, callId) });
+    if (config.phone) await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence, callId) });
   } catch (err) {
     log.error("notify_unconfirmed_claim", { message: err?.message });
     captureException(err, { businessId });
@@ -503,10 +562,10 @@ export async function notifyUnconfirmedClaim({ businessId, callbackNumber = null
  * strength of this first send (lib/capabilities/customerRequests.js), and
  * re-sends only when it did not land.
  *
- * @param {{ businessId: string, customerRequest: { request_type?: string, caller_name?: string, callback_number?: string, message?: string, preferred_time?: string }, call?: { callerNumber?: string } }} opts
+ * @param {{ businessId: string, customerRequest: { request_type?: string, caller_name?: string, callback_number?: string, message?: string, preferred_time?: string }, call?: { callerNumber?: string }, callId?: string|null }} opts
  * @returns {Promise<boolean>}
  */
-export async function notifyCustomerRequest({ businessId, customerRequest }) {
+export async function notifyCustomerRequest({ businessId, customerRequest, callId = null }) {
   if (!NOTIFICATIONS_ENABLED || !customerRequest) return false;
   try {
     if (!checkRateLimit(businessId)) return false;
@@ -516,10 +575,10 @@ export async function notifyCustomerRequest({ businessId, customerRequest }) {
     const subject = `New customer request — ${config.businessName}`;
     let reached = false;
     if (config.email) {
-      reached = (await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence) })) || reached;
+      reached = (await sendEmail({ to: config.email, subject, text: ownerEmailBody(config.businessName, sentence, callId) })) || reached;
     }
     if (config.phone) {
-      reached = (await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence) })) === true || reached;
+      reached = (await sendSms({ to: config.phone, body: ownerSmsBody(config.businessName, sentence, callId) })) === true || reached;
     }
     return reached;
   } catch (err) {
@@ -569,7 +628,7 @@ export async function notifyCallRequests({ businessId, rows }) {
       } else {
         email = {
           subject: `New customer request — ${config.businessName}`,
-          text: ownerEmailBody(config.businessName, "A caller left a message or a callback request."),
+          text: ownerEmailBody(config.businessName, "A caller left a message or a callback request.", rows[0]?.call_id),
         };
       }
     }
@@ -586,7 +645,7 @@ export async function notifyCallRequests({ businessId, rows }) {
       if (config.phone && !timedOut) {
         const handed = await sendSms({
           to: config.phone,
-          body: ownerSmsBody(config.businessName, "A caller left a message or a callback request."),
+          body: ownerSmsBody(config.businessName, "A caller left a message or a callback request.", rows[0]?.call_id),
         });
         // With an address, the email already reached the owner; the text is extra.
         if (!email && !handed) return "failed";
