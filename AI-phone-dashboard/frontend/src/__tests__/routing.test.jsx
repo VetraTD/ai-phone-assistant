@@ -48,6 +48,10 @@ vi.mock("../shell/BusinessContext.jsx", () => ({
   BusinessContext: null,
   useBusiness: () => FAKE_BUSINESS,
 }));
+// Routing is under test here, not the pages: they load their own data and
+// have their own tests.
+vi.mock("../pages/Home.jsx", () => ({ default: () => <h1>Home</h1> }));
+vi.mock("../pages/Inbox.jsx", () => ({ default: () => <h1>Inbox</h1> }));
 vi.mock("../Landing.jsx", () => ({
   default: () => <div data-testid="landing">landing</div>,
 }));

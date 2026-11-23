@@ -1,0 +1,310 @@
+/* Home (spec §8): the list of what needs the owner, with a "Today" rail. */
+
+.vt-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 100%;
+}
+
+.vt-home-main {
+  padding: 36px 44px 48px;
+  min-width: 0;
+}
+
+/* Fraunces only here, for the greeting. */
+.vt-hello {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+}
+
+.vt-brief {
+  font-size: 17px;
+  color: var(--muted);
+  margin: 8px 0 28px;
+  max-width: 62ch;
+}
+
+.vt-home-section {
+  margin-bottom: 28px;
+}
+
+.vt-sech {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.vt-sech h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+.vt-sech span {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.vt-card {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+ul.vt-card {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vt-empty {
+  padding: 22px 20px;
+  color: var(--muted);
+}
+
+.vt-when {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.vt-kind {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--amber);
+  margin-bottom: 2px;
+}
+.vt-nm {
+  display: block;
+  font-weight: 600;
+  font-size: 15.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.vt-ln {
+  display: block;
+  font-size: 14.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* Needs you rows */
+.vt-task {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line-2);
+}
+.vt-task:last-child {
+  border-bottom: 0;
+}
+.vt-task .vt-when {
+  align-self: start;
+  padding-top: 1px;
+}
+.vt-task-body,
+.vt-drow-body {
+  display: block;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+}
+.vt-task-body:hover .vt-nm,
+.vt-drow-body:hover .vt-nm {
+  text-decoration: underline;
+}
+
+.vt-acts {
+  display: flex;
+  gap: 8px;
+}
+
+/* Done today rows */
+.vt-drow {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line-2);
+}
+.vt-drow:last-child {
+  border-bottom: 0;
+}
+.vt-drow .vt-nm {
+  font-size: 14.5px;
+}
+
+.vt-link {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  min-height: 44px;
+  color: var(--ink-blue);
+  font-weight: 600;
+  font-size: 14.5px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.vt-link:hover {
+  text-decoration: underline;
+}
+
+/* Today rail */
+.vt-rail {
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  padding: 32px 24px;
+}
+.vt-rail-h {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.vt-rail-empty {
+  color: var(--muted);
+  font-size: 14.5px;
+  margin-bottom: 8px;
+}
+.vt-tls {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+.vt-tl-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 4px 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 14.5px;
+  color: inherit;
+  text-decoration: none;
+}
+a.vt-tl-row:hover .vt-tl-name {
+  text-decoration: underline;
+}
+.vt-tl-t {
+  font-weight: 600;
+}
+.vt-tl-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.vt-tl-w {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.vt-tl-past .vt-tl-row {
+  color: var(--muted);
+}
+.vt-tl-cancelled .vt-tl-name {
+  text-decoration: line-through;
+}
+
+.vt-nowline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-blue);
+  margin: 4px 0;
+}
+.vt-nowline::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: var(--ink-blue);
+  border-radius: 2px;
+}
+
+.vt-week {
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+.vt-home-state p {
+  margin-bottom: 14px;
+  color: var(--muted);
+}
+
+.vt-toast {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  width: min(480px, calc(100% - 32px));
+}
+.vt-toast p {
+  background: var(--navy);
+  color: #fff;
+  border-radius: var(--r-dialog);
+  box-shadow: var(--shadow-pop);
+  padding: 12px 16px;
+  font-weight: 600;
+}
+
+/* Narrower desktops: the rail moves under the list. */
+@media (max-width: 1100px) {
+  .vt-home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vt-rail {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* Phones */
+@media (max-width: 760px) {
+  .vt-home-main {
+    padding: 20px 16px 24px;
+  }
+  .vt-hello {
+    font-size: 30px;
+  }
+  .vt-brief {
+    font-size: 16px;
+    margin-bottom: 22px;
+  }
+  .vt-task {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 14px 16px;
+  }
+  .vt-acts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-top: 8px;
+  }
+  .vt-acts-one {
+    grid-template-columns: 1fr;
+  }
+  .vt-drow {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    padding: 12px 16px;
+  }
+  .vt-rail {
+    padding: 20px 16px 28px;
+  }
+  .vt-ln,
+  .vt-drow .vt-nm,
+  .vt-tl-row,
+  .vt-week,
+  .vt-link {
+    font-size: 16px;
+  }
+  .vt-toast {
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+}
