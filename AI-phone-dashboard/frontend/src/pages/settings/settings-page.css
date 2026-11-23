@@ -2,7 +2,9 @@
  * plus Sign out at the foot of the list and the read-only panels' text. */
 
 .vt-set-items {
-  padding-top: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
 }
 .vt-set-signout {
   padding: 20px 20px 0;
@@ -64,4 +66,10 @@
   font-size: 26px;
   font-weight: 700;
   color: var(--ink);
+}
+
+@media (max-width: 760px) {
+  .vt-set-usage dt {
+    font-size: 16px;
+  }
 }

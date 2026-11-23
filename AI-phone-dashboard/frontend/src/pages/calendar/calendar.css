@@ -372,7 +372,12 @@
     font-size: 16px;
   }
   .vt-cal-row,
-  .vt-cal-stripday {
+  .vt-cal-row .vt-cal-b-time,
+  .vt-cal-b-tag,
+  .vt-cal-stripday,
+  .vt-cal-week,
+  .vt-cal-detail-name,
+  .vt-cal-detail-source {
     font-size: 16px;
   }
 }

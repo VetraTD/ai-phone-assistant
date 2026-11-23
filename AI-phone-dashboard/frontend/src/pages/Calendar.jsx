@@ -20,10 +20,11 @@ import "./calendar/calendar.css";
 
 const LOAD_ERROR = "Couldn't load your bookings. Check your connection, then try again.";
 const SEND_ERROR = "Couldn't send the email. Try again in a minute.";
+// Worded so the picker never reads as a second "Today" button beside the week's.
 const RANGES = [
-  ["today", "Today"],
+  ["today", "Today's bookings"],
   ["7days", "Next 7 days"],
-  ["upcoming", "Upcoming"],
+  ["upcoming", "All upcoming"],
 ];
 // Below this content width the week grid becomes a day strip and a list.
 const NARROW = 760;

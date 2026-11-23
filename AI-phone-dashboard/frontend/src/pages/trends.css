@@ -43,15 +43,15 @@
   font-size: 15px;
 }
 
-.vt-tr-state p,
-.vt-tr-state:is(p) {
+.vt-tr-state,
+.vt-tr-state p {
   color: var(--muted);
   margin-bottom: 14px;
 }
 
 .vt-tr-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   margin: 0 0 16px;
 }
@@ -213,7 +213,14 @@
   }
   .vt-tr-period select,
   .vt-tr-counts,
-  .vt-tr-insights ul {
+  .vt-tr-insights ul,
+  .vt-tr-tile dt {
     font-size: 16px;
+  }
+  /* Axis labels stay small so seven to thirteen of them fit across a phone;
+   * each bar also carries its label and count in its name and tooltip. */
+  .vt-tr-label,
+  .vt-tr-tip {
+    font-size: 13px;
   }
 }
