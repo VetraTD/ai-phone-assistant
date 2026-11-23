@@ -423,3 +423,57 @@ describeDb("the dashboard records PHI access (§164.312(b))", () => {
     expect(await auditRows(2)).toHaveLength(2);
   });
 });
+
+// Mark done / reopen (dashboard overhaul, migration 061). Writes under FORCE RLS
+// fail closed: an unscoped UPDATE "succeeds" having changed nothing. So every
+// assertion reads the row back through the admin client.
+describeDb("Done and Reopen only ever touch the caller's own business", () => {
+  const callOf = async (tenant) =>
+    (await admin.query(`SELECT id FROM calls WHERE twilio_call_sid = $1`, [`CA-dash-${tenant.slice(0, 8)}`])).rows[0].id;
+  const handled = async (id) =>
+    (await admin.query(`SELECT handled_at, handled_by FROM calls WHERE id = $1`, [id])).rows[0];
+
+  it("marks the tenant's own call done, and the row really changed", async () => {
+    const own = await callOf(TENANT_A);
+    const res = await request(app).put(`/api/calls/${own}/handled`);
+    expect(res.status).toBe(200);
+    const row = await handled(own);
+    expect(row.handled_at).not.toBeNull();
+    expect(row.handled_by).toBe(STAFF_A);
+  });
+
+  it("cannot mark another tenant's call done: 404, and that row is untouched", async () => {
+    const theirs = await callOf(TENANT_B);
+    const res = await request(app).put(`/api/calls/${theirs}/handled`);
+    expect(res.status).toBe(404);
+    expect(await handled(theirs)).toEqual({ handled_at: null, handled_by: null });
+  });
+
+  it("cannot reopen another tenant's call either", async () => {
+    const theirs = await callOf(TENANT_B);
+    await admin.query(`UPDATE calls SET handled_at = now(), handled_by = 'staff-b' WHERE id = $1`, [theirs]);
+    const res = await request(app).delete(`/api/calls/${theirs}/handled`);
+    expect(res.status).toBe(404);
+    expect((await handled(theirs)).handled_by).toBe("staff-b");
+  });
+
+  it("two people pressing Done: the first keeps it, the second is harmless; Reopen clears it", async () => {
+    const own = await callOf(TENANT_A);
+    const SECOND = "eeee5555-eeee-4eee-8eee-eeeeeeee5555";
+    await admin.query(`INSERT INTO users (id, business_id, email, auth_uid) VALUES ($1, $2, $3, $4)`, [
+      SECOND, TENANT_A, "dash-a2@example.com", SECOND,
+    ]);
+    expect((await request(app).put(`/api/calls/${own}/handled`)).status).toBe(200);
+    const first = await handled(own);
+    authState.user = { id: SECOND, email: "dash-a2@example.com" };
+    const again = await request(app).put(`/api/calls/${own}/handled`);
+    expect(again.status).toBe(200);
+    expect(again.body.handled_by).toBe(STAFF_A);
+    const after = await handled(own);
+    expect(after.handled_by).toBe(STAFF_A);
+    expect(after.handled_at).toEqual(first.handled_at);
+
+    expect((await request(app).delete(`/api/calls/${own}/handled`)).status).toBe(200);
+    expect(await handled(own)).toEqual({ handled_at: null, handled_by: null });
+  });
+});

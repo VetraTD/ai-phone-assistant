@@ -6,6 +6,12 @@ const pool = require("../db");
 const { sanitizeString } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { loadBusinessTimezone, callDateClauses } = require("../callDateBounds");
+const { authSensitiveLimiter } = require("../middleware/rateLimiters");
+
+// A call id is a uuid. Anything else is answered "not found" without asking
+// the database, which would otherwise fail the cast and answer 500.
+const CALL_ID = /^[0-9a-f-]{36}$/i;
+const CALL_NOT_FOUND = { error: "Call not found" };
 
 // Calls list with filters (scoped to the authenticated user's business)
 // Supports query params:
@@ -199,6 +205,49 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
     // The detail belongs in the log, where an operator can find it.
     console.error("call_detail_failed", { callId: req.params?.id, message: err?.message });
     res.status(500).json({ error: "Could not load this call." });
+  }
+}));
+
+// Mark a call's open item (a message or call-back request) done, and reopen it
+// (dashboard overhaul, migration 061). The first person to press Done keeps it:
+// a second Done changes nothing. Scoped to the signed-in business explicitly as
+// well as by row-level security, so another business's call is "not found".
+router.put("/api/calls/:id/handled", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!CALL_ID.test(id)) return res.status(404).json(CALL_NOT_FOUND);
+  try {
+    const r = await pool.query(
+      `UPDATE calls
+          SET handled_at = COALESCE(handled_at, now()),
+              handled_by = COALESCE(handled_by, $3)
+        WHERE id = $1 AND business_id = $2
+        RETURNING id, handled_at, handled_by`,
+      [id, req.businessId, req.authUser.id]
+    );
+    if (!r.rows.length) return res.status(404).json(CALL_NOT_FOUND);
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error("call_handled_failed", { callId: id, message: err?.message });
+    res.status(500).json({ error: "Couldn't mark that as done. Try again." });
+  }
+}));
+
+router.delete("/api/calls/:id/handled", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!CALL_ID.test(id)) return res.status(404).json(CALL_NOT_FOUND);
+  try {
+    const r = await pool.query(
+      `UPDATE calls
+          SET handled_at = NULL, handled_by = NULL
+        WHERE id = $1 AND business_id = $2
+        RETURNING id, handled_at, handled_by`,
+      [id, req.businessId]
+    );
+    if (!r.rows.length) return res.status(404).json(CALL_NOT_FOUND);
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error("call_reopen_failed", { callId: id, message: err?.message });
+    res.status(500).json({ error: "Couldn't reopen that. Try again." });
   }
 }));
 

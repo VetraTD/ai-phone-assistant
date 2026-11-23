@@ -83,6 +83,10 @@ const NON_PHI_ROUTES = Object.freeze([
   "POST /api/knowledge",
   "PUT /api/knowledge/:id",
   "DELETE /api/knowledge/:id",
+  // Marking a call's open item done or reopening it changes state and returns
+  // only the id and who/when — no call content.
+  "PUT /api/calls/:id/handled",
+  "DELETE /api/calls/:id/handled",
   "GET /api/integrations",
   "POST /api/integrations",
   "DELETE /api/integrations/:id",
