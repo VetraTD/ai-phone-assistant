@@ -157,6 +157,37 @@ describeDb("GET /api/home in the business's timezone", () => {
     expect(res.body.week.calls).toBe(1);
   });
 
+  it("the week counts moves and cancellations separately from bookings made", async () => {
+    const ownCall = await call(TENANT_A, "CA_home_week_changes", new Date());
+    const booking = await admin.query(
+      `INSERT INTO appointments (business_id, call_id, client_name, scheduled_at) VALUES ($1, $2, 'Sample Caller', now() + interval '2 days') RETURNING id`,
+      [TENANT_A, ownCall]
+    );
+    const apptId = booking.rows[0].id;
+    const weekStart = (
+      await admin.query(`SELECT date_trunc('week', now() AT TIME ZONE $1) AT TIME ZONE $1 AS t`, [TZ])
+    ).rows[0].t;
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at, created_at)
+       VALUES ($1, $2, $3, 'moved', now() + interval '1 day', now() + interval '2 days', now()),
+              ($1, $2, $3, 'cancelled', now() + interval '2 days', NULL, now()),
+              ($1, $2, $3, 'moved', now(), now() + interval '1 day', $4::timestamptz - interval '1 hour')`,
+      [TENANT_A, apptId, ownCall, weekStart]
+    );
+    // Another business's change is never counted.
+    const theirCall = await call(TENANT_B, "CA_home_week_theirs", new Date());
+    const theirs = await admin.query(
+      `INSERT INTO appointments (business_id, call_id, scheduled_at) VALUES ($1, $2, now() + interval '1 day') RETURNING id`,
+      [TENANT_B, theirCall]
+    );
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at) VALUES ($1, $2, $3, 'cancelled', now())`,
+      [TENANT_B, theirs.rows[0].id, theirCall]
+    );
+    const res = await request(app).get("/api/home");
+    expect(res.body.week).toEqual({ calls: 1, bookingsMade: 1, bookingsMoved: 1, bookingsCancelled: 1 });
+  });
+
   it("an item closed at launch is not 'done today'; one a person closed today is", async () => {
     const now = new Date();
     await call(TENANT_A, "CA_home_launch", new Date(now.getTime() - 9 * 86400000), { request: true, handledBy: "launch", handledAt: now });

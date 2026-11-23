@@ -129,6 +129,39 @@ describe("Calendar", () => {
     expect(button).toHaveFocus();
   });
 
+  it("the calendar says a booking was moved here, with a link to that call", async () => {
+    const user = userEvent.setup();
+    renderCalendar(undefined, {
+      bookings: [
+        booking({
+          booked_on: "2026-11-20T16:00:00Z",
+          last_change: { kind: "moved", call_id: "c9", created_at: "2026-11-23T17:30:00Z" },
+        }),
+        booking({
+          id: "a2",
+          call_id: "c2",
+          client_name: "Second Caller",
+          scheduled_at: "2026-11-26T17:00:00Z",
+          status: "cancelled",
+          booked_on: "2026-11-21T16:00:00Z",
+          last_change: { kind: "cancelled", call_id: "c8", created_at: "2026-11-23T18:00:00Z" },
+        }),
+      ],
+    });
+    await user.click(await screen.findByRole("button", { name: "9:00 am, Sample Caller" }));
+    let detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Booked by VetraTD on a call on Friday 20 November")).toBeInTheDocument();
+    expect(within(detail).getByRole("link", { name: "Open the call" })).toHaveAttribute("href", "/inbox/c1");
+    expect(within(detail).getByText("Moved here by VetraTD on a call on Monday 23 November")).toBeInTheDocument();
+    expect(within(detail).getByRole("link", { name: "Open the call that moved it" })).toHaveAttribute("href", "/inbox/c9");
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "11:00 am, Second Caller, cancelled" }));
+    detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Cancelled by VetraTD on a call on Monday 23 November")).toBeInTheDocument();
+    expect(within(detail).getByRole("link", { name: "Open the call that cancelled it" })).toHaveAttribute("href", "/inbox/c8");
+  });
+
   it("Next week moves the date by seven days", async () => {
     const user = userEvent.setup();
     renderCalendar("/calendar?date=2026-11-25");

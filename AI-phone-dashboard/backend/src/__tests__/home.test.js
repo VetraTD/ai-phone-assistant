@@ -15,7 +15,7 @@ describe("GET /api/home", () => {
       if (sql.includes("app_lookup_user_by_auth_uid")) return Promise.resolve({ rows: [{ business_id: "b1" }] });
       if (sql.includes("SELECT timezone FROM businesses")) return Promise.resolve({ rows: [{ timezone: "America/Chicago" }] });
       seen.push({ sql, params });
-      if (/AS answered/.test(sql)) return Promise.resolve({ rows: [{ answered: 3, bookings_made: 1, week_calls: 9, week_bookings_made: 2 }] });
+      if (/AS answered/.test(sql)) return Promise.resolve({ rows: [{ answered: 3, bookings_made: 1, week_calls: 9, week_bookings_made: 2, week_bookings_moved: 4, week_bookings_cancelled: 1 }] });
       return Promise.resolve({ rows: [] });
     });
   });
@@ -28,7 +28,7 @@ describe("GET /api/home", () => {
     expect(Object.keys(res.body).sort()).toEqual(["doneToday", "openItems", "timezone", "today", "todaysBookings", "week"]);
     expect(res.body.timezone).toBe("America/Chicago");
     expect(res.body.today).toEqual({ answered: 3, bookingsMade: 1 });
-    expect(res.body.week).toEqual({ calls: 9, bookingsMade: 2 });
+    expect(res.body.week).toEqual({ calls: 9, bookingsMade: 2, bookingsMoved: 4, bookingsCancelled: 1 });
     expect(res.body.openItems).toEqual([]);
     expect(res.body.doneToday).toEqual([]);
     expect(res.body.todaysBookings).toEqual([]);

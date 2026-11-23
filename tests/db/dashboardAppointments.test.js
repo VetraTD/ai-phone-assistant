@@ -115,7 +115,7 @@ describeDb("GET /api/appointments?from&to in the business's days", () => {
     expect(res.status).toBe(200);
     expect(res.body.map((a) => a.id)).toEqual([first, last]);
     expect(Object.keys(res.body[0]).sort()).toEqual(
-      ["call_id", "client_name", "client_phone", "id", "notes", "scheduled_at", "status"].sort()
+      ["booked_on", "call_id", "client_name", "client_phone", "id", "last_change", "notes", "scheduled_at", "status"].sort()
     );
   });
 
@@ -148,6 +148,37 @@ describeDb("GET /api/appointments?from&to in the business's days", () => {
     await bookAt(TENANT_A, new Date(localMidnight.getTime() - 10 * 60 * 1000));
     const res = await request(app).get("/api/appointments").query({ range: "today" });
     expect(res.body.map((a) => a.id)).toEqual([morning, late]);
+  });
+});
+
+describeDb("GET /api/appointments: who booked and who last changed each booking", () => {
+  it("each booking carries the call that last changed it", async () => {
+    const calls = [];
+    for (const [sid, started] of [["CA-appt-booked", "2026-12-01T16:00:00Z"], ["CA-appt-moved", "2026-12-02T16:00:00Z"], ["CA-appt-cancel", "2026-12-03T16:00:00Z"]]) {
+      const r = await admin.query(
+        `INSERT INTO calls (business_id, twilio_call_sid, status, started_at) VALUES ($1, $2, 'completed', $3) RETURNING id`,
+        [TENANT_A, sid, started]
+      );
+      calls.push(r.rows[0].id);
+    }
+    const id = await bookAtLocal(TENANT_A, "2026-12-07 10:00", { status: "cancelled" });
+    await admin.query(`UPDATE appointments SET call_id = $2 WHERE id = $1`, [id, calls[0]]);
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at, created_at)
+       VALUES ($1, $2, $3, 'moved', '2026-12-06T16:00:00Z', '2026-12-07T16:00:00Z', '2026-12-02T16:05:00Z'),
+              ($1, $2, $4, 'cancelled', '2026-12-07T16:00:00Z', NULL, '2026-12-03T16:05:00Z')`,
+      [TENANT_A, id, calls[1], calls[2]]
+    );
+    const plain = await bookAtLocal(TENANT_A, "2026-12-08 10:00");
+    const res = await request(app).get("/api/appointments").query({ from: "2026-12-07", to: "2026-12-13" });
+    const changed = res.body.find((a) => a.id === id);
+    expect(new Date(changed.booked_on).toISOString()).toBe("2026-12-01T16:00:00.000Z");
+    expect(changed.last_change.kind).toBe("cancelled");
+    expect(changed.last_change.call_id).toBe(calls[2]);
+    expect(new Date(changed.last_change.created_at).toISOString()).toBe("2026-12-03T16:05:00.000Z");
+    const untouched = res.body.find((a) => a.id === plain);
+    expect(untouched.booked_on).toBeNull();
+    expect(untouched.last_change).toBeNull();
   });
 });
 

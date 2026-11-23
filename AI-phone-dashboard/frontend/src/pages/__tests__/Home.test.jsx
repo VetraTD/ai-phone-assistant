@@ -160,6 +160,18 @@ describe("Home", () => {
     ).toBeInTheDocument();
   });
 
+  it("Home's week sentence counts moves and cancellations", async () => {
+    api.get.mockResolvedValue({ data: home({ week: { calls: 3, bookingsMade: 1, bookingsMoved: 2, bookingsCancelled: 1 } }) });
+    renderHome();
+    expect(await screen.findByText(/This week so far: 3 calls, 1 booking made, 2 moved, 1 cancelled\./)).toBeInTheDocument();
+  });
+
+  it("leaves moves and cancellations out of the week sentence when there are none", async () => {
+    api.get.mockResolvedValue({ data: home({ week: { calls: 3, bookingsMade: 1, bookingsMoved: 0, bookingsCancelled: 0 } }) });
+    renderHome();
+    expect(await screen.findByText(/This week so far: 3 calls, 1 booking made\./)).toBeInTheDocument();
+  });
+
   it("shows today's bookings and the week, with a way to call trends", async () => {
     api.get.mockResolvedValue({
       data: home({

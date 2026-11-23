@@ -1,9 +1,10 @@
 import { formatDateTime } from "./format";
 
 // What a call needs from the owner, and what VetraTD did on it, in the
-// caller's terms (spec §8 Inbox). Built only from what is recorded per call
-// today: a booking made on the call (appointments.call_id), a message or
-// call-back request (customer_requests), a transfer (calls.status).
+// caller's terms (spec §8 Inbox). Built only from what is recorded per call:
+// a booking made on the call (appointments.call_id), a booking it moved or
+// cancelled (appointment_changes, migration 062), a message or call-back
+// request (customer_requests), a transfer (calls.status).
 
 /**
  * What is needed, from a request in the /api/home shape ({ type, preferredTime }).
@@ -29,7 +30,7 @@ const toNeed = (row) => ({ type: row?.request_type, preferredTime: row?.preferre
  * API returns them.
  * @returns {{ tone: "needs" | "done" | "quiet", text: string }}
  */
-export function statusLine({ call, appointments = [], requests = [] }) {
+export function statusLine({ call, appointments = [], requests = [], changes = [] }) {
   if (requests.length) {
     const latest = requests.reduce((a, b) => (new Date(b?.created_at || 0) > new Date(a?.created_at || 0) ? b : a), requests[0]);
     // Open when nobody has marked it done, or a request arrived after they did
@@ -43,9 +44,11 @@ export function statusLine({ call, appointments = [], requests = [] }) {
   }
   // A call still going has done nothing yet, and must not read as finished.
   if (call?.status === "in-progress") return { tone: "quiet", text: "This call is still going." };
-  // Only a booking or a transfer earns "nothing to do": a hang-up, a refused
-  // message or a technical failure would make "handled" untrue.
-  if (appointments.length || call?.status === "transferred") return { tone: "done", text: "Nothing for you to do" };
+  // Only a booking, a booking change or a transfer earns "nothing to do": a
+  // hang-up, a refused message or a technical failure would make "handled" untrue.
+  if (appointments.length || changes.length || call?.status === "transferred") {
+    return { tone: "done", text: "Nothing for you to do" };
+  }
   return { tone: "quiet", text: "No message was left." };
 }
 
@@ -59,9 +62,19 @@ const DID_REQUEST = {
  * "What VetraTD did", as a ticked list.
  * @returns {string[]}
  */
-export function didList({ call, appointments = [], requests = [], tz }) {
+export function didList({ call, appointments = [], requests = [], changes = [], tz }) {
   const out = [];
   for (const a of appointments) out.push(`Booked an appointment for ${formatDateTime(a.scheduled_at, tz)}`);
+  // Oldest first, as the API returns them: a move then a cancel reads in order.
+  for (const c of changes) {
+    const name = typeof c?.client_name === "string" ? c.client_name.trim() : "";
+    const whose = name ? `${name}'s booking` : "a booking";
+    if (c?.kind === "moved") {
+      out.push(`Moved ${whose} from ${formatDateTime(c.old_scheduled_at, tz)} to ${formatDateTime(c.new_scheduled_at, tz)}`);
+    } else if (c?.kind === "cancelled") {
+      out.push(`Cancelled ${whose}, ${formatDateTime(c.old_scheduled_at, tz)}`);
+    }
+  }
   for (const r of requests) {
     const line = DID_REQUEST[r.request_type];
     if (line) out.push(line);

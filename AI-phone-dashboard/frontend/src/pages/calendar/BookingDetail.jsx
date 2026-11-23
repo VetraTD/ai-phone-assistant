@@ -1,6 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { formatDateTime, telHref } from "../../calls/format";
+import { formatDate, formatDateTime, telHref } from "../../calls/format";
+
+// The newest change a call made to this booking (migration 062).
+const CHANGE_WORDS = {
+  moved: { line: "Moved here", link: "Open the call that moved it" },
+  cancelled: { line: "Cancelled", link: "Open the call that cancelled it" },
+};
 
 /**
  * One booking: when, who, their number, its notes, and the call that made it.
@@ -37,6 +43,10 @@ export default function BookingDetail({ booking, tz, onClose, position, variant 
   const notes = typeof booking.notes === "string" ? booking.notes.trim() : "";
   const cancelled = booking.status === "cancelled";
   const when = formatDateTime(booking.scheduled_at, tz);
+  const bookedOn = booking.booked_on ? ` on ${formatDate(booking.booked_on, tz)}` : "";
+  const change = booking.last_change && CHANGE_WORDS[booking.last_change.kind] ? booking.last_change : null;
+  const changeWords = change ? CHANGE_WORDS[change.kind] : null;
+  const changedOn = change?.created_at ? ` on ${formatDate(change.created_at, tz)}` : "";
 
   return (
     <div
@@ -61,11 +71,23 @@ export default function BookingDetail({ booking, tz, onClose, position, variant 
       ) : null}
       {notes ? <p className="vt-cal-detail-notes">{notes}</p> : null}
       <div className="vt-cal-detail-source">
-        <p>Booked by VetraTD on a call</p>
+        <p>{`Booked by VetraTD on a call${bookedOn}`}</p>
         {booking.call_id ? (
           <Link className="vt-link" to={`/inbox/${booking.call_id}`}>
             Open the call
           </Link>
+        ) : null}
+        {change ? (
+          <>
+            <p className="vt-cal-detail-change">
+              {change.call_id ? `${changeWords.line} by VetraTD on a call${changedOn}` : `${changeWords.line}${changedOn}`}
+            </p>
+            {change.call_id ? (
+              <Link className="vt-link" to={`/inbox/${change.call_id}`} aria-label={changeWords.link}>
+                Open the call
+              </Link>
+            ) : null}
+          </>
         ) : null}
       </div>
       <button type="button" className="vt-btn vt-btn-quiet vt-cal-detail-close" onClick={onClose}>

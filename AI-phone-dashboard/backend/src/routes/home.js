@@ -83,7 +83,13 @@ const COUNTS = `
         AND c.started_at >= ${WEEK_START} AND c.started_at <= now()) AS week_calls,
     (SELECT count(*)::int FROM appointments ap JOIN calls c ON c.id = ap.call_id
       WHERE ap.business_id = $1 AND c.business_id = $1
-        AND c.started_at >= ${WEEK_START} AND c.started_at <= now()) AS week_bookings_made`;
+        AND c.started_at >= ${WEEK_START} AND c.started_at <= now()) AS week_bookings_made,
+    (SELECT count(*)::int FROM appointment_changes ch
+      WHERE ch.business_id = $1 AND ch.kind = 'moved'
+        AND ch.created_at >= ${WEEK_START} AND ch.created_at <= now()) AS week_bookings_moved,
+    (SELECT count(*)::int FROM appointment_changes ch
+      WHERE ch.business_id = $1 AND ch.kind = 'cancelled'
+        AND ch.created_at >= ${WEEK_START} AND ch.created_at <= now()) AS week_bookings_cancelled`;
 
 const TODAYS_BOOKINGS = `
   SELECT ap.id, ap.scheduled_at, ap.client_name, ap.status, ap.call_id
@@ -144,7 +150,14 @@ router.get("/api/home", authenticate, withTenantHandler(async (req, res) => {
         status: r.status ?? null,
         callId: r.call_id ?? null,
       })),
-      week: { calls: n.week_calls ?? 0, bookingsMade: n.week_bookings_made ?? 0 },
+      week: {
+        calls: n.week_calls ?? 0,
+        bookingsMade: n.week_bookings_made ?? 0,
+        // Booking changes calls made this week (migration 062), counted apart
+        // from bookings made: a move is not a new booking.
+        bookingsMoved: n.week_bookings_moved ?? 0,
+        bookingsCancelled: n.week_bookings_cancelled ?? 0,
+      },
     });
   } catch (err) {
     console.error("home_failed", { message: err?.message });

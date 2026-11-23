@@ -44,6 +44,7 @@ const detail = (over = {}) => ({
     { speaker: "caller", message: "Hi, I'd like a check-up.", sequence: 2 },
   ],
   appointments: over.appointments || [],
+  booking_changes: over.booking_changes || [],
   customer_requests: over.customer_requests || [{ request_type: "callback", caller_name: "Sample Caller", callback_number: null, preferred_time: "after 3 pm", message: "About a check-up" }],
   caller_history: over.caller_history || { calls: [], bookings: [] },
 });
@@ -174,6 +175,24 @@ describe("Inbox call view", () => {
     expect(within(view).getByText("Thanks for calling Brightwork Family Dental.")).toBeInTheDocument();
     expect(within(view).getAllByText("VetraTD").length).toBeGreaterThan(0);
     expect(within(view).getByRole("link", { name: "Call back" })).toHaveAttribute("href", "tel:+15550100199");
+  });
+
+  it("lists the bookings the call moved and cancelled, and has nothing for you to do", async () => {
+    renderInbox("/inbox/c1", {
+      callDetail: detail({
+        customer_requests: [],
+        booking_changes: [
+          { id: "ch1", appointment_id: "a1", kind: "moved", old_scheduled_at: "2026-11-25T15:00:00Z", new_scheduled_at: "2026-11-24T15:00:00Z", created_at: "2026-11-23T16:00:00Z", client_name: "Sample Caller" },
+          { id: "ch2", appointment_id: "a2", kind: "cancelled", old_scheduled_at: "2026-11-25T17:00:00Z", new_scheduled_at: null, created_at: "2026-11-23T16:01:00Z", client_name: null },
+        ],
+      }),
+    });
+    const view = await screen.findByRole("region", { name: /\+1/ });
+    expect(within(view).getByText("Nothing for you to do")).toBeInTheDocument();
+    expect(
+      within(view).getByText("Moved Sample Caller's booking from Wednesday 25 November, 9:00 am to Tuesday 24 November, 9:00 am")
+    ).toBeInTheDocument();
+    expect(within(view).getByText("Cancelled a booking, Wednesday 25 November, 11:00 am")).toBeInTheDocument();
   });
 
   it("shows caller speech that looks like HTML literally", async () => {

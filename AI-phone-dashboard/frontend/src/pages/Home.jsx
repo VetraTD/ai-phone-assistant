@@ -310,7 +310,9 @@ export default function Home() {
             data.week.bookingsMade,
             "booking",
             "bookings"
-          )} made.`}{" "}
+          )} made${data.week.bookingsMoved ? `, ${data.week.bookingsMoved} moved` : ""}${
+            data.week.bookingsCancelled ? `, ${data.week.bookingsCancelled} cancelled` : ""
+          }.`}{" "}
           <Link className="vt-link" to="/trends">
             See call trends
           </Link>

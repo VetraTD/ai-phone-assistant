@@ -63,6 +63,59 @@ describe("didList", () => {
   });
 });
 
+// Booking moves and cancellations a call made (migration 062), in the
+// /api/calls/:id booking_changes shape.
+const change = (over) => ({
+  id: "ch1",
+  appointment_id: "a1",
+  kind: "moved",
+  old_scheduled_at: "2026-11-25T15:00:00Z",
+  new_scheduled_at: "2026-11-24T15:00:00Z",
+  created_at: "2026-11-23T16:00:00Z",
+  client_name: "Jane",
+  ...over,
+});
+
+describe("booking changes a call made", () => {
+  it("a call that only moved a booking says Nothing for you to do", () => {
+    expect(statusLine({ call: call(), appointments: [], requests: [], changes: [change()] })).toEqual({
+      tone: "done",
+      text: "Nothing for you to do",
+    });
+  });
+
+  it("lists a move then a cancel in order", () => {
+    expect(
+      didList({
+        call: call(),
+        appointments: [],
+        requests: [],
+        changes: [
+          change(),
+          change({ id: "ch2", kind: "cancelled", old_scheduled_at: "2026-11-25T17:00:00Z", new_scheduled_at: null, client_name: "Sam" }),
+        ],
+        tz: TZ,
+      })
+    ).toEqual([
+      "Moved Jane's booking from Wednesday 25 November, 9:00 am to Tuesday 24 November, 9:00 am",
+      "Cancelled Sam's booking, Wednesday 25 November, 11:00 am",
+    ]);
+  });
+
+  it("a change with no client name says a booking", () => {
+    expect(
+      didList({
+        call: call(),
+        changes: [change({ client_name: null }), change({ id: "ch2", kind: "cancelled", new_scheduled_at: null, client_name: "  " })],
+        tz: TZ,
+      })
+    ).toEqual([
+      "Moved a booking from Wednesday 25 November, 9:00 am to Tuesday 24 November, 9:00 am",
+      "Cancelled a booking, Wednesday 25 November, 9:00 am",
+    ]);
+  });
+});
+
 describe("statusLine: live calls and late requests", () => {
   it("a call still going says so, and claims nothing", () => {
     expect(statusLine({ call: call({ status: "in-progress" }), appointments: [], requests: [] }))

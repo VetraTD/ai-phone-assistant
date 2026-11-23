@@ -163,7 +163,14 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
     );
   }
 
-  const { call, transcript = [], appointments = [], customer_requests: requests = [], caller_history } = state.data;
+  const {
+    call,
+    transcript = [],
+    appointments = [],
+    customer_requests: requests = [],
+    booking_changes: changes = [],
+    caller_history,
+  } = state.data;
   const named = requests.find((r) => r?.caller_name) || null;
   const callerName = named?.caller_name || appointments[0]?.client_name || null;
   const label = callerLabel({ callerName, callerNumber: call.caller_number });
@@ -173,8 +180,8 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
   const dialled = leftNumber || (telHref(call.caller_number) ? call.caller_number : null);
   const callHref = telHref(dialled);
   const shownNumber = dialled && dialled !== label ? dialled : null;
-  const line = statusLine({ call, appointments, requests });
-  const did = didList({ call, appointments, requests, tz });
+  const line = statusLine({ call, appointments, requests, changes });
+  const did = didList({ call, appointments, requests, changes, tz });
   const booking = appointments[0] || null;
   const lines = expanded ? transcript : transcript.slice(0, FIRST_LINES);
   const open = line.tone === "needs";

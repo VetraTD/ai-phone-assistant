@@ -69,8 +69,20 @@ router.get("/api/appointments", authenticate, withTenantHandler(async (req, res)
               a.client_phone,
               a.scheduled_at,
               a.status,
-              a.notes
+              a.notes,
+              bc.started_at as booked_on,
+              lc.last_change
        from appointments a
+       -- The call that booked it (a move keeps this call), and the newest
+       -- change a call made to it (migration 062), both kept to this business.
+       left join calls bc on bc.id = a.call_id and bc.business_id = $1
+       left join lateral (
+         select json_build_object('kind', ch.kind, 'call_id', ch.call_id, 'created_at', ch.created_at) as last_change
+           from appointment_changes ch
+          where ch.appointment_id = a.id and ch.business_id = $1
+          order by ch.created_at desc, ch.id desc
+          limit 1
+       ) lc on true
        where a.business_id = $1
          ${bounds.sql}
        order by a.scheduled_at asc`,

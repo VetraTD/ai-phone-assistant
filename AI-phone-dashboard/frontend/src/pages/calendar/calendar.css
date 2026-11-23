@@ -355,6 +355,9 @@
 .vt-cal-detail-source .vt-link {
   padding: 0;
 }
+.vt-cal-detail-change {
+  margin-top: 8px;
+}
 .vt-cal-detail-close {
   justify-self: end;
   margin-top: 4px;

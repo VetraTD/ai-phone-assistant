@@ -245,6 +245,19 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
       [id]
     );
 
+    // Bookings this call moved or cancelled (migration 062), oldest first,
+    // with the booking's name. Kept to this business explicitly as well as by
+    // row-level security.
+    const changesRes = await pool.query(
+      `/* booking_changes */
+       SELECT ch.id, ch.appointment_id, ch.kind, ch.old_scheduled_at, ch.new_scheduled_at, ch.created_at, ap.client_name
+         FROM appointment_changes ch
+         LEFT JOIN appointments ap ON ap.id = ch.appointment_id AND ap.business_id = $2
+        WHERE ch.call_id = $1 AND ch.business_id = $2
+        ORDER BY ch.created_at ASC, ch.id ASC`,
+      [id, userBusinessId]
+    );
+
     const call = callRes.rows[0];
 
     // The caller's other calls and this week's bookings (the Inbox's caller
@@ -281,6 +294,7 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
       transcript: transcriptRes.rows,
       appointments: apptRes.rows,
       customer_requests: reqRes.rows,
+      booking_changes: changesRes.rows,
       caller_history: callerHistory,
     });
   } catch (err) {

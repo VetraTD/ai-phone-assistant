@@ -566,3 +566,59 @@ describeDb("Inbox reads: caller history, number search and late requests", () =>
     expect(again.body.calls.map((c) => c.twilio_call_sid)).not.toContain("CA-late-req");
   });
 });
+
+describeDb("booking moves and cancellations on a call's detail (migration 062)", () => {
+  async function seedChanges(tenant, sid) {
+    const { rows: [c] } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status) VALUES ($1, $2, '+15551230077', 'completed') RETURNING id`,
+      [tenant, sid]
+    );
+    const { rows: [named] } = await admin.query(
+      `INSERT INTO appointments (business_id, client_name, scheduled_at) VALUES ($1, 'Moved Patient', '2026-12-08T15:00:00Z') RETURNING id`,
+      [tenant]
+    );
+    const { rows: [unnamed] } = await admin.query(
+      `INSERT INTO appointments (business_id, scheduled_at, status) VALUES ($1, '2026-12-09T17:00:00Z', 'cancelled') RETURNING id`,
+      [tenant]
+    );
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at, created_at)
+       VALUES ($1, $2, $4, 'moved', '2026-12-07T15:00:00Z', '2026-12-08T15:00:00Z', now() - interval '2 minutes'),
+              ($1, $3, $4, 'cancelled', '2026-12-09T17:00:00Z', NULL, now() - interval '1 minute')`,
+      [tenant, named.id, unnamed.id, c.id]
+    );
+    return { callId: c.id, named: named.id, unnamed: unnamed.id };
+  }
+
+  it("a call's detail lists the bookings it moved and cancelled, oldest first", async () => {
+    const { callId, named, unnamed } = await seedChanges(TENANT_A, "CA-chg-a");
+    const res = await request(app).get(`/api/calls/${callId}`);
+    expect(res.status).toBe(200);
+    const changes = res.body.booking_changes;
+    expect(changes.map((c) => [c.appointment_id, c.kind, c.client_name])).toEqual([
+      [named, "moved", "Moved Patient"],
+      [unnamed, "cancelled", null],
+    ]);
+    expect(new Date(changes[0].old_scheduled_at).toISOString()).toBe("2026-12-07T15:00:00.000Z");
+    expect(new Date(changes[0].new_scheduled_at).toISOString()).toBe("2026-12-08T15:00:00.000Z");
+    expect(changes[1].new_scheduled_at).toBeNull();
+    expect(Object.keys(changes[0]).sort()).toEqual(
+      ["appointment_id", "client_name", "created_at", "id", "kind", "new_scheduled_at", "old_scheduled_at"].sort()
+    );
+  });
+
+  it("business B's call detail never shows A's changes", async () => {
+    // A change row of business A pointing at business B's call: only a bug or a
+    // forged write could make one, and B must still never see it.
+    const { rows: [theirCall] } = await admin.query(`SELECT id FROM calls WHERE business_id = $1 LIMIT 1`, [TENANT_B]);
+    const { named } = await seedChanges(TENANT_A, "CA-chg-a2");
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at) VALUES ($1, $2, $3, 'cancelled', now())`,
+      [TENANT_A, named, theirCall.id]
+    );
+    authState.user = { id: STAFF_B, email: EMAIL_B };
+    const res = await request(app).get(`/api/calls/${theirCall.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.booking_changes).toEqual([]);
+  });
+});
