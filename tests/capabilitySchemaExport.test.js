@@ -63,6 +63,16 @@ describe("generated capability schemas", () => {
     expect(adapters.internal).not.toContain("name");
   });
 
+  it("says which scheduling backends keep bookings in VetraTD's own calendar", () => {
+    // The dashboard shows a Calendar tab only where bookings are rows in
+    // `appointments`; athenahealth keeps them in its own system and the webhook
+    // adapter books nothing yet.
+    const adapters = committed().adapters.scheduling;
+    for (const a of adapters) expect(typeof a.storesBookingsLocally, a.id).toBe("boolean");
+    const byId = Object.fromEntries(adapters.map((a) => [a.id, a.storesBookingsLocally]));
+    expect(byId).toEqual({ internal: true, athenahealth: false, webhook: false });
+  });
+
   it("does not leak engine internals into a browser bundle", () => {
     // The dashboard has no business knowing how a pack executes, and prompt
     // text and tool declarations should not ship to a client.

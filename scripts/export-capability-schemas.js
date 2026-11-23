@@ -56,6 +56,9 @@ export function buildSchemaExport() {
         // to decide which identity checks it may offer as verified rather than
         // merely collected — and to explain why, when it cannot.
         verifiableFields: a.verifiableFields || [],
+        // Whether bookings land in VetraTD's own `appointments` table: the
+        // dashboard shows its Calendar tab only then.
+        storesBookingsLocally: a.storesBookingsLocally === true,
       })),
     },
   };

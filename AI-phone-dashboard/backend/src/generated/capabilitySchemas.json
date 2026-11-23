@@ -220,7 +220,8 @@
         "verifiableFields": [
           "phone_on_file",
           "phone_last4"
-        ]
+        ],
+        "storesBookingsLocally": true
       },
       {
         "id": "athenahealth",
@@ -232,13 +233,15 @@
           "phone_on_file",
           "patient_id",
           "customfields.*"
-        ]
+        ],
+        "storesBookingsLocally": false
       },
       {
         "id": "webhook",
         "label": "Send to my own system",
         "selfServe": false,
-        "verifiableFields": []
+        "verifiableFields": [],
+        "storesBookingsLocally": false
       }
     ]
   }

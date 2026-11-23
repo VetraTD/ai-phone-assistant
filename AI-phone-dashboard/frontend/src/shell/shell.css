@@ -1,0 +1,182 @@
+/* The signed-in frame: side navigation on desktop, bottom tab bar on phones. */
+
+.vt-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+}
+
+.vt-skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.vt-skip:focus {
+  top: 12px;
+}
+
+/* --- desktop side navigation --- */
+.vt-sidenav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  background: var(--navy);
+  color: var(--on-navy-muted);
+  padding: 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vt-sidenav :focus-visible {
+  outline-color: var(--cyan);
+}
+
+.vt-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  padding: 0 8px 6px;
+}
+.vt-brand img {
+  border-radius: 8px;
+  display: block;
+}
+
+.vt-bizname {
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 8px 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  overflow-wrap: anywhere;
+}
+
+.vt-navlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.vt-navlist-end {
+  margin-top: auto;
+}
+
+.vt-navitem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px;
+  border-radius: 9px;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: inherit;
+  text-decoration: none;
+}
+.vt-navitem svg {
+  color: #8f9cbd;
+  flex: none;
+}
+.vt-navitem:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.vt-navitem[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+.vt-navitem[aria-current="page"] svg {
+  color: var(--cyan);
+}
+
+.vt-navcount {
+  margin-left: auto;
+  background: var(--cyan);
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
+/* --- content --- */
+.vt-main {
+  min-width: 0;
+  outline: none;
+}
+
+/* --- phone bottom tab bar --- */
+.vt-tabbar {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .vt-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vt-sidenav {
+    display: none;
+  }
+  .vt-main {
+    /* Room for the fixed tab bar, so it never covers the end of a page. */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+  .vt-tabbar {
+    display: grid;
+    grid-template-columns: repeat(var(--vt-tabs, 5), minmax(0, 1fr));
+    position: fixed;
+    z-index: 40;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.97);
+    border-top: 1px solid var(--line);
+    padding: 6px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .vt-tab {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 52px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--faint);
+    text-decoration: none;
+  }
+  .vt-tab[aria-current="page"] {
+    color: var(--ink-blue);
+  }
+  .vt-tabcount {
+    position: absolute;
+    top: 2px;
+    left: calc(50% + 6px);
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--r-pill);
+    background: var(--ink-blue);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
+}

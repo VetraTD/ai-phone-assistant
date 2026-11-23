@@ -29,8 +29,24 @@ import { MemoryRouter } from "react-router-dom";
 const MARKETING_URL = "https://www.vetratd.com";
 const APP_URL = "https://app.vetratd.com";
 
-vi.mock("../App.jsx", () => ({
-  default: () => <div data-testid="dashboard">dashboard</div>,
+// The app build serves the new shell. Sign-in is SessionGate's job and has its
+// own tests; here it stands aside and hands the shell a signed-in business.
+const FAKE_BUSINESS = vi.hoisted(() => ({
+  business: { id: "b1", name: "Brightwork Family Dental", phone_number: "+15550100" },
+  businessId: "b1",
+  setBusiness: () => {},
+  definitions: null,
+  capabilityRows: [],
+  reloadCapabilities: () => {},
+  openCount: 0,
+  setOpenCount: () => {},
+}));
+vi.mock("../shell/SessionGate.jsx", () => ({
+  default: ({ children }) => <div data-testid="dashboard">{children}</div>,
+}));
+vi.mock("../shell/BusinessContext.jsx", () => ({
+  BusinessContext: null,
+  useBusiness: () => FAKE_BUSINESS,
 }));
 vi.mock("../Landing.jsx", () => ({
   default: () => <div data-testid="landing">landing</div>,
@@ -59,9 +75,20 @@ async function at(target, path) {
 describe("the app build (app.vetratd.com)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("serves the dashboard at the root", async () => {
+  it("serves the dashboard at the root, opening on Home", async () => {
     await at("app", "/");
     expect(await screen.findByTestId("dashboard")).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeTruthy();
+  });
+
+  it("an email-style link to a call opens the Inbox", async () => {
+    await at("app", "/inbox/abc");
+    expect(await screen.findByRole("heading", { level: 1, name: "Inbox" })).toBeTruthy();
+  });
+
+  it("an unknown path inside the app is a 404, not a blank shell", async () => {
+    await at("app", "/no-such-page");
+    expect(await screen.findByText(/doesn.t exist/i)).toBeTruthy();
   });
 
   it.each(["/app", "/login", "/signin"])(
@@ -71,6 +98,7 @@ describe("the app build (app.vetratd.com)", () => {
       // and DASHBOARD_URL still does until the domain cutover.
       await at("app", path);
       expect(await screen.findByTestId("dashboard")).toBeTruthy();
+      expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeTruthy();
     }
   );
 

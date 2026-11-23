@@ -22,6 +22,9 @@ export default {
   // until it is actually wired, rather than presented as a working option.
   selfServe: false,
 
+  // A stub that books nothing (book is null), so there is nothing to show.
+  storesBookingsLocally: false,
+
   verifiableFields: [],
 
   claimsIntegration() {

@@ -12,6 +12,9 @@
  *   prove nothing, so identity fields on it are collect-only no matter what an
  *   operator configures. This is what stops the UI offering a guarantee the
  *   backend cannot deliver.
+ * @property {boolean} [storesBookingsLocally]
+ *   True when bookings are rows in VetraTD's own `appointments` table. The
+ *   dashboard shows its Calendar tab only for such a backend.
  * @property {(integrations: Array) => boolean} [claimsIntegration]
  *   Legacy routing: did this business reach this backend before it had explicit
  *   configuration? Preserves behavior mid-migration.

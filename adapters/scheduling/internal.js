@@ -35,6 +35,10 @@ export default {
   // The one appointment backend a business can turn on itself.
   selfServe: true,
 
+  // Bookings are rows in VetraTD's `appointments` table, so the dashboard can
+  // show them on its Calendar.
+  storesBookingsLocally: true,
+
   // Name alone is NOT here. A name is public information, and knowing one must
   // never be enough to cancel a stranger's appointment — the phone number is
   // the second factor. See the appointments pack's identity check.

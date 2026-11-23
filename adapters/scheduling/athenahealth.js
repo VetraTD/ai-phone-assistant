@@ -21,6 +21,9 @@ export default {
   // in the settings picker.
   selfServe: false,
 
+  // Bookings live in athenahealth, not in `appointments`: no dashboard Calendar.
+  storesBookingsLocally: false,
+
   // An EHR holds the patient record, so it can genuinely check a caller
   // against name + date of birth — the same pair a human receptionist uses.
   // customfields.* is where a practice-specific identifier like a "dental

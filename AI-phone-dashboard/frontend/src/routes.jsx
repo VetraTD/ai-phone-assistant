@@ -34,7 +34,12 @@ import Landing from "./Landing.jsx";
 // main.jsx calls createRoot at module scope and cannot be imported by a test.
 // ---------------------------------------------------------------------------
 
-const App = lazy(() => import("./App.jsx"));
+// The signed-in dashboard: SessionGate + AppShell, with each page in the
+// shell's <Outlet/>. Lazy, so the marketing build never loads any of it.
+const AppLayout = lazy(() => import("./shell/AppLayout.jsx"));
+const Home = lazy(() => import("./pages/Home.jsx"));
+const Inbox = lazy(() => import("./pages/Inbox.jsx"));
+const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
 const Contact = lazy(() => import("./Contact.jsx"));
 const ResetPassword = lazy(() => import("./resetPassword.jsx"));
@@ -97,6 +102,11 @@ export function NotFound() {
   );
 }
 
+// Placeholder for the pages part 1 hosts next (Task 7 moves the old ones in).
+function PageHeading({ title }) {
+  return <h1>{title}</h1>;
+}
+
 export default function AppRoutes() {
   const isApp = BUILD_TARGET === "app";
 
@@ -105,16 +115,33 @@ export default function AppRoutes() {
       <Routes>
         {isApp ? (
           <>
-            <Route path="/" element={<App />} />
-            <Route path="/app" element={<Navigate to="/" replace />} />
+            <Route element={<AppLayout />}>
+              <Route path="/home" element={<Home />} />
+              <Route path="/inbox" element={<Inbox />} />
+              <Route path="/inbox/:callId" element={<Inbox />} />
+              <Route path="/calendar" element={<PageHeading title="Calendar" />} />
+              <Route path="/voice-agent" element={<VoiceAgent />} />
+              <Route path="/voice-agent/:section" element={<VoiceAgent />} />
+              <Route path="/voice-agent/:section/:item" element={<VoiceAgent />} />
+              <Route path="/settings" element={<PageHeading title="Settings" />} />
+              <Route path="/settings/:item" element={<PageHeading title="Settings" />} />
+              <Route path="/trends" element={<PageHeading title="Call trends" />} />
+            </Route>
+            {/*
+              Every address an alert email has ever carried lands on Home: the
+              bare dashboard address and /app (sent before the move to the
+              root), plus the Log in links below.
+            */}
+            <Route path="/" element={<Navigate to="/home" replace />} />
+            <Route path="/app" element={<Navigate to="/home" replace />} />
             {/*
               The marketing site is a separate deployment and is not rebuilt
               when this router changes, so it needs a link that cannot rot.
               "https://app.vetratd.com" is correct but reads like a bare domain
               in a nav bar; a Log in button should be able to point at /login.
             */}
-            <Route path="/login" element={<Navigate to="/" replace />} />
-            <Route path="/signin" element={<Navigate to="/" replace />} />
+            <Route path="/login" element={<Navigate to="/home" replace />} />
+            <Route path="/signin" element={<Navigate to="/home" replace />} />
             <Route path="/reset-password" element={<ResetPassword />} />
           </>
         ) : (
