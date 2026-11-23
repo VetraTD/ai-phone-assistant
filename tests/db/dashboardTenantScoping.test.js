@@ -414,6 +414,51 @@ describeDb("the dashboard records PHI access (§164.312(b))", () => {
     expect(rows[0].row_count).toBe(1);
   });
 
+  it("records how many calls the list showed, and which", async () => {
+    for (const sid of ["CA-audit-list-1", "CA-audit-list-2"]) {
+      await admin.query(`INSERT INTO calls (business_id, twilio_call_sid, caller_number, status) VALUES ($1, $2, '+15551239877', 'completed')`, [TENANT_A, sid]);
+    }
+    const res = await request(app).get("/api/calls").query({ view: "all" });
+    expect(res.body.calls).toHaveLength(3);
+    const rows = await auditRows(1);
+    expect(rows[0].row_count).toBe(3);
+    expect([...rows[0].resource_ids].sort()).toEqual(res.body.calls.map((c) => c.id).sort());
+  });
+
+  it("records how many records Home showed", async () => {
+    for (const sid of ["CA-audit-home-1", "CA-audit-home-2"]) {
+      const { rows: [c] } = await admin.query(
+        `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, started_at) VALUES ($1, $2, '+15551239878', 'completed', now()) RETURNING id`,
+        [TENANT_A, sid]
+      );
+      await admin.query(`INSERT INTO customer_requests (business_id, call_id, request_type, message) VALUES ($1, $2, 'message', 'Please ring back')`, [TENANT_A, c.id]);
+    }
+    const res = await request(app).get("/api/home");
+    const shown = res.body.openItems.length + res.body.doneToday.length + res.body.todaysBookings.length;
+    expect(shown).toBeGreaterThan(1);
+    const rows = await auditRows(1);
+    expect(rows[0].row_count).toBe(shown);
+  });
+
+  it("records a CSV download as an export of the calls in it, and only this business's", async () => {
+    const { rows: [own] } = await admin.query(`SELECT id FROM calls WHERE business_id = $1 LIMIT 1`, [TENANT_A]);
+    const { rows: [theirs] } = await admin.query(`SELECT id FROM calls WHERE business_id = $1 LIMIT 1`, [TENANT_B]);
+    const res = await request(app).post("/api/calls/export-record").send({ ids: [own.id, theirs.id] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ recorded: 1 });
+    const rows = await auditRows(1);
+    expect(rows[0].action).toBe("export");
+    expect(rows[0].row_count).toBe(1);
+    expect(rows[0].resource_ids).toEqual([own.id]);
+  });
+
+  it("refuses an export record it cannot read", async () => {
+    for (const body of [{}, { ids: "x" }, { ids: ["not-a-uuid"] }, { ids: Array.from({ length: 501 }, () => "aaaa1111-aaaa-4aaa-8aaa-aaaaaaaa1111") }]) {
+      const res = await request(app).post("/api/calls/export-record").send(body);
+      expect(res.status, JSON.stringify(body).slice(0, 40)).toBe(400);
+    }
+  });
+
   // One row per UNIT OF WORK, not per statement. /api/calls runs several
   // queries; a per-statement trail would make one staff member opening one page
   // look like a dozen accesses.

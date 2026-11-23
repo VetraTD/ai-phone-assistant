@@ -163,6 +163,29 @@ beforeEach(async () => {
 
 const exportSubject = () => db.withTenant(BUSINESS, () => db.exportCallerData(BUSINESS, SUBJECT));
 
+d("Art. 15 export includes the subject's booking moves and cancellations (migration 062)", () => {
+  it("returns the change rows for the subject's own bookings only", async () => {
+    const own = (await admin.query(`SELECT id, call_id FROM appointments WHERE business_id = $1 AND client_phone = $2`, [BUSINESS, SUBJECT])).rows[0];
+    const bystanders = (await admin.query(`SELECT id FROM appointments WHERE business_id = $1 AND client_phone = $2`, [BUSINESS, BYSTANDER])).rows[0];
+    const otherTenant = (await admin.query(`SELECT id FROM appointments WHERE business_id = $1 AND client_phone = $2`, [OTHER_BUSINESS, SUBJECT])).rows[0];
+    await admin.query(
+      `INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at)
+       VALUES ($1, $2, $3, 'moved', '2026-12-07T15:00:00Z', '2026-12-08T15:00:00Z'),
+              ($1, $4, NULL, 'cancelled', '2026-12-09T15:00:00Z', NULL),
+              ($5, $6, NULL, 'cancelled', '2026-12-10T15:00:00Z', NULL)`,
+      [BUSINESS, own.id, own.call_id, bystanders.id, OTHER_BUSINESS, otherTenant.id]
+    );
+    try {
+      const data = await exportSubject();
+      expect(data.appointmentChanges).toHaveLength(1);
+      expect(data.appointmentChanges[0]).toMatchObject({ appointment_id: own.id, call_id: own.call_id, kind: "moved" });
+      expect(new Date(data.appointmentChanges[0].old_scheduled_at).toISOString()).toBe("2026-12-07T15:00:00.000Z");
+    } finally {
+      await admin.query(`DELETE FROM appointment_changes WHERE appointment_id IN ($1, $2, $3)`, [own.id, bystanders.id, otherTenant.id]);
+    }
+  });
+});
+
 d("Art. 15 export reaches outbound calling's tables (S4-3)", () => {
   it("returns the subject's rows for every outbound table, and the old keys still", async () => {
     const data = await exportSubject();

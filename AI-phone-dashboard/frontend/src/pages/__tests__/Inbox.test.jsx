@@ -3,7 +3,7 @@ import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router-dom";
 
-vi.mock("../../api", () => ({ api: { get: vi.fn(), put: vi.fn(), delete: vi.fn() } }));
+vi.mock("../../api", () => ({ api: { get: vi.fn(), put: vi.fn(), delete: vi.fn(), post: vi.fn() } }));
 vi.mock("../../callsCsv", () => ({ buildCallsCsv: vi.fn(() => "Date,Caller\r\nx,y") }));
 
 import { api } from "../../api";
@@ -154,15 +154,38 @@ describe("Inbox list", () => {
     const calls = [row({ id: "a" }), row({ id: "b", caller_name_guess: "Other Caller" })];
     globalThis.URL.createObjectURL = vi.fn(() => "blob:x");
     globalThis.URL.revokeObjectURL = vi.fn();
+    api.post.mockResolvedValue({ data: { recorded: 2 } });
     renderInbox("/inbox", { calls });
     await screen.findByText("Other Caller");
     await user.click(screen.getByRole("button", { name: "Download calls (CSV)" }));
-    expect(buildCallsCsv).toHaveBeenCalledWith(calls);
+    // Recorded in the access log as an export first, then built.
+    expect(api.post).toHaveBeenCalledWith("/api/calls/export-record", { ids: ["a", "b"] });
+    await waitFor(() => expect(buildCallsCsv).toHaveBeenCalledWith(calls));
+  });
+
+  it("does not download what it could not record", async () => {
+    const user = userEvent.setup();
+    globalThis.URL.createObjectURL = vi.fn(() => "blob:x");
+    globalThis.URL.revokeObjectURL = vi.fn();
+    api.post.mockRejectedValue(new Error("offline"));
+    renderInbox("/inbox", { calls: [row({ id: "a" })] });
+    await screen.findByText("Sample Caller");
+    await user.click(screen.getByRole("button", { name: "Download calls (CSV)" }));
+    expect(await screen.findByText("Couldn't prepare the download. Try again in a minute.")).toBeInTheDocument();
+    expect(buildCallsCsv).not.toHaveBeenCalled();
   });
 });
 
 describe("Inbox call view", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("a link with a broken call id says so and asks the server for nothing", async () => {
+    renderInbox("/inbox/..%2F..%2Fapi%2Fhome");
+    expect(await screen.findByText("That call isn't here.")).toBeInTheDocument();
+    const paths = api.get.mock.calls.map(([url]) => url);
+    expect(paths.some((u) => u.includes(".."))).toBe(false);
+    expect(paths).not.toContain("/api/home");
+  });
 
   it("shows what is needed, the summary, what VetraTD did and the conversation", async () => {
     renderInbox("/inbox/c1", {

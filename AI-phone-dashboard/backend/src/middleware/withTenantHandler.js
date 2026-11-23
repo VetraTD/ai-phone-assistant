@@ -77,6 +77,10 @@ function withTenantHandler(handler) {
     //
     // Only wrapped for a classified route: a non-PHI response is nobody's
     // business and there is no reason to touch res.json on those paths.
+    //
+    // A response that is an OBJECT (Home, the calls list) holds many records,
+    // and only the handler knows how many: it says so with discloseRecords(),
+    // and that count wins over the guess from the response's shape.
     let disclosed = 0;
     if (access) {
       const json = res.json.bind(res);
@@ -85,10 +89,14 @@ function withTenantHandler(handler) {
         return json(body);
       };
     }
+    // The records being read: the route's own :id, plus any the handler names.
+    // One array, read by withTenant after the handler has run.
+    const resourceIds = req.params?.id ? [req.params.id] : [];
+    res.locals.phiResourceIds = resourceIds;
 
     try {
       await db.withTenant(businessId, () => handler(req, res), {
-        rowCount: () => disclosed,
+        rowCount: () => (Number.isInteger(res.locals.phiRowCount) ? res.locals.phiRowCount : disclosed),
         access,
         // The record being read, when the route names one. This is what makes
         // "who accessed THIS call" answerable — the question O29 put a GIN
@@ -99,7 +107,7 @@ function withTenantHandler(handler) {
         // `:businessId` do not identify a patient record, and an audit column
         // that accumulates whatever happened to be in the URL stops meaning
         // one thing.
-        resourceIds: req.params?.id ? [req.params.id] : [],
+        resourceIds,
         // The AUTH provider's id, not `users.id`. It is what identifies the
         // human being to Identity Platform, survives a staff row being
         // rewritten, and is what an investigator would be given to look up.
@@ -115,4 +123,28 @@ function withTenantHandler(handler) {
   };
 }
 
-module.exports = { withTenantHandler };
+// A uuid, and nothing else: resource_ids is uuid[].
+const RECORD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// The id list is capped (row_count stays the true total), as the voice
+// engine's audit writer caps it: "200 rows, here are the first 100".
+const MAX_RECORD_IDS = 100;
+
+/**
+ * Tell the access log how many records this response disclosed, and which.
+ * For a route whose response is an object holding many records (Home, the
+ * calls list, an export); without it such a response counts as one.
+ *
+ * @param {import("express").Response} res
+ * @param {{ count: number, ids?: Array<string|null|undefined> }} disclosed
+ */
+function discloseRecords(res, { count, ids = [] }) {
+  res.locals.phiRowCount = Math.max(0, Math.trunc(Number(count) || 0));
+  const list = res.locals.phiResourceIds;
+  if (!Array.isArray(list)) return;
+  for (const id of ids) {
+    if (list.length >= MAX_RECORD_IDS) break;
+    if (typeof id === "string" && RECORD_ID.test(id) && !list.includes(id)) list.push(id);
+  }
+}
+
+module.exports = { withTenantHandler, discloseRecords };

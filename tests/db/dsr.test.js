@@ -164,7 +164,7 @@ describeDb("Art. 15 export", () => {
   it("is empty, not an error, for a caller with no history", async () => {
     const data = await db.exportCallerData(BUSINESS, "+15550000000");
     expect(data).toEqual({
-      calls: [], transcripts: [], appointments: [], customerRequests: [], smsConsents: [],
+      calls: [], transcripts: [], appointments: [], appointmentChanges: [], customerRequests: [], smsConsents: [],
       contacts: [], consents: [], outreach: [], callAttempts: [], suppressions: [], outbox: [],
     });
   });

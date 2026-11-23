@@ -3,7 +3,7 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { withTenantHandler } = require("../middleware/withTenantHandler");
+const { withTenantHandler, discloseRecords } = require("../middleware/withTenantHandler");
 const { loadBusinessTimezone } = require("../callDateBounds");
 
 // Day and week bounds in the BUSINESS's timezone ($2), never the database's or
@@ -114,6 +114,11 @@ router.get("/api/home", authenticate, withTenantHandler(async (req, res) => {
     const bookings = await pool.query(TODAYS_BOOKINGS, [businessId, tz]);
     const n = counts.rows[0] || {};
 
+    // Every open item, done row and booking on the page.
+    discloseRecords(res, {
+      count: open.rows.length + done.rows.length + bookings.rows.length,
+      ids: [...open.rows, ...done.rows].map((r) => r.call_id),
+    });
     res.json({
       timezone: tz,
       openItems: open.rows.map((r) => ({

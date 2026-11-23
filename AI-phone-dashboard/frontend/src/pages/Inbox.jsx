@@ -19,7 +19,12 @@ const LIST_ERROR = "Couldn't load your calls. Check your connection, then try ag
  * and an alert email's link opens the right call.
  */
 export default function Inbox() {
-  const { callId } = useParams();
+  const { callId: rawCallId } = useParams();
+  // Only an id made of letters, digits and dashes goes anywhere near an API
+  // path: the router decodes %2F, so /inbox/..%2Fapi%2Fhome would otherwise
+  // become a request for another API address.
+  const badCallId = rawCallId !== undefined && !/^[0-9a-z-]{1,64}$/i.test(rawCallId);
+  const callId = badCallId ? undefined : rawCallId;
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "all" ? "all" : "open";
   const q = params.get("q") || "";
@@ -130,7 +135,11 @@ export default function Inbox() {
         search={params.toString()}
         tz={tz}
       />
-      {callId ? (
+      {badCallId ? (
+        <div className="vt-inbox-empty">
+          <p>That call isn't here.</p>
+        </div>
+      ) : callId ? (
         <CallView key={callId} callId={callId} tz={tz} backSearch={params.toString()} onHandledChange={onHandledChange}>
           {(history) => <CallerPanel history={history} tz={tz} />}
         </CallView>

@@ -24,6 +24,13 @@ app.use(
   })
 );
 
+// Call data must not stay in a browser's disk cache after someone signs out of
+// a shared front-desk PC: no API response is stored.
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 // CORS allow-list. Kept deliberately in step with the voice server's — see the
 // long comment there for the reasoning behind each of these three changes.
 //

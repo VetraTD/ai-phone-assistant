@@ -2403,6 +2403,23 @@ export async function exportCallerData(businessId, phone) {
     return null;
   }
 
+  // The subject's bookings' moves and cancellations (migration 062): personal
+  // data by linkage, and for a clinic, about the person's care.
+  const appointmentIds = appointments.rows.map((a) => a.id);
+  const appointmentChanges = appointmentIds.length
+    ? await q(
+        `SELECT id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at, created_at
+           FROM appointment_changes
+          WHERE business_id = $1 AND appointment_id = ANY($2::uuid[])
+          ORDER BY created_at ASC, id ASC`,
+        [businessId, appointmentIds]
+      )
+    : { rows: [] };
+  if (appointmentChanges.error) {
+    log.error("db_error", { operation: "exportCallerData.appointmentChanges", error: appointmentChanges.error.message });
+    return null;
+  }
+
   const requests = await q(
     `SELECT id, request_type, caller_name, callback_number, message, preferred_time, notes, details, created_at
        FROM customer_requests
@@ -2554,6 +2571,7 @@ export async function exportCallerData(businessId, phone) {
       calls.rows.length +
       transcripts.rows.length +
       appointments.rows.length +
+      appointmentChanges.rows.length +
       requests.rows.length +
       consents.rows.length +
       contacts.rows.length +
@@ -2568,6 +2586,7 @@ export async function exportCallerData(businessId, phone) {
     calls: calls.rows,
     transcripts: transcripts.rows,
     appointments: appointments.rows,
+    appointmentChanges: appointmentChanges.rows,
     customerRequests: requests.rows,
     smsConsents: consents.rows,
     contacts: contacts.rows,

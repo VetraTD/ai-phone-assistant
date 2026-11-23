@@ -241,7 +241,7 @@ describe("Voice agent after the final review", () => {
     expect(await screen.findByText("Choose one of the offered options")).toBeInTheDocument();
   });
 
-  it("does not show Quotes to a business that has it stored but off (live data: Digile)", () => {
+  it("does not show Quotes to a business that has it stored but off (seen on a live business)", () => {
     renderAgent("/voice-agent", { rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false, { configured: true })] });
     expect(within(actions()).queryByRole("switch", { name: "Quotes" })).toBeNull();
   });

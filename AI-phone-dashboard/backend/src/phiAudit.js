@@ -38,7 +38,13 @@
 /** `METHOD /path` (the express route pattern, so `:id` stays a parameter). */
 const PHI_ROUTES = Object.freeze({
   // The record that an interaction happened, and who was on the other end.
-  "GET /api/calls": { action: "read", resources: ["calls"] },
+  // Each row also names the caller from their message or booking.
+  "GET /api/calls": { action: "read", resources: ["calls", "customer_requests", "appointments"] },
+
+  // "Download calls (CSV)": the list the browser already holds, written to a
+  // file. Recorded BEFORE the file is made, as an export of exactly the calls
+  // in it (only this business's are counted).
+  "POST /api/calls/export-record": { action: "export", resources: ["calls", "customer_requests", "appointments"] },
 
   // THE RICHEST PHI READ IN THE PRODUCT. One request returns the call, its full
   // transcript, every appointment booked on it and every message left — what a

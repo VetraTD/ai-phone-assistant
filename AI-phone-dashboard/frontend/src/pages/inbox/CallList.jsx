@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { api } from "../../api";
 import { buildCallsCsv } from "../../callsCsv";
 import { callerLabel, dayHeading, formatTime, localDay } from "../../calls/format";
 import { needText } from "../../calls/callStatus";
 
 const SEARCH_DELAY_MS = 300;
+const CSV_ERROR = "Couldn't prepare the download. Try again in a minute.";
 
 function downloadCsv(csv, filename) {
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
@@ -48,6 +50,7 @@ export default function CallList({
   // When the search in the address changes from outside (the Inbox tab, the
   // back button), the box follows it.
   const [shownQuery, setShownQuery] = useState(query);
+  const [csvError, setCsvError] = useState("");
   if (query !== shownQuery) {
     setShownQuery(query);
     if (query !== text.trim()) setText(query);
@@ -98,13 +101,25 @@ export default function CallList({
           type="button"
           className="vt-link vt-csv"
           disabled={!calls.length}
-          onClick={() => {
+          onClick={async () => {
+            setCsvError("");
+            // Recorded in the access log as an export first; a download that
+            // cannot be recorded is not made.
+            try {
+              await api.post("/api/calls/export-record", { ids: calls.map((c) => c.id) });
+            } catch {
+              setCsvError(CSV_ERROR);
+              return;
+            }
             const csv = buildCallsCsv(calls);
             if (csv) downloadCsv(csv, `vetratd-calls-${localDay(new Date().toISOString(), tz)}.csv`);
           }}
         >
           Download calls (CSV)
         </button>
+        <div role="status" aria-live="polite" className="vt-inline-error">
+          {csvError ? <p>{csvError}</p> : null}
+        </div>
       </div>
 
       {status === "error" ? (

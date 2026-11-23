@@ -3,8 +3,8 @@ const router = express.Router();
 
 const authenticate = require("../middleware/authMiddleware");
 const pool = require("../db");
-const { sanitizeString } = require("../utils");
-const { withTenantHandler } = require("../middleware/withTenantHandler");
+const { sanitizeString, rejectUnexpectedKeys } = require("../utils");
+const { withTenantHandler, discloseRecords } = require("../middleware/withTenantHandler");
 const { loadBusinessTimezone, callDateClauses } = require("../callDateBounds");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
 const { isWithheld } = require("../withheld");
@@ -201,6 +201,7 @@ if (needs_followup === "true") {
       ...row,
       inferred_transferred: row.status === "transferred",
     }));
+    discloseRecords(res, { count: rows.length, ids: rows.map((c) => c.id) });
     res.json({ calls: rows, total });
   } catch (err) {
     const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
@@ -300,6 +301,8 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
     // See the /api/calls list handler above — mirrors the authoritative
     // status column rather than regexing the summary text.
     const inferredTransferred = call?.status === "transferred";
+    // This call, and the caller's other calls shown beside it.
+    discloseRecords(res, { count: 1 + callerHistory.calls.length, ids: callerHistory.calls.map((c) => c.id) });
     res.json({
       call: { ...call, inferred_transferred: inferredTransferred },
       transcript: transcriptRes.rows,
@@ -361,6 +364,34 @@ router.delete("/api/calls/:id/handled", authenticate, authSensitiveLimiter, with
   } catch (err) {
     console.error("call_reopen_failed", { callId: id, message: err?.message });
     res.status(500).json({ error: "Couldn't reopen that. Try again." });
+  }
+}));
+
+// "Download calls (CSV)" records an export of the calls in the file before the
+// browser makes it (spec §10a: the export is in the access log). The browser
+// sends the ids it is about to write; only this business's are counted, so the
+// record says exactly which calls left, and a download that cannot be recorded
+// is not made.
+const EXPORT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_EXPORT_IDS = 500;
+router.post("/api/calls/export-record", authenticate, authSensitiveLimiter, withTenantHandler(async (req, res) => {
+  try {
+    rejectUnexpectedKeys(req.body || {}, ["ids"]);
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || ids.length > MAX_EXPORT_IDS || !ids.every((id) => typeof id === "string" && EXPORT_ID.test(id))) {
+      return res.status(400).json({ error: "Choose up to 500 calls to download." });
+    }
+    const r = await pool.query(
+      `SELECT id FROM calls WHERE business_id = $1 AND id = ANY($2::uuid[])`,
+      [req.businessId, ids]
+    );
+    discloseRecords(res, { count: r.rows.length, ids: r.rows.map((row) => row.id) });
+    res.json({ recorded: r.rows.length });
+  } catch (err) {
+    const status = err.statusCode && Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    if (status === 400) return res.status(400).json({ error: "Choose up to 500 calls to download." });
+    console.error("calls_export_record_failed", { message: err?.message });
+    res.status(500).json({ error: "Couldn't prepare the download. Try again in a minute." });
   }
 }));
 
