@@ -17,6 +17,10 @@ export default function Contact() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [phone, setPhone] = useState("");
+  // SMS opt-in: optional and unticked by default. It must never be
+  // pre-ticked or required to send the form.
+  const [smsConsent, setSmsConsent] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
@@ -24,13 +28,25 @@ export default function Contact() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const trimmedPhone = phone.trim();
+    if (smsConsent && !trimmedPhone) {
+      setError("Please enter a mobile number to receive text messages, or untick the SMS box.");
+      return;
+    }
     setSending(true);
     try {
-      await axios.post(`${API}/api/contact`, { name, email, message });
+      const payload = { name, email, message };
+      if (trimmedPhone) {
+        payload.phone = trimmedPhone;
+        payload.smsConsent = smsConsent;
+      }
+      await axios.post(`${API}/api/contact`, payload);
       setSent(true);
       setName("");
       setEmail("");
       setMessage("");
+      setPhone("");
+      setSmsConsent(false);
     } catch (err) {
       setError(err?.response?.data?.error || "Something went wrong. Please try again or email us directly.");
     } finally {
@@ -117,6 +133,38 @@ export default function Contact() {
                   rows={5}
                   required
                 />
+              </div>
+              <div className="contact-field">
+                <label htmlFor="contact-phone">
+                  Mobile number <span className="contact-optional">(optional)</span>
+                </label>
+                <input
+                  id="contact-phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+1 (555) 123-4567"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={32}
+                />
+              </div>
+              <div className="contact-consent">
+                <input
+                  id="contact-sms-consent"
+                  type="checkbox"
+                  checked={smsConsent}
+                  onChange={(e) => setSmsConsent(e.target.checked)}
+                />
+                <label htmlFor="contact-sms-consent">
+                  (Optional) By checking this box, I agree to receive text messages from VetraTD about my
+                  enquiry and our service at the mobile number provided. Consent is not a condition of
+                  purchase. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt
+                  out, HELP for help, or email{" "}
+                  <a href="mailto:josh.tite@vetratd.com" className="contact-link">josh.tite@vetratd.com</a>.
+                  See our <Link to="/legal#sms-privacy" className="contact-link">Privacy Policy</Link> and{" "}
+                  <Link to="/legal#sms-terms" className="contact-link">Terms</Link>.
+                </label>
               </div>
               {error && <p className="contact-error">{error}</p>}
               <button type="submit" className="contact-submit" disabled={sending}>

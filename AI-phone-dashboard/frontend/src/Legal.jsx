@@ -4,6 +4,7 @@ import "./Legal.css";
 import { MARKETING_URL } from "./siteUrl";
 
 const CONTACT_EMAIL = "support@vetratd.com";
+const SMS_CONTACT_EMAIL = "josh.tite@vetratd.com";
 
 export default function Legal() {
   return (
@@ -34,6 +35,10 @@ export default function Legal() {
             <p>
               <strong>Where it&apos;s stored.</strong> Data is stored using secure, industry-standard infrastructure with encryption and access controls to protect your information.
             </p>
+            <p id="sms-privacy">
+              <strong>Text messaging (SMS).</strong> If you give us your mobile number and opt in to text messages (for example, on our contact form), we use that number only to send the messages you agreed to receive. No mobile information will be shared with third parties or affiliates for marketing or promotional purposes. Text messaging opt-in data and consent are not shared with any third party. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out at any time, or HELP for help. You can also contact us at{" "}
+              <a href={`mailto:${SMS_CONTACT_EMAIL}`} className="legal-link">{SMS_CONTACT_EMAIL}</a>.
+            </p>
             <p>
               <strong>Your rights.</strong> You may request access to, correction of, or deletion of your data by contacting us at {CONTACT_EMAIL}. We will respond in a reasonable time.
             </p>
@@ -55,6 +60,10 @@ export default function Legal() {
             </p>
             <p>
               <strong>Service &ldquo;as is.&rdquo;</strong> While we strive to keep the service available and accurate, the service is provided &ldquo;as is.&rdquo; We do not guarantee uninterrupted access or that the service will meet every specific need.
+            </p>
+            <p id="sms-terms">
+              <strong>Text messaging (SMS) terms.</strong> Opting in to text messages from VetraTD is optional and is not a condition of purchase. If you opt in, you agree to receive text messages from VetraTD about your enquiry and our service at the mobile number you provide. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out at any time; you will receive a single message confirming you have been unsubscribed. Reply HELP for help, or contact us at{" "}
+              <a href={`mailto:${SMS_CONTACT_EMAIL}`} className="legal-link">{SMS_CONTACT_EMAIL}</a>. Carriers are not liable for delayed or undelivered messages. See the Privacy Policy above for how we handle your mobile information.
             </p>
             <p>
               <strong>Termination.</strong> We may suspend or terminate your access if you breach these terms or for other operational reasons. You may stop using the service at any time.
