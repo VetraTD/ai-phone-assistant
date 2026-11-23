@@ -20,14 +20,7 @@ const FIXTURES = {
 };
 
 describe("resolveScenarioConfig", () => {
-  it("a scenario's own config replaces the fixture config completely", () => {
-    const own = { businessName: "Own Co", capabilities: {} };
-    const { config } = resolveScenarioConfig({ fixture: "base", config: own }, FIXTURES);
-    expect(config).toEqual(own);
-    expect(config.onlyInFixture).toBeUndefined();
-  });
-
-  it("a scenario with its own config needs no fixture", () => {
+  it("a scenario with its own config uses it as is and needs no fixture", () => {
     const own = { businessName: "Own Co" };
     const { config, extras } = resolveScenarioConfig({ config: own, extrasPatch: { callerPhone: "+447700900123" } }, FIXTURES);
     expect(config).toEqual(own);
@@ -42,6 +35,14 @@ describe("resolveScenarioConfig", () => {
     expect(config.businessName).toBe("Patched");
     expect(config.onlyInFixture).toBe("leaks if merged");
     expect(extras).toEqual({ knowledge: ["fixture fact"], transferAllowed: false });
+  });
+
+  it("refuses a scenario that names both its own config and a fixture", () => {
+    // The fixture's extras (knowledge, caller history, integrations) belong to
+    // another business; inheriting them would test a different agent.
+    expect(() => resolveScenarioConfig({ fixture: "base", config: { businessName: "Own Co" } }, FIXTURES)).toThrow(
+      /both "config" and "fixture"/
+    );
   });
 
   it("an unknown fixture with no config of its own still fails loudly", () => {
@@ -61,6 +62,12 @@ describe("loadScenarios", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("names the folder when it does not exist, instead of a bare ENOENT", async () => {
+    await expect(loadScenarios(path.join(os.tmpdir(), "no-such-eval-dir-xyz"))).rejects.toThrow(
+      /scenarios folder not found: .*no-such-eval-dir-xyz/
+    );
   });
 
   it("defaults to the built-in scenarios", async () => {

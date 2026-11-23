@@ -32,7 +32,7 @@
  */
 
 import "dotenv/config";
-import { readdirSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
@@ -160,7 +160,9 @@ export function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 
 export async function loadScenarios(dir = SCENARIOS_DIR) {
+  // Relative to the current directory, like any other CLI path.
   const root = path.resolve(dir);
+  if (!existsSync(root)) throw new Error(`scenarios folder not found: ${root}`);
   const files = readdirSync(root).filter((f) => f.endsWith(".js")).sort();
   const scenarios = [];
   for (const f of files) {
@@ -174,21 +176,23 @@ export async function loadScenarios(dir = SCENARIOS_DIR) {
 /**
  * The business config and extras a scenario runs against. A scenario either
  * names a fixture (optionally patched) or carries a complete `config` of its
- * own, which then replaces the fixture's config outright — no fixture key may
- * leak into a config that is meant to be exactly one tenant's.
+ * own. The two are exclusive: a fixture's config AND extras (knowledge, caller
+ * history, integrations) belong to another business, and a scenario that is
+ * meant to be exactly one tenant must not inherit either. Its extras come from
+ * extrasPatch alone.
  *
  * @param {object} scenario
  * @param {object} [fixtures] - defaults to tests/fixtures/businessConfigs.js
  * @returns {{config: object, extras: object}}
  */
 export function resolveScenarioConfig(scenario, fixtures = FIXTURES) {
-  const fixture = scenario.fixture ? fixtures[scenario.fixture] : null;
   if (scenario.config) {
-    return {
-      config: scenario.config,
-      extras: { ...(fixture?.extras || {}), ...(scenario.extrasPatch || {}) },
-    };
+    if (scenario.fixture) {
+      throw new Error(`scenario "${scenario.name}" has both "config" and "fixture"; use one`);
+    }
+    return { config: scenario.config, extras: { ...(scenario.extrasPatch || {}) } };
   }
+  const fixture = scenario.fixture ? fixtures[scenario.fixture] : null;
   if (!fixture) throw new Error(`unknown fixture "${scenario.fixture}"`);
   return {
     config: { ...fixture.config, ...(scenario.configPatch || {}) },
