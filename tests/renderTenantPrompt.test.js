@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderTenantPrompt } from "../scripts/render-tenant-prompt.js";
+import { renderTenantPrompt, payloadToConfig } from "../scripts/render-tenant-prompt.js";
+import { buildSystemInstruction } from "../services/gemini.js";
 
 // A reserved, fictional business: example.com style names only.
 const BASE = {
@@ -67,6 +68,19 @@ describe("renderTenantPrompt", () => {
     const p = clone(BASE);
     p.capabilities[1].enabled = true;
     expect(renderTenantPrompt(p).prompt).toMatch(/check_appointment_availability/);
+  });
+
+  it("payloadToConfig builds the exact config the prompt is rendered from", () => {
+    // The eval runner tests a real tenant payload through this; if it drifted
+    // from what renderTenantPrompt renders, a sim would test a different agent.
+    const config = payloadToConfig(BASE);
+    const prompt = buildSystemInstruction("greeting", null, config, { greetingSpoken: false });
+    expect(prompt).toBe(renderTenantPrompt(BASE).prompt);
+    expect(config.businessName).toBe("Example Plumbing Co");
+  });
+
+  it("payloadToConfig refuses a payload with no business object", () => {
+    expect(() => payloadToConfig({ capabilities: [] })).toThrow(/business/);
   });
 
   it("accepts capability / id spellings the importer accepts", () => {

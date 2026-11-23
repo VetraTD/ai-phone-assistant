@@ -35,6 +35,10 @@ npm run eval -- --model gemini-2.5-pro --temperature 0   # one-off model overrid
 `--filter` matches on the scenario `name`; `--tag` matches an entry in its
 `tags` array. Both narrow the set before anything runs (and before any spend).
 
+`--scenarios <dir>` reads scenarios from another folder instead of
+`eval/scenarios`. Use it for one client's scenarios, which carry that client's
+details and so belong in a gitignored folder, not here.
+
 `npm run chat` (`scripts/chat.js`) is the same harness in a REPL — type caller
 turns, watch the receptionist reply and the tool calls. Use it to sanity-check a
 new scenario's wording before you commit assertions to it.
@@ -125,6 +129,12 @@ export default {
   judge: [ "Did the receptionist confirm the booking before ending the call?" ],
 };
 ```
+
+To test a real tenant before it is imported, give the scenario a complete
+`config` instead of a fixture: `config: payloadToConfig(payload)` (from
+`scripts/render-tenant-prompt.js`, the same `loadConfig` the call path uses).
+It replaces the fixture's config outright; `fixture` becomes optional and
+`extrasPatch` still applies.
 
 **`ctx` shape** the runner assembles for hard asserts: `toolCalls` (flat, in
 order), `toolResults`, `turns` (`{caller, reply, toolCalls, …}`), `transcript`,

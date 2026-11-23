@@ -22,13 +22,9 @@ import { buildSystemInstruction } from "../services/gemini.js";
 
 const LIMIT = 2000;
 
-export function renderTenantPrompt(payload) {
-  const business = payload?.business;
-  if (!business || typeof business !== "object") {
-    throw new Error('Payload needs a "business" object.');
-  }
+/** The capability rows a payload would write, adapted the way importTenant does. */
+function payloadRows(payload) {
   const capabilities = Array.isArray(payload.capabilities) ? payload.capabilities : [];
-
   // Same adapting importTenant does: the id may be spelled three ways.
   const rows = [];
   for (const cap of capabilities) {
@@ -42,8 +38,26 @@ export function renderTenantPrompt(payload) {
       ...(cap.adapter_config ? { adapter_config: cap.adapter_config } : {}),
     });
   }
+  return rows;
+}
 
-  const config = loadConfig({ id: "payload-check", ...business }, rows);
+/**
+ * The config the call path would build from this payload once imported: the
+ * same loadConfig, fed the same rows. Exported so the eval runner can test a
+ * tenant before it is imported (a scenario's `config`).
+ */
+export function payloadToConfig(payload) {
+  const business = payload?.business;
+  if (!business || typeof business !== "object") {
+    throw new Error('Payload needs a "business" object.');
+  }
+  return loadConfig({ id: "payload-check", ...business }, payloadRows(payload));
+}
+
+export function renderTenantPrompt(payload) {
+  const config = payloadToConfig(payload);
+  const business = payload.business;
+  const rows = payloadRows(payload);
   const prompt = buildSystemInstruction("greeting", null, config, { greetingSpoken: false });
 
   const warnings = [];

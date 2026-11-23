@@ -41,6 +41,13 @@ describe("parseArgs", () => {
     expect(o.filter).toBeNull();
   });
 
+  it("--scenarios points the run at another folder; the default is the built-in one", () => {
+    // A client's own scenarios carry that client's details, so they live in a
+    // gitignored folder rather than in eval/scenarios.
+    expect(parseArgs([]).scenariosDir).toBeNull();
+    expect(parseArgs(["--scenarios", "some/dir"]).scenariosDir).toBe("some/dir");
+  });
+
   it("still rejects an unknown flag rather than ignoring it", () => {
     const prev = process.exitCode;
     try {

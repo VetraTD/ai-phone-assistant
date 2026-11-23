@@ -118,6 +118,9 @@ export function parseArgs(argv) {
     json: null,
     matrix: false,
     matrixFile: null,
+    // null = eval/scenarios. A client's own scenarios carry its details, so
+    // they live in a gitignored folder and are pointed at with --scenarios.
+    scenariosDir: null,
     // Judge OFF by default (changed 2026-08-30). The advisory judge re-sends
     // the ENTIRE transcript once per question per scenario and has never set
     // the exit code — the 37-scenario hard gate is the only thing that does.
@@ -143,6 +146,7 @@ export function parseArgs(argv) {
       case "--judge": opts.noJudge = false; break;
       case "--matrix": opts.matrix = true; break;
       case "--matrix-file": opts.matrixFile = next(); break;
+      case "--scenarios": opts.scenariosDir = next(); break;
       default:
         console.error(`Unknown flag: ${a}`);
         process.exitCode = 1;
@@ -155,15 +159,41 @@ export function parseArgs(argv) {
 // Scenario loading
 // ---------------------------------------------------------------------------
 
-export async function loadScenarios() {
-  const files = readdirSync(SCENARIOS_DIR).filter((f) => f.endsWith(".js")).sort();
+export async function loadScenarios(dir = SCENARIOS_DIR) {
+  const root = path.resolve(dir);
+  const files = readdirSync(root).filter((f) => f.endsWith(".js")).sort();
   const scenarios = [];
   for (const f of files) {
-    const mod = await import(pathToFileURL(path.join(SCENARIOS_DIR, f)).href);
+    const mod = await import(pathToFileURL(path.join(root, f)).href);
     if (!mod.default) throw new Error(`scenario ${f} has no default export`);
     scenarios.push({ ...mod.default, _file: f });
   }
   return scenarios;
+}
+
+/**
+ * The business config and extras a scenario runs against. A scenario either
+ * names a fixture (optionally patched) or carries a complete `config` of its
+ * own, which then replaces the fixture's config outright — no fixture key may
+ * leak into a config that is meant to be exactly one tenant's.
+ *
+ * @param {object} scenario
+ * @param {object} [fixtures] - defaults to tests/fixtures/businessConfigs.js
+ * @returns {{config: object, extras: object}}
+ */
+export function resolveScenarioConfig(scenario, fixtures = FIXTURES) {
+  const fixture = scenario.fixture ? fixtures[scenario.fixture] : null;
+  if (scenario.config) {
+    return {
+      config: scenario.config,
+      extras: { ...(fixture?.extras || {}), ...(scenario.extrasPatch || {}) },
+    };
+  }
+  if (!fixture) throw new Error(`unknown fixture "${scenario.fixture}"`);
+  return {
+    config: { ...fixture.config, ...(scenario.configPatch || {}) },
+    extras: { ...fixture.extras, ...(scenario.extrasPatch || {}) },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -207,11 +237,9 @@ export async function runScenario(scenario, { modelOverrides, noJudge = false } 
   let session = null;
 
   try {
-    const fixture = FIXTURES[scenario.fixture];
-    if (!fixture) throw new Error(`unknown fixture "${scenario.fixture}"`);
-
-    const config = { ...fixture.config, ...(scenario.configPatch || {}) };
-    const extras = { ...fixture.extras, ...(scenario.extrasPatch || {}), businessId: EVAL_BUSINESS_ID };
+    const resolved = resolveScenarioConfig(scenario);
+    const config = resolved.config;
+    const extras = { ...resolved.extras, businessId: EVAL_BUSINESS_ID };
     const seedAppointments = (scenario.seedAppointments || []).map((s) => ({ business_id: EVAL_BUSINESS_ID, ...s }));
 
     const { deps, store } = makeFakeDeps({ seedAppointments });
@@ -844,7 +872,7 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const modelOverrides = Object.keys(opts.modelOverrides).length ? opts.modelOverrides : undefined;
 
-  let scenarios = await loadScenarios();
+  let scenarios = await loadScenarios(opts.scenariosDir || undefined);
   if (opts.filter) scenarios = scenarios.filter((s) => s.name.includes(opts.filter));
   if (opts.tag) scenarios = scenarios.filter((s) => (s.tags || []).includes(opts.tag));
 
