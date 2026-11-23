@@ -17501,3 +17501,34 @@ Nothing written on either (postcall_verify ok, 0 rows) -- correct, nothing was a
 - "What are you looking to come in for?" for a marketing agency -- `services/gemini.js:1530` uses "come in for
   something" as its example of a vague reason; the model mirrored it.
 - "Yes, it's completely safe." to "is it safe to use my number?" -- a promise nothing backs.
+
+## Hammersleys Taxis demo sims, 2026-11-23 (eval `EVAL_DRIVER=live`, gemini-3.8-live, branch feat/hammersleys-demo)
+
+Seen in paid persona sims against a taxi tenant's config (results in gitignored `.superpowers/hammersleys/results/`).
+Recorded, not fixed (product code, outside a config-only session).
+
+### LVX190 · Spoke internal meta text aloud ("…Everything matches the style guide.") · **NEW 2026-11-23 · P1** `[medium]`
+- hm-wheelchair run 1, turn 2: the reply's output transcription carried a markdown table of phrase pairs and
+  "Everything matches the style guide." after the real question. Output transcription is what was voiced, so a
+  caller would hear it. One of ~150 sim turns. Not tenant-specific: the tenant config has no table or "style guide".
+- Next: search Live logs for `live_call_summary` turns with `|` or "style guide" in the assistant text to size it on
+  real calls before deciding on a detector.
+
+### LVX191 · Reply text doubled after a tool call in the Live eval harness · **NEW 2026-11-23 · needs triage** `[cheap]`
+- e.g. "How many pieces of luggage will you have?Thank you. How many pieces of luggage will you have?" and
+  "just one moment.I'm putting you through to the dispatcher now." Seen on several sims, always across a tool call.
+- Unknown whether callers hear it twice or only `lib/harness/liveTextSession.js` concatenates two transcription
+  segments. Check one real call's `live_call_summary` / repeated-phrase counter before treating it as a product defect.
+
+### Also from these sims
+- The notes' question list beats `custom_instructions`. After a save, the tool reply asks for "this business's
+  questions, in order", and rules that only sit in custom_instructions (ASAP transfer, fare wording) were skipped.
+  Config-only change: the ASAP branch moved to the top of the messages notes, the flight question beside the
+  destination, the pickup read-back into notes item 1 (confirmStyle "each"). Measured, same 8 scenarios, re-scored:
+  v2 9/23 valid runs -> v4 15/16 (ASAP 1/4 -> 2/2, airport run 0/3 -> 2/2, fare 0/3 -> 2/2). Generic lesson: a
+  business rule that must steer the flow belongs in the messages notes, not custom_instructions.
+- Read-back wording: asked to "read the booking back", the model said "You are booked for…" (2 of 8 v3 runs). Fixed
+  in config ("when reading a trip back, begin: your request is for"); a generic guard would catch it for every
+  tenant whose requests are not bookings.
+- `scripts/corpus/sabotage.mjs --census` row `p4-d1-preset-sends-to` is stale: `970d51a` deleted
+  `AI-phone-dashboard/frontend/src/callsQueryParams.js`. Not touched here.
