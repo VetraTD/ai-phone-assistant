@@ -13,6 +13,13 @@ const DEMO_TEL = `tel:${DEMO_NUMBER.replace(/[^\d+]/g, "")}`;
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+// Digits, spaces, + ( ) . - only, 7 to 32 characters.
+const PHONE_PATTERN = /^\+?[\d\s().-]{7,32}$/;
+// The backend cuts messages off at 4000 characters. Capping the typed message
+// below that leaves room for the mobile/consent lines appended on submit, so
+// the consent record is never the part that gets cut.
+const MESSAGE_MAX_LENGTH = 3800;
+
 export default function Contact() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -33,14 +40,24 @@ export default function Contact() {
       setError("Please enter a mobile number to receive text messages, or untick the SMS box.");
       return;
     }
+    if (trimmedPhone && !PHONE_PATTERN.test(trimmedPhone)) {
+      setError("Please enter a valid mobile number.");
+      return;
+    }
     setSending(true);
     try {
-      const payload = { name, email, message };
-      if (trimmedPhone) {
-        payload.phone = trimmedPhone;
-        payload.smsConsent = smsConsent;
-      }
-      await axios.post(`${API}/api/contact`, payload);
+      // The contact endpoint only accepts name, email and message (and the
+      // vetratd.com build may post to an older backend), so the mobile number
+      // and SMS consent ride along at the end of the message. The notification
+      // email is the consent record.
+      const smsBlock = trimmedPhone
+        ? `\n\n---\nMobile: ${trimmedPhone}\nSMS consent: ${
+            smsConsent
+              ? `YES (ticked on the contact form, ${new Date().toISOString()})`
+              : "NO - do not text"
+          }`
+        : "";
+      await axios.post(`${API}/api/contact`, { name, email, message: message + smsBlock });
       setSent(true);
       setName("");
       setEmail("");
@@ -131,6 +148,7 @@ export default function Contact() {
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="How can we help?"
                   rows={5}
+                  maxLength={MESSAGE_MAX_LENGTH}
                   required
                 />
               </div>
