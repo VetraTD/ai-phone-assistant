@@ -103,7 +103,7 @@ describe("Login", () => {
     expect(await screen.findByText("Enter your email first.")).toBeInTheDocument();
   });
 
-  it("sends a reset with a continueUrl, and says the same thing either way", async () => {
+  it("sends a reset for the typed email only, and says the same thing either way", async () => {
     const user = userEvent.setup();
     wrap(<Login onSwitchToSignup={() => {}} />);
 
@@ -111,10 +111,9 @@ describe("Login", () => {
     await user.click(screen.getByRole("button", { name: "Forgot password?" }));
 
     await waitFor(() => expect(sendPasswordReset).toHaveBeenCalledTimes(1));
-    expect(sendPasswordReset).toHaveBeenCalledWith(
-      "staff@clinic.test",
-      expect.objectContaining({ continueUrl: expect.stringContaining("/reset-password") })
-    );
+    // Email only: the API builds the link from its own configured address, so
+    // the page has no say in where a reset link points.
+    expect(sendPasswordReset).toHaveBeenCalledWith("staff@clinic.test");
     // Deliberately not "we sent you a link" vs "no such account" — the wording
     // must not turn this form into a way to enumerate staff addresses.
     expect(await screen.findByText(/if that email has an account/i)).toBeInTheDocument();

@@ -154,8 +154,7 @@ function LoginPanel() {
   async function sendLink() {
     if (!email || state.kind === "sending") return;
     setState({ kind: "sending" });
-    const continueUrl = `${window.location.origin}/reset-password`;
-    const { error } = await sendPasswordReset(email, { continueUrl });
+    const { error } = await sendPasswordReset(email);
     setState(error ? { kind: "error" } : { kind: "sent" });
   }
   return (

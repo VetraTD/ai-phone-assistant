@@ -18,17 +18,13 @@ import { MARKETING_URL } from "./siteUrl";
 // stays a session whether or not a password is ever set. Here the code is spent
 // or it expires.
 //
-// WHERE THE LINK GOES TODAY: Identity Platform's own hosted action handler,
-// which collects the new password and then sends the person to the
-// `continueUrl` Login.jsx passed — this page, with no code in the URL. So the
-// no-code branch below is the ORDINARY path right now, not an error case, and
-// it says "your password is set, sign in" rather than showing a dead form.
-//
-// The code branch is live the moment somebody points Identity Platform's email
-// template at this route instead, which is a console/API setting Terraform's
-// `google_identity_platform_config` does not carry. Built now because the page
-// exists either way and a half-working reset is discovered by a locked-out
-// receptionist.
+// WHERE THE LINK GOES: our own reset email (sent by the API from
+// notifications@vetratd.com, backend routes/passwordReset.js) links straight
+// here with `mode=resetPassword&oobCode=...`, so the code branch below is the
+// ordinary path. The no-code branch still covers a link from Identity
+// Platform's own hosted handler, which finishes the reset itself and then
+// lands here with no code: it says "your password is set, sign in" rather
+// than showing a dead form.
 // ---------------------------------------------------------------------------
 
 /** Identity Platform puts the one-shot code in the query string as `oobCode`. */

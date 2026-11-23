@@ -4,7 +4,6 @@ import {
   confirmPasswordReset,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  sendPasswordResetEmail,
   setPersistence,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -12,6 +11,7 @@ import {
   initializeAuth,
   inMemoryPersistence,
 } from "firebase/auth";
+import { requestPasswordReset } from "./passwordResetRequest";
 
 // ---------------------------------------------------------------------------
 // Staff sign-in. Identity Platform, replacing Supabase Auth (B3).
@@ -172,53 +172,25 @@ export async function signOut() {
 }
 
 /**
- * Send a password-reset email.
+ * Ask for a password-reset email.
  *
- * `continueUrl` is where the person lands AFTER the reset, and Identity Platform
- * refuses any domain not in `authorized_domains` — see the Terraform. A domain
- * missing there produces a reset email whose link is rejected, and the person
- * who sees that is a locked-out member of staff rather than a deploy.
+ * Our API sends it now, from notifications@vetratd.com, with a link to this
+ * app's /reset-password page (see passwordResetRequest.js and the backend's
+ * routes/passwordReset.js). Identity Platform used to send it from its own
+ * noreply@vetra-core-edc8ca.firebaseapp.com address.
  *
- * Resolves the same way whether or not the address has an account. Telling the
- * difference here would hand anyone a way to test which staff addresses exist.
+ * Email only. The API builds the link from its own configured address, so the
+ * page has no say in where a reset link points.
+ *
+ * Resolves the same way whether or not the address has an account: the API
+ * answers the same for both, so this cannot tell the difference, show it, or
+ * log it (LVX85).
  *
  * @param {string} email
- * @param {{ continueUrl?: string }} [opts]
  * @returns {Promise<{ error?: string }>}
  */
-export async function sendPasswordReset(email, { continueUrl } = {}) {
-  try {
-    await sendPasswordResetEmail(auth, email, continueUrl ? { url: continueUrl } : undefined);
-    return {};
-  } catch (err) {
-    const code = err && typeof err === "object" ? String(err.code) : "";
-    // Not an error the person should see: it would confirm the address has no
-    // account. Everything else — a malformed address, rate limiting — is real
-    // feedback about what they typed.
-    //
-    // AND NOT LOGGED EITHER, which is the point people get wrong. Writing
-    // "user-not-found" to the console would hand the enumeration back to
-    // anyone who opens devtools, which is the only place that matters — the
-    // defence is worth nothing if the answer is one panel away.
-    //
-    // This is LVX85, and the investigation went the wrong way for a week
-    // because of it. A reset was requested on 2026-09-01, no email arrived,
-    // and the API reported success — which read as broken delivery. It was
-    // not: Identity Platform sends from its own noreply@ sender (method
-    // DEFAULT), and the project contains exactly ONE account. The request was
-    // for an address that does not exist, and this branch turned that into a
-    // success message. Nothing was broken and nothing said so.
-    //
-    // The gap being closed is the OTHER half: everything that is not
-    // enumeration was equally silent, because this file had no telemetry at
-    // all. auth/unauthorized-continue-uri in particular renders as "Something
-    // went wrong signing in" — the exact confusing failure that appears if a
-    // new origin is not in Identity Platform's authorized domains.
-    if (code === "auth/user-not-found") return {};
-    // eslint-disable-next-line no-console
-    console.error("password_reset_failed", { code, continueUrl });
-    return { error: messageFor(err) };
-  }
+export function sendPasswordReset(email) {
+  return requestPasswordReset(email);
 }
 
 /**

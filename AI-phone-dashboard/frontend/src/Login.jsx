@@ -43,16 +43,7 @@ export default function Login() {
 
     setResetLoading(true);
 
-    // Where the person lands AFTER the reset, not where the reset happens —
-    // Identity Platform issues a one-shot code rather than a recovery session,
-    // so the link goes to the action handler and only then here. The domain must
-    // be in Identity Platform's authorized_domains or the link is refused.
-    const continueUrl =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/reset-password`
-        : "http://localhost:5173/reset-password";
-
-    const { error } = await sendPasswordReset(email, { continueUrl });
+    const { error } = await sendPasswordReset(email);
 
     setResetLoading(false);
 

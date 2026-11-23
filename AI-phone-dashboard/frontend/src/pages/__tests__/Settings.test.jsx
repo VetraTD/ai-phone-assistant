@@ -105,10 +105,7 @@ describe("Settings", () => {
     renderSettings("/settings/login");
     expect(screen.getByText("owner@brightwork.example")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Email me a link to change my password" }));
-    expect(sendPasswordReset).toHaveBeenCalledWith(
-      "owner@brightwork.example",
-      expect.objectContaining({ continueUrl: expect.stringMatching(/\/reset-password$/) })
-    );
+    expect(sendPasswordReset).toHaveBeenCalledWith("owner@brightwork.example");
     expect(
       await screen.findByText("We've sent a link to owner@brightwork.example. Open it to choose a new password.")
     ).toBeInTheDocument();
