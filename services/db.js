@@ -454,16 +454,17 @@ function applyCapabilityRows(rows, allowedTasks, businessId) {
       continue;
     }
 
-    // Enabling has to ADD the capability's module tasks, or switching one on in
-    // the dashboard would store enabled=true and still register no tools —
+    // Enabling ADDS every module task the capability owns, or switching one on
+    // in the dashboard would store enabled=true and still register no tools —
     // a setting that appears to work and does nothing.
     //
-    // Only when the business has none of them already. A business that opted
-    // into booking but not cancelling has expressed a real preference at a
-    // finer grain than a single capability row can, and enabling must not
-    // silently widen it.
-    if (owned.length > 0 && !owned.some((t) => tasks.includes(t))) {
-      tasks = [...tasks, ...owned];
+    // All of them, whatever the legacy allowed_tasks list said (owner,
+    // 2026-11-23). That list used to be kept as a finer-grained choice ("book
+    // but not cancel"), but the dashboard can no longer edit it (spec §8: the
+    // capability row replaced it), so a business on a book-only list showed
+    // Bookings ON while the agent could not cancel or move a booking.
+    if (owned.length > 0) {
+      tasks = [...new Set([...tasks, ...owned])];
     }
 
     capabilities[row.capability_id] = {

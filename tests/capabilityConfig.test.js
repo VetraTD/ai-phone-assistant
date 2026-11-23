@@ -67,16 +67,25 @@ describe("loadConfig — dual read", () => {
     expect(config.allowedTasks).toContain("quote_request");
   });
 
-  it("enabling does not widen a finer-grained choice the business already made", () => {
-    // A business that opted into booking but NOT cancelling expressed a real
-    // preference at a finer grain than one capability row can carry. Enabling
-    // the capability must not silently grant the rest.
+  it("a switched-on Bookings action brings check, cancel and move, whatever the old task list said", () => {
+    // REVERSED 2026-11-23 (owner). This used to keep a legacy allowed_tasks of
+    // ["book_appointment"] as a "finer-grained choice". But the dashboard's
+    // Tasks picker is gone (spec §8: business_capabilities replaced
+    // allowed_tasks), so that list could never be widened again: Bookings showed
+    // ON while the agent could book but not cancel or move, and told a caller
+    // "I'm unable to cancel your appointment directly" (test line, 2026-11-23).
+    // The switch is the source of truth: on means every booking task.
     const config = loadConfig(
       { id: "biz-3", name: "Acme", allowed_tasks: ["book_appointment"] },
       [{ capability_id: "appointments", enabled: true, config: {} }]
     );
-    expect(config.allowedTasks).toContain("book_appointment");
-    expect(config.allowedTasks).not.toContain("cancel_reschedule");
+    expect(config.allowedTasks).toEqual(
+      expect.arrayContaining(["book_appointment", "check_appointment", "cancel_reschedule"])
+    );
+    const declared = appointments.adapterTools(config, { integrations: [] }).map((d) => d.name);
+    expect(declared).toEqual(
+      expect.arrayContaining(["get_caller_appointments_from_db", "cancel_appointment_db", "reschedule_appointment_db"])
+    );
   });
 
   it("ignores a row for a capability this build does not have", () => {
