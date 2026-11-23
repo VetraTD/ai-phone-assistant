@@ -25,6 +25,25 @@ function closed(reason) {
 }
 
 /**
+ * The 400 refusals that are about ONE address. Anything else Identity Platform
+ * answers 400 for (OPERATION_NOT_ALLOWED, CONFIGURATION_NOT_FOUND, a body it no
+ * longer accepts) refuses every address, and must be flagged, not passed off as
+ * "no account": that would turn reset off silently, forever (LVX85).
+ */
+const PER_ADDRESS_REFUSALS = new Set(["EMAIL_NOT_FOUND", "USER_DISABLED", "RESET_PASSWORD_EXCEED_LIMIT"]);
+
+/** The leading error code of a 400, e.g. "EMAIL_NOT_FOUND : ..." -> "EMAIL_NOT_FOUND". Never the rest. */
+async function refusalCode(response) {
+  try {
+    const body = await response.json();
+    const match = /^[A-Z][A-Z_]{2,59}/.exec(String(body?.error?.message || ""));
+    return match ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The Cloud Run service account's access token, from the metadata server,
  * cached until shortly before it expires. Throws when there is no metadata
  * server (local dev), which the minter reports as idp_token_failed.
@@ -60,10 +79,12 @@ function createResetCodeMinter({ projectId, getAccessToken, fetchImpl = (...a) =
   const url = `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/accounts:sendOobCode`;
 
   /**
-   * { code } when the address has an account; { skip: true } for any refusal
-   * about THIS address (no account, disabled), which callers must treat exactly
-   * like a send. Throws a closed reason for failures that are the same for
-   * every address (no token, permission, outage), which are safe to surface.
+   * { code } when the address has an account. { skip: true, reason } when no
+   * email will go: reason is the per-address refusal (EMAIL_NOT_FOUND, ...), or
+   * "unexpected" (with the 400's code as `refusal`) or "no_link", which the caller must log
+   * as errors. Callers answer every skip exactly like a send. Throws a closed
+   * reason only for failures that are the same for every address (no token,
+   * permission, outage, unreachable), which are safe to surface.
    */
   async function mint(email) {
     let token;
@@ -91,22 +112,22 @@ function createResetCodeMinter({ projectId, getAccessToken, fetchImpl = (...a) =
       throw closed("idp_unreachable");
     }
 
-    if (response.status === 400) return { skip: true };
+    if (response.status === 400) {
+      const code = await refusalCode(response);
+      return PER_ADDRESS_REFUSALS.has(code) ? { skip: true, reason: code } : { skip: true, reason: "unexpected", refusal: code };
+    }
     if (!response.ok) throw closed("idp_refused");
 
-    let body;
-    try {
-      body = await response.json();
-    } catch {
-      throw closed("idp_no_link");
-    }
+    // Only a real account reaches here, so a missing link is a flagged skip,
+    // not a throw: a 503 on this path alone would tell real accounts apart.
     let code = null;
     try {
+      const body = await response.json();
       code = new URL(body?.oobLink).searchParams.get("oobCode");
     } catch {
       code = null;
     }
-    if (!code) throw closed("idp_no_link");
+    if (!code) return { skip: true, reason: "no_link", refusal: null };
     return { code };
   }
 

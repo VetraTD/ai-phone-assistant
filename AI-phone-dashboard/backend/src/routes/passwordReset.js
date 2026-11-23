@@ -25,6 +25,19 @@ const { sanitizeString, isValidEmail, rejectUnexpectedKeys } = require("../utils
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const MAX_TRACKED_ADDRESSES = 10_000;
 
+/**
+ * What may be logged about a failure: a closed code, never the message. A
+ * nodemailer error appends the SMTP server's reply, which can quote the
+ * address; mailer.js's Graph failures carry a closed reason as their message
+ * under code MAIL_SEND_FAILED, and identityPlatform.js throws closed reasons.
+ */
+function closedReason(err) {
+  const message = String(err?.message || "");
+  if (err?.code === "MAIL_SEND_FAILED" && /^graph_[a-z_]+$/.test(message)) return message;
+  if (/^(idp|metadata)_[a-z_]+$/.test(message)) return message;
+  return typeof err?.code === "string" && /^[A-Z_0-9]{2,40}$/.test(err.code) ? err.code : "send_error";
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -82,7 +95,7 @@ function createPasswordResetRouter({
   minter,
   mailer,
   dashboardOrigin,
-  minResponseMs = 2_000,
+  minResponseMs = 3_000,
   perEmailMax = 3,
   limiters = [],
 }) {
@@ -121,25 +134,39 @@ function createPasswordResetRouter({
     try {
       minted = await minter.mint(email);
     } catch (err) {
-      console.error("password_reset_failed", { reason: String(err?.message || "idp_error") });
+      // identityPlatform.js throws closed reasons only, and only for failures
+      // that are the same for every address.
+      console.error("password_reset_failed", { reason: closedReason(err) });
       return answer(503, { error: "Password reset is not available right now. Please try again later." });
     }
-    if (!minted?.code) return answer(200, { success: true });
+    if (minted?.skip || !minted?.code) {
+      if (minted?.reason === "unexpected" || minted?.reason === "no_link") {
+        // Probably refusing EVERY address: reset is off until someone reads this.
+        console.error("password_reset_unexpected", { reason: minted.reason, refusal: minted.refusal ?? null });
+      } else {
+        console.info("password_reset_skipped", { reason: minted?.reason ?? "skip" });
+      }
+      return answer(200, { success: true });
+    }
 
     const link = `${dashboardOrigin}/reset-password?mode=resetPassword&oobCode=${encodeURIComponent(minted.code)}`;
-    try {
-      await mailer.sendMail({
+    // Only real accounts wait on the send, so it RACES the minimum response
+    // time: the answer goes at the same moment either way, and a slow send
+    // finishes after it and logs its own result.
+    const sending = mailer
+      .sendMail({
         to: email,
         subject: "Reset your VetraTD password",
         text: resetEmailText(link),
         fromName: "VetraTD",
-      });
-      console.info("password_reset_sent");
-    } catch (err) {
-      // Same answer as a success: a failure only real accounts can hit must not
-      // become the way to find them. The log is how an operator finds it.
-      console.error("password_reset_send_failed", { reason: String(err?.message || "send_error") });
-    }
+      })
+      .then(
+        () => console.info("password_reset_sent"),
+        // Same answer as a success: a failure only real accounts can hit must
+        // not become the way to find them. The log is how an operator finds it.
+        (err) => console.error("password_reset_send_failed", { reason: closedReason(err) })
+      );
+    await Promise.race([sending, sleep(Math.max(0, minResponseMs - (Date.now() - started)))]);
     return answer(200, { success: true });
   });
 

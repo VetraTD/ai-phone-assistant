@@ -48,6 +48,12 @@ const contactLimiter = rateLimit({
 
 // Password reset: unauthenticated and sends email, so the strictest per-IP
 // limit. routes/passwordReset.js adds a per-address limit behind it.
+//
+// Keyed on req.ip, which is right only while server.js's `trust proxy 1`
+// matches the hops in front of the service (Cloud Run's front end today). Put
+// the Terraform load balancer in front and req.ip becomes the balancer, so
+// every visitor shares ONE bucket and one abuser blocks reset for everyone:
+// raise `trust proxy` in the same change.
 const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,

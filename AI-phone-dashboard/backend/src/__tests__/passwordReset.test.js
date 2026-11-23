@@ -62,10 +62,12 @@ describe("POST /api/auth/password-reset", () => {
   });
 
   it("a failed send for a real account still answers the same, and is logged without the address", async () => {
+    // nodemailer appends the server's reply to the message, and an SMTP
+    // recipient rejection quotes the address: only the code may be logged.
     const { app } = buildApp({
       sendMail: vi.fn(async () => {
-        const err = new Error("graph_refused");
-        err.code = "MAIL_SEND_FAILED";
+        const err = new Error("Can't send mail: 550 5.1.1 <owner@example.com>: Recipient address rejected");
+        err.code = "EENVELOPE";
         throw err;
       }),
     });
@@ -86,6 +88,51 @@ describe("POST /api/auth/password-reset", () => {
     expect(res.status).toBe(503);
     expect(everythingLogged()).toContain("idp_refused");
     expect(everythingLogged()).not.toContain("owner@example.com");
+  });
+
+  it("an unexpected Identity Platform refusal answers the same, and is logged as an error with its code", async () => {
+    const { app, mailer } = buildApp({
+      mint: vi.fn(async () => ({ skip: true, reason: "unexpected", refusal: "OPERATION_NOT_ALLOWED" })),
+    });
+    const res = await post(app, { email: "owner@example.com" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(mailer.sendMail).not.toHaveBeenCalled();
+    const errors = JSON.stringify(logSpies[3].mock.calls);
+    expect(errors).toContain("password_reset_unexpected");
+    expect(errors).toContain("OPERATION_NOT_ALLOWED");
+  });
+
+  it("a routine skip (no account) is logged with its reason, not as an error", async () => {
+    const { app } = buildApp({ mint: vi.fn(async () => ({ skip: true, reason: "EMAIL_NOT_FOUND" })) });
+    await post(app, { email: "nobody@example.com" });
+    expect(JSON.stringify(logSpies[1].mock.calls)).toContain("EMAIL_NOT_FOUND");
+    expect(logSpies[3]).not.toHaveBeenCalled();
+  });
+
+  it("answers at the minimum time even when the send is slower, so speed cannot reveal an account", async () => {
+    let finished = false;
+    const sendMail = vi.fn(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            finished = true;
+            resolve();
+          }, 400)
+        )
+    );
+    const { app } = buildApp({ sendMail, minResponseMs: 120 });
+    const started = Date.now();
+    const res = await post(app, { email: "owner@example.com" });
+    const took = Date.now() - started;
+    expect(res.status).toBe(200);
+    expect(took).toBeGreaterThanOrEqual(110);
+    expect(took).toBeLessThan(350);
+    expect(finished).toBe(false);
+    // The send still completes and logs on its own.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(finished).toBe(true);
+    expect(everythingLogged()).toContain("password_reset_sent");
   });
 
   it("never logs the address or the code", async () => {

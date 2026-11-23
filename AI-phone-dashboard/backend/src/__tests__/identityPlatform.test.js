@@ -38,14 +38,29 @@ describe("createResetCodeMinter", () => {
     });
   });
 
-  it("an address with no account is a quiet skip, not an error", async () => {
-    const fetchImpl = vi.fn(async () => json(400, { error: { message: "EMAIL_NOT_FOUND" } }));
-    expect(await minterWith(fetchImpl).mint("nobody@example.com")).toEqual({ skip: true });
+  it.each(["EMAIL_NOT_FOUND", "USER_DISABLED", "RESET_PASSWORD_EXCEED_LIMIT"])(
+    "%s is a refusal about THIS address: skipped, with the reason named",
+    async (code) => {
+      const fetchImpl = vi.fn(async () => json(400, { error: { message: `${code} : detail about a@example.com` } }));
+      expect(await minterWith(fetchImpl).mint("a@example.com")).toEqual({ skip: true, reason: code });
+    }
+  );
+
+  it("any OTHER 400 is flagged as unexpected, never passed off as 'no account'", async () => {
+    // OPERATION_NOT_ALLOWED (password sign-in off), CONFIGURATION_NOT_FOUND, or
+    // a body the API stopped accepting would refuse EVERY address. Treated as
+    // "no account", reset would silently send nothing, forever (LVX85).
+    const fetchImpl = vi.fn(async () => json(400, { error: { message: "OPERATION_NOT_ALLOWED" } }));
+    expect(await minterWith(fetchImpl).mint("a@example.com")).toEqual({
+      skip: true,
+      reason: "unexpected",
+      refusal: "OPERATION_NOT_ALLOWED",
+    });
   });
 
-  it("any other per-account refusal (disabled user) is the same quiet skip", async () => {
-    const fetchImpl = vi.fn(async () => json(400, { error: { message: "USER_DISABLED" } }));
-    expect(await minterWith(fetchImpl).mint("off@example.com")).toEqual({ skip: true });
+  it("an unreadable 400 is unexpected too, with no code", async () => {
+    const fetchImpl = vi.fn(async () => new Response("<html>bad request for a@example.com</html>", { status: 400 }));
+    expect(await minterWith(fetchImpl).mint("a@example.com")).toEqual({ skip: true, reason: "unexpected", refusal: null });
   });
 
   it("a permission failure throws a closed reason, because it is the same for every address", async () => {
@@ -67,9 +82,11 @@ describe("createResetCodeMinter", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("a 200 without a usable link throws idp_no_link", async () => {
+  it("a 200 without a usable link is a flagged skip, not a throw", async () => {
+    // Only real accounts get a 200, so answering this one differently (503)
+    // would tell real accounts apart.
     const fetchImpl = vi.fn(async () => json(200, { email: "a@example.com" }));
-    await expect(minterWith(fetchImpl).mint("a@example.com")).rejects.toThrow(/^idp_no_link$/);
+    expect(await minterWith(fetchImpl).mint("a@example.com")).toEqual({ skip: true, reason: "no_link", refusal: null });
   });
 });
 
