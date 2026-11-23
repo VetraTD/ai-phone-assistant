@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import { onAuthChange, signOut } from "./auth";
-import { useIdleLogout, IDLE_TIMEOUT_MINUTES } from "./useIdleLogout";
+import { signOut } from "./auth";
 import { useTranslations } from "./LanguageSwitcher";
 
 import "./Dashboard.css";
 
-import Login from "./Login";
-import Onboarding from "./Onboarding";
+import SessionGate from "./shell/SessionGate";
+import { useBusiness } from "./shell/BusinessContext";
 import SettingsPage from "./settings/SettingsPage";
 import CallOutcomeAnswers from "./components/CallOutcomeAnswers";
 import { humanise } from "./callOutcome";
@@ -174,28 +173,13 @@ function AnimatedNumber({ value, duration = 1200, suffix = "" }) {
   return <>{display}{suffix}</>;
 }
 
-function LoadingScreen({ title, subtitle }) {
-  return (
-    <div className="dashboard-loading-screen">
-      <div className="dashboard-loading-card">
-        <div className="dashboard-loading-spinner" />
-        <div className="dashboard-loading-title">{title}</div>
-        <div className="dashboard-loading-subtitle">{subtitle}</div>
-      </div>
-    </div>
-  );
-}
-
-function App() {
+// The old one-page dashboard. Sign-in, the /api/me business, onboarding and
+// idle sign-out moved to shell/SessionGate; this reads the business from it.
+// Deleted in Task 14 when the new pages replace it.
+function Dashboard() {
   const t = useTranslations();
+  const { business, businessId, setBusiness } = useBusiness();
 
-  const [session, setSession] = useState(null);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [meLoading, setMeLoading] = useState(true);
-  const [meError, setMeError] = useState(null);
-  const [businessId, setBusinessId] = useState(null);
-  const [business, setBusiness] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [calls, setCalls] = useState([]);
   const [callsTotal, setCallsTotal] = useState(null);
@@ -250,56 +234,6 @@ function App() {
       width: rect.width,
     });
   }, [activePage]);
-
-  useEffect(() => {
-    // One subscription, no separate boot read. onAuthChange fires once with the
-    // restored user (or null) as soon as Identity Platform has finished reading
-    // persisted storage, which is the same moment the old getSession() resolved
-    // — so `checkingSession` still clears exactly when the answer is known, and
-    // there is no window where a signed-in person sees the login screen.
-    return onAuthChange((user) => {
-      setSession(user || null);
-      setCheckingSession(false);
-    });
-  }, []);
-
-  // HIPAA 164.312(a)(2)(iii) automatic logoff. Before this, a session lasted
-  // until the tab closed — Identity Platform refreshes its one-hour token
-  // indefinitely, so an unattended browser on a clinic front desk stayed signed
-  // in overnight, in front of every patient record that clinic holds.
-  const idle = useIdleLogout({
-    enabled: !!session,
-    onLogout: async () => {
-      await signOut();
-    },
-  });
-
-  useEffect(() => {
-    const loadMe = async () => {
-      if (!session) {
-        setBusiness(null); setBusinessId(null); setAnalytics(null);
-        setCalls([]); setCallDetails(null); setSelectedCallId(null);
-        setNeedsOnboarding(false); setMeError(null); setMeLoading(false);
-        setCallsError(null); setCallDetailsError(null);
-        return;
-      }
-      setMeLoading(true); setMeError(null);
-      try {
-        const res = await api.get("/api/me");
-        const biz = res.data.business || null;
-        // Need onboarding if there is no business yet or the business has no phone number.
-        const needs = !biz || !biz.phone_number;
-        setNeedsOnboarding(needs);
-        setBusiness(biz); setBusinessId(biz?.id || null);
-      } catch (err) {
-        const msg = err?.response?.data?.error || err?.message || "Unknown error";
-        setMeError(msg); setBusiness(null); setBusinessId(null);
-      } finally {
-        setMeLoading(false);
-      }
-    };
-    loadMe();
-  }, [session]);
 
   useEffect(() => {
     if (datePreset === "custom") return;
@@ -486,63 +420,8 @@ function App() {
     setHasAppointments(false); setSentiment("all"); setHasSummary("all"); setNeedsFollowUp(false); setDirection("all");
   };
 
-  if (checkingSession)
-    return <LoadingScreen title={t.checkingSession} subtitle={t.checkingSubtitle} />;
-
-  if (!session)
-    // Login only. The sign-up route is deliberately closed — see the comment
-    // in Login.jsx: self-serve account creation binds the account to a NEW
-    // empty business, and there is no way to move it to the real one
-    // afterwards. Onboarding is concierge until an invite token exists.
-    return <Login />;
-
-  if (needsOnboarding)
-    return (
-      <Onboarding
-        existingBusiness={business && !business.phone_number ? business : null}
-        onBack={() => signOut()}
-        onComplete={(biz) => {
-          setNeedsOnboarding(false); setBusiness(biz); setBusinessId(biz.id);
-        }}
-      />
-    );
-
-  if (meLoading)
-    return <LoadingScreen title={t.loadingDashboard} subtitle={t.loadingSubtitle} />;
-
-  if (meError)
-    return (
-      <div className="dashboard-error-screen">
-        <div className="dashboard-error-card">
-          <div className="dashboard-error-title">{t.couldntLoad}</div>
-          <div className="dashboard-error-message">{meError}</div>
-          <button
-            type="button"
-            className="dashboard-logout"
-            onClick={async () => { await signOut(); window.location.reload(); }}
-          >
-            {t.signOut}
-          </button>
-        </div>
-      </div>
-    );
-
   return (
     <div className="dashboard-page">
-      {idle.warning ? (
-        <div className="idle-warning" role="alert" aria-live="assertive">
-          <span>
-            {t.idleWarning
-              ? t.idleWarning(Math.ceil(idle.secondsRemaining / 60))
-              : `You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
-                  idle.secondsRemaining % 60
-                ).padStart(2, "0")} for security.`}
-          </span>
-          <button type="button" className="idle-warning-button" onClick={idle.stayActive}>
-            {t.idleStaySignedIn ?? "Stay signed in"}
-          </button>
-        </div>
-      ) : null}
       <div className="dashboard-shell">
         <header className="dashboard-topbar">
           <div className="dashboard-topbar-left">
@@ -1505,4 +1384,10 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <SessionGate>
+      <Dashboard />
+    </SessionGate>
+  );
+}

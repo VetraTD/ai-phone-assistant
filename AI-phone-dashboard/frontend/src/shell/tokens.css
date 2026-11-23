@@ -1,0 +1,161 @@
+/* VetraTD dashboard brand tokens and base type.
+ *
+ * Palette and type from PRODUCT.md (the new vetratd.com). Usage rules, spec §10:
+ *   navy      side navigation (and the phone frame)
+ *   ink-blue  primary buttons and the active state
+ *   cyan      ONLY the active navigation icon and the Home count
+ *   paper     the page
+ *   amber marks "needs you", green marks done; colour is never the only signal.
+ * Fraunces only for the Home greeting; Plus Jakarta Sans everywhere else, with
+ * tabular figures for times. Both are self-hosted (src/fonts.css).
+ *
+ * Base styles are scoped to .vt-app so the pages still hosted from the old
+ * dashboard, and the marketing build, are untouched.
+ */
+:root {
+  --navy: #010b29;
+  --navy-raised: #061438;
+  --ink-blue: #0038fd;
+  --ink-blue-h: #002ec3;
+  --blue: #1273fe;
+  --cyan: #00eafe;
+  --paper: #f2f6ff;
+  --surface: #ffffff;
+  --ink: #010b29;
+  --muted: #4f5b78;
+  --faint: #5f6a85;
+  --line: rgba(1, 11, 41, 0.11);
+  --line-2: rgba(1, 11, 41, 0.06);
+  --tint: #e7eeff;
+  --hover: #f6f8fe;
+  --green: #14683a;
+  --green-bg: #e4f4ea;
+  --amber: #7f4500;
+  --amber-bg: #fff1dc;
+  --grey-bg: #edf0f6;
+  --red: #a4231a;
+  --red-bg: #fdecea;
+  --on-navy-muted: #aab6d3;
+
+  --sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Fraunces", Georgia, serif;
+
+  /* One radius per element type. */
+  --r-control: 10px; /* buttons, inputs */
+  --r-card: 14px; /* cards and panels */
+  --r-pill: 999px; /* counts and switches */
+  --r-dialog: 16px; /* popovers and dialogs */
+
+  --shadow-pop: 0 12px 32px -12px rgba(1, 11, 41, 0.35);
+  --focus: 2px solid var(--ink-blue);
+}
+
+.vt-app {
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.vt-app *,
+.vt-app *::before,
+.vt-app *::after {
+  box-sizing: border-box;
+}
+
+.vt-app :where(h1, h2, h3, p, ul, ol, dl, dd) {
+  margin: 0;
+}
+
+.vt-app :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+.vt-app :where(a) {
+  color: inherit;
+}
+
+.vt-app :focus-visible {
+  outline: var(--focus);
+  outline-offset: 2px;
+}
+
+/* Times and counts line up. */
+.vt-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Buttons shared by every new page. 44 px tall for touch. */
+.vt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--r-control);
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+.vt-btn-primary {
+  background: var(--ink-blue);
+  color: #fff;
+}
+.vt-btn-primary:hover {
+  background: var(--ink-blue-h);
+}
+.vt-btn-quiet {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.vt-btn-quiet:hover {
+  background: var(--hover);
+}
+.vt-btn:disabled {
+  background: #dfe4ef;
+  color: var(--faint);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
+/* On phones body text is at least 16 px. */
+@media (max-width: 760px) {
+  .vt-app {
+    font-size: 16px;
+  }
+  .vt-btn {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vt-app *,
+  .vt-app *::before,
+  .vt-app *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

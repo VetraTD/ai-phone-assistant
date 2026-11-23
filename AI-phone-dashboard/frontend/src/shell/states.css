@@ -1,0 +1,56 @@
+/* Full-screen states before the shell renders (checking sign-in, loading,
+ * couldn't load) and the idle sign-out warning. */
+.vt-state {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.vt-state-card {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  padding: 28px 24px;
+  color: var(--muted);
+}
+
+.vt-state-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.vt-state-text {
+  margin-bottom: 20px;
+}
+
+.vt-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vt-idle {
+  position: fixed;
+  z-index: 50;
+  left: 16px;
+  right: 16px;
+  top: 16px;
+  margin: 0 auto;
+  max-width: 560px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-dialog);
+  box-shadow: var(--shadow-pop);
+  font-weight: 600;
+}
