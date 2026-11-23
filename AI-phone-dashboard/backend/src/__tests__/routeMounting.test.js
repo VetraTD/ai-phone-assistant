@@ -83,4 +83,11 @@ describe("route mounting smoke test (all split route files wired)", () => {
     const res = await request(app).get("/api/knowledge?businessId=b1").set("Authorization", "Bearer t");
     expect(res.status).toBe(200);
   });
+
+  it("POST /api/auth/password-reset (passwordReset.js, no auth)", async () => {
+    // An empty body is refused by the route's own validation, which proves it is
+    // mounted: an unmounted path would answer 404.
+    const res = await request(app).post("/api/auth/password-reset").send({});
+    expect(res.status).toBe(400);
+  });
 });

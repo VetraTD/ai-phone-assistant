@@ -10,7 +10,18 @@ const pool = require("./db");
 const mailer = require("./services/mailer");
 
 const { sanitizeString, isValidEmail, rejectUnexpectedKeys } = require("./utils");
-const { apiLimiter, contactLimiter } = require("./middleware/rateLimiters");
+const { apiLimiter, contactLimiter, passwordResetLimiter } = require("./middleware/rateLimiters");
+const { createPasswordResetRouter } = require("./routes/passwordReset");
+const { createResetCodeMinter, metadataTokenSource } = require("./services/identityPlatform");
+
+/** The dashboard's origin (DASHBOARD_URL may carry a path), or "" when unset or unparseable. */
+function dashboardOrigin(value) {
+  try {
+    return value ? new URL(value).origin : "";
+  } catch {
+    return "";
+  }
+}
 
 const app = express();
 
@@ -154,6 +165,20 @@ app.use(require("./routes/onboarding"));
 app.use(require("./routes/settings"));
 app.use(require("./routes/knowledge"));
 app.use(require("./routes/capabilities"));
+
+// Password reset, emailed by us from notifications@ instead of by Identity
+// Platform from its own noreply@ address. Public: the person is signed out.
+const idpProjectId = (process.env.IDENTITY_PLATFORM_PROJECT_ID || "").trim();
+app.use(
+  createPasswordResetRouter({
+    minter: idpProjectId
+      ? createResetCodeMinter({ projectId: idpProjectId, getAccessToken: metadataTokenSource() })
+      : null,
+    mailer,
+    dashboardOrigin: dashboardOrigin(process.env.DASHBOARD_URL),
+    limiters: [passwordResetLimiter],
+  })
+);
 
 // Centralized error handler – avoid leaking stack traces in production
 // Note: keep this AFTER all route declarations

@@ -46,10 +46,21 @@ const contactLimiter = rateLimit({
   handler: createRateLimitHandler(),
 });
 
+// Password reset: unauthenticated and sends email, so the strictest per-IP
+// limit. routes/passwordReset.js adds a per-address limit behind it.
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: createRateLimitHandler(),
+});
+
 module.exports = {
   createRateLimitHandler,
   apiLimiter,
   sensitiveLimiter,
   authSensitiveLimiter,
   contactLimiter,
+  passwordResetLimiter,
 };
