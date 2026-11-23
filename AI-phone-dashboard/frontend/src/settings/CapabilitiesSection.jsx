@@ -1,3 +1,4 @@
+import { FORMAT_CHOICES, MIN_DIGITS, MAX_DIGITS, formatFromPattern, patternFor } from "./identityFormats";
 import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, Plus, TriangleAlert, Trash2 } from "lucide-react";
 import { api } from "../api";
@@ -127,7 +128,11 @@ function draftFromRow(row, def) {
   };
 }
 
-function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
+export function CapabilityPanel(props) {
+  return <CapabilityCard {...props} />;
+}
+
+function CapabilityCard({ def, adapters, row, businessId, extra, onSaved, hideEnabledToggle = false }) {
   const [draft, setDraft] = useState(() => draftFromRow(row, def));
   // What is currently on the server, so the Save button can be honest about
   // whether there is anything to send. Previously every card's Save was
@@ -175,6 +180,9 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
       await api.put(`/api/business/${businessId}/capabilities/${def.id}`, {
         enabled: draft.enabled,
         adapter: draft.adapter,
+        // Sent back unchanged: the endpoint replaces it with {} when absent,
+        // which would cut a booking system off from its own settings.
+        adapter_config: row?.adapter_config ?? {},
         config: draft.config,
       });
       onSaved({ enabled: draft.enabled, adapter: draft.adapter, config: draft.config });
@@ -254,7 +262,7 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
         ) : null
       }
     >
-      {!def.core && (
+      {!def.core && !hideEnabledToggle && (
         <CheckField
           checked={draft.enabled}
           onChange={(enabled) => {
@@ -288,7 +296,7 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
 
           {onHiddenAdapter && (
             <p className="set-hint">
-              Appointments route to <strong>{onHiddenAdapter.label}</strong>, set up outside the dashboard.
+              Bookings go to <strong>{onHiddenAdapter.label}</strong>, set up outside the dashboard.
             </p>
           )}
 
@@ -318,7 +326,7 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
 
           {/* Availability only applies to the built-in calendar; an external
               backend (athena) owns its own free/busy, so hide it there. */}
-          {schema.availability && (draft.adapter === "internal" || !draft.adapter) && (
+          {schema.availability && (chosenAdapter ? chosenAdapter.storesBookingsLocally !== false : true) && (
             <AvailabilityEditor
               schema={schema.availability}
               value={draft.config.availability || {}}
@@ -330,7 +338,7 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved }) {
             <Field
               label={schema.notes.label}
               optional
-              hint="Guidance, not a rule — your receptionist follows this closely but it isn't enforced. Anything that must always happen belongs in the checkboxes above."
+              hint="Guidance, not a rule — the voice agent follows this closely but it isn't enforced. Anything that must always happen belongs in the checkboxes above."
             >
               {(p) => (
                 <textarea
@@ -530,21 +538,7 @@ function CustomIdentityField({ field, canVerify, onPatch, onRemove }) {
         )}
       </Field>
 
-      <Field
-        label="Expected format"
-        optional
-        error={patternError}
-        hint="Leave blank to accept anything. ^[0-9]{6}$ means exactly six digits."
-      >
-        {(p) => (
-          <input
-            {...p}
-            value={pattern}
-            placeholder="^[0-9]{6}$"
-            onChange={(e) => onPatch({ pattern: e.target.value })}
-          />
-        )}
-      </Field>
+      <FormatPicker pattern={pattern} onChange={(next) => onPatch({ pattern: next })} />
 
       {pattern && !patternError ? (
         <Field label="Try a value" hint="Just to check the format does what you expect. Nothing is saved.">
@@ -572,6 +566,61 @@ function CustomIdentityField({ field, canVerify, onPatch, onRemove }) {
         Remove
       </button>
     </div>
+  );
+}
+
+/**
+ * The format a caller's answer must have, as a choice (spec §8): never a
+ * regular expression in front of the owner. A pattern that matches no choice
+ * was set by VetraTD by hand; it is shown read-only and saved back unchanged.
+ */
+function FormatPicker({ pattern, onChange }) {
+  const current = formatFromPattern(pattern);
+  const [digits, setDigits] = useState(current.digits || 6);
+  if (current.choice === "custom") {
+    return (
+      <Field label="Format">
+        {() => <p className="set-hint">A custom format set by VetraTD. Ask us if you want it changed.</p>}
+      </Field>
+    );
+  }
+  return (
+    <>
+      <Field label="Format" hint="What a correct answer looks like. Anything else is asked for again.">
+        {(p) => (
+          <select
+            {...p}
+            aria-label="Format"
+            value={current.choice}
+            onChange={(e) => onChange(patternFor({ choice: e.target.value, digits }))}
+          >
+            {FORMAT_CHOICES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      {current.choice === "digits" ? (
+        <Field label="How many digits">
+          {(p) => (
+            <input
+              {...p}
+              type="number"
+              min={MIN_DIGITS}
+              max={MAX_DIGITS}
+              value={current.digits ?? digits}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setDigits(n);
+                onChange(patternFor({ choice: "digits", digits: n }));
+              }}
+            />
+          )}
+        </Field>
+      ) : null}
+    </>
   );
 }
 
@@ -607,7 +656,7 @@ function AvailabilityEditor({ schema, value, onChange }) {
   return (
     <div className="set-field">
       <p className="set-hint">
-        Your receptionist checks the calendar before booking and never double-books. These set how
+        The voice agent checks the calendar before booking and never double-books. These set how
         long an appointment is and how many can share the same time.
       </p>
       {numberField("length")}

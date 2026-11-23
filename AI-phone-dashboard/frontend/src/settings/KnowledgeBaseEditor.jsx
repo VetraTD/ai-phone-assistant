@@ -110,7 +110,7 @@ export default function KnowledgeBaseEditor({ businessId, onCountChange }) {
   return (
     <Panel
       title="Answers"
-      description="Questions callers ask, and what your receptionist should say back. Each one is saved on its own."
+      description="Questions callers ask, and what the voice agent should say back. Each one is saved on its own."
       badge={rows.length ? <span className="set-pill">{rows.length} saved</span> : null}
       actions={
         !editingId ? (

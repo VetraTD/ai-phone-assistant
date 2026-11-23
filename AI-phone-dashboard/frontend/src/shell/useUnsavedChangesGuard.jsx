@@ -12,11 +12,16 @@ import { useBlocker } from "react-router-dom";
  * throws under a plain <BrowserRouter>.
  *
  * @param {boolean} dirty  true while there are unsaved changes
+ * @param {{ stayWithin?: string }} [options]  moves to addresses under this
+ *   prefix keep the draft (a page whose items share one draft) and are let through
  * @returns {JSX.Element|null}  the dialog, to render wherever the page likes
  */
-export function useUnsavedChangesGuard(dirty) {
+export function useUnsavedChangesGuard(dirty, { stayWithin } = {}) {
   const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname
+    ({ currentLocation, nextLocation }) =>
+      dirty &&
+      currentLocation.pathname !== nextLocation.pathname &&
+      !(stayWithin && nextLocation.pathname.startsWith(stayWithin))
   );
 
   useEffect(() => {

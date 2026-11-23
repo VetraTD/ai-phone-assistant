@@ -23,7 +23,7 @@ export default function AfterHoursSection({ value, onChange, appointmentsEnabled
       <p className="set-note">
         <Info className="set-note-icon" size={16} aria-hidden="true" />
         <span>
-          Your receptionist still answers every call. This only decides what it offers the caller once it knows
+          The voice agent still answers every call. This only decides what it offers the caller once it knows
           you're closed.
         </span>
       </p>

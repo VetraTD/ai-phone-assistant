@@ -26,7 +26,12 @@ function autoGreetingPreview(name) {
   return `${tod}, thanks for calling ${name || "our office"}. How can I help you today?`;
 }
 
-export default function AIBehaviorSection({ value, onChange }) {
+// `only` shows a single field ("greeting" | "tone" | "rules"), for the Voice
+// agent tab where each is its own item.
+const ONLY_TITLES = { greeting: "Greeting", tone: "Tone of voice", rules: "House rules" };
+
+export default function AIBehaviorSection({ value, onChange, only }) {
+  const show = (key) => !only || only === key;
   const { greeting, custom_instructions: customInstructions } = value;
   const presetKey = detectPreset(customInstructions);
 
@@ -44,7 +49,11 @@ export default function AIBehaviorSection({ value, onChange }) {
   };
 
   return (
-    <Panel title="What it says" description="The first thing callers hear, and the rules it follows after that.">
+    <Panel
+      title={only ? ONLY_TITLES[only] : "What it says"}
+      description={only ? undefined : "The first thing callers hear, and the rules it follows after that."}
+    >
+      {show("greeting") ? (
       <Field
         label="Greeting"
         optional
@@ -67,7 +76,9 @@ export default function AIBehaviorSection({ value, onChange }) {
           />
         )}
       </Field>
+      ) : null}
 
+      {show("tone") ? (
       <Field
         label="Tone of voice"
         hint="Picking one writes a single tone line at the top of your house rules below, replacing any tone line already there."
@@ -83,11 +94,13 @@ export default function AIBehaviorSection({ value, onChange }) {
           </select>
         )}
       </Field>
+      ) : null}
 
+      {show("rules") ? (
       <Field
         label="House rules"
         optional
-        hint="Things your receptionist should always know. Written as instructions, one per line."
+        hint="Things the voice agent should always know. Written as instructions, one per line."
         count={customInstructions.length}
         max={2000}
       >
@@ -102,6 +115,7 @@ export default function AIBehaviorSection({ value, onChange }) {
           />
         )}
       </Field>
+      ) : null}
     </Panel>
   );
 }

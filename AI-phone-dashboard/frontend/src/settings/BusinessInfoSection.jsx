@@ -7,7 +7,7 @@ import { TIMEZONES } from "./constants";
 // removed by migration 012; default_language was never a real column).
 export default function BusinessInfoSection({ value, onChange, phoneNumber }) {
   return (
-    <Panel title="Business info" description="The basics your receptionist mentions when it answers.">
+    <Panel title="Business info" description="The basics the voice agent mentions when it answers.">
       <Field label="Business name">
         {(p) => (
           <input
@@ -55,7 +55,7 @@ export default function BusinessInfoSection({ value, onChange, phoneNumber }) {
         hint={
           value.general_info.trim()
             ? "Anything a caller might ask about — what you do, who works there, which insurance you take."
-            : "Add this so your receptionist can actually answer questions about you — it's the single most useful thing to fill in."
+            : "Add this so the voice agent can actually answer questions about you — it's the single most useful thing to fill in."
         }
         count={value.general_info.length}
         max={2000}

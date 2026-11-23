@@ -117,7 +117,7 @@ function LiveVoice({ value, onChange, live }) {
     <>
       <Panel
         title="Accent and language"
-        description="What your receptionist speaks, and how it says dates and phone numbers. Set this before picking a voice — the default voice follows it."
+        description="What the voice agent speaks, and how it says dates and phone numbers. Set this before picking a voice — the default voice follows it."
       >
         <ChoiceCards
           legend="Choose an accent"

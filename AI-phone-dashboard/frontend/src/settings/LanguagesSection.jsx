@@ -5,7 +5,9 @@ import { LANGUAGES } from "./constants";
 // validateLanguagesSpoken (settingsValidation.js) rejects an empty array —
 // toggling off the last remaining language is a no-op here rather than
 // producing an invalid save.
-export default function LanguagesSection({ value, onChange }) {
+// `only` shows "languages" or "notice" alone, for the Voice agent tab.
+export default function LanguagesSection({ value, onChange, only }) {
+  const show = (key) => !only || only === key;
   const langs = value.languages_spoken;
 
   const toggle = (key) => {
@@ -17,9 +19,14 @@ export default function LanguagesSection({ value, onChange }) {
 
   return (
     <Panel
-      title="Languages & call notice"
-      description="Which languages your receptionist can switch to mid-call, and whether callers are told the call may be transcribed."
+      title={only === "languages" ? "Languages" : only === "notice" ? "Call notice" : "Languages & call notice"}
+      description={
+        only
+          ? undefined
+          : "Which languages the voice agent can switch to mid-call, and whether callers are told the call may be transcribed."
+      }
     >
+      {show("languages") ? (
       <fieldset className="set-fieldset">
         <legend className="set-legend">Languages spoken</legend>
         <div className="set-checklist">
@@ -41,7 +48,10 @@ export default function LanguagesSection({ value, onChange }) {
         </div>
         <p className="set-hint">At least one language has to stay on, so the last one can't be switched off.</p>
       </fieldset>
+      ) : null}
 
+      {show("notice") ? (
+        <>
       <CheckField
         checked={value.recording_disclosure_enabled}
         onChange={(recording_disclosure_enabled) => onChange({ recording_disclosure_enabled })}
@@ -62,6 +72,8 @@ export default function LanguagesSection({ value, onChange }) {
             />
           )}
         </Field>
+      ) : null}
+        </>
       ) : null}
     </Panel>
   );

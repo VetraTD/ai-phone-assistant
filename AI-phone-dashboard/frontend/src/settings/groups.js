@@ -21,7 +21,7 @@ export const GROUPS = [
     icon: Building2,
     caption: "Name, hours, timezone",
     title: "General",
-    description: "Who you are and when you're open. Your receptionist uses this on every call.",
+    description: "Who you are and when you're open. The voice agent uses this on every call.",
   },
   {
     id: "voice",
@@ -38,7 +38,7 @@ export const GROUPS = [
     caption: "What it can handle",
     title: "Capabilities",
     description:
-      "What your receptionist is allowed to do on a call, and what it must ask for before doing it.",
+      "What the voice agent is allowed to do on a call, and what it must ask for before doing it.",
   },
   {
     id: "knowledge",
@@ -46,7 +46,7 @@ export const GROUPS = [
     icon: BookOpen,
     caption: "Answers to questions",
     title: "Knowledge Base",
-    description: "Answers your receptionist can give when a caller asks something.",
+    description: "Answers the voice agent can give when a caller asks something.",
   },
   {
     id: "notifications",
