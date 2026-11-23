@@ -95,6 +95,69 @@
   margin-bottom: 0;
 }
 
+.legal-subtitle {
+  margin: 28px 0 12px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--vetra-text);
+  scroll-margin-top: 24px;
+}
+
+.legal-section-title + .legal-subtitle {
+  margin-top: 0;
+}
+
+.legal-list {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--vetra-muted);
+}
+
+.legal-list li + li {
+  margin-top: 6px;
+}
+
+/* Wide tables scroll inside their box on phones instead of widening the page. */
+.legal-table-wrap {
+  margin: 0 0 14px;
+  overflow-x: auto;
+  border: 1px solid var(--vetra-border);
+  border-radius: 12px;
+}
+
+.legal-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--vetra-muted);
+}
+
+.legal-table th,
+.legal-table td {
+  padding: 10px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--vetra-border);
+}
+
+.legal-table th {
+  font-weight: 700;
+  color: var(--vetra-text);
+  background: var(--vetra-bg);
+}
+
+.legal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.legal-table td strong {
+  color: var(--vetra-text);
+}
+
 .legal-footer-link {
   margin-top: 48px;
   padding-top: 24px;
