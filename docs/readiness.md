@@ -265,6 +265,22 @@ voicemail.
 
 ### 3. First month — before about 5–10 clients (~37–54 h)
 
+- [ ] **Dashboard polish round** (~4–5 h, one dashboard deploy, no voice change;
+  owner 2026-11-23: later, after higher-priority items). Leftovers from the
+  overhaul's reviews. Visible (~2 h): Call trends day/week/month charts and the
+  period window on the business's days, not UTC; Voice agent settings leftovers
+  (old blue gradient button with shadow/lift/42 px, old blue selected ring,
+  "changes" menu shadow); Home "Call back" says which number it dials (the one
+  left vs the one called from — owner picks). Behind the scenes (~2–3 h): search
+  text out of URLs/history/request logs; older calls.js subqueries get their own
+  business filter + a cross-tenant test under an RLS-bypassing role;
+  appointment_changes composite (id, business_id) FKs, append-only not dependent
+  on no deletes, created_at = clock_timestamp(); general booking update cannot
+  change scheduled_at/status around the change record; CSV formula check covers
+  leading whitespace and semicolon locales; background polls respect the 30-min
+  session ceiling and the nav badge uses a count. Checks: idle sign-out vs
+  scrolling; owner views Call trends signed in. Skipped unless asked: CSP
+  style-src 'unsafe-inline' / COOP / violation reporting.
 - [ ] **Owner/Staff roles** (8–12 h) before any business gets a second login.
   Today every login can change the transfer number.
 - [ ] **Deletion job** (3–4 h) before the privacy page promises retention
