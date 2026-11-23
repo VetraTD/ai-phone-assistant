@@ -147,7 +147,11 @@ CREATE TABLE calls (
   outcome_code     text,
   answers          jsonb,
   -- When the call was first transferred to a person (migration 052).
-  transferred_at   timestamptz
+  transferred_at   timestamptz,
+  -- When its open item (a message or call-back request) was marked done, and
+  -- by whom: an Identity Platform uid, or 'launch' (migration 061).
+  handled_at       timestamptz,
+  handled_by       text
 );
 
 -- 4. Call transcripts (conversation turns)
@@ -288,6 +292,8 @@ CREATE TABLE business_capabilities (
 -- ============================================================
 
 CREATE INDEX idx_calls_business_started ON calls (business_id, started_at DESC);
+-- Open items per business, oldest first (migration 061).
+CREATE INDEX idx_calls_open_items ON calls (business_id, started_at) WHERE handled_at IS NULL;
 CREATE INDEX idx_transcripts_call ON call_transcripts (call_id);
 CREATE INDEX idx_appointments_business_scheduled ON appointments (business_id, scheduled_at);
 -- Migration 008: speeds up listAppointmentsByCaller (business + status filter).
