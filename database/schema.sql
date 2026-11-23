@@ -2212,3 +2212,38 @@ REVOKE ALL ON FUNCTION app_ai_seconds_today(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_ai_seconds_today(uuid, text, text) TO vetra_app;
 COMMENT ON FUNCTION app_ai_seconds_today(uuid, text, text) IS
   'Repeat-caller alert: AI seconds this caller used at this business today (UTC); time after a transfer is not counted.';
+
+-- ------------------------------------------------------------
+-- appointment_changes (migration 062): booking moves and cancellations,
+-- recorded against the call that made them. Append-only for vetra_app.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS appointment_changes (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id      uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  appointment_id   uuid NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+  call_id          uuid REFERENCES calls(id) ON DELETE SET NULL,
+  kind             text NOT NULL CONSTRAINT appointment_changes_kind_check CHECK (kind IN ('moved', 'cancelled')),
+  old_scheduled_at timestamptz NOT NULL,
+  new_scheduled_at timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  -- A move has a new time; a cancellation has none.
+  CONSTRAINT appointment_changes_new_time_check CHECK ((kind = 'moved') = (new_scheduled_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_appointment_changes_business_time ON appointment_changes (business_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_appointment_changes_appointment ON appointment_changes (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_changes_call ON appointment_changes (call_id);
+
+ALTER TABLE appointment_changes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointment_changes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON appointment_changes;
+CREATE POLICY tenant_isolation ON appointment_changes
+  USING (business_id = app_current_business_id())
+  WITH CHECK (business_id = app_current_business_id());
+
+REVOKE ALL ON appointment_changes FROM PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON appointment_changes FROM vetra_app;
+GRANT SELECT, INSERT ON appointment_changes TO vetra_app;
+
+COMMENT ON TABLE appointment_changes IS
+  'Booking moves and cancellations on VetraTD''s own calendar, one row per change, against the call that made it (call_id NULL for a change outside a call). Append-only for vetra_app. Times and ids only.';

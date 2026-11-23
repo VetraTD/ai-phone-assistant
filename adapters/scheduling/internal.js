@@ -105,16 +105,20 @@ export default {
     return { ok: !!res?.id, id: res?.id || null };
   },
 
+  // Moves and cancellations are recorded against the call that made them
+  // (migration 062), so the dashboard can show which call moved or cancelled
+  // a booking. A change outside a call records a null call.
   async cancel(ctx, { appointmentId }) {
-    const ok = await ctx.deps.updateAppointmentStatus(appointmentId, "cancelled", ctx.businessId);
+    const ok = await ctx.deps.cancelAppointmentRecorded(appointmentId, ctx.businessId, ctx.callId || null);
     return { ok: !!ok };
   },
 
   async reschedule(ctx, { appointmentId, newScheduledAt }) {
-    const ok = await ctx.deps.updateAppointment(
+    const ok = await ctx.deps.rescheduleAppointmentRecorded(
       appointmentId,
-      { scheduled_at: newScheduledAt },
-      ctx.businessId
+      newScheduledAt,
+      ctx.businessId,
+      ctx.callId || null
     );
     return { ok: !!ok };
   },

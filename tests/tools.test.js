@@ -26,6 +26,12 @@ vi.mock("../services/db.js", () => ({
   listAppointmentsByCaller: (...args) => mockListAppointmentsByCaller(...args),
   updateAppointmentStatus: (...args) => mockUpdateAppointmentStatus(...args),
   updateAppointment: (...args) => mockUpdateAppointment(...args),
+  // Moves and cancels go through the recorded writers (migration 062); these
+  // map them onto the mocks above so the checks below keep their meaning.
+  // tests/schedulingAdapters.test.js and tests/db/appointmentChanges.test.js
+  // cover the call id and the change rows.
+  cancelAppointmentRecorded: (id, biz) => mockUpdateAppointmentStatus(id, "cancelled", biz),
+  rescheduleAppointmentRecorded: (id, at, biz) => mockUpdateAppointment(id, { scheduled_at: at }, biz),
   getAppointmentById: (...args) => mockGetAppointmentById(...args),
 }));
 
@@ -63,6 +69,12 @@ const capabilityDepsFake = {
   getAppointmentById: (...a) => mockGetAppointmentById(...a),
   updateAppointment: (...a) => mockUpdateAppointment(...a),
   updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
+  // Moves and cancels go through the recorded writers (migration 062); these
+  // map them onto the mocks above so the checks below keep their meaning.
+  // tests/schedulingAdapters.test.js and tests/db/appointmentChanges.test.js
+  // cover the call id and the change rows.
+  cancelAppointmentRecorded: (id, biz) => mockUpdateAppointmentStatus(id, "cancelled", biz),
+  rescheduleAppointmentRecorded: (id, at, biz) => mockUpdateAppointment(id, { scheduled_at: at }, biz),
   listAppointmentsByCaller: (...a) => mockListAppointmentsByCaller(...a),
   createAppointment: (...a) => mockCreateAppointment(...a),
   createAppointmentIfAvailable: async (p) => {

@@ -1504,6 +1504,92 @@ export async function updateAppointment(appointmentId, updates, businessId) {
 }
 
 /**
+ * Move a booking and record the move against the call that made it
+ * (migration 062), in ONE statement: the booking changes and its change row is
+ * written together or not at all, so a change row exists only if the booking
+ * really moved. A move to the time it already has changes nothing and records
+ * nothing.
+ *
+ * @param {string} appointmentId
+ * @param {string} newScheduledAt - ISO instant
+ * @param {string} businessId - REQUIRED; the tenant filter is unconditional
+ *   (see getAppointmentById). Missing => no query at all.
+ * @param {string|null} callId - the call that moved it; null outside a call
+ * @returns {Promise<boolean>} true when the booking exists for this business
+ */
+export async function rescheduleAppointmentRecorded(appointmentId, newScheduledAt, businessId, callId) {
+  if (!pool || !appointmentId || !newScheduledAt) return false;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "rescheduleAppointmentRecorded", appointmentId });
+    return false;
+  }
+  const res = await q(
+    `WITH old AS (
+       SELECT id, scheduled_at FROM appointments WHERE id = $1 AND business_id = $2::uuid FOR UPDATE
+     ), upd AS (
+       UPDATE appointments a SET scheduled_at = $3::timestamptz FROM old WHERE a.id = old.id
+       RETURNING a.id, old.scheduled_at AS old_at
+     ), rec AS (
+       INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at, new_scheduled_at)
+       SELECT $2::uuid, id, $4::uuid, 'moved', old_at, $3::timestamptz FROM upd
+        WHERE old_at IS DISTINCT FROM $3::timestamptz
+       RETURNING appointment_id
+     )
+     SELECT EXISTS (SELECT 1 FROM old) AS found`,
+    [appointmentId, businessId, newScheduledAt, callId || null]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "rescheduleAppointmentRecorded", error: res.error.message });
+    return false;
+  }
+  const found = one(res)?.found === true;
+  noteAccess("rescheduleAppointmentRecorded", { resourceIds: [appointmentId], rowCount: found ? 1 : 0 });
+  return found;
+}
+
+/**
+ * Cancel a booking and record the cancellation against the call that made it
+ * (migration 062), in ONE statement, as rescheduleAppointmentRecorded. A
+ * booking already cancelled stays cancelled and records nothing more, so
+ * cancelling twice records once.
+ *
+ * @param {string} appointmentId
+ * @param {string} businessId - REQUIRED; the tenant filter is unconditional
+ *   (see getAppointmentById). Missing => no query at all.
+ * @param {string|null} callId - the call that cancelled it; null outside a call
+ * @returns {Promise<boolean>} true when the booking exists for this business
+ */
+export async function cancelAppointmentRecorded(appointmentId, businessId, callId) {
+  if (!pool || !appointmentId) return false;
+  if (!businessId) {
+    log.error("db_unscoped_query_refused", { operation: "cancelAppointmentRecorded", appointmentId });
+    return false;
+  }
+  const res = await q(
+    `WITH old AS (
+       SELECT id, scheduled_at, status FROM appointments WHERE id = $1 AND business_id = $2::uuid FOR UPDATE
+     ), upd AS (
+       UPDATE appointments a SET status = 'cancelled' FROM old WHERE a.id = old.id
+       RETURNING a.id, old.scheduled_at AS old_at, old.status AS old_status
+     ), rec AS (
+       INSERT INTO appointment_changes (business_id, appointment_id, call_id, kind, old_scheduled_at)
+       SELECT $2::uuid, id, $3::uuid, 'cancelled', old_at FROM upd
+        WHERE old_status IS DISTINCT FROM 'cancelled'
+       RETURNING appointment_id
+     )
+     SELECT EXISTS (SELECT 1 FROM old) AS found`,
+    [appointmentId, businessId, callId || null]
+  );
+  if (res.error) {
+    log.error("db_error", { operation: "cancelAppointmentRecorded", error: res.error.message });
+    return false;
+  }
+  const found = one(res)?.found === true;
+  noteAccess("cancelAppointmentRecorded", { resourceIds: [appointmentId], rowCount: found ? 1 : 0 });
+  return found;
+}
+
+/**
  * The JSON text for customer_requests.details, or null when there is nothing to store.
  *
  * An empty value must never overwrite stored details: COALESCE($n::jsonb, details)

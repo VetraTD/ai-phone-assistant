@@ -4,6 +4,8 @@ import {
   listAppointmentsByCaller,
   updateAppointmentStatus,
   updateAppointment,
+  rescheduleAppointmentRecorded,
+  cancelAppointmentRecorded,
   createAppointment,
   createAppointmentIfAvailable,
   countScheduledOverlapping,
@@ -392,6 +394,12 @@ const CAPABILITY_DEPS = {
   },
   get updateAppointment() {
     return updateAppointment;
+  },
+  get rescheduleAppointmentRecorded() {
+    return rescheduleAppointmentRecorded;
+  },
+  get cancelAppointmentRecorded() {
+    return cancelAppointmentRecorded;
   },
   get recordSmsConsent() {
     return recordSmsConsent;

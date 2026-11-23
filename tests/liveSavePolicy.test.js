@@ -36,6 +36,12 @@ vi.mock("../services/db.js", () => ({
   listAppointmentsByCaller: async () => [],
   updateAppointmentStatus: (...a) => mockUpdateAppointmentStatus(...a),
   updateAppointment: (...a) => mockUpdateAppointment(...a),
+  // Moves and cancels go through the recorded writers (migration 062); these
+  // map them onto the mocks above so the checks below keep their meaning.
+  // tests/schedulingAdapters.test.js and tests/db/appointmentChanges.test.js
+  // cover the call id and the change rows.
+  cancelAppointmentRecorded: (id, biz) => mockUpdateAppointmentStatus(id, "cancelled", biz),
+  rescheduleAppointmentRecorded: (id, at, biz) => mockUpdateAppointment(id, { scheduled_at: at }, biz),
   getAppointmentById: (...a) => mockGetAppointmentById(...a),
 }));
 vi.mock("../services/integrations.js", () => ({ executeIntegration: vi.fn() }));

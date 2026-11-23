@@ -126,3 +126,46 @@ describe("adapter interface", () => {
     expect(getSchedulingAdapter("nope")).toBeNull();
   });
 });
+
+describe("internal adapter records which call changed a booking", () => {
+  it("internal adapter passes the call id when it moves or cancels", async () => {
+    const internal = getSchedulingAdapter("internal");
+    const seen = [];
+    const ctx = {
+      businessId: "biz-1",
+      callId: "call-7",
+      deps: {
+        async rescheduleAppointmentRecorded(...args) {
+          seen.push(["reschedule", ...args]);
+          return true;
+        },
+        async cancelAppointmentRecorded(...args) {
+          seen.push(["cancel", ...args]);
+          return true;
+        },
+      },
+    };
+    expect(await internal.reschedule(ctx, { appointmentId: "appt-1", newScheduledAt: "2026-12-01T15:00:00Z" })).toEqual({ ok: true });
+    expect(await internal.cancel(ctx, { appointmentId: "appt-1" })).toEqual({ ok: true });
+    expect(seen).toEqual([
+      ["reschedule", "appt-1", "2026-12-01T15:00:00Z", "biz-1", "call-7"],
+      ["cancel", "appt-1", "biz-1", "call-7"],
+    ]);
+  });
+
+  it("a change with no call (a script, a test) passes null, never undefined", async () => {
+    const internal = getSchedulingAdapter("internal");
+    const seen = [];
+    const ctx = {
+      businessId: "biz-1",
+      deps: {
+        async cancelAppointmentRecorded(...args) {
+          seen.push(args);
+          return false;
+        },
+      },
+    };
+    expect(await internal.cancel(ctx, { appointmentId: "appt-1" })).toEqual({ ok: false });
+    expect(seen).toEqual([["appt-1", "biz-1", null]]);
+  });
+});
