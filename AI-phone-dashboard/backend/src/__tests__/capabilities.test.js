@@ -54,7 +54,7 @@ describe("capability settings", () => {
     it("carries the labels and schemas the settings screen renders from", async () => {
       const res = await request(app).get("/api/capabilities/definitions");
       const appointments = res.body.capabilities.find((c) => c.id === "appointments");
-      expect(appointments.label).toBe("Appointments");
+      expect(appointments.label).toBe("Bookings");
       expect(appointments.configSchema.require.identity.allowCustom).toBe(true);
       expect(res.body.adapters.scheduling.map((a) => a.id)).toContain("athenahealth");
     });
