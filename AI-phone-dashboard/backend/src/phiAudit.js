@@ -50,6 +50,9 @@ const PHI_ROUTES = Object.freeze({
 
   // A named person, at a time, with their phone number.
   "GET /api/appointments": { action: "read", resources: ["appointments"] },
+  // Home: who needs a call back, with their message, today's calls and
+  // bookings (dashboard overhaul, spec §8).
+  "GET /api/home": { action: "read", resources: ["calls", "customer_requests", "appointments"] },
 
   // `export`, not `read`, and the distinction is the point: this SENDS
   // appointment data to the business's notification address. It is the only

@@ -140,6 +140,7 @@ app.get("/db-test", async (req, res) => {
 // Route modules — see src/routes/*.js. Each module owns its own full paths
 // (e.g. "/api/calls"), so these mount with no prefix.
 app.use(require("./routes/calls"));
+app.use(require("./routes/home"));
 app.use(require("./routes/appointments"));
 app.use(require("./routes/analytics"));
 app.use(require("./routes/onboarding"));
