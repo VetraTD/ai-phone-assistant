@@ -130,3 +130,27 @@ describeDb("GET /api/analytics-breakdown — calls outside opening hours", () =>
     expect(await openingHoursFigure()).toMatchObject({ opening_hours_set: false });
   });
 });
+
+// "Busiest hour" and "Calls by day of the week" read the hour and weekday on
+// the database's clock (UTC): a Chicago 9 am rush showed as 3 pm, and a Monday
+// evening call counted as Tuesday.
+describeDb("GET /api/analytics-breakdown — busiest hour and weekday on the business's clock", () => {
+  async function breakdown() {
+    const res = await request(app).get("/api/analytics-breakdown").query({ period: "30d" });
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  it("names the busiest hour in the business's time", async () => {
+    await callAtLocal(0, "09:15");
+    await callAtLocal(0, "09:40");
+    await callAtLocal(0, "14:10");
+    expect((await breakdown()).peak_hour).toEqual({ hour: 9, calls: 2 });
+  });
+
+  it("counts a Monday evening call on Monday", async () => {
+    await callAtLocal(0, "20:30"); // Tuesday in UTC
+    const days = Object.fromEntries((await breakdown()).calls_by_weekday.map((d) => [d.day_name, d.total_calls]));
+    expect(days).toMatchObject({ Mon: 1, Tue: 0 });
+  });
+});

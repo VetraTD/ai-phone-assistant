@@ -254,13 +254,22 @@ router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (re
       [businessId]
     );
 
+    // The business's clock and opening hours: the weekday, busiest hour and
+    // opening-hours figures below are all read in its time zone, not the
+    // database's (UTC), where a Chicago 9 am rush showed as 3 pm.
+    const bizRes = await pool.query(
+      `SELECT timezone, business_hours FROM businesses WHERE id = $1 LIMIT 1`,
+      [businessId]
+    );
+    const businessTimezone = bizRes.rows[0]?.timezone || "America/Chicago";
+
     // Calls by day of week (1=Mon .. 7=Sun) for the period
     const weekdayRes = await pool.query(
-      `SELECT EXTRACT(ISODOW FROM started_at)::int AS dow, COUNT(*) AS total_calls
+      `SELECT EXTRACT(ISODOW FROM started_at AT TIME ZONE $2)::int AS dow, COUNT(*) AS total_calls
        FROM calls WHERE business_id = $1 AND started_at >= ${since}
-       GROUP BY EXTRACT(ISODOW FROM started_at)
+       GROUP BY 1
        ORDER BY dow`,
-      [businessId]
+      [businessId, businessTimezone]
     );
     const dayNames = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const byWeekday = [1, 2, 3, 4, 5, 6, 7].map((dow) => {
@@ -294,14 +303,14 @@ router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (re
     // Peak call hour in the period (0-23)
     const peakHourRes = await pool.query(
       `
-      SELECT EXTRACT(HOUR FROM started_at)::int AS hour, COUNT(*) AS total_calls
+      SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE $2)::int AS hour, COUNT(*) AS total_calls
       FROM calls
       WHERE business_id = $1 AND started_at >= ${since}
-      GROUP BY EXTRACT(HOUR FROM started_at)
+      GROUP BY 1
       ORDER BY total_calls DESC
       LIMIT 1
       `,
-      [businessId]
+      [businessId, businessTimezone]
     );
 
     // Calls inside vs outside the business's OWN opening hours, on its clock —
@@ -311,11 +320,6 @@ router.get("/api/analytics-breakdown", authenticate, withTenantHandler(async (re
     // missing day is outside, [open, close), a day with no times is open all
     // day, and an unreadable time is outside. No hours set = always open, so
     // there is no "outside" figure to give (opening_hours_set: false).
-    const bizRes = await pool.query(
-      `SELECT timezone, business_hours FROM businesses WHERE id = $1 LIMIT 1`,
-      [businessId]
-    );
-    const businessTimezone = bizRes.rows[0]?.timezone || "America/Chicago";
     const openingHours = bizRes.rows[0]?.business_hours ?? null;
     const openingHoursSet = !!openingHours && typeof openingHours === "object" && (
       openingHours.mon !== undefined || !!(openingHours.open_time && openingHours.close_time)
