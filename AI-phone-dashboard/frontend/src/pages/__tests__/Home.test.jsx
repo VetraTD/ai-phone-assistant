@@ -64,7 +64,7 @@ describe("Home", () => {
     renderHome();
     expect(await screen.findByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)$/ })).toBeInTheDocument();
     expect(screen.getByText("1 caller needs you. VetraTD answered 1 call today and made 1 booking.")).toBeInTheDocument();
-    expect(setOpenCount).toHaveBeenLastCalledWith(1);
+    await waitFor(() => expect(setOpenCount).toHaveBeenLastCalledWith(1));
   });
 
   it("lists open items oldest first, each with what is needed, who, and one line", async () => {
@@ -124,12 +124,12 @@ describe("Home", () => {
     expect(api.put).toHaveBeenCalledWith("/api/calls/c1/handled");
     expect(await screen.findByText("Nothing needs you right now. New calls that need you will show up here, and you'll get an email.")).toBeInTheDocument();
     expect(within(doneList()).getByText("Sample Caller")).toBeInTheDocument();
-    expect(setOpenCount).toHaveBeenLastCalledWith(0);
+    await waitFor(() => expect(setOpenCount).toHaveBeenLastCalledWith(0));
 
     await user.click(within(doneList()).getByRole("button", { name: "Reopen" }));
     expect(api.delete).toHaveBeenCalledWith("/api/calls/c1/handled");
     expect(within(await screen.findByRole("list", { name: "Needs you" })).getByText("Sample Caller")).toBeInTheDocument();
-    expect(setOpenCount).toHaveBeenLastCalledWith(1);
+    await waitFor(() => expect(setOpenCount).toHaveBeenLastCalledWith(1));
   });
 
   it("a Done that fails puts the row back and says what to do", async () => {
