@@ -297,11 +297,19 @@ a.vt-tl-row:hover .vt-tl-name {
   .vt-rail {
     padding: 20px 16px 28px;
   }
+  /* 16 px minimum for text on phones. */
   .vt-ln,
+  .vt-nm,
+  .vt-kind,
+  .vt-when,
   .vt-drow .vt-nm,
   .vt-tl-row,
+  .vt-tl-w,
   .vt-week,
-  .vt-link {
+  .vt-link,
+  .vt-sech span,
+  .vt-rail-empty,
+  .vt-empty {
     font-size: 16px;
   }
   .vt-toast {

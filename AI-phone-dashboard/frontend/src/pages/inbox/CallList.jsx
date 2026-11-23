@@ -20,8 +20,9 @@ function downloadCsv(csv, filename) {
 
 /** The line under a caller's name in the list. */
 function rowKind(call) {
-  if (call.has_request && !call.handled_at) return { tone: "needs", text: needText({ type: call.request_type }) };
-  if (call.has_request && call.handled_at) return { tone: "done", text: "Marked done" };
+  const open = call.is_open ?? (call.has_request && !call.handled_at);
+  if (open) return { tone: "needs", text: needText({ type: call.request_type }) };
+  if (call.has_request) return { tone: "done", text: "Marked done" };
   return null;
 }
 
@@ -44,6 +45,13 @@ export default function CallList({
   tz,
 }) {
   const [text, setText] = useState(query);
+  // When the search in the address changes from outside (the Inbox tab, the
+  // back button), the box follows it.
+  const [shownQuery, setShownQuery] = useState(query);
+  if (query !== shownQuery) {
+    setShownQuery(query);
+    if (query !== text.trim()) setText(query);
+  }
   const timer = useRef(null);
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -68,10 +76,10 @@ export default function CallList({
       <div className="vt-ihead">
         <h1>Inbox</h1>
         <div className="vt-seg" role="group" aria-label="Which calls">
-          <button type="button" aria-pressed={view === "open"} onClick={() => onView("open")}>
+          <button type="button" aria-pressed={!query && view === "open"} onClick={() => onView("open")}>
             {openTotal == null ? "Needs you" : `Needs you (${openTotal})`}
           </button>
-          <button type="button" aria-pressed={view === "all"} onClick={() => onView("all")}>
+          <button type="button" aria-pressed={!!query || view === "all"} onClick={() => onView("all")}>
             All calls
           </button>
         </div>
@@ -85,6 +93,7 @@ export default function CallList({
             onChange={(e) => onType(e.target.value)}
           />
         </label>
+        {query ? <p className="vt-search-note">Searching all calls.</p> : null}
         <button
           type="button"
           className="vt-link vt-csv"

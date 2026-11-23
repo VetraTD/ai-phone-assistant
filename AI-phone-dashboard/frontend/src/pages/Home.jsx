@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAutoRefresh } from "../shell/useAutoRefresh";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
@@ -9,6 +10,8 @@ import "./home.css";
 const LOAD_ERROR = "Couldn't load your calls. Check your connection, then try again.";
 const DONE_ERROR = "Couldn't mark that as done. Check your connection, then try again.";
 const REOPEN_ERROR = "Couldn't reopen that. Check your connection, then try again.";
+const TOO_MANY = "Too many changes at once. Wait a minute, then try again.";
+const failure = (err, fallback) => (err?.response?.status === 429 ? TOO_MANY : fallback);
 const EMPTY = "Nothing needs you right now. New calls that need you will show up here, and you'll get an email.";
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -29,11 +32,27 @@ function firstSentence(text) {
   return end === -1 ? trimmed : trimmed.slice(0, end + 1);
 }
 
-/** The one line under a need: the caller's message, else the summary's first sentence. */
+/**
+ * The one line under a need: the caller's message; for a follow-up the check
+ * raised, its reason; else the summary's first sentence.
+ */
 function needLine(item) {
   const message = item.request?.message;
   if (typeof message === "string" && message.trim()) return message.trim();
+  const notes = item.request?.type === "unconfirmed_claim" ? item.request?.notes : null;
+  if (typeof notes === "string" && notes.trim()) return notes.trim();
   return firstSentence(item.summary);
+}
+
+/** The day above the time, for anything not from today. */
+function WhenCell({ iso, tz }) {
+  const day = dayHeading(iso, tz);
+  return (
+    <span className="vt-when vt-num">
+      {day !== "Today" ? <span className="vt-when-day">{day}</span> : null}
+      {formatTime(iso, tz)}
+    </span>
+  );
 }
 
 /** The line under a done row. */
@@ -65,6 +84,11 @@ export default function Home() {
   const [toast, setToast] = useState("");
   // Every open item this page has seen, so Reopen can put one back as it was.
   const seenOpen = useRef(new Map());
+  // Where keyboard focus goes once a row leaves the list (Done or Reopen).
+  const [focusTarget, setFocusTarget] = useState(null);
+  const needsHeading = useRef(null);
+  const doneHeading = useRef(null);
+  useAutoRefresh(() => setAttempt((n) => n + 1));
 
   useEffect(() => {
     let cancelled = false;
@@ -91,12 +115,21 @@ export default function Home() {
   }, [status, openTotal, setOpenCount]);
 
   useEffect(() => {
+    if (!focusTarget) return;
+    const el =
+      (focusTarget.id && document.querySelector(`[data-focus-key="${focusTarget.id}"]`)) ||
+      (focusTarget.fallback === "done" ? doneHeading.current : needsHeading.current);
+    el?.focus();
+  }, [focusTarget, data]);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const t = setTimeout(() => setToast(""), 8000);
     return () => clearTimeout(t);
   }, [toast]);
 
-  const markDone = useCallback(async (item) => {
+  const markDone = useCallback(async (item, nextId) => {
+    setFocusTarget({ id: nextId ? `done-${nextId}` : null, fallback: "needs" });
     const doneRow = {
       callId: item.callId,
       startedAt: item.startedAt,
@@ -115,17 +148,18 @@ export default function Home() {
     }));
     try {
       await api.put(`/api/calls/${item.callId}/handled`);
-    } catch {
+    } catch (err) {
       setData((d) => ({
         ...d,
         openItems: [...d.openItems.filter((i) => i.callId !== item.callId), item].sort(byStartedAsc),
         doneToday: d.doneToday.filter((r) => r.callId !== item.callId),
       }));
-      setToast(DONE_ERROR);
+      setToast(failure(err, DONE_ERROR));
     }
   }, []);
 
-  const reopen = useCallback(async (row) => {
+  const reopen = useCallback(async (row, nextId) => {
+    setFocusTarget({ id: nextId ? `reopen-${nextId}` : null, fallback: "done" });
     const known = seenOpen.current.get(row.callId);
     setData((d) => ({
       ...d,
@@ -136,13 +170,13 @@ export default function Home() {
       await api.delete(`/api/calls/${row.callId}/handled`);
       // An item marked done before this page loaded: fetch it back with its request.
       if (!known) setAttempt((n) => n + 1);
-    } catch {
+    } catch (err) {
       setData((d) => ({
         ...d,
         openItems: d.openItems.filter((i) => i.callId !== row.callId),
         doneToday: [row, ...d.doneToday.filter((r) => r.callId !== row.callId)],
       }));
-      setToast(REOPEN_ERROR);
+      setToast(failure(err, REOPEN_ERROR));
     }
   }, []);
 
@@ -182,21 +216,19 @@ export default function Home() {
 
         <section className="vt-home-section">
           <div className="vt-sech">
-            <h2 id="vt-needs-h">Needs you</h2>
+            <h2 id="vt-needs-h" tabIndex={-1} ref={needsHeading}>
+              Needs you
+            </h2>
             {openTotal ? <span className="vt-num">{openTotal}</span> : null}
           </div>
           {openTotal ? (
             <ul className="vt-card vt-tasks" aria-labelledby="vt-needs-h">
-              {openItems.map((item) => {
+              {openItems.map((item, index) => {
                 const href = telHref(item.request?.callbackNumber) || telHref(item.callerNumber);
+                const next = openItems[index + 1] || openItems[index - 1];
                 return (
                   <li key={item.callId} className="vt-task">
-                    <span className="vt-when vt-num">
-                      {dayHeading(item.startedAt, tz) !== "Today" ? (
-                        <span className="vt-when-day">{dayHeading(item.startedAt, tz)}</span>
-                      ) : null}
-                      {formatTime(item.startedAt, tz)}
-                    </span>
+                    <WhenCell iso={item.startedAt} tz={tz} />
                     <Link className="vt-task-body" to={`/inbox/${item.callId}`}>
                       <span className="vt-kind">{needText(item.request || {})}</span>
                       <span className="vt-nm">{callerLabel(item)}</span>
@@ -208,7 +240,12 @@ export default function Home() {
                           Call back
                         </a>
                       ) : null}
-                      <button type="button" className="vt-btn vt-btn-quiet" onClick={() => markDone(item)}>
+                      <button
+                        type="button"
+                        className="vt-btn vt-btn-quiet"
+                        data-focus-key={`done-${item.callId}`}
+                        onClick={() => markDone(item, next?.callId)}
+                      >
                         Done
                       </button>
                     </div>
@@ -225,20 +262,30 @@ export default function Home() {
 
         <section className="vt-home-section">
           <div className="vt-sech">
-            <h2 id="vt-done-h">Done today</h2>
+            <h2 id="vt-done-h" tabIndex={-1} ref={doneHeading}>
+              Done today
+            </h2>
             {data.doneToday.length ? <span className="vt-num">{data.doneToday.length}</span> : null}
           </div>
           {data.doneToday.length ? (
             <ul className="vt-card vt-drows" aria-labelledby="vt-done-h">
-              {data.doneToday.map((row) => (
+              {data.doneToday.map((row, index) => (
                 <li key={row.callId} className="vt-drow">
-                  <span className="vt-when vt-num">{formatTime(row.startedAt, tz)}</span>
+                  <WhenCell iso={row.startedAt} tz={tz} />
                   <Link className="vt-drow-body" to={`/inbox/${row.callId}`}>
                     <span className="vt-nm">{callerLabel(row)}</span>
                     <span className="vt-ln">{doneLine(row)}</span>
                   </Link>
                   {row.handledBy ? (
-                    <button type="button" className="vt-link" onClick={() => reopen(row)}>
+                    <button
+                      type="button"
+                      className="vt-link"
+                      data-focus-key={`reopen-${row.callId}`}
+                      onClick={() => {
+                        const next = data.doneToday.slice(index + 1).concat(data.doneToday.slice(0, index)).find((r) => r.handledBy);
+                        reopen(row, next?.callId);
+                      }}
+                    >
                       Reopen
                     </button>
                   ) : (
@@ -319,6 +366,13 @@ function TodaysBookings({ bookings, tz }) {
         ) : (
           <span className="vt-tl-row">{body}</span>
         )}
+      </li>
+    );
+  }
+  if (!nowShown) {
+    out.push(
+      <li key="now" className="vt-nowline" aria-label={`Now, ${formatTime(new Date(now).toISOString(), tz)}`}>
+        <span>Now</span>
       </li>
     );
   }

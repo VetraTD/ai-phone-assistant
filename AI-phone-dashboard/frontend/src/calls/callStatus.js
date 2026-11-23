@@ -31,12 +31,18 @@ const toNeed = (row) => ({ type: row?.request_type, preferredTime: row?.preferre
  */
 export function statusLine({ call, appointments = [], requests = [] }) {
   if (requests.length) {
-    if (!call?.handled_at) return { tone: "needs", text: needText(toNeed(requests[0])) };
+    const latest = requests.reduce((a, b) => (new Date(b?.created_at || 0) > new Date(a?.created_at || 0) ? b : a), requests[0]);
+    // Open when nobody has marked it done, or a request arrived after they did
+    // (the post-call follow-up is written at call end).
+    const lateRequest = call?.handled_at && latest?.created_at && new Date(latest.created_at) > new Date(call.handled_at);
+    if (!call?.handled_at || lateRequest) return { tone: "needs", text: needText(toNeed(latest)) };
     return {
       tone: "done",
       text: call.handled_by === "launch" ? "Marked done when the new dashboard launched" : "Marked done",
     };
   }
+  // A call still going has done nothing yet, and must not read as finished.
+  if (call?.status === "in-progress") return { tone: "quiet", text: "This call is still going." };
   // Only a booking or a transfer earns "nothing to do": a hang-up, a refused
   // message or a technical failure would make "handled" untrue.
   if (appointments.length || call?.status === "transferred") return { tone: "done", text: "Nothing for you to do" };

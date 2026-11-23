@@ -194,3 +194,69 @@ describe("Home", () => {
     expect(container.querySelector("b")).toBeNull();
   });
 });
+
+describe("Home after review", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("a follow-up with no message shows why it needs you", async () => {
+    api.get.mockResolvedValue({
+      data: home({
+        openItems: [item({ summary: "Booked nothing.", request: { type: "unconfirmed_claim", message: null, notes: "Follow-up needed: please call them back to confirm." } })],
+      }),
+    });
+    renderHome();
+    const row = within(await screen.findByRole("list", { name: "Needs you" })).getByRole("listitem");
+    expect(within(row).getByText("Call back to confirm")).toBeInTheDocument();
+    expect(within(row).getByText("Follow-up needed: please call them back to confirm.")).toBeInTheDocument();
+  });
+
+  it("a done row from an earlier day says which day", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "long" }).format(new Date(twoDaysAgo));
+    api.get.mockResolvedValue({
+      data: home({ doneToday: [{ callId: "d1", startedAt: twoDaysAgo, callerName: "Earlier Caller", summary: "x", status: "completed", handledAt: new Date().toISOString(), handledBy: "uid-1", hadRequest: true }] }),
+    });
+    renderHome();
+    const row = within(await screen.findByRole("list", { name: "Done today" })).getByRole("listitem");
+    expect(within(row).getByText(new RegExp("^" + dayName))).toBeInTheDocument();
+  });
+
+  it("refreshes when the tab comes back into view", async () => {
+    api.get.mockResolvedValue({ data: home() });
+    renderHome();
+    await screen.findByRole("heading", { level: 2, name: "Needs you" });
+    const before = api.get.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("after Done, keyboard focus stays in the list rather than falling off the page", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue({ data: home({ openItems: [item({ callId: "a" }), item({ callId: "b", callerName: "Second Caller" })] }) });
+    api.put.mockResolvedValue({ data: { id: "a", handled_at: "x", handled_by: "uid" } });
+    renderHome();
+    const first = within(await screen.findByRole("list", { name: "Needs you" })).getAllByRole("button", { name: "Done" })[0];
+    first.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    expect(document.activeElement.textContent).toMatch(/Done|Second Caller|Needs you/);
+  });
+
+  it("too many changes at once says to wait, not to check the connection", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue({ data: home({ openItems: [item()] }) });
+    api.put.mockRejectedValue({ response: { status: 429 } });
+    renderHome();
+    await user.click(within(await screen.findByRole("list", { name: "Needs you" })).getByRole("button", { name: "Done" }));
+    expect(await screen.findByText("Too many changes at once. Wait a minute, then try again.")).toBeInTheDocument();
+  });
+
+  it("shows the now line even when every booking today is over", async () => {
+    api.get.mockResolvedValue({
+      data: home({ todaysBookings: [{ id: "bk", scheduledAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), clientName: "Earlier Patient", status: "scheduled", callId: null }] }),
+    });
+    renderHome();
+    const today = await screen.findByRole("complementary", { name: "Today" });
+    expect(within(today).getByText("Now")).toBeInTheDocument();
+  });
+});

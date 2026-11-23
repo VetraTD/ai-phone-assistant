@@ -57,3 +57,11 @@ describe("callerLabel", () => {
     expect(callerLabel({ callerNumber: "+266696687" })).toBe("Withheld number");
   });
 });
+
+describe("dayHeading far east of UTC", () => {
+  it("says Yesterday in New Zealand too", () => {
+    const now = new Date("2026-11-23T10:00:00Z"); // 23:00 on the 23rd in Auckland
+    expect(dayHeading("2026-11-22T10:00:00Z", "Pacific/Auckland", now)).toBe("Yesterday"); // 23:00 on the 22nd
+    expect(dayHeading("2026-11-23T01:00:00Z", "Pacific/Auckland", now)).toBe("Today");
+  });
+});

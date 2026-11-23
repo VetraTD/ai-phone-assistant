@@ -38,7 +38,10 @@ export function dayHeading(iso, tz, now = new Date()) {
   const day = localDay(iso, tz);
   const today = localDay(now, tz);
   if (day === today) return "Today";
-  const yesterday = localDay(new Date(new Date(`${today}T12:00:00Z`).getTime() - 24 * 60 * 60 * 1000), tz);
+  // The day before, worked out on the calendar date itself: anchoring on a UTC
+  // time instead lands on the wrong day for zones far from UTC (New Zealand).
+  const [y, m, d] = today.split("-").map(Number);
+  const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
   if (day === yesterday) return "Yesterday";
   return formatDate(iso, tz);
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { useBusiness } from "../../shell/BusinessContext";
 import { calendarAvailable } from "../../shell/nav";
@@ -12,6 +12,15 @@ const NOT_FOUND = "That call isn't here. The link may be wrong, or the call belo
 const LOAD_ERROR = "Couldn't load this call. Check your connection, then try again.";
 const DONE_ERROR = "Couldn't mark that as done. Check your connection, then try again.";
 const REOPEN_ERROR = "Couldn't reopen that. Check your connection, then try again.";
+const TOO_MANY = "Too many changes at once. Wait a minute, then try again.";
+
+// The heading over each request the call left.
+const REQUEST_HEADING = {
+  callback: "Call-back request",
+  message: "Message",
+  quote: "Quote request",
+  unconfirmed_claim: "Follow-up",
+};
 
 function lengthText(seconds) {
   const s = Number(seconds);
@@ -38,19 +47,50 @@ function StatusIcon({ tone }) {
   );
 }
 
+/** One request the call left: what the caller said, and for a follow-up the reason. */
+function RequestBlock({ request, shownNumber }) {
+  const answers = Array.isArray(request?.details?.answers) ? request.details.answers : [];
+  const rows = [];
+  if (request.caller_name) rows.push(["From", request.caller_name]);
+  if (request.message) rows.push(["Message", request.message]);
+  if (request.request_type === "unconfirmed_claim" && request.notes) rows.push(["Why", request.notes]);
+  if (request.preferred_time) rows.push(["Best time", request.preferred_time]);
+  // A number the caller left, unless it is already the one shown at the top.
+  if (request.callback_number && request.callback_number !== shownNumber) rows.push(["Number to ring", request.callback_number]);
+  for (const a of answers) rows.push([a.label, a.answer]);
+  if (!rows.length) return null;
+  return (
+    <>
+      <h3>{REQUEST_HEADING[request.request_type] || "Message"}</h3>
+      <dl className="vt-msg">
+        {rows.map(([label, value], i) => (
+          <div key={i} className="vt-msg-row">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+}
+
 /**
  * One call, in one place (spec §8 Inbox): who and when, what is needed, the
- * summary, what VetraTD did, the booking it made, the message, and the whole
- * conversation. Every piece of caller speech or AI text is rendered as text.
- * `children(history)` renders the caller panel.
+ * summary, every request it left, what VetraTD did, the booking it made, and
+ * the whole conversation. Every piece of caller speech or AI text is rendered
+ * as text. `children(history)` renders the caller panel.
  */
 export default function CallView({ callId, tz, backSearch, onHandledChange, children }) {
   const { definitions, capabilityRows } = useBusiness();
+  const navigate = useNavigate();
   const [state, setState] = useState({ status: "loading", data: null });
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // After Done or Reopen the button swaps; keep keyboard focus on its successor.
+  const toggleRef = useRef(null);
+  const [refocus, setRefocus] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,8 +107,26 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
     };
   }, [callId, attempt]);
 
+  useEffect(() => {
+    if (!refocus) return;
+    toggleRef.current?.focus();
+    setRefocus(false);
+  }, [refocus, state]);
+
+  const backTo = `/inbox${backSearch ? `?${backSearch}` : ""}`;
   const back = (
-    <Link className="vt-pback" to={`/inbox${backSearch ? `?${backSearch}` : ""}`}>
+    <Link
+      className="vt-pback"
+      to={backTo}
+      onClick={(e) => {
+        // Arrived from the list: go back, so the phone's own back gesture does
+        // not return to this call. Arrived from an email: go to the list.
+        if (window.history.state?.idx > 0) {
+          e.preventDefault();
+          navigate(-1);
+        }
+      }}
+    >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
         <path d="m15 6-6 6 6 6" />
       </svg>
@@ -106,27 +164,33 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
   }
 
   const { call, transcript = [], appointments = [], customer_requests: requests = [], caller_history } = state.data;
-  const request = requests[0] || null;
-  const callerName = request?.caller_name || appointments[0]?.client_name || null;
+  const named = requests.find((r) => r?.caller_name) || null;
+  const callerName = named?.caller_name || appointments[0]?.client_name || null;
   const label = callerLabel({ callerName, callerNumber: call.caller_number });
-  const callHref = telHref(request?.callback_number) || telHref(call.caller_number);
-  const showNumber = callHref && label !== call.caller_number ? call.caller_number : null;
+  // The number Call back rings, and the one shown: the number a caller left
+  // first, else the one they called from. A withheld number is neither.
+  const leftNumber = requests.map((r) => r?.callback_number).find((n) => telHref(n)) || null;
+  const dialled = leftNumber || (telHref(call.caller_number) ? call.caller_number : null);
+  const callHref = telHref(dialled);
+  const shownNumber = dialled && dialled !== label ? dialled : null;
   const line = statusLine({ call, appointments, requests });
   const did = didList({ call, appointments, requests, tz });
   const booking = appointments[0] || null;
   const lines = expanded ? transcript : transcript.slice(0, FIRST_LINES);
-  const answers = Array.isArray(request?.details?.answers) ? request.details.answers : [];
+  const open = line.tone === "needs";
 
   const setHandled = async (done) => {
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
       const res = done ? await api.put(`/api/calls/${callId}/handled`) : await api.delete(`/api/calls/${callId}/handled`);
       const handled = { handled_at: res.data?.handled_at ?? null, handled_by: res.data?.handled_by ?? null };
       setState((s) => ({ ...s, data: { ...s.data, call: { ...s.data.call, ...handled } } }));
+      setRefocus(true);
       onHandledChange?.(callId, done ? handled : null);
-    } catch {
-      setError(done ? DONE_ERROR : REOPEN_ERROR);
+    } catch (err) {
+      setError(err?.response?.status === 429 ? TOO_MANY : done ? DONE_ERROR : REOPEN_ERROR);
     } finally {
       setBusy(false);
     }
@@ -139,7 +203,7 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
         <header className="vt-dh">
           <h2 id="vt-call-h">{label}</h2>
           <p className="vt-meta">
-            {showNumber ? <span className="vt-num">{showNumber}</span> : null}
+            {shownNumber ? <span className="vt-num">{shownNumber}</span> : null}
             {call.started_at ? <span>{formatDateTime(call.started_at, tz)}</span> : null}
             {lengthText(call.duration_seconds) ? <span>{lengthText(call.duration_seconds)}</span> : null}
           </p>
@@ -150,15 +214,15 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
               </a>
             ) : null}
             {requests.length ? (
-              call.handled_at ? (
-                <button type="button" className="vt-btn vt-btn-quiet" disabled={busy} onClick={() => setHandled(false)}>
-                  Reopen
-                </button>
-              ) : (
-                <button type="button" className="vt-btn vt-btn-quiet" disabled={busy} onClick={() => setHandled(true)}>
-                  Done
-                </button>
-              )
+              <button
+                ref={toggleRef}
+                type="button"
+                className="vt-btn vt-btn-quiet"
+                aria-disabled={busy || undefined}
+                onClick={() => setHandled(open)}
+              >
+                {open ? "Done" : "Reopen"}
+              </button>
             ) : null}
           </div>
           <div role="status" aria-live="polite" className="vt-inline-error">
@@ -179,37 +243,9 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
             </>
           ) : null}
 
-          {request && (request.message || request.preferred_time || answers.length) ? (
-            <>
-              <h3>{request.request_type === "callback" ? "Their call-back request" : "Their message"}</h3>
-              <dl className="vt-msg">
-                {request.message ? (
-                  <>
-                    <dt>Message</dt>
-                    <dd>{request.message}</dd>
-                  </>
-                ) : null}
-                {request.preferred_time ? (
-                  <>
-                    <dt>Best time</dt>
-                    <dd>{request.preferred_time}</dd>
-                  </>
-                ) : null}
-                {request.callback_number && request.callback_number !== call.caller_number ? (
-                  <>
-                    <dt>Number to ring</dt>
-                    <dd className="vt-num">{request.callback_number}</dd>
-                  </>
-                ) : null}
-                {answers.map((a, i) => (
-                  <div key={i} className="vt-msg-row">
-                    <dt>{a.label}</dt>
-                    <dd>{a.answer}</dd>
-                  </div>
-                ))}
-              </dl>
-            </>
-          ) : null}
+          {requests.map((r, i) => (
+            <RequestBlock key={r.id || i} request={r} shownNumber={shownNumber} />
+          ))}
 
           {/* Answers the agent recorded on the call (calls.answers), shown as
               plain text; renders nothing for a call that recorded none. */}
@@ -221,8 +257,8 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
             <>
               <h3>What VetraTD did</h3>
               <ul className="vt-did">
-                {did.map((d) => (
-                  <li key={d}>
+                {did.map((d, i) => (
+                  <li key={`${d}-${i}`}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                       <path d="M5 12.5 10 17l9-10" />
                     </svg>

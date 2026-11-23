@@ -221,3 +221,69 @@ describe("Inbox call view", () => {
     expect(within(view).queryByRole("link", { name: "Call back" })).toBeNull();
   });
 });
+
+describe("Inbox after review", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("search looks through all calls, not only those that need you", async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    await screen.findByText("Sample Caller");
+    api.get.mockClear();
+    await user.type(screen.getByRole("searchbox", { name: "Search calls" }), "rivera");
+    await waitFor(() => {
+      const searches = api.get.mock.calls.filter(([u, o]) => u === "/api/calls" && o?.params?.q);
+      expect(searches.length).toBeGreaterThan(0);
+      expect(searches.at(-1)[1].params.view).toBe("all");
+    });
+  });
+
+  it("shows every request a call left, and the reason behind a follow-up", async () => {
+    renderInbox("/inbox/c1", {
+      callDetail: detail({
+        customer_requests: [
+          { request_type: "unconfirmed_claim", notes: "Follow-up needed: please call them back to confirm.", created_at: "2026-11-23T10:05:00Z" },
+          { request_type: "message", caller_name: "Sample Caller", message: "First message", created_at: "2026-11-23T10:00:00Z" },
+          { request_type: "message", caller_name: "Second Person", message: "Second message", created_at: "2026-11-23T09:59:00Z" },
+        ],
+      }),
+    });
+    const view = await screen.findByRole("region", { name: /Sample Caller/ });
+    expect(within(view).getByText("Follow-up needed: please call them back to confirm.")).toBeInTheDocument();
+    expect(within(view).getByText("First message")).toBeInTheDocument();
+    expect(within(view).getByText("Second message")).toBeInTheDocument();
+  });
+
+  it("shows the number Call back will ring", async () => {
+    renderInbox("/inbox/c1", {
+      callDetail: detail({
+        call: { caller_number: "+266696687" },
+        customer_requests: [{ request_type: "callback", caller_name: "Sample Caller", callback_number: "+15550100177", created_at: "2026-11-23T10:00:00Z" }],
+      }),
+    });
+    const view = await screen.findByRole("region", { name: /Sample Caller/ });
+    expect(within(view).getByRole("link", { name: "Call back" })).toHaveAttribute("href", "tel:+15550100177");
+    expect(within(view).getByText("+15550100177")).toBeInTheDocument();
+    expect(within(view).queryByText("+266696687")).toBeNull();
+  });
+
+  it("a row reopened by a late request reads as needing you", async () => {
+    renderInbox("/inbox", { calls: [row({ handled_at: "2026-11-23T10:00:00Z", handled_by: "u", is_open: true, request_type: "unconfirmed_claim" })] });
+    expect(await screen.findByText("Call back to confirm")).toBeInTheDocument();
+  });
+
+  it("the search box follows the address when the search is cleared elsewhere", async () => {
+    const router = renderInbox("/inbox?q=sample");
+    expect(await screen.findByRole("searchbox", { name: "Search calls" })).toHaveValue("sample");
+    await router.navigate("/inbox");
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search calls" })).toHaveValue(""));
+  });
+
+  it("refreshes the list when the tab comes back into view", async () => {
+    renderInbox();
+    await screen.findByText("Sample Caller");
+    const before = api.get.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before));
+  });
+});

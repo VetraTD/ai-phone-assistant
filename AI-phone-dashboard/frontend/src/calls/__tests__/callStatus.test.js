@@ -62,3 +62,22 @@ describe("didList", () => {
     expect(didList({ call: call(), appointments: [], requests: [], tz: TZ })).toEqual([]);
   });
 });
+
+describe("statusLine: live calls and late requests", () => {
+  it("a call still going says so, and claims nothing", () => {
+    expect(statusLine({ call: call({ status: "in-progress" }), appointments: [], requests: [] }))
+      .toEqual({ tone: "quiet", text: "This call is still going." });
+  });
+
+  it("a request that arrived after Done is needed again", () => {
+    const handled = call({ handled_at: "2026-11-23T10:00:00Z", handled_by: "uid-1" });
+    const late = req({ request_type: "unconfirmed_claim", created_at: "2026-11-23T10:05:00Z" });
+    expect(statusLine({ call: handled, appointments: [], requests: [late] })).toEqual({ tone: "needs", text: "Call back to confirm" });
+  });
+
+  it("a request older than Done stays done", () => {
+    const handled = call({ handled_at: "2026-11-23T10:00:00Z", handled_by: "uid-1" });
+    const early = req({ created_at: "2026-11-23T09:55:00Z" });
+    expect(statusLine({ call: handled, appointments: [], requests: [early] })).toEqual({ tone: "done", text: "Marked done" });
+  });
+});

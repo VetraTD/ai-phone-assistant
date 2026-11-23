@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
+import { useAutoRefresh } from "../shell/useAutoRefresh";
 import CallList from "./inbox/CallList";
 import CallView from "./inbox/CallView";
 import CallerPanel from "./inbox/CallerPanel";
@@ -29,11 +30,18 @@ export default function Inbox() {
   const [listAttempt, setListAttempt] = useState(0);
   const [openTotal, setOpenTotal] = useState(null);
   const [countAttempt, setCountAttempt] = useState(0);
+  useAutoRefresh(() => {
+    setListAttempt((n) => n + 1);
+    setCountAttempt((n) => n + 1);
+  });
+  // A search looks through every call: a caller whose call is done, or who
+  // left no message, is still someone you may be looking for.
+  const fetchView = q ? "all" : view;
 
   useEffect(() => {
     let cancelled = false;
     api
-      .get("/api/calls", { params: { view, ...(q ? { q } : {}), limit: 200 } })
+      .get("/api/calls", { params: { view: fetchView, ...(q ? { q } : {}), limit: 200 } })
       .then((res) => {
         if (!cancelled) setList({ status: "ready", calls: Array.isArray(res.data?.calls) ? res.data.calls : [] });
       })
@@ -43,7 +51,7 @@ export default function Inbox() {
     return () => {
       cancelled = true;
     };
-  }, [view, q, listAttempt]);
+  }, [fetchView, q, listAttempt]);
 
   // "Needs you (n)" and the navigation badge, whichever view is showing.
   useEffect(() => {
