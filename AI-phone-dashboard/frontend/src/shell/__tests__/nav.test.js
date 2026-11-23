@@ -3,7 +3,7 @@ import { calendarAvailable, navItems } from "../nav";
 
 const DEFS = {
   capabilities: [
-    { id: "appointments", core: false, adapterKind: "scheduling" },
+    { id: "appointments", core: false, adapterKind: "scheduling", configSchema: { adapter: { type: "choice", default: "internal" } } },
     { id: "messages", core: true, adapterKind: null },
   ],
   adapters: {
@@ -22,6 +22,13 @@ describe("calendarAvailable", () => {
   });
   it("is true when bookings are on and no backend was chosen (the built-in calendar is the default)", () => {
     expect(calendarAvailable(DEFS, [row({ adapter: null })])).toBe(true);
+  });
+  it("follows the pack's own default backend when none was chosen", () => {
+    const athenaDefault = {
+      ...DEFS,
+      capabilities: [{ ...DEFS.capabilities[0], configSchema: { adapter: { type: "choice", default: "athenahealth" } } }],
+    };
+    expect(calendarAvailable(athenaDefault, [row({ adapter: null })])).toBe(false);
   });
   it("is false when bookings live in athenahealth", () => {
     expect(calendarAvailable(DEFS, [row({ adapter: "athenahealth" })])).toBe(false);

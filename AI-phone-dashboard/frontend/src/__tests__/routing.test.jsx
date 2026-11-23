@@ -114,6 +114,8 @@ describe("the app build (app.vetratd.com)", () => {
     await at("app", "/nope");
     const link = await screen.findByRole("link", { name: /vetratd\.com/i });
     expect(link.getAttribute("href")).toBe(MARKETING_URL);
+    // A signed-in person who mistyped an address needs a way back in too.
+    expect(screen.getByRole("link", { name: /your dashboard/i }).getAttribute("href")).toBe("/home");
   });
 });
 

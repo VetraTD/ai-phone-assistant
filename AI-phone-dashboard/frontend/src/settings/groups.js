@@ -52,17 +52,17 @@ export const GROUPS = [
     id: "notifications",
     label: "Notifications",
     icon: Bell,
-    caption: "Email and text alerts",
+    caption: "Email alerts",
     title: "Notifications",
-    description: "How you hear about calls, and what callers get texted afterwards.",
+    description: "How you hear about calls.",
   },
   {
     id: "billing",
-    label: "Billing & Integrations",
+    label: "Usage & number",
     icon: CreditCard,
-    caption: "Plan, usage, calendar",
-    title: "Billing & Integrations",
-    description: "Your plan, how much you've used this month, and connected apps.",
+    caption: "This month, your number",
+    title: "Usage & number",
+    description: "How much VetraTD answered this month, and the number callers ring.",
   },
 ];
 

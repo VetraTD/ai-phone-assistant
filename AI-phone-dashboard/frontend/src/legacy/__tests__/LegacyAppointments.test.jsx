@@ -48,5 +48,6 @@ describe("LegacyAppointments", () => {
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith("/api/appointments/email", { range: "7days" })
     );
+    expect(await screen.findByRole("status")).toBeInTheDocument();
   });
 });

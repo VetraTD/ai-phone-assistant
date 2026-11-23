@@ -25,12 +25,14 @@ async function fetchCapabilities(businessId) {
       api.get(`/api/business/${businessId}/capabilities`),
     ]);
     return {
+      status: "ready",
       definitions: defs.data,
       capabilityRows: Array.isArray(rows.data?.capabilities) ? rows.data.capabilities : [],
     };
   } catch {
-    // Pages that need these say so themselves; the shell still works.
-    return { definitions: null, capabilityRows: [] };
+    // Pages that need these say so themselves (capabilitiesStatus "error");
+    // the shell still works.
+    return { status: "error", definitions: null, capabilityRows: [] };
   }
 }
 
@@ -82,11 +84,12 @@ export default function SessionGate({ children }) {
   return (
     <>
       {idle.warning ? (
-        <div className="vt-app vt-idle" role="alert" aria-live="assertive">
-          <span>
-            {`You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
-              idle.secondsRemaining % 60
-            ).padStart(2, "0")} for security.`}
+        <div className="vt-app vt-idle">
+          {/* Said in whole minutes, so a screen reader hears it once a minute
+              at most; the ticking clock beside it is for the eye only. */}
+          <span role="alert">{signedOutIn(idle.secondsRemaining)}</span>
+          <span className="vt-num vt-idle-clock" aria-hidden="true">
+            {`${Math.floor(idle.secondsRemaining / 60)}:${String(idle.secondsRemaining % 60).padStart(2, "0")}`}
           </span>
           <button type="button" className="vt-btn vt-btn-primary" onClick={idle.stayActive}>
             Stay signed in
@@ -99,10 +102,15 @@ export default function SessionGate({ children }) {
   );
 }
 
+function signedOutIn(seconds) {
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `You will be signed out in ${minutes} ${minutes === 1 ? "minute" : "minutes"} for security.`;
+}
+
 function SignedIn({ children }) {
   const [me, setMe] = useState({ status: "loading", business: null });
   const [attempt, setAttempt] = useState(0);
-  const [caps, setCaps] = useState({ definitions: null, capabilityRows: [] });
+  const [caps, setCaps] = useState({ status: "loading", definitions: null, capabilityRows: [] });
   const [openCount, setOpenCount] = useState(0);
 
   useEffect(() => {
@@ -155,6 +163,7 @@ function SignedIn({ children }) {
       setBusiness,
       definitions: caps.definitions,
       capabilityRows: caps.capabilityRows,
+      capabilitiesStatus: caps.status,
       reloadCapabilities,
       openCount,
       setOpenCount,
@@ -205,7 +214,12 @@ function SignedIn({ children }) {
       <Onboarding
         existingBusiness={business && !business.phone_number ? business : null}
         onBack={() => signOut()}
-        onComplete={(biz) => setBusiness(biz)}
+        // Onboarding.jsx calls onComplete() with no argument once the number
+        // is bought, so load the business again rather than trust an argument.
+        onComplete={() => {
+          setMe({ status: "loading", business: null });
+          setAttempt((n) => n + 1);
+        }}
       />
     );
   }

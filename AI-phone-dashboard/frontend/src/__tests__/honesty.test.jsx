@@ -18,6 +18,7 @@ vi.mock("../api", () => ({
 
 import App from "../App";
 import AccountSection from "../settings/AccountSection";
+import { GROUPS } from "../settings/groups";
 
 afterEach(() => {
   cleanup();
@@ -42,6 +43,13 @@ describe("the dashboard shows only what is real", () => {
     expect(screen.queryByText("Starter")).toBeNull();
     expect(screen.queryByText(/billing status/i)).toBeNull();
     expect(screen.queryByText(/billing & plan|current plan|card payments/i)).toBeNull();
+  });
+
+  it("the settings menu promises no texts, plan, billing or integrations", () => {
+    // Texts are off in production and billing and integrations are not built,
+    // so the menu that leads to these panels must not offer them either.
+    const words = GROUPS.map((g) => [g.label, g.caption, g.title, g.description].join(" ")).join(" | ");
+    expect(words).not.toMatch(/text(ed|s)?|plan|billing|integration|connected apps/i);
   });
 
   it("the marketing page no longer links to a demo", () => {

@@ -3,6 +3,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const authState = vi.hoisted(() => ({ user: null }));
+const idleState = vi.hoisted(() => ({ warning: false, secondsRemaining: 0 }));
+
+vi.mock("../../useIdleLogout", () => ({
+  useIdleLogout: () => ({ ...idleState, stayActive: () => {} }),
+}));
 
 vi.mock("../../auth", () => ({
   onAuthChange(cb) {
@@ -12,7 +17,15 @@ vi.mock("../../auth", () => ({
   signOut: vi.fn(),
 }));
 vi.mock("../../Login", () => ({ default: () => <div>login screen</div> }));
-vi.mock("../../Onboarding", () => ({ default: () => <div>onboarding screen</div> }));
+// Onboarding.jsx calls onComplete() with NO argument once the number is bought.
+vi.mock("../../Onboarding", () => ({
+  default: ({ onComplete }) => (
+    <div>
+      onboarding screen
+      <button type="button" onClick={() => onComplete()}>finish onboarding</button>
+    </div>
+  ),
+}));
 vi.mock("../../api", () => ({ api: { get: vi.fn(), put: vi.fn() } }));
 
 import { api } from "../../api";
@@ -20,12 +33,13 @@ import SessionGate from "../SessionGate";
 import { useBusiness } from "../BusinessContext";
 
 function BusinessName() {
-  const { business, definitions, capabilityRows } = useBusiness();
+  const { business, definitions, capabilityRows, capabilitiesStatus } = useBusiness();
   return (
     <div>
       <p>{business.name}</p>
       <p>{definitions ? "definitions loaded" : "no definitions"}</p>
       <p>{`${capabilityRows.length} capability rows`}</p>
+      <p>{`actions ${capabilitiesStatus}`}</p>
     </div>
   );
 }
@@ -44,7 +58,38 @@ function routeGets(me) {
 describe("SessionGate", () => {
   beforeEach(() => {
     authState.user = { uid: "u1", email: "owner@brightwork.example" };
+    idleState.warning = false;
+    idleState.secondsRemaining = 0;
     api.get.mockReset();
+  });
+
+  it("finishing onboarding loads the business again and opens the dashboard", async () => {
+    let calls = 0;
+    routeGets(() =>
+      Promise.resolve({ data: { business: ++calls === 1 ? { id: "b1", name: "Brightwork Family Dental" } : BRIGHTWORK } })
+    );
+    render(<SessionGate><BusinessName /></SessionGate>);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "finish onboarding" }));
+    expect(await screen.findByText("Brightwork Family Dental")).toBeInTheDocument();
+    expect(api.get.mock.calls.filter(([u]) => u === "/api/me")).toHaveLength(2);
+  });
+
+  it("the idle warning is said once in words; the ticking clock is not read out", async () => {
+    idleState.warning = true;
+    idleState.secondsRemaining = 95;
+    routeGets(() => Promise.resolve({ data: { business: BRIGHTWORK } }));
+    render(<SessionGate><BusinessName /></SessionGate>);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("You will be signed out in 2 minutes for security.");
+    expect(screen.getByText("1:35")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("says when the business's actions could not be loaded", async () => {
+    api.get.mockImplementation((url) =>
+      url === "/api/me" ? Promise.resolve({ data: { business: BRIGHTWORK } }) : Promise.reject(new Error("Network Error"))
+    );
+    render(<SessionGate><BusinessName /></SessionGate>);
+    expect(await screen.findByText("actions error")).toBeInTheDocument();
   });
 
   it("signed out shows the sign-in screen", async () => {
@@ -66,6 +111,7 @@ describe("SessionGate", () => {
     expect(await screen.findByText("Brightwork Family Dental")).toBeInTheDocument();
     expect(await screen.findByText("definitions loaded")).toBeInTheDocument();
     expect(await screen.findByText("1 capability rows")).toBeInTheDocument();
+    expect(await screen.findByText("actions ready")).toBeInTheDocument();
   });
 
   it("a failed account load says what to do and Try again asks again", async () => {

@@ -80,7 +80,7 @@ export default function LegacyAppointments() {
   };
 
   return (
-    <>
+    <div className="vt-page">
       <section className="appointments-page">
         <div className="appointments-page-header">
           <h2 className="appointments-page-title">{t.appointmentsPageTitle}</h2>
@@ -152,10 +152,10 @@ export default function LegacyAppointments() {
         )}
       </section>
       {toast && (
-        <div className={`dashboard-toast dashboard-toast-${toast.type}`}>
+        <div className={`dashboard-toast dashboard-toast-${toast.type}`} role="status">
           {toast.message}
         </div>
       )}
-    </>
+    </div>
   );
 }

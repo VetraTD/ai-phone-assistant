@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { signOut } from "../auth";
 import { useBusiness } from "../shell/BusinessContext";
+import { useUnsavedChangesGuard } from "../shell/useUnsavedChangesGuard";
 import SettingsPage from "../settings/SettingsPage";
 import "../Dashboard.css";
 
@@ -12,6 +13,10 @@ export default function LegacySettings() {
   const [usage, setUsage] = useState(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState(null);
+  // Spec §7: leaving with unsaved changes asks first (the old page used
+  // window.confirm when switching pages).
+  const [dirty, setDirty] = useState(false);
+  const leaveDialog = useUnsavedChangesGuard(dirty);
 
   useEffect(() => {
     if (!businessId) return;
@@ -25,12 +30,12 @@ export default function LegacySettings() {
   }, [businessId]);
 
   return (
-    <>
+    <div className="vt-page">
       <SettingsPage
         business={business}
         businessId={businessId}
         onBusinessUpdate={(updated) => setBusiness((prev) => ({ ...(prev || {}), ...updated }))}
-        onDirtyChange={() => {}}
+        onDirtyChange={setDirty}
         usage={usage}
         usageLoading={usageLoading}
         usageError={usageError}
@@ -38,6 +43,7 @@ export default function LegacySettings() {
       <button type="button" className="vt-btn vt-btn-quiet" onClick={() => signOut()}>
         Sign out
       </button>
-    </>
+      {leaveDialog}
+    </div>
   );
 }

@@ -22,6 +22,11 @@
 .vt-skip:focus {
   top: 12px;
 }
+/* It sits over the navy navigation, where ink blue is too dark to see. */
+.vt-skip:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
 
 /* --- desktop side navigation --- */
 .vt-sidenav {
@@ -82,7 +87,7 @@
   gap: 12px;
   min-height: 44px;
   padding: 10px;
-  border-radius: 9px;
+  border-radius: var(--r-control);
   font-size: 14.5px;
   font-weight: 500;
   color: inherit;
@@ -161,8 +166,20 @@
     color: var(--faint);
     text-decoration: none;
   }
+  /* Colour is never the only signal: the active tab also gets a bar and weight. */
   .vt-tab[aria-current="page"] {
     color: var(--ink-blue);
+    font-weight: 700;
+  }
+  .vt-tab[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: 25%;
+    right: 25%;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: var(--ink-blue);
   }
   .vt-tabcount {
     position: absolute;
@@ -178,5 +195,16 @@
     font-weight: 700;
     display: grid;
     place-items: center;
+  }
+}
+
+/* Pages hosted from the old dashboard until part 2 replaces them, and any
+ * page that is not full-bleed. */
+.vt-page {
+  padding: 28px 32px 40px;
+}
+@media (max-width: 760px) {
+  .vt-page {
+    padding: 16px 16px 24px;
   }
 }

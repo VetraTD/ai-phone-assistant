@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useBusiness } from "./BusinessContext";
 import { calendarAvailable, navItems } from "./nav";
@@ -61,7 +62,16 @@ export default function AppShell() {
       </nav>
 
       <main id="main" className="vt-main" tabIndex={-1}>
-        <Outlet />
+        {/* A page still loading keeps the navigation on screen. */}
+        <Suspense
+          fallback={
+            <p className="vt-page" role="status">
+              Loading this page…
+            </p>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </main>
 
       <nav className="vt-tabbar" aria-label="Main" style={{ "--vt-tabs": items.length }}>

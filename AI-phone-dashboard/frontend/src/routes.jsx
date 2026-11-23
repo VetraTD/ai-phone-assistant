@@ -37,6 +37,7 @@ import Landing from "./Landing.jsx";
 // The signed-in dashboard: SessionGate + AppShell, with each page in the
 // shell's <Outlet/>. Lazy, so the marketing build never loads any of it.
 const AppLayout = lazy(() => import("./shell/AppLayout.jsx"));
+const CalendarRoute = lazy(() => import("./shell/CalendarRoute.jsx"));
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
@@ -98,7 +99,13 @@ export function NotFound() {
     >
       <h1 style={{ fontSize: 48, margin: 0 }}>404</h1>
       <p style={{ margin: 0, color: "#64748b" }}>This page doesn&apos;t exist.</p>
-      <a href={home} style={{ color: "#3a8ff2", fontWeight: 600 }}>
+      {BUILD_TARGET === "app" ? (
+        // Someone signed in who mistyped an address needs a way back in.
+        <a href="/home" style={{ color: "#0038fd", fontWeight: 600 }}>
+          Go to your dashboard
+        </a>
+      ) : null}
+      <a href={home} style={{ color: "#0038fd", fontWeight: 600 }}>
         {BUILD_TARGET === "app" ? "Back to vetratd.com" : "Back to home"}
       </a>
     </div>
@@ -117,7 +124,14 @@ export default function AppRoutes() {
               <Route path="/home" element={<Home />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/inbox/:callId" element={<Inbox />} />
-              <Route path="/calendar" element={<LegacyAppointments />} />
+              <Route
+                path="/calendar"
+                element={
+                  <CalendarRoute>
+                    <LegacyAppointments />
+                  </CalendarRoute>
+                }
+              />
               <Route path="/voice-agent" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section/:item" element={<VoiceAgent />} />

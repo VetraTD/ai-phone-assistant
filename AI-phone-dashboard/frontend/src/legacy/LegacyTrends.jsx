@@ -113,6 +113,7 @@ export default function LegacyTrends() {
   }, [businessId, analyticsPeriod]);
 
   return (
+    <div className="vt-page">
       <section className="analytics-page">
         <div className="analytics-page-header">
           <div className="analytics-page-title-row">
@@ -449,5 +450,6 @@ export default function LegacyTrends() {
           </>
         )}
       </section>
+    </div>
   );
 }

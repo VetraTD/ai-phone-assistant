@@ -7,6 +7,7 @@ import { createContext, useContext } from "react";
  *   business, businessId, setBusiness   the /api/me business row
  *   definitions                         GET /api/capabilities/definitions (null until loaded or if it failed)
  *   capabilityRows                      GET /api/business/:id/capabilities, the `capabilities` array
+ *   capabilitiesStatus                  "loading" | "ready" | "error" for the two above
  *   reloadCapabilities()                fetch both again
  *   openCount, setOpenCount             calls that need the owner, shown on Home in the navigation
  */

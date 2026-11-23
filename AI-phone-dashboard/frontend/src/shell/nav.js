@@ -1,9 +1,5 @@
 import { HomeIcon, InboxIcon, CalendarIcon, AgentIcon, SettingsIcon } from "./icons";
 
-// The built-in calendar is what the voice engine uses when a business has not
-// chosen a scheduling backend (adapters/scheduling/index.js).
-const DEFAULT_SCHEDULING_ADAPTER = "internal";
-
 /**
  * Whether this business gets a Calendar tab: bookings are on, and they land in
  * VetraTD's own calendar rather than an outside system such as athenahealth.
@@ -17,7 +13,8 @@ export function calendarAvailable(definitions, capabilityRows) {
   if (!pack) return false;
   const row = (capabilityRows || []).find((r) => r.capability_id === pack.id);
   if (!row?.enabled) return false;
-  const adapterId = row.adapter || DEFAULT_SCHEDULING_ADAPTER;
+  // No backend chosen: the pack's own declared default (its configSchema).
+  const adapterId = row.adapter || pack.configSchema?.adapter?.default;
   const adapter = (definitions.adapters?.[pack.adapterKind] || []).find((a) => a.id === adapterId);
   return adapter?.storesBookingsLocally === true;
 }
