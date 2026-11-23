@@ -157,8 +157,7 @@
   align-items: flex-start;
   text-align: left;
   min-height: 44px;
-  border: 1px solid rgba(0, 56, 253, 0.22);
-  border-left: 3px solid var(--ink-blue);
+  border: 1px solid rgba(0, 56, 253, 0.28);
   border-radius: 8px;
   background: var(--tint);
   color: var(--ink);
@@ -198,7 +197,6 @@
 /* Cancelled: struck through and hatched, and the word itself, so colour is never the only signal. */
 .vt-cal-booking.vt-cal-cancelled {
   border-color: var(--line);
-  border-left-color: var(--faint);
   color: var(--muted);
   background: repeating-linear-gradient(135deg, var(--grey-bg) 0 5px, var(--surface) 5px 10px);
 }
