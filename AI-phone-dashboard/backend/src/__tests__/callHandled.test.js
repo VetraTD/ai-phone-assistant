@@ -31,8 +31,10 @@ describe("PUT/DELETE /api/calls/:id/handled", () => {
     expect(res.status).toBe(200);
     expect(seen).toHaveLength(1);
     expect(seen[0].sql).toMatch(/business_id = \$2/);
-    expect(seen[0].sql).toMatch(/COALESCE\(handled_at/);
-    expect(seen[0].sql).toMatch(/COALESCE\(handled_by/);
+    // Takes effect only when not done yet, or when a request arrived after Done;
+    // otherwise the first person and time stand.
+    expect(seen[0].sql).toMatch(/CASE WHEN \(calls\.handled_at IS NULL OR EXISTS/);
+    expect(seen[0].sql).toMatch(/cr\.created_at > calls\.handled_at/);
     expect(seen[0].params).toEqual([CALL, "b1", DEFAULT_TEST_USER.id]);
     expect(res.body).toEqual({ id: CALL, handled_at: "2026-11-23T10:00:00Z", handled_by: DEFAULT_TEST_USER.id });
   });

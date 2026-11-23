@@ -84,6 +84,21 @@ describeDb("061: a call's open item can be marked done", () => {
     expect(idx.rows[0]?.indexdef).toMatch(/\(business_id, started_at\) WHERE \(handled_at IS NULL\)/);
   });
 
+  it("gives up rather than queue live call writes behind it", () => {
+    const sql = fs.readFileSync(MIGRATION, "utf8");
+    const firstStatement = sql.split("\n").find((l) => l.trim() && !l.trim().startsWith("--"));
+    expect(firstStatement.trim()).toBe("SET LOCAL lock_timeout = '5s';");
+  });
+
+  it("indexes requests and bookings by call, which every Home and Inbox read joins on", async () => {
+    const r = await admin.query(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE indexname IN ('idx_customer_requests_call', 'idx_appointments_call') ORDER BY indexname`
+    );
+    expect(r.rows.map((x) => x.indexname)).toEqual(["idx_appointments_call", "idx_customer_requests_call"]);
+    expect(r.rows[0].indexdef).toMatch(/\(call_id\)/);
+    expect(r.rows[1].indexdef).toMatch(/\(call_id\)/);
+  });
+
   it("the launch backfill, run as a Cloud SQL-like owner, closes only requests older than 7 days", async () => {
     const sql = fs.readFileSync(MIGRATION, "utf8");
     await admin.query("BEGIN");
@@ -92,6 +107,7 @@ describeDb("061: a call's open item can be marked done", () => {
       // RLS. The superuser `vetra` would bypass regardless and prove nothing.
       await admin.query(`ALTER TABLE calls OWNER TO ${OWNER_ROLE}`);
       await admin.query(`ALTER TABLE customer_requests OWNER TO ${OWNER_ROLE}`);
+      await admin.query(`ALTER TABLE appointments OWNER TO ${OWNER_ROLE}`);
       await admin.query(`SET LOCAL ROLE ${OWNER_ROLE}`);
       await admin.query(sql);
       await admin.query(`RESET ROLE`);

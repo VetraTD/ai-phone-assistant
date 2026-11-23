@@ -510,3 +510,59 @@ describeDb("Inbox search and the Needs-you view against real Postgres", () => {
     expect(res.body.calls[0]).toMatchObject({ has_request: true, request_type: "message", caller_name_guess: "Sample Caller" });
   });
 });
+
+describeDb("Inbox reads: caller history, number search and late requests", () => {
+  it("caller history never shows another tenant's calls from the same number", async () => {
+    const own = await admin.query(`SELECT id FROM calls WHERE twilio_call_sid = $1`, [`CA-dash-${TENANT_A.slice(0, 8)}`]);
+    // The seed gives both tenants a call from +15551239876.
+    const res = await request(app).get(`/api/calls/${own.rows[0].id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.caller_history.calls).toEqual([]);
+    expect(res.body.caller_history.bookings.every((b) => b.client_name === "A Patient")).toBe(true);
+  });
+
+  it("a withheld number has no history, even with other withheld calls on file", async () => {
+    const ids = [];
+    for (const sid of ["CA-withheld-1", "CA-withheld-2"]) {
+      const r = await admin.query(
+        `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, summary) VALUES ($1, $2, '+266696687', 'completed', 'Withheld caller.') RETURNING id`,
+        [TENANT_A, sid]
+      );
+      ids.push(r.rows[0].id);
+    }
+    const res = await request(app).get(`/api/calls/${ids[0]}`);
+    expect(res.body.caller_history).toEqual({ calls: [], bookings: [] });
+  });
+
+  it("finds a number however it is typed", async () => {
+    await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status) VALUES ($1, 'CA-digits-uk', '+447700900123', 'completed')`,
+      [TENANT_A]
+    );
+    for (const typed of ["07700 900123", "+44 7700 900123", "7700-900-123"]) {
+      const res = await request(app).get("/api/calls").query({ q: typed });
+      expect(res.body.calls.map((c) => c.twilio_call_sid), typed).toEqual(["CA-digits-uk"]);
+    }
+  });
+
+  it("a request written after Done puts the call back under Needs you", async () => {
+    const { rows } = await admin.query(
+      `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, handled_at, handled_by)
+       VALUES ($1, 'CA-late-req', '+15551230009', 'completed', now() - interval '10 minutes', 'staff-x') RETURNING id`,
+      [TENANT_A]
+    );
+    await admin.query(
+      `INSERT INTO customer_requests (business_id, call_id, request_type, created_at) VALUES ($1, $2, 'message', now() - interval '20 minutes'), ($1, $2, 'unconfirmed_claim', now())`,
+      [TENANT_A, rows[0].id]
+    );
+    const res = await request(app).get("/api/calls").query({ view: "open" });
+    expect(res.body.calls.map((c) => c.twilio_call_sid)).toContain("CA-late-req");
+    const row = res.body.calls.find((c) => c.twilio_call_sid === "CA-late-req");
+    expect(row.is_open).toBe(true);
+
+    // Done again now takes the new time, so the item really closes.
+    expect((await request(app).put(`/api/calls/${rows[0].id}/handled`)).status).toBe(200);
+    const again = await request(app).get("/api/calls").query({ view: "open" });
+    expect(again.body.calls.map((c) => c.twilio_call_sid)).not.toContain("CA-late-req");
+  });
+});

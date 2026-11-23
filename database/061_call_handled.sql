@@ -24,14 +24,28 @@
 -- for the one UPDATE and put straight back. tests/db/callHandled.test.js runs
 -- this file as such an owner.
 --
--- Additive and idempotent: re-running it adds nothing, and never overwrites an
--- item someone has already marked done.
+-- Additive, and safe if applied twice: it never overwrites an item someone has
+-- already marked done. It is NOT meant to be run again by hand: a later run
+-- would close requests that have since passed 7 days. The migration ledger
+-- (schema_migrations) applies it once.
+--
+-- LOCKS. ADD COLUMN and the index builds lock calls, customer_requests and
+-- appointments, which the voice engine writes mid-call. Rather than queue
+-- behind a long transaction (and hold live calls' writes behind it), give up
+-- after 5 seconds and let the deploy be retried (migrations 042, 052, 054).
+
+SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS handled_at timestamptz;
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS handled_by text;
 
 -- Home and the Inbox's "Needs you" read open items per business, oldest first.
 CREATE INDEX IF NOT EXISTS idx_calls_open_items ON calls (business_id, started_at) WHERE handled_at IS NULL;
+
+-- Every Home and Inbox read joins a call to its requests and bookings by call
+-- id; without these each join scans the business's whole table.
+CREATE INDEX IF NOT EXISTS idx_customer_requests_call ON customer_requests (call_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_call ON appointments (call_id);
 
 ALTER TABLE calls NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE customer_requests NO FORCE ROW LEVEL SECURITY;

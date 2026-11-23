@@ -43,14 +43,25 @@ describe("GET /api/calls for the Inbox", () => {
   it("view=open keeps calls with a request nobody has marked done, after the tenant clause", async () => {
     await get("?view=open");
     for (const s of seen) {
-      expect(s.sql).toMatch(/WHERE business_id = \$1 AND handled_at IS NULL AND EXISTS \(/);
+      // Open = a request nobody has marked done, or one that arrived after Done.
+      expect(s.sql).toMatch(/WHERE business_id = \$1 AND EXISTS \(\s*SELECT 1 FROM customer_requests cr/);
+      expect(s.sql).toMatch(/calls\.handled_at IS NULL OR cr\.created_at > calls\.handled_at/);
       expect(s.params[0]).toBe("b1");
     }
   });
 
   it("any other view means all calls", async () => {
     await get("?view=all");
-    for (const s of seen) expect(s.sql).not.toMatch(/handled_at IS NULL/);
+    const count = seen.find((s) => s.sql.includes("COUNT(*)"));
+    expect(count.sql).not.toMatch(/handled_at/);
+  });
+
+  it("every request and booking subquery names the business, not RLS alone", async () => {
+    await get("?q=sample&view=open");
+    const list = seen.find((s) => !s.sql.includes("COUNT(*)"));
+    const subqueries = list.sql.match(/FROM (customer_requests|appointments) \w+ WHERE [^)]*/g) || [];
+    expect(subqueries.length).toBeGreaterThan(3);
+    for (const q of subqueries) expect(q, q).toMatch(/business_id = calls\.business_id/);
   });
 
   it("each row says whether it left a request, its latest kind, and the best name", async () => {

@@ -18,7 +18,7 @@ const WEEK_START = `(date_trunc('week', now() AT TIME ZONE $2) AT TIME ZONE $2)`
 // The latest request left on a call, and the latest booking's name, both kept
 // to this business explicitly as well as by row-level security.
 const LATEST_REQUEST = `LATERAL (
-    SELECT cr.request_type, cr.caller_name, cr.callback_number, cr.preferred_time, cr.message
+    SELECT cr.request_type, cr.caller_name, cr.callback_number, cr.preferred_time, cr.message, cr.notes, cr.created_at
       FROM customer_requests cr
      WHERE cr.call_id = c.id AND cr.business_id = $1
      ORDER BY cr.created_at DESC
@@ -30,19 +30,26 @@ const LATEST_BOOKING_NAME = `LATERAL (
      ORDER BY ap.created_at DESC
      LIMIT 1) a`;
 
+// Open: a request nobody has marked done, or one that arrived after Done
+// (the post-call check's follow-up is written at call end). Driven from the
+// business's requests, which are far fewer than its calls.
 const OPEN_ITEMS = `
   SELECT c.id AS call_id, c.started_at, c.caller_number, c.summary,
          COALESCE(r.caller_name, a.client_name) AS caller_name,
-         r.request_type, r.caller_name AS request_caller_name, r.callback_number, r.preferred_time, r.message
+         r.request_type, r.caller_name AS request_caller_name, r.callback_number, r.preferred_time, r.message, r.notes
     FROM calls c
     JOIN ${LATEST_REQUEST} ON true
     LEFT JOIN ${LATEST_BOOKING_NAME} ON true
-   WHERE c.business_id = $1 AND c.handled_at IS NULL
+   WHERE c.business_id = $1
+     AND c.id IN (SELECT cr.call_id FROM customer_requests cr WHERE cr.business_id = $1 AND cr.call_id IS NOT NULL)
+     AND (c.handled_at IS NULL OR r.created_at > c.handled_at)
    ORDER BY c.started_at ASC
    LIMIT 200`;
 
-// Done today: calls today that left nothing to do, and items a person marked
-// done today. Items closed by the launch backfill are not news.
+// Done today: finished calls today that left nothing to do, and items a person
+// marked done today (and that no later request has opened again). Items closed
+// by the launch backfill are not news, and a call still in progress is not done.
+// The first condition narrows to today's calls before any per-call join.
 const DONE_TODAY = `
   SELECT c.id AS call_id, c.started_at, c.caller_number, c.summary, c.status, c.handled_at, c.handled_by,
          (r.request_type IS NOT NULL) AS had_request,
@@ -51,9 +58,12 @@ const DONE_TODAY = `
     LEFT JOIN ${LATEST_REQUEST} ON true
     LEFT JOIN ${LATEST_BOOKING_NAME} ON true
    WHERE c.business_id = $1
+     AND (c.started_at >= ${DAY_START} OR c.handled_at >= ${DAY_START})
+     AND c.status <> 'in-progress'
      AND (
           (r.request_type IS NULL AND c.started_at >= ${DAY_START} AND c.started_at < ${DAY_END})
-       OR (c.handled_at >= ${DAY_START} AND c.handled_at < ${DAY_END} AND c.handled_by <> 'launch')
+       OR (c.handled_at >= ${DAY_START} AND c.handled_at < ${DAY_END} AND c.handled_by <> 'launch'
+           AND r.created_at <= c.handled_at)
      )
    ORDER BY GREATEST(c.started_at, COALESCE(c.handled_at, c.started_at)) DESC
    LIMIT 200`;
@@ -112,6 +122,7 @@ router.get("/api/home", authenticate, withTenantHandler(async (req, res) => {
           callbackNumber: r.callback_number ?? null,
           preferredTime: r.preferred_time ?? null,
           message: r.message ?? null,
+          notes: r.notes ?? null,
         },
       })),
       doneToday: done.rows.map((r) => ({

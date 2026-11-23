@@ -7,6 +7,22 @@ const { sanitizeString } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { loadBusinessTimezone, callDateClauses } = require("../callDateBounds");
 const { authSensitiveLimiter } = require("../middleware/rateLimiters");
+const { isWithheld } = require("../withheld");
+
+// A call is OPEN when it has a request nobody has marked done: either it was
+// never marked done, or a request arrived after it was (for example the
+// post-call check's follow-up, written at call end). Used by the "Needs you"
+// view, the row's is_open, and Done itself.
+const OPEN_REQUEST = `EXISTS (
+        SELECT 1 FROM customer_requests cr
+         WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id
+           AND (calls.handled_at IS NULL OR cr.created_at > calls.handled_at))`;
+
+// Done takes effect when the call was not done yet, or a request arrived after
+// it was; otherwise the first person and time stand.
+const NOT_DONE = `(calls.handled_at IS NULL OR EXISTS (
+        SELECT 1 FROM customer_requests cr
+         WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id AND cr.created_at > calls.handled_at))`;
 
 // A call id is a uuid. Anything else is answered "not found" without asking
 // the database, which would otherwise fail the cast and answer 500.
@@ -49,9 +65,7 @@ router.get("/api/calls", authenticate, withTenantHandler(async (req, res) => {
     // The Inbox's "Needs you": calls that left a message or call-back request
     // nobody has marked done (migration 061). Any other value means all calls.
     if (req.query.view === "open") {
-      where.push(
-        `handled_at IS NULL AND EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id)`
-      );
+      where.push(OPEN_REQUEST);
     }
 
     // Inbox search over the number, the summary and the names callers gave.
@@ -60,12 +74,24 @@ router.get("/api/calls", authenticate, withTenantHandler(async (req, res) => {
     const q = sanitizeString(req.query.q, 64);
     if (q) {
       const p = addParam(`%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`);
-      where.push(`(
-        calls.caller_number ILIKE ${p} ESCAPE '\\'
-        OR calls.summary ILIKE ${p} ESCAPE '\\'
-        OR EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.caller_name ILIKE ${p} ESCAPE '\\')
-        OR EXISTS (SELECT 1 FROM appointments a WHERE a.call_id = calls.id AND a.client_name ILIKE ${p} ESCAPE '\\')
-      )`);
+      const matches = [
+        `calls.caller_number ILIKE ${p} ESCAPE '\\'`,
+        `calls.summary ILIKE ${p} ESCAPE '\\'`,
+        `EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id AND cr.caller_name ILIKE ${p} ESCAPE '\\')`,
+        `EXISTS (SELECT 1 FROM appointments a WHERE a.call_id = calls.id AND a.business_id = calls.business_id AND a.client_name ILIKE ${p} ESCAPE '\\')`,
+      ];
+      // A number however it is typed: "07700 900123", "+44 7700 900123" and
+      // "(555) 010-0199" all match the stored +447700900123 / +15550100199 by
+      // their digits (a national leading 0 dropped).
+      const digits = q.replace(/\D/g, "").replace(/^0+/, "");
+      if (digits.length >= 4) {
+        const d = addParam(`%${digits}%`);
+        matches.push(
+          `regexp_replace(coalesce(calls.caller_number, ''), '\\D', '', 'g') LIKE ${d}`,
+          `EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id AND regexp_replace(coalesce(cr.callback_number, ''), '\\D', '', 'g') LIKE ${d})`
+        );
+      }
+      where.push(`(${matches.join(" OR ")})`);
     }
 
     if (status && status !== "all") {
@@ -153,12 +179,13 @@ if (needs_followup === "true") {
       SELECT calls.*,
         COALESCE(
           (SELECT cr.caller_name FROM customer_requests cr
-            WHERE cr.call_id = calls.id AND cr.caller_name IS NOT NULL AND btrim(cr.caller_name) <> ''
+            WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id AND cr.caller_name IS NOT NULL AND btrim(cr.caller_name) <> ''
             ORDER BY cr.created_at DESC LIMIT 1),
-          (SELECT a.client_name FROM appointments a WHERE a.call_id = calls.id ORDER BY a.created_at DESC LIMIT 1)
+          (SELECT a.client_name FROM appointments a WHERE a.call_id = calls.id AND a.business_id = calls.business_id ORDER BY a.created_at DESC LIMIT 1)
         ) AS caller_name_guess,
-        EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id) AS has_request,
-        (SELECT cr.request_type FROM customer_requests cr WHERE cr.call_id = calls.id ORDER BY cr.created_at DESC LIMIT 1) AS request_type
+        EXISTS (SELECT 1 FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id) AS has_request,
+        ${OPEN_REQUEST} AS is_open,
+        (SELECT cr.request_type FROM customer_requests cr WHERE cr.call_id = calls.id AND cr.business_id = calls.business_id ORDER BY cr.created_at DESC LIMIT 1) AS request_type
       FROM calls
       ${whereSql}
       ORDER BY started_at DESC
@@ -224,7 +251,7 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
     // column). Nothing to look up for a withheld or missing number.
     const callerHistory = { calls: [], bookings: [] };
     const number = typeof call.caller_number === "string" ? call.caller_number : "";
-    if (number.trim()) {
+    if (!isWithheld(number)) {
       const otherCalls = await pool.query(
         `/* caller_history_calls */
          SELECT id, started_at, summary, status FROM calls
@@ -268,16 +295,19 @@ router.get("/api/calls/:id", authenticate, withTenantHandler(async (req, res) =>
 
 // Mark a call's open item (a message or call-back request) done, and reopen it
 // (dashboard overhaul, migration 061). The first person to press Done keeps it:
-// a second Done changes nothing. Scoped to the signed-in business explicitly as
-// well as by row-level security, so another business's call is "not found".
-router.put("/api/calls/:id/handled", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
+// a second Done changes nothing, unless a request arrived after the first one,
+// in which case Done takes the new time and person. Scoped to the signed-in
+// business explicitly as well as by row-level security, so another business's
+// call is "not found". Rate-limited per signed-in user (the limiter runs after
+// authenticate, so it can key on the account rather than the office's IP).
+router.put("/api/calls/:id/handled", authenticate, authSensitiveLimiter, withTenantHandler(async (req, res) => {
   const { id } = req.params;
   if (!CALL_ID.test(id)) return res.status(404).json(CALL_NOT_FOUND);
   try {
     const r = await pool.query(
       `UPDATE calls
-          SET handled_at = COALESCE(handled_at, now()),
-              handled_by = COALESCE(handled_by, $3)
+          SET handled_at = CASE WHEN ${NOT_DONE} THEN now() ELSE handled_at END,
+              handled_by = CASE WHEN ${NOT_DONE} THEN $3 ELSE handled_by END
         WHERE id = $1 AND business_id = $2
         RETURNING id, handled_at, handled_by`,
       [id, req.businessId, req.authUser.id]
@@ -290,7 +320,7 @@ router.put("/api/calls/:id/handled", authSensitiveLimiter, authenticate, withTen
   }
 }));
 
-router.delete("/api/calls/:id/handled", authSensitiveLimiter, authenticate, withTenantHandler(async (req, res) => {
+router.delete("/api/calls/:id/handled", authenticate, authSensitiveLimiter, withTenantHandler(async (req, res) => {
   const { id } = req.params;
   if (!CALL_ID.test(id)) return res.status(404).json(CALL_NOT_FOUND);
   try {

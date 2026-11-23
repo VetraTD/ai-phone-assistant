@@ -82,7 +82,7 @@ describe("GET /api/home", () => {
     const res = await get();
     expect(res.body.openItems).toEqual([{
       callId: "c1", startedAt: "2026-11-23T15:00:00Z", callerNumber: "+15550100", callerName: "Sample Caller", summary: "Wants a call back.",
-      request: { type: "callback", callerName: "Sample Caller", callbackNumber: "+15550199", preferredTime: "after 3 pm", message: "About a filling" },
+      request: { type: "callback", callerName: "Sample Caller", callbackNumber: "+15550199", preferredTime: "after 3 pm", message: "About a filling", notes: null },
     }]);
   });
 

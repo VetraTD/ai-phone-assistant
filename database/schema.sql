@@ -315,6 +315,9 @@ CREATE INDEX idx_appointments_unsynced ON appointments (business_id, scheduled_a
 -- the last-10-digit suffix match is applied in the application, so this serves
 -- the business_id scoping rather than the phone comparison itself.
 CREATE INDEX idx_appointments_business_client_phone ON appointments (business_id, client_phone);
+-- Requests and bookings by call, for the dashboard's Home and Inbox joins (migration 061).
+CREATE INDEX idx_customer_requests_call ON customer_requests (call_id);
+CREATE INDEX idx_appointments_call ON appointments (call_id);
 -- Migration 024: phone_number is the tenant-routing key — lookupBusinessByPhone
 -- matches Twilio's `To` against it on every inbound call. Two businesses sharing
 -- a number means the caller reaches whichever row the planner happened to return.

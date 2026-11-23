@@ -22,7 +22,9 @@ const APP_URL = "postgres://vetra_app:probe_only@localhost:55432/vetra";
 const TENANT_A = "a7a7a7a7-1111-4111-8111-a7a7a7a7a7a7";
 const TENANT_B = "b7b7b7b7-2222-4222-8222-b7b7b7b7b7b7";
 const STAFF_A = "c7c7c7c7-3333-4333-8333-c7c7c7c7c7c7";
-const TZ = "America/Chicago";
+// Not America/Chicago: that is also the fallback timezone, so a silent
+// fallback would pass a Chicago test.
+const TZ = "Europe/London";
 
 const require = createRequire(import.meta.url);
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "AI-phone-dashboard", "backend", "src");
@@ -49,18 +51,19 @@ function bootApp() {
   return { app: require(path.join(BACKEND, "server.js")), state };
 }
 
-async function call(tenant, sid, startedAt, { request: withRequest = false, handledBy = null, handledAt = null } = {}) {
+async function call(tenant, sid, startedAt, { request: withRequest = false, handledBy = null, handledAt = null, status = "completed" } = {}) {
   const r = await admin.query(
     `INSERT INTO calls (business_id, twilio_call_sid, caller_number, status, started_at, summary, handled_at, handled_by)
-     VALUES ($1, $2, '+15550170000', 'completed', $3, 'Synthetic call.', $4, $5) RETURNING id`,
-    [tenant, sid, startedAt, handledAt, handledBy]
+     VALUES ($1, $2, '+15550170000', $6, $3, 'Synthetic call.', $4, $5) RETURNING id`,
+    [tenant, sid, startedAt, handledAt, handledBy, status]
   );
   const id = r.rows[0].id;
   if (withRequest) {
+    // Left during the call, so before anyone could mark it done.
     await admin.query(
-      `INSERT INTO customer_requests (business_id, call_id, request_type, caller_name, message)
-       VALUES ($1, $2, 'callback', 'Sample Caller', 'Please ring back')`,
-      [tenant, id]
+      `INSERT INTO customer_requests (business_id, call_id, request_type, caller_name, message, created_at)
+       VALUES ($1, $2, 'callback', 'Sample Caller', 'Please ring back', $3)`,
+      [tenant, id, startedAt]
     );
   }
   return id;
@@ -117,6 +120,41 @@ describeDb("GET /api/home in the business's timezone", () => {
     const res = await request(app).get("/api/home");
     expect(res.body.openItems.map((i) => i.callId)).toEqual([own]);
     expect(res.body.openItems[0].request).toMatchObject({ type: "callback", callerName: "Sample Caller", message: "Please ring back" });
+  });
+
+  it("a call still in progress is not listed as done", async () => {
+    await call(TENANT_A, "CA_home_live", new Date(), { status: "in-progress" });
+    const res = await request(app).get("/api/home");
+    expect(res.body.doneToday).toEqual([]);
+  });
+
+  it("a request written after Done opens the item again, and it is not also 'done today'", async () => {
+    const id = await call(TENANT_A, "CA_home_late", new Date(Date.now() - 60 * 60 * 1000), {
+      request: true, handledBy: STAFF_A, handledAt: new Date(Date.now() - 30 * 60 * 1000),
+    });
+    // The original request predates Done; a later one (e.g. the post-call check) does not.
+    await admin.query(`UPDATE customer_requests SET created_at = now() - interval '50 minutes' WHERE call_id = $1`, [id]);
+    await admin.query(
+      `INSERT INTO customer_requests (business_id, call_id, request_type, notes) VALUES ($1, $2, 'unconfirmed_claim', 'Follow-up needed: please call them back to confirm.')`,
+      [TENANT_A, id]
+    );
+    const res = await request(app).get("/api/home");
+    expect(res.body.openItems.map((i) => i.callId)).toEqual([id]);
+    expect(res.body.openItems[0].request).toMatchObject({ type: "unconfirmed_claim", notes: "Follow-up needed: please call them back to confirm." });
+    expect(res.body.doneToday.map((d) => d.callId)).not.toContain(id);
+  });
+
+  it("another tenant's calls and bookings are never counted", async () => {
+    await call(TENANT_A, "CA_home_count_own", new Date());
+    const theirs = await call(TENANT_B, "CA_home_count_theirs", new Date());
+    await admin.query(
+      `INSERT INTO appointments (business_id, call_id, client_name, client_phone, scheduled_at) VALUES ($1, $2, 'Other Patient', '+15550170009', now() + interval '1 hour')`,
+      [TENANT_B, theirs]
+    );
+    const res = await request(app).get("/api/home");
+    expect(res.body.today).toEqual({ answered: 1, bookingsMade: 0 });
+    expect(res.body.todaysBookings).toEqual([]);
+    expect(res.body.week.calls).toBe(1);
   });
 
   it("an item closed at launch is not 'done today'; one a person closed today is", async () => {
