@@ -123,7 +123,7 @@ export default function LegacyTrends() {
               onChange={setAnalyticsPeriod}
             />
           </div>
-          <p className="analytics-page-subtitle">Trends and totals for your receptionist calls</p>
+          <p className="analytics-page-subtitle">Trends and totals for your calls</p>
         </div>
 
         {!analyticsBreakdown ? (
@@ -131,7 +131,7 @@ export default function LegacyTrends() {
             <section className="analytics-overview">
               <h3 className="analytics-section-label">Overview</h3>
               <div className="dashboard-kpis analytics-kpis">
-                <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Receptionist calls</div><div className="kpi-value kpi-skeleton" /></div>
+                <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Calls</div><div className="kpi-value kpi-skeleton" /></div>
                 <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Appointments scheduled</div><div className="kpi-value kpi-skeleton" /></div>
                 <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Follow-ups needed</div><div className="kpi-value kpi-skeleton" /></div>
                 <div className="kpi-card kpi-card-skeleton"><div className="kpi-label">Positive calls</div><div className="kpi-value kpi-skeleton" /></div>
@@ -174,7 +174,7 @@ export default function LegacyTrends() {
               <div className="kpi-value">
                 <AnimatedNumber value={analyticsBreakdown?.total_calls_3m ?? 0} duration={1200} />
               </div>
-              <div className="kpi-label">Receptionist calls</div>
+              <div className="kpi-label">Calls</div>
             </div>
             <div className="kpi-card kpi-card-green">
               <div className="kpi-value">

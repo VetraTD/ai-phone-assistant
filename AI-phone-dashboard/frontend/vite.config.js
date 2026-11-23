@@ -2,17 +2,21 @@ import { readFileSync } from 'node:fs'
 import { cwd } from 'node:process'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import { missingConnectOrigins } from './cspGuard.js'
+import { apiAddressProblem, missingConnectOrigins } from './cspGuard.js'
 
 // The app build (Firebase Hosting) fails when the API addresses it was given
 // are not allowed by the Content-Security-Policy in firebase.json: such a build
 // would load, then have every request blocked. See cspGuard.js.
-function cspFollowsApi(env) {
+function cspFollowsApi(env, mode) {
   return {
     name: 'csp-follows-api',
     apply: 'build',
     buildStart() {
       if (env.VITE_BUILD_TARGET !== 'app') return
+      if (mode === 'production') {
+        const problem = apiAddressProblem(env.VITE_API_URL, { localBuild: process.env.VETRA_LOCAL_BUILD === '1' })
+        if (problem) this.error(problem)
+      }
       const firebaseJson = JSON.parse(readFileSync(new URL('./firebase.json', import.meta.url), 'utf8'))
       const missing = missingConnectOrigins(firebaseJson, [env.VITE_API_URL, env.VITE_NUMBER_API_URL])
       if (missing.length) {
@@ -29,7 +33,7 @@ function cspFollowsApi(env) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, cwd(), 'VITE_')
   return {
-    plugins: [react(), cspFollowsApi(env)],
+    plugins: [react(), cspFollowsApi(env, mode)],
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/setupTests.js'],

@@ -26,6 +26,12 @@ export default function AppShell() {
   const section = pathname.split("/")[1] || "";
   const mainRef = useRef(null);
   const firstSection = useRef(section);
+  // The app's own name in the browser tab (index.html's title is the
+  // marketing site's).
+  useEffect(() => {
+    document.title = business?.name ? `VetraTD · ${business.name}` : "VetraTD";
+  }, [business?.name]);
+
   useEffect(() => {
     if (section === firstSection.current) return;
     firstSection.current = section;

@@ -3,13 +3,14 @@ import {
   browserLocalPersistence,
   confirmPasswordReset,
   createUserWithEmailAndPassword,
-  getAuth,
   onAuthStateChanged,
   sendPasswordResetEmail,
   setPersistence,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   verifyPasswordResetCode,
+  initializeAuth,
+  inMemoryPersistence,
 } from "firebase/auth";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +44,11 @@ const app = initializeApp({
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
 });
 
-export const auth = getAuth(app);
+// initializeAuth with no popup/redirect resolver: sign-in is email and password
+// only, and the default getAuth() loads apis.google.com on phones and Safari for
+// popups this app never uses, which the dashboard's content security policy
+// (rightly) blocks. Local persistence first, memory when storage is disabled.
+export const auth = initializeAuth(app, { persistence: [browserLocalPersistence, inMemoryPersistence] });
 
 // Survive a page reload and a closed tab, which is what Supabase did and what
 // the dashboard's own §164.312(a)(2)(iii) idle timeout assumes — that hook is

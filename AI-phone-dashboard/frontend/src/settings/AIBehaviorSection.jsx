@@ -81,7 +81,7 @@ export default function AIBehaviorSection({ value, onChange, only }) {
       {show("tone") ? (
       <Field
         label="Tone of voice"
-        hint="Picking one writes a single tone line at the top of your house rules below, replacing any tone line already there."
+        hint="Picking one adds a tone line at the start of your House rules, replacing any tone line already there."
       >
         {(p) => (
           <select {...p} value={presetKey} onChange={(e) => applyPreset(e.target.value)}>

@@ -160,6 +160,12 @@
  * @property {boolean} [core] - always on, not opt-in, cannot be disabled
  * @property {string|null} [adapterKind] - e.g. "scheduling"; null if self-contained
  * @property {object} [configSchema] - validates CapabilityConfig; later drives the UI
+ * @property {"listed"|"optIn"|"hidden"} dashboardListing - REQUIRED. How the owner dashboard
+ *   lists it for an inbound business: always, only where switched on or set up, or
+ *   never (outbound-only and text packs). Required so a new pack is never shown by
+ *   default; tests/capabilitySchemaExport.test.js checks every pack declares it.
+ * @property {string} [dashboardPanel] - names a dashboard panel for settings kept on
+ *   the business row rather than in this pack config ("transferRules").
  * @property {(cfg: CapabilityConfig, ctx: object) => CapabilityTool[]} [tools]
  * @property {(cfg: CapabilityConfig, ctx: object) => CapabilityTool[]} [adapterTools]
  *   Tools whose shape depends on which backend is active. TRANSITIONAL: in Step A

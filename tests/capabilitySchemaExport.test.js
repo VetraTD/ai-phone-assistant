@@ -101,6 +101,13 @@ describe("generated capability schemas", () => {
     });
   });
 
+  it("every pack says how the dashboard lists it, so a new pack is never shown by default", async () => {
+    const { listPacks } = await import("../capabilities/index.js");
+    for (const pack of listPacks()) {
+      expect(["listed", "optIn", "hidden"], pack.id).toContain(pack.dashboardListing);
+    }
+  });
+
   it("names a business-settings panel a pack needs, so the dashboard never tests an id", () => {
     const panels = Object.fromEntries(committed().capabilities.map((c) => [c.id, c.dashboardPanel ?? null]));
     expect(panels.transfer).toBe("transferRules");

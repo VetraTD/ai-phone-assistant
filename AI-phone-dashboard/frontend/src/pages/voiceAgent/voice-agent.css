@@ -4,8 +4,8 @@
 .vt-va {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  grid-template-areas: "head head" "list panel";
-  grid-template-rows: auto 1fr;
+  grid-template-areas: "head head" "list panel" "list save";
+  grid-template-rows: auto 1fr auto;
   min-height: 100vh;
   min-height: 100dvh;
 }
@@ -89,7 +89,8 @@
   height: 26px;
   border: 0;
   border-radius: var(--r-pill);
-  background: #b9c2d6;
+  /* Off: 3:1 against white at least (WCAG 1.4.11). */
+  background: #7b859e;
   cursor: pointer;
   transition: background-color 0.15s;
 }
@@ -128,10 +129,12 @@
 }
 
 .vt-va-save {
+  grid-area: save;
   position: sticky;
   bottom: 16px;
   z-index: 20;
-  margin-top: 20px;
+  margin: 0 28px 20px;
+  max-width: 764px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
@@ -144,6 +147,17 @@
   box-shadow: var(--shadow-pop);
   font-weight: 600;
 }
+.vt-va-save-empty {
+  display: none;
+}
+.vt-va-error {
+  padding: 4px 20px 8px;
+  color: var(--red);
+  font-weight: 600;
+}
+.vt-va-panel:focus {
+  outline: none;
+}
 .vt-va-save-actions {
   display: flex;
   gap: 8px;
@@ -152,14 +166,15 @@
 @media (max-width: 760px) {
   .vt-va {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "head" "list";
+    grid-template-areas: "head" "list" "save";
+    grid-template-rows: auto auto auto;
     min-height: 0;
   }
   .vt-va-head {
     padding: 20px 16px 14px;
   }
   .vt-va.vt-va-has-item {
-    grid-template-areas: "panel";
+    grid-template-areas: "panel" "save";
   }
   .vt-va.vt-va-has-item .vt-va-head,
   .vt-va.vt-va-has-item .vt-va-list {
@@ -180,6 +195,7 @@
     font-size: 16px;
   }
   .vt-va-save {
+    margin: 0 16px 16px;
     bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   }
   /* The reused settings parts use smaller text; 16 px minimum on phones. */

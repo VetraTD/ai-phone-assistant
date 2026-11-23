@@ -9,13 +9,19 @@ const EMPTY_FORM = { question: "", answer: "", category: "", priority: 0 };
 // /api/knowledge CRUD (routes/knowledge.js). Independent of the main
 // settings save flow — add/edit/delete/toggle each hit the API immediately,
 // same pattern as the dashboard's calendar connect/disconnect actions.
-export default function KnowledgeBaseEditor({ businessId, onCountChange }) {
+export default function KnowledgeBaseEditor({ businessId, onCountChange, onDirtyChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // null = no form open; "new" = add form; otherwise the id of the row being edited.
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  // A question or answer typed but not yet saved is unsaved work.
+  const formDirty = JSON.stringify(form) !== JSON.stringify(EMPTY_FORM);
+  useEffect(() => {
+    onDirtyChange?.(formDirty);
+  }, [formDirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   const [saving, setSaving] = useState(false);
 
   const load = () => {

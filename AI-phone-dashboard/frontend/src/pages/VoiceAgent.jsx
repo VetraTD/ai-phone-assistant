@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
 import { useUnsavedChangesGuard } from "../shell/useUnsavedChangesGuard";
@@ -15,6 +15,7 @@ import KnowledgeBaseEditor from "../settings/KnowledgeBaseEditor";
 import TransferRulesSection from "../settings/TransferRulesSection";
 import { TRANSFER_POLICIES } from "../settings/constants";
 import { buildSections, DEFAULT_ITEM, DEFAULT_SECTION } from "./voiceAgent/items";
+import { formatPhone } from "./voiceAgent/formatPhone";
 import "../settings/Settings.css";
 import "./voiceAgent/voice-agent.css";
 
@@ -23,6 +24,7 @@ import "./voiceAgent/voice-agent.css";
 const PACK_PANELS = { transferRules: TransferRulesSection };
 
 const TOGGLE_ERROR = "Couldn't change that. Check your connection, then try again.";
+const ACTIONS_ERROR = "Couldn't load your actions. Check your connection, then refresh the page.";
 
 function policyLabel(key) {
   return TRANSFER_POLICIES.find((p) => p.key === key)?.label || "";
@@ -31,25 +33,35 @@ function policyLabel(key) {
 /**
  * The Voice agent tab (spec §8): what the agent says, what it knows about the
  * business, and what it can do on a call. Text settings use one draft with
- * Save and Discard; switching an action on or off applies at once; questions
- * and answers save one by one.
+ * Save and Discard; switching an action on or off applies at once; an action's
+ * own settings and each question-and-answer save themselves.
  */
 export default function VoiceAgent() {
   const params = useParams();
-  const { business, businessId, setBusiness, definitions, capabilityRows, reloadCapabilities } = useBusiness();
+  const navigate = useNavigate();
+  const { business, businessId, setBusiness, definitions, capabilityRows, capabilitiesStatus, reloadCapabilities } =
+    useBusiness();
   const sections = buildSections(definitions, capabilityRows);
   const hasItem = !!params.item;
   const sectionId = params.section || DEFAULT_SECTION;
   const section = sections.find((s) => s.id === sectionId) || sections[0];
-  const item = section.items.find((i) => i.id === (params.item || (params.section ? section.items[0]?.id : DEFAULT_ITEM))) || section.items[0];
+  const item =
+    section.items.find((i) => i.id === (params.item || (params.section ? section.items[0]?.id : DEFAULT_ITEM))) ||
+    section.items[0];
 
   const { draft, changedKeys, dirty, patch, discard, save, saving, error, savedMessage } = useBusinessDraft({
     business,
     businessId,
     onBusinessUpdate: (updated) => setBusiness((prev) => ({ ...(prev || {}), ...updated })),
   });
-  // Moving between this tab's own items keeps the draft; leaving the tab asks.
-  const leaveDialog = useUnsavedChangesGuard(dirty, { stayWithin: "/voice-agent" });
+
+  // An action's settings and a half-written answer keep their own drafts, which
+  // opening another item or leaving the tab would lose: those ask first.
+  const [panelDirty, setPanelDirty] = useState(false);
+  const onPanelDirty = useCallback((d) => setPanelDirty(!!d), []);
+  const leaveDialog = useUnsavedChangesGuard(dirty || panelDirty, {
+    stayWithin: panelDirty ? undefined : "/voice-agent",
+  });
 
   const rows = new Map((capabilityRows || []).map((r) => [r.capability_id, r]));
   const appointmentsOn = (definitions?.capabilities || []).some(
@@ -60,23 +72,32 @@ export default function VoiceAgent() {
   const [toggleError, setToggleError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // Opening an item moves focus to it (on a phone the list it came from is gone).
+  const panelRef = useRef(null);
+  const itemKey = `${section.id}/${item?.id}`;
+  const firstItem = useRef(itemKey);
+  useEffect(() => {
+    if (itemKey === firstItem.current) return;
+    firstItem.current = itemKey;
+    panelRef.current?.focus();
+  }, [itemKey]);
+
   const toggle = async (def) => {
     if (toggling) return;
     const current = rows.get(def.id) || {};
     setToggling(def.id);
     setToggleError("");
     try {
-      // Everything else about the action is sent back unchanged, including the
-      // booking system's connection settings, which the save would otherwise clear.
+      // Only the on/off changes. The action's settings go back as stored; the
+      // booking system's connection settings are left for the server to keep.
       await api.put(`/api/business/${businessId}/capabilities/${def.id}`, {
         enabled: !current.enabled,
         adapter: current.adapter ?? null,
-        adapter_config: current.adapter_config ?? {},
         config: current.config ?? {},
       });
       await reloadCapabilities?.();
-    } catch {
-      setToggleError(TOGGLE_ERROR);
+    } catch (err) {
+      setToggleError(err?.response?.data?.error || TOGGLE_ERROR);
     } finally {
       setToggling(null);
     }
@@ -93,8 +114,6 @@ export default function VoiceAgent() {
     }
   };
 
-  const panel = renderPanel();
-
   function renderPanel() {
     if (!item) return null;
     if (section.id === "voice") {
@@ -106,32 +125,46 @@ export default function VoiceAgent() {
       if (item.id === "details") return <BusinessInfoSection value={draft} onChange={patch} phoneNumber={number} />;
       if (item.id === "hours") return <BusinessHoursEditor value={draft} onChange={patch} />;
       if (item.id === "closed") return <AfterHoursSection value={draft} onChange={patch} appointmentsEnabled={appointmentsOn} />;
-      return <KnowledgeBaseEditor businessId={businessId} />;
+      return <KnowledgeBaseEditor businessId={businessId} onDirtyChange={onPanelDirty} />;
     }
     const def = item.def;
     const Extra = def?.dashboardPanel ? PACK_PANELS[def.dashboardPanel] : null;
     return (
-      <>
-        <CapabilityPanel
-          key={def.id}
-          def={def}
-          adapters={definitions?.adapters || {}}
-          row={rows.get(def.id)}
-          businessId={businessId}
-          hideEnabledToggle
-          onSaved={() => reloadCapabilities?.()}
-        />
-        {Extra ? <Extra value={draft} onChange={patch} /> : null}
-      </>
+      <CapabilityPanel
+        key={def.id}
+        def={def}
+        adapters={definitions?.adapters || {}}
+        row={rows.get(def.id)}
+        businessId={businessId}
+        hideEnabledToggle
+        onDirtyChange={onPanelDirty}
+        onSaved={() => reloadCapabilities?.()}
+        extra={
+          Extra
+            ? {
+                node: <Extra value={draft} onChange={patch} />,
+                badge: <span className="set-pill">{policyLabel(draft.transfer_policy)}</span>,
+              }
+            : undefined
+        }
+      />
     );
   }
+
+  const saveMessage = error
+    ? error
+    : dirty
+      ? `${changedKeys.length} unsaved ${changedKeys.length === 1 ? "change" : "changes"}`
+      : savedMessage
+        ? "Saved. It applies from the next call."
+        : "";
 
   return (
     <div className={`vt-va${hasItem ? " vt-va-has-item" : ""}`}>
       <header className="vt-va-head">
         <h1>Voice agent</h1>
         <p>
-          {`To try a change, call ${number}. Saved changes apply from the next call.`}{" "}
+          {`To try a change, call ${formatPhone(number)}. Saved changes apply from the next call.`}{" "}
           <button type="button" className="vt-link" onClick={copyNumber}>
             Copy number
           </button>
@@ -145,20 +178,21 @@ export default function VoiceAgent() {
         {sections.map((s) => (
           <section key={s.id} className="vt-va-sec">
             <h2 id={`vt-va-${s.id}`}>{s.label}</h2>
+            {s.id === "actions" && capabilitiesStatus === "error" ? <p className="vt-va-error">{ACTIONS_ERROR}</p> : null}
             <ul aria-label={s.label}>
               {s.items.map((i) => {
                 const def = i.def;
                 const row = def ? rows.get(def.id) : null;
                 const selected = s.id === section.id && i.id === item?.id;
+                const showsPolicy = def?.dashboardPanel === "transferRules";
                 return (
                   <li key={i.id} className={`vt-va-row${selected ? " vt-va-row-sel" : ""}`}>
                     <NavLink to={`/voice-agent/${s.id}/${i.id}`} className="vt-va-link" aria-current={selected ? "page" : undefined}>
                       <span className="vt-va-name">{i.label}</span>
-                      {def?.dashboardPanel === "transferRules" ? (
-                        <span className="vt-va-note">{policyLabel(draft.transfer_policy)}</span>
-                      ) : null}
                     </NavLink>
-                    {def ? (
+                    {showsPolicy ? (
+                      <span className="vt-va-always">{policyLabel(draft.transfer_policy)}</span>
+                    ) : def ? (
                       def.core ? (
                         <span className="vt-va-always">Always on</span>
                       ) : (
@@ -186,36 +220,41 @@ export default function VoiceAgent() {
         </div>
       </nav>
 
-      <section className="vt-va-panel" aria-label={item?.label || "Setting"}>
-        <Link className="vt-pback" to="/voice-agent">
+      <section className="vt-va-panel" aria-label={item?.label || "Setting"} tabIndex={-1} ref={panelRef}>
+        <Link
+          className="vt-pback"
+          to="/voice-agent"
+          onClick={(e) => {
+            if (window.history.state?.idx > 0) {
+              e.preventDefault();
+              navigate(-1);
+            }
+          }}
+        >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
             <path d="m15 6-6 6 6 6" />
           </svg>
           Voice agent
         </Link>
-        {panel}
-        {dirty || error || savedMessage ? (
-          <div className="vt-va-save" role="region" aria-label="Unsaved changes">
-            <span>
-              {error
-                ? error
-                : dirty
-                  ? `${changedKeys.length} unsaved ${changedKeys.length === 1 ? "change" : "changes"}`
-                  : "Saved. It applies from the next call."}
-            </span>
-            {dirty ? (
-              <span className="vt-va-save-actions">
-                <button type="button" className="vt-btn vt-btn-quiet" onClick={discard} disabled={saving}>
-                  Discard
-                </button>
-                <button type="button" className="vt-btn vt-btn-primary" onClick={save} aria-disabled={saving || undefined}>
-                  {saving ? "Saving…" : "Save"}
-                </button>
-              </span>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="set-root vt-va-set">{renderPanel()}</div>
       </section>
+
+      {/* Outside the panel, so it also shows on a phone's list screen. */}
+      <div className={`vt-va-save${saveMessage ? "" : " vt-va-save-empty"}`}>
+        <span role="status" aria-live="polite">
+          {saveMessage}
+        </span>
+        {dirty ? (
+          <span className="vt-va-save-actions">
+            <button type="button" className="vt-btn vt-btn-quiet" onClick={discard} aria-disabled={saving || undefined}>
+              Discard
+            </button>
+            <button type="button" className="vt-btn vt-btn-primary" onClick={save} aria-disabled={saving || undefined}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </span>
+        ) : null}
+      </div>
       {leaveDialog}
     </div>
   );

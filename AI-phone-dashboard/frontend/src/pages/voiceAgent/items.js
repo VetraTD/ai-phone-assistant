@@ -29,7 +29,9 @@ export function listedCapabilities(definitions, capabilityRows) {
     .filter((def) => {
       const listing = def.dashboardListing || "listed";
       if (listing === "hidden") return false;
-      if (listing === "optIn") return rows.get(def.id)?.enabled === true;
+      // On, or set up once (so switching it off does not make it vanish
+      // with no way to switch it back on).
+      if (listing === "optIn") return rows.get(def.id)?.enabled === true || rows.get(def.id)?.configured === true;
       return true;
     })
     .sort((a, b) => Number(!!b.core) - Number(!!a.core));

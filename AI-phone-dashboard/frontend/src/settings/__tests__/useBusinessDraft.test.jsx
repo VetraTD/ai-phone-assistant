@@ -75,3 +75,17 @@ describe("useBusinessDraft", () => {
     expect(result.current.error).toBe("Greeting is too long");
   });
 });
+
+describe("useBusinessDraft errors", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("says a field's name, not its column, in a server error", async () => {
+    api.put.mockRejectedValue({ response: { data: { error: "transfer_phone_number: must be a phone number like +15550100" } } });
+    const { result } = setup();
+    act(() => result.current.patch({ greeting: "x" }));
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(result.current.error).not.toMatch(/transfer_phone_number/);
+    expect(result.current.error).toMatch(/must be a phone number/);
+  });
+});

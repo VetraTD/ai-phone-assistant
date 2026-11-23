@@ -1,5 +1,5 @@
 import { FORMAT_CHOICES, MIN_DIGITS, MAX_DIGITS, formatFromPattern, patternFor } from "./identityFormats";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { CircleCheck, Plus, TriangleAlert, Trash2 } from "lucide-react";
 import { api } from "../api";
 import Panel from "./Panel";
@@ -132,7 +132,7 @@ export function CapabilityPanel(props) {
   return <CapabilityCard {...props} />;
 }
 
-function CapabilityCard({ def, adapters, row, businessId, extra, onSaved, hideEnabledToggle = false }) {
+function CapabilityCard({ def, adapters, row, businessId, extra, onSaved, onDirtyChange, hideEnabledToggle = false }) {
   const [draft, setDraft] = useState(() => draftFromRow(row, def));
   // What is currently on the server, so the Save button can be honest about
   // whether there is anything to send. Previously every card's Save was
@@ -142,8 +142,11 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved, hideEn
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
+  // Unsaved edits are never overwritten by a reload of the rows (which
+  // happens whenever any action is switched on or off).
+  const dirtyRef = useRef(false);
   useEffect(() => {
-    if (!row) return;
+    if (!row || dirtyRef.current) return;
     const next = draftFromRow(row, def);
     setDraft(next);
     setBaseline(JSON.stringify(next));
@@ -202,6 +205,11 @@ function CapabilityCard({ def, adapters, row, businessId, extra, onSaved, hideEn
   const require = draft.config.require || {};
   const off = !def.core && !draft.enabled;
   const dirty = JSON.stringify(draft) !== baseline;
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   // What this business's chosen backend can actually prove a caller against.
   // Used below to explain, honestly, why a custom field can only be collected.
@@ -538,7 +546,7 @@ function CustomIdentityField({ field, canVerify, onPatch, onRemove }) {
         )}
       </Field>
 
-      <FormatPicker pattern={pattern} onChange={(next) => onPatch({ pattern: next })} />
+      <FormatPicker pattern={pattern} invalid={!!patternError} onChange={(next) => onPatch({ pattern: next })} />
 
       {pattern && !patternError ? (
         <Field label="Try a value" hint="Just to check the format does what you expect. Nothing is saved.">
@@ -574,14 +582,23 @@ function CustomIdentityField({ field, canVerify, onPatch, onRemove }) {
  * regular expression in front of the owner. A pattern that matches no choice
  * was set by VetraTD by hand; it is shown read-only and saved back unchanged.
  */
-function FormatPicker({ pattern, onChange }) {
+function FormatPicker({ pattern, invalid, onChange }) {
   const current = formatFromPattern(pattern);
-  const [digits, setDigits] = useState(current.digits || 6);
+  // What is typed in the digits box, applied when the box is left: clamping
+  // each keystroke turned "delete 6, type 8" into 18.
+  const [digitsText, setDigitsText] = useState(String(current.digits || 6));
   if (current.choice === "custom") {
     return (
-      <Field label="Format">
-        {() => <p className="set-hint">A custom format set by VetraTD. Ask us if you want it changed.</p>}
-      </Field>
+      <div className="set-field">
+        <p className="set-label">Format</p>
+        {invalid ? (
+          <p className="set-field-error" role="alert">
+            This format can't be used, so bookings won't save. Ask us to fix it.
+          </p>
+        ) : (
+          <p className="set-hint">A custom format set by VetraTD. Ask us if you want it changed.</p>
+        )}
+      </div>
     );
   }
   return (
@@ -592,7 +609,7 @@ function FormatPicker({ pattern, onChange }) {
             {...p}
             aria-label="Format"
             value={current.choice}
-            onChange={(e) => onChange(patternFor({ choice: e.target.value, digits }))}
+            onChange={(e) => onChange(patternFor({ choice: e.target.value, digits: Number(digitsText) }))}
           >
             {FORMAT_CHOICES.map((c) => (
               <option key={c.value} value={c.value}>
@@ -610,11 +627,12 @@ function FormatPicker({ pattern, onChange }) {
               type="number"
               min={MIN_DIGITS}
               max={MAX_DIGITS}
-              value={current.digits ?? digits}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                setDigits(n);
-                onChange(patternFor({ choice: "digits", digits: n }));
+              value={digitsText}
+              onChange={(e) => setDigitsText(e.target.value)}
+              onBlur={() => {
+                const next = patternFor({ choice: "digits", digits: Number(digitsText) });
+                setDigitsText(String(formatFromPattern(next).digits));
+                onChange(next);
               }}
             />
           )}

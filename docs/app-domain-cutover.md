@@ -255,6 +255,9 @@ VITE_FIREBASE_API_KEY=... VITE_FIREBASE_AUTH_DOMAIN=... VITE_FIREBASE_PROJECT_ID
 # not in connect-src of the Content-Security-Policy in firebase.json
 # (cspGuard.js). Moving the API to a new address means changing both together,
 # or the dashboard loads and then has every request blocked.
+# It also FAILS when VITE_API_URL is unset or a local address (localhost),
+# so a dashboard that cannot reach its API is never published. A build only
+# for checking on this computer sets VETRA_LOCAL_BUILD=1.
 
 # Two guards worth running before publishing:
 grep -rl "landing-hero-cta" dist/assets/*.js && echo "ABORT: marketing build"

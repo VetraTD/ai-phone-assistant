@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { FIELD_LABELS } from "./fieldLabels";
 import { api } from "../api";
 import { DAY_KEYS, MODULE_TASKS, AFTER_HOURS_POLICIES, TRANSFER_POLICIES } from "./constants";
 
@@ -11,6 +12,15 @@ const MODULE_TASK_KEYS = MODULE_TASKS.map((t) => t.key);
 const AFTER_HOURS_KEYS = AFTER_HOURS_POLICIES.map((p) => p.key);
 const TRANSFER_POLICY_KEYS = TRANSFER_POLICIES.map((p) => p.key);
 const SAVE_ERROR = "Couldn't save. Check your connection, then try again.";
+
+// The server names a column ("transfer_phone_number: must be …"); say the
+// setting's own name instead.
+function readableError(message) {
+  const m = /^([a-z][a-z0-9_]*):\s*(.+)$/.exec(message || "");
+  if (!m) return message;
+  const label = FIELD_LABELS[m[1]]?.label;
+  return label ? `${label}: ${m[2]}` : m[2];
+}
 
 const DEFAULT_HOURS = DAY_KEYS.reduce((acc, day) => {
   acc[day] =
@@ -82,6 +92,8 @@ export function useBusinessDraft({ business, businessId, onBusinessUpdate }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
+  // A second click while a save is in flight does nothing.
+  const inFlight = useRef(false);
 
   // A different business (an account switch) starts from its own settings.
   const [forBusiness, setForBusiness] = useState(businessId);
@@ -111,6 +123,8 @@ export function useBusinessDraft({ business, businessId, onBusinessUpdate }) {
 
   const save = useCallback(async () => {
     if (!businessId || !dirty) return true;
+    if (inFlight.current) return false;
+    inFlight.current = true;
     setSaving(true);
     setError("");
     setSavedMessage("");
@@ -125,9 +139,10 @@ export function useBusinessDraft({ business, businessId, onBusinessUpdate }) {
       return true;
     } catch (err) {
       // The draft stays as typed, so nothing is lost; the message says why.
-      setError(err?.response?.data?.error || SAVE_ERROR);
+      setError(readableError(err?.response?.data?.error) || SAVE_ERROR);
       return false;
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   }, [businessId, dirty, changed, onBusinessUpdate]);

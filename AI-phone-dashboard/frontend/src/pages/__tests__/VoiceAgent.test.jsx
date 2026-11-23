@@ -25,7 +25,7 @@ const DEFINITIONS = {
     }),
     pack("messages", "Messages", { core: true }),
     pack("quotes", "Quotes", { dashboardListing: "optIn" }),
-    pack("transfer", "Transfers", { core: true }),
+    pack("transfer", "Transfers", { core: true, dashboardPanel: "transferRules" }),
     pack("sms_consent", "Text confirmations", { core: true, dashboardListing: "hidden" }),
     pack("qualification", "Qualification questions", { dashboardListing: "hidden" }),
     pack("outcome", "Call outcome", { dashboardListing: "hidden" }),
@@ -35,7 +35,8 @@ const DEFINITIONS = {
   adapters: { scheduling: [{ id: "internal", label: "Our built-in calendar", selfServe: true, verifiableFields: [], storesBookingsLocally: true }] },
 };
 const row = (id, enabled, over = {}) => ({ capability_id: id, enabled, adapter: null, adapter_config: {}, config: {}, configured: true, ...over });
-const ROWS = [row("appointments", true), row("messages", true), row("quotes", false), row("transfer", true)];
+// Quotes was never set up for this business (no stored row).
+const ROWS = [row("appointments", true), row("messages", true), row("quotes", false, { configured: false }), row("transfer", true)];
 
 const BUSINESS = {
   id: "b1",
@@ -46,14 +47,14 @@ const BUSINESS = {
   transfer_policy: "business_hours_only",
 };
 
-function renderAgent(path = "/voice-agent", { rows = ROWS } = {}) {
+function renderAgent(path = "/voice-agent", { rows = ROWS, status = "ready", business = BUSINESS } = {}) {
   const value = {
-    business: BUSINESS,
+    business,
     businessId: "b1",
     setBusiness: vi.fn(),
     definitions: DEFINITIONS,
     capabilityRows: rows,
-    capabilitiesStatus: "ready",
+    capabilitiesStatus: status,
     reloadCapabilities: vi.fn(),
     openCount: 0,
     setOpenCount: vi.fn(),
@@ -176,10 +177,11 @@ describe("Voice agent", () => {
       rows: [row("appointments", true, { adapter: "internal", adapter_config: { kept: true }, config: { notes: "Mornings only" } }), ...ROWS.slice(1)],
     });
     await user.click(within(actions()).getByRole("switch", { name: "Bookings" }));
+    // The booking system's connection settings are not sent: the server keeps
+    // the stored ones (backend capabilities.test.js).
     expect(api.put).toHaveBeenCalledWith("/api/business/b1/capabilities/appointments", {
       enabled: false,
       adapter: "internal",
-      adapter_config: { kept: true },
       config: { notes: "Mornings only" },
     });
     await waitFor(() => expect(value.reloadCapabilities).toHaveBeenCalled());
@@ -188,5 +190,118 @@ describe("Voice agent", () => {
   it("never says receptionist, capabilities or webhook", () => {
     renderAgent("/voice-agent/actions/appointments");
     expect(document.body.textContent).not.toMatch(/receptionist|capabilit|webhook|intake/i);
+  });
+});
+
+describe("Voice agent after the final review", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.get.mockResolvedValue({ data: [] });
+  });
+
+  it("styles its controls with the settings styles (they apply inside .set-root)", () => {
+    renderAgent("/voice-agent/voice/greeting");
+    expect(screen.getByRole("textbox", { name: /^Greeting/ }).closest(".set-root")).not.toBeNull();
+  });
+
+  it("asks before leaving with unsaved booking rules", async () => {
+    const user = userEvent.setup();
+    const { router } = renderAgent("/voice-agent/actions/appointments");
+    await user.type(screen.getByRole("textbox", { name: /Your booking rules/ }), "Mornings only");
+    await router.navigate("/home");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("asks before opening another item with unsaved booking rules (they are not part of the shared draft)", async () => {
+    const user = userEvent.setup();
+    const { router } = renderAgent("/voice-agent/actions/appointments");
+    await user.type(screen.getByRole("textbox", { name: /Your booking rules/ }), "Mornings only");
+    await router.navigate("/voice-agent/voice/greeting");
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("flipping a switch keeps unsaved edits in the open panel", async () => {
+    const user = userEvent.setup();
+    api.put.mockResolvedValue({ data: { ok: true } });
+    const { value } = renderAgent("/voice-agent/actions/appointments", {
+      rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false, { configured: true })],
+    });
+    const rules = screen.getByRole("textbox", { name: /Your booking rules/ });
+    await user.type(rules, "Mornings only");
+    await user.click(within(actions()).getByRole("switch", { name: "Quotes" }));
+    await waitFor(() => expect(value.reloadCapabilities).toHaveBeenCalled());
+    expect(screen.getByRole("textbox", { name: /Your booking rules/ })).toHaveValue("Mornings only");
+  });
+
+  it("a switch that fails says why, in the server's words when it gave some", async () => {
+    const user = userEvent.setup();
+    api.put.mockRejectedValue({ response: { data: { error: "Choose one of the offered options" } } });
+    renderAgent();
+    await user.click(within(actions()).getByRole("switch", { name: "Bookings" }));
+    expect(await screen.findByText("Choose one of the offered options")).toBeInTheDocument();
+  });
+
+  it("keeps Quotes listed after it is switched off, so it can be switched back on", () => {
+    renderAgent("/voice-agent", { rows: [...ROWS.filter((r) => r.capability_id !== "quotes"), row("quotes", false, { configured: true })] });
+    expect(within(actions()).getByRole("switch", { name: "Quotes" })).not.toBeChecked();
+  });
+
+  it("Transfers shows its policy, never 'Always on' beside it", () => {
+    renderAgent();
+    const transfers = within(actions()).getByRole("link", { name: /Transfers/ }).closest("li");
+    expect(within(transfers).getByText("Business hours only")).toBeInTheDocument();
+    expect(within(transfers).queryByText("Always on")).toBeNull();
+  });
+
+  it("Save twice quickly saves once", async () => {
+    const user = userEvent.setup();
+    let resolve;
+    api.put.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    renderAgent("/voice-agent/voice/greeting");
+    await user.type(screen.getByRole("textbox", { name: /^Greeting/ }), "!");
+    const save = screen.getByRole("button", { name: "Save" });
+    await user.click(save);
+    await user.click(save);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    resolve({ data: { ...BUSINESS, greeting: "Hello, Brightwork!" } });
+  });
+
+  it("announces the save result", async () => {
+    const user = userEvent.setup();
+    api.put.mockRejectedValue(new Error("Network Error"));
+    renderAgent("/voice-agent/voice/greeting");
+    await user.type(screen.getByRole("textbox", { name: /^Greeting/ }), "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const message = await screen.findByText("Couldn't save. Check your connection, then try again.");
+    expect(message.closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("shows the number to ring in a readable form", () => {
+    renderAgent("/voice-agent", { business: { ...BUSINESS, phone_number: "+15550199001" } });
+    expect(screen.getByText(/To try a change, call \+1 \(555\) 019-9001\. Saved changes/)).toBeInTheDocument();
+  });
+
+  it("says when the actions could not be loaded", () => {
+    renderAgent("/voice-agent", { rows: [], status: "error" });
+    expect(screen.getByText("Couldn't load your actions. Check your connection, then refresh the page.")).toBeInTheDocument();
+  });
+
+  it("the digit count takes what is typed, not a number stuck to the old one", async () => {
+    const user = userEvent.setup();
+    renderAgent("/voice-agent/actions/appointments");
+    const panel = screen.getByRole("region", { name: "Bookings" });
+    await user.click(within(panel).getByRole("button", { name: /Add something else/ }));
+    await user.selectOptions(within(panel).getByRole("combobox", { name: "Format" }), "digits");
+    const count = within(panel).getByRole("spinbutton", { name: "How many digits" });
+    await user.clear(count);
+    await user.type(count, "8");
+    await user.tab();
+    expect(count).toHaveValue(8);
+  });
+
+  it("a hand-set format that cannot be used says so", () => {
+    const bad = row("appointments", true, { config: { require: { identity: { custom: [{ key: "member", label: "Member number", ask: "Your member number?", pattern: "[", verify: "collect_only" }] } } } });
+    renderAgent("/voice-agent/actions/appointments", { rows: [bad, ...ROWS.slice(1)] });
+    expect(screen.getByText(/This format can't be used/)).toBeInTheDocument();
   });
 });

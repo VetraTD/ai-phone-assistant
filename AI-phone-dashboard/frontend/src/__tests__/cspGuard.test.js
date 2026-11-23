@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { missingConnectOrigins } from "../../cspGuard.js";
+import { missingConnectOrigins, apiAddressProblem } from "../../cspGuard.js";
 
 const firebaseJson = JSON.parse(readFileSync(join(cwd(), "firebase.json"), "utf8"));
 
@@ -24,5 +24,14 @@ describe("CSP follows the API address", () => {
   });
   it("a local development API is not checked (local builds are never deployed)", () => {
     expect(missingConnectOrigins(firebaseJson, ["http://localhost:3001"])).toEqual([]);
+  });
+});
+
+describe("a production app build needs a real API address", () => {
+  it("refuses an unset or local API address unless it is a local build", () => {
+    expect(apiAddressProblem(undefined)).toMatch(/VITE_API_URL/);
+    expect(apiAddressProblem("http://localhost:3001")).toMatch(/local/);
+    expect(apiAddressProblem("http://localhost:3001", { localBuild: true })).toBeNull();
+    expect(apiAddressProblem("https://dashboard-api-uk-prod-qn43z3hljq-nw.a.run.app")).toBeNull();
   });
 });

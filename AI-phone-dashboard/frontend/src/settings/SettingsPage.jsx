@@ -119,7 +119,9 @@ export default function SettingsPage({
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("section", activeGroup);
-    window.history.replaceState({}, "", url);
+    // Keep the router's own history state: replacing it with {} broke the
+    // index the unsaved-changes guard relies on for the Back button.
+    window.history.replaceState(window.history.state, "", url);
 
     if (shouldFocusPanel.current) {
       shouldFocusPanel.current = false;
