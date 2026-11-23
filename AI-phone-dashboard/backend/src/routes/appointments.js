@@ -8,24 +8,59 @@ const { rejectUnexpectedKeys } = require("../utils");
 const { withTenantHandler } = require("../middleware/withTenantHandler");
 const { authSensitiveLimiter, sensitiveLimiter } = require("../middleware/rateLimiters");
 const mailer = require("../services/mailer");
+const { DEFAULT_TIMEZONE, loadBusinessTimezone } = require("../callDateBounds");
 
-// Appointments for the authenticated user's business with simple ranges
-// GET /api/appointments?range=today|7days|upcoming
+const RANGE_ERROR = "Choose a date range of up to six weeks.";
+const MAX_RANGE_DAYS = 42;
+
+// A real calendar day as "YYYY-MM-DD", or NaN. "2026-02-30" is not one.
+function dayNumber(s) {
+  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return NaN;
+  const [y, m, d] = s.split("-").map(Number);
+  const t = Date.UTC(y, m - 1, d);
+  const back = new Date(t);
+  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== m - 1 || back.getUTCDate() !== d) return NaN;
+  return t / 86400000;
+}
+
+// The scheduled_at bounds, in the BUSINESS's days, for both routes. Returns
+// { sql, params } with params numbered from $2 ($1 is the business id), or null
+// when the input cannot be served. Each day is turned into a local midnight and
+// then an instant with AT TIME ZONE, so a booking at 23:30 in Chicago stays on
+// its own day and a 23- or 25-hour clock-change day still ends at midnight.
+// The functions sit on the bound, never on scheduled_at.
+//   from + to: inclusive days, at most six weeks. Both or neither.
+//   range:     today (default) | 7days (today and the next seven) | upcoming.
+function dayBounds({ from, to, range, tz }) {
+  const today = `(now() AT TIME ZONE $2)::date`;
+  const at = (day) => `(${day}::timestamp AT TIME ZONE $2)`;
+  if (from !== undefined || to !== undefined) {
+    const a = dayNumber(from);
+    const b = dayNumber(to);
+    if (Number.isNaN(a) || Number.isNaN(b) || a > b || b - a + 1 > MAX_RANGE_DAYS) return null;
+    return {
+      sql: `and a.scheduled_at >= ${at("$3::date")} and a.scheduled_at < ${at("($4::date + 1)")}`,
+      params: [tz, from, to],
+    };
+  }
+  if (range === "upcoming") return { sql: `and a.scheduled_at >= ${at(today)}`, params: [tz] };
+  const days = range === "7days" ? 8 : 1;
+  return {
+    sql: `and a.scheduled_at >= ${at(today)} and a.scheduled_at < ${at(`(${today} + ${days})`)}`,
+    params: [tz],
+  };
+}
+
+// Appointments for the authenticated user's business, in its own days.
+// GET /api/appointments?from=YYYY-MM-DD&to=YYYY-MM-DD   (the Calendar)
+// GET /api/appointments?range=today|7days|upcoming      (older callers)
 router.get("/api/appointments", authenticate, withTenantHandler(async (req, res) => {
   try {
     const businessId = req.businessId;
-
-    const { range } = req.query;
-
-    let dateCondition = "";
-    if (range === "7days") {
-      dateCondition = "and a.scheduled_at::date between CURRENT_DATE and (CURRENT_DATE + interval '7 days')";
-    } else if (range === "upcoming") {
-      dateCondition = "and a.scheduled_at::date >= CURRENT_DATE";
-    } else {
-      // default to today
-      dateCondition = "and a.scheduled_at::date = CURRENT_DATE";
-    }
+    const { from, to, range } = req.query;
+    const tz = await loadBusinessTimezone((sql, p) => pool.query(sql, p), businessId);
+    const bounds = dayBounds({ from, to, range, tz });
+    if (!bounds) return res.status(400).json({ error: RANGE_ERROR });
 
     const r = await pool.query(
       `select a.id,
@@ -37,9 +72,9 @@ router.get("/api/appointments", authenticate, withTenantHandler(async (req, res)
               a.notes
        from appointments a
        where a.business_id = $1
-         ${dateCondition}
+         ${bounds.sql}
        order by a.scheduled_at asc`,
-      [businessId]
+      [businessId, ...bounds.params]
     );
 
     res.json(r.rows);
@@ -61,7 +96,7 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
     const businessId = req.businessId;
 
     const bizRes = await pool.query(
-      `select name, notification_email from businesses where id = $1`,
+      `select name, notification_email, timezone from businesses where id = $1`,
       [businessId]
     );
     const biz = bizRes.rows[0];
@@ -75,19 +110,8 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
     rejectUnexpectedKeys(req.body || {}, allowedKeys);
     const rawRange = req.body?.range;
     const range = rawRange === "7days" || rawRange === "upcoming" ? rawRange : "today";
-    let dateCondition = "";
-    let label;
-    if (range === "7days") {
-      dateCondition =
-        "and a.scheduled_at::date between CURRENT_DATE and (CURRENT_DATE + interval '7 days')";
-      label = "Next 7 days";
-    } else if (range === "upcoming") {
-      dateCondition = "and a.scheduled_at::date >= CURRENT_DATE";
-      label = "Upcoming";
-    } else {
-      dateCondition = "and a.scheduled_at::date = CURRENT_DATE";
-      label = "Today";
-    }
+    const label = range === "7days" ? "Next 7 days" : range === "upcoming" ? "Upcoming" : "Today";
+    const bounds = dayBounds({ range, tz: biz.timezone || DEFAULT_TIMEZONE });
 
     // COUNT only. The previous version selected client_name, client_phone,
     // scheduled_at, status and notes and printed one line per appointment into
@@ -97,13 +121,16 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
     // Not selecting the columns is the point. Selecting them and then declining
     // to print them leaves the payload one careless template literal away from
     // leaking again; a query that never fetches a name cannot send one.
+    //
+    // Scoped by the booking's own business (a booking need not have a call),
+    // and a cancelled booking is not one that is scheduled.
     const apptsRes = await pool.query(
       `select count(*)::int as total
        from appointments a
-       join calls c on a.call_id = c.id
-       where c.business_id = $1
-         ${dateCondition}`,
-      [businessId]
+       where a.business_id = $1
+         and a.status is distinct from 'cancelled'
+         ${bounds.sql}`,
+      [businessId, ...bounds.params]
     );
     const count = apptsRes.rows[0]?.total ?? 0;
 
