@@ -41,7 +41,7 @@ const CalendarRoute = lazy(() => import("./shell/CalendarRoute.jsx"));
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
-const LegacyAppointments = lazy(() => import("./legacy/LegacyAppointments.jsx"));
+const Calendar = lazy(() => import("./pages/Calendar.jsx"));
 const LegacyTrends = lazy(() => import("./legacy/LegacyTrends.jsx"));
 const LegacySettings = lazy(() => import("./legacy/LegacySettings.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
@@ -128,7 +128,7 @@ export default function AppRoutes() {
                 path="/calendar"
                 element={
                   <CalendarRoute>
-                    <LegacyAppointments />
+                    <Calendar />
                   </CalendarRoute>
                 }
               />

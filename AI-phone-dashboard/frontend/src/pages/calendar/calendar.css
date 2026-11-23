@@ -1,0 +1,380 @@
+/* Calendar (spec §8): a week grid on wide screens, a day strip and list on phones. */
+
+.vt-cal {
+  padding: 28px 32px 40px;
+  min-width: 0;
+}
+
+.vt-cal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-bottom: 8px;
+}
+.vt-cal-titles {
+  margin-right: auto;
+  min-width: 0;
+}
+.vt-cal-titles h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.vt-cal-week {
+  color: var(--muted);
+  font-size: 15px;
+  margin-top: 2px;
+}
+
+.vt-cal-nav {
+  display: flex;
+  gap: 6px;
+}
+.vt-cal-arrow {
+  width: 44px;
+  padding: 0;
+}
+
+.vt-cal-email {
+  display: flex;
+  gap: 8px;
+}
+.vt-cal-select {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.vt-cal-mail {
+  min-height: 8px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+.vt-cal-mail p {
+  padding: 4px 0;
+}
+.vt-cal-mail-warn span {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.vt-cal-state p {
+  margin-bottom: 14px;
+  color: var(--muted);
+}
+.vt-cal-empty {
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+
+/* ---- Week grid ---- */
+
+.vt-cal-grid {
+  --hour-h: 60px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  padding: 0 8px 8px 0;
+}
+.vt-cal-gridhead,
+.vt-cal-gridbody {
+  display: grid;
+  grid-template-columns: 56px repeat(var(--cols), minmax(0, 1fr));
+}
+.vt-cal-gridhead {
+  border-bottom: 1px solid var(--line-2);
+}
+.vt-cal-dayh {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.vt-cal-dayh-num {
+  font-weight: 700;
+  color: var(--ink);
+}
+.vt-cal-dayh-today .vt-cal-dayh-num {
+  background: var(--ink-blue);
+  color: #fff;
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
+.vt-cal-gridbody {
+  position: relative;
+  height: calc(var(--hour-h) * 10 + 24px);
+  padding-top: 12px;
+}
+.vt-cal-hours {
+  position: absolute;
+  inset: 12px 0 12px 0;
+}
+.vt-cal-hour {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--line-2);
+}
+.vt-cal-hour span {
+  position: absolute;
+  left: 0;
+  width: 50px;
+  top: -9px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--faint);
+  background: var(--surface);
+  padding-right: 6px;
+}
+
+.vt-cal-col {
+  position: relative;
+  grid-row: 1;
+  height: calc(var(--hour-h) * 10);
+  border-left: 1px solid var(--line-2);
+}
+.vt-cal-col-today {
+  background: rgba(0, 56, 253, 0.03);
+}
+.vt-cal-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vt-cal-booking {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  min-height: 44px;
+  border: 1px solid rgba(0, 56, 253, 0.22);
+  border-left: 3px solid var(--ink-blue);
+  border-radius: 8px;
+  background: var(--tint);
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.25;
+  padding: 4px 8px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.vt-cal-booking:hover {
+  background: #dce6ff;
+}
+.vt-cal-booking[aria-expanded="true"] {
+  outline: 2px solid var(--ink-blue);
+  outline-offset: 1px;
+}
+.vt-cal-block {
+  position: absolute;
+  z-index: 1;
+}
+.vt-cal-b-time {
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.vt-cal-b-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vt-cal-b-tag {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Cancelled: struck through and hatched, and the word itself, so colour is never the only signal. */
+.vt-cal-booking.vt-cal-cancelled {
+  border-color: var(--line);
+  border-left-color: var(--faint);
+  color: var(--muted);
+  background: repeating-linear-gradient(135deg, var(--grey-bg) 0 5px, var(--surface) 5px 10px);
+}
+.vt-cal-cancelled .vt-cal-b-name,
+.vt-cal-cancelled .vt-cal-b-time {
+  text-decoration: line-through;
+}
+
+.vt-cal-now {
+  position: absolute;
+  left: -4px;
+  right: 0;
+  height: 2px;
+  background: var(--ink-blue);
+  z-index: 2;
+  pointer-events: none;
+}
+.vt-cal-now::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-blue);
+}
+
+/* ---- Lists: outside the grid, and the phone's day ---- */
+
+.vt-cal-outside,
+.vt-cal-day {
+  margin-top: 24px;
+}
+.vt-cal-outside h2,
+.vt-cal-day h2 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.vt-cal-outside ul,
+.vt-cal-day ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.vt-cal-row {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 15px;
+}
+.vt-cal-row .vt-cal-b-time {
+  font-size: 14px;
+  flex: none;
+}
+.vt-cal-row .vt-cal-b-name {
+  flex: 1;
+}
+
+/* ---- Phone day strip ---- */
+
+.vt-cal-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.vt-cal-stripday {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: 8px 0 4px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.vt-cal-stripday[aria-pressed="true"] {
+  border-color: var(--ink-blue);
+  box-shadow: inset 0 0 0 1px var(--ink-blue);
+  color: var(--ink);
+}
+.vt-cal-stripday-today .vt-cal-dayh-num {
+  background: var(--ink-blue);
+  color: #fff;
+  border-radius: var(--r-pill);
+  padding: 0 7px;
+}
+.vt-cal-stripdot {
+  height: 14px;
+  line-height: 14px;
+  color: var(--ink-blue);
+  font-size: 18px;
+}
+
+/* ---- Booking detail ---- */
+
+.vt-cal-detail {
+  position: fixed;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-dialog);
+  box-shadow: var(--shadow-pop);
+  padding: 18px 18px 14px;
+  display: grid;
+  gap: 6px;
+}
+.vt-cal-detail:focus {
+  outline: none;
+}
+.vt-cal-detail-panel {
+  left: 8px;
+  right: 8px;
+  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  width: auto;
+  max-width: none;
+}
+.vt-cal-detail-when {
+  font-weight: 700;
+  font-size: 16px;
+}
+.vt-cal-detail-cancelled {
+  font-weight: 700;
+  color: var(--red);
+}
+.vt-cal-detail-name {
+  font-size: 15px;
+}
+.vt-cal-detail-phone {
+  justify-self: start;
+  padding: 0;
+  min-height: 32px;
+}
+.vt-cal-detail-notes {
+  color: var(--muted);
+  white-space: pre-line;
+}
+.vt-cal-detail-source {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 14px;
+}
+.vt-cal-detail-source .vt-link {
+  padding: 0;
+}
+.vt-cal-detail-close {
+  justify-self: end;
+  margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .vt-cal {
+    padding: 16px 16px 24px;
+  }
+  .vt-cal-email {
+    width: 100%;
+  }
+  .vt-cal-select {
+    flex: 1;
+    font-size: 16px;
+  }
+  .vt-cal-row,
+  .vt-cal-stripday {
+    font-size: 16px;
+  }
+}
