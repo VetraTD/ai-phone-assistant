@@ -129,7 +129,9 @@ router.put("/api/business/:id/capabilities/:capabilityId", authenticate, withTen
        on conflict (business_id, capability_id) do update
          set enabled = excluded.enabled,
              adapter = excluded.adapter,
-             adapter_config = excluded.adapter_config,
+             -- Set up by VetraTD, not the owner: a save that does not send it
+             -- keeps what is stored rather than blanking it.
+             adapter_config = CASE WHEN $7 THEN excluded.adapter_config ELSE business_capabilities.adapter_config END,
              config = excluded.config,
              updated_at = now()`,
       [
@@ -139,6 +141,7 @@ router.put("/api/business/:id/capabilities/:capabilityId", authenticate, withTen
         adapter,
         JSON.stringify(req.body?.adapter_config ?? {}),
         JSON.stringify(config),
+        req.body?.adapter_config !== undefined,
       ]
     );
 

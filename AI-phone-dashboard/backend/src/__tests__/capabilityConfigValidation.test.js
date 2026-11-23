@@ -52,3 +52,42 @@ describe("capability config validation — messages.callbackLine", () => {
     expect(config.callbackLine).toBeUndefined();
   });
 });
+
+// A save from the dashboard must never quietly drop a setting the voice engine
+// honours. Every top-level choice in every pack's schema, and the required
+// fields list, survive a round trip through the check unchanged.
+describe("every setting the engine reads survives a dashboard save", () => {
+  for (const def of schemas.capabilities) {
+    const schema = def.configSchema || {};
+    const choices = Object.entries(schema).filter(([key, node]) => key !== "adapter" && node?.type === "choice");
+    if (!choices.length) continue;
+    it(`${def.id}: each choice keeps every allowed value`, () => {
+      for (const [key, node] of choices) {
+        for (const option of node.options) {
+          const { config, errors } = validateCapabilityConfig({ [key]: option }, def.id, schemas);
+          expect(errors, `${def.id}.${key}=${option}`).toEqual([]);
+          expect(config[key], `${def.id}.${key}=${option}`).toBe(option);
+        }
+      }
+    });
+    it(`${def.id}: a choice outside the options is refused, not silently dropped`, () => {
+      for (const [key] of choices) {
+        const { errors } = validateCapabilityConfig({ [key]: "not-an-option" }, def.id, schemas);
+        expect(errors.length, key).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it("keeps the messages pack's intake choices together with its other settings", () => {
+    const raw = { notes: "Ask which department", callbackLine: "Sam will call you back.", confirmStyle: "each", spellUpFront: "leads" };
+    const { config, errors } = validateCapabilityConfig(raw, "messages", schemas);
+    expect(errors).toEqual([]);
+    expect(config).toEqual(raw);
+  });
+
+  it("keeps a required-fields list", () => {
+    const { config, errors } = validateCapabilityConfig({ require: { requiredFields: ["company", "postcode"] } }, "messages", schemas);
+    expect(errors).toEqual([]);
+    expect(config.require.requiredFields).toEqual(["company", "postcode"]);
+  });
+});

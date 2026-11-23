@@ -283,6 +283,8 @@ d("export/erasure coverage drift guard", () => {
       business_id: "tenant scope, implicit in the request",
       avg_turn_latency_ms: "aggregate latency telemetry, not about the person",
       p95_turn_latency_ms: "aggregate latency telemetry, not about the person",
+      handled_at: "when the business's staff dealt with the call's message (dashboard workflow), not about the caller",
+      handled_by: "the staff account (or 'launch') that marked it done; staff data, not the caller's",
     },
     contacts: { business_id: "tenant scope, implicit in the request" },
     consents: { business_id: "tenant scope, implicit in the request" },

@@ -195,6 +195,25 @@ describe("capability settings", () => {
       });
     });
 
+    it("keeps the stored booking-system settings when a save does not send them", async () => {
+      // They are set up by VetraTD, not the owner; a save that leaves them out
+      // must not blank them.
+      mockOwnership();
+      const res = await put("appointments", { enabled: false, adapter: "internal", config: {} });
+      expect(res.status).toBe(200);
+      const [sql, params] = poolQueryMock.mock.calls.find(([q]) => q.includes("insert into business_capabilities"));
+      expect(sql).toContain("adapter_config = CASE WHEN $7 THEN excluded.adapter_config ELSE business_capabilities.adapter_config END");
+      expect(params[6]).toBe(false);
+    });
+
+    it("replaces them when a save does send them", async () => {
+      mockOwnership();
+      await put("appointments", { enabled: true, adapter: "internal", adapter_config: { practice: "x" }, config: {} });
+      const [, params] = poolQueryMock.mock.calls.find(([q]) => q.includes("insert into business_capabilities"));
+      expect(JSON.parse(params[4])).toEqual({ practice: "x" });
+      expect(params[6]).toBe(true);
+    });
+
     it("rejects a custom field with no wording for how to ask", async () => {
       // The receptionist would have to invent the question, and the point of
       // the field is that the business chose how it is asked.

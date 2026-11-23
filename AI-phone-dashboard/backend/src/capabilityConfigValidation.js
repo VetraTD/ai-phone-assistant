@@ -70,12 +70,25 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
   // rather than silently dropped, per this file's contract: a value the engine
   // would ignore must not be saved looking as though it took effect. Absence is
   // left as absence — the engine defaults to "confirm" at read time.
-  if (raw.existingAppointment !== undefined && raw.existingAppointment !== "") {
-    const allowed = schema.existingAppointment?.options || [];
-    if (typeof raw.existingAppointment !== "string" || !allowed.includes(raw.existingAppointment)) {
-      errors.push("Choose what to do when the caller already has an appointment");
+  // Every top-level choice the pack's schema declares (existingAppointment,
+  // the messages pack's confirmStyle and spellUpFront, any added later), each
+  // against its own options. Generic on purpose: this check used to list keys
+  // by name, and a choice it did not list was silently dropped on every save
+  // while the voice engine still honoured it. The adapter is stored on the row,
+  // not in config, so it is not a config choice.
+  for (const [key, node] of Object.entries(schema)) {
+    if (key === "adapter" || node?.type !== "choice") continue;
+    const value = raw[key];
+    if (value === undefined || value === "") continue;
+    const allowed = Array.isArray(node.options) ? node.options : [];
+    if (typeof value !== "string" || !allowed.includes(value)) {
+      errors.push(
+        key === "existingAppointment"
+          ? "Choose what to do when the caller already has an appointment"
+          : `Choose one of the offered options for "${node.label || key}"`
+      );
     } else {
-      config.existingAppointment = raw.existingAppointment;
+      config[key] = value;
     }
   }
 
@@ -90,6 +103,16 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
         if (require[flag] === undefined) continue;
         if (typeof require[flag] !== "boolean") errors.push(`${flag} must be true or false`);
         else if (require[flag]) out[flag] = true;
+      }
+
+      // Fields a pack must collect (the engine keeps non-empty strings).
+      if (require.requiredFields !== undefined) {
+        if (!Array.isArray(require.requiredFields)) {
+          errors.push("Required fields must be a list");
+        } else {
+          const fields = require.requiredFields.filter((x) => typeof x === "string" && x.trim());
+          if (fields.length) out.requiredFields = fields;
+        }
       }
 
       const identity = validateIdentity(require.identity, schema, errors);
