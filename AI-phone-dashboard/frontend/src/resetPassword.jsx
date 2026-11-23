@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { checkPasswordResetCode, completePasswordReset } from "./auth";
 import "./Login.css";
 import { MARKETING_URL } from "./siteUrl";
+import VetraLogo from "./components/VetraLogo";
 
 // ---------------------------------------------------------------------------
 // Setting a new password from a reset link.
@@ -111,8 +112,9 @@ export default function ResetPassword() {
 
   const shell = (children) => (
     <div className="login-page">
-      <div className="login-shell">
+      <div className="login-shell login-shell--single">
         <div className="login-top-row">
+          <VetraLogo to={null} name="VetraTD" className="login-logo" />
           <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
           </a>
@@ -170,6 +172,7 @@ export default function ResetPassword() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter new password"
+            autoComplete="new-password"
             required
           />
         </div>
@@ -182,6 +185,7 @@ export default function ResetPassword() {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             placeholder="Confirm new password"
+            autoComplete="new-password"
             required
           />
         </div>

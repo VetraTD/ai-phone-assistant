@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 // event as the email argument. Vite built it, the tests passed, and the only
 // symptom was a button stuck on "Signing in...".
 import { signIn as signInWithPassword, sendPasswordReset } from "./auth";
-import VetraMark from "./components/VetraMark";
+import VetraLogo from "./components/VetraLogo";
 import "./Login.css";
 import { MARKETING_URL } from "./siteUrl";
 
@@ -61,18 +61,15 @@ export default function Login() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-top-row">
+          <VetraLogo to={null} name="VetraTD" className="login-logo" />
           {/* External. This origin is the app now; its root is the dashboard. */}
           <a href={MARKETING_URL} className="login-back-home">
             ← Back to website
           </a>
         </div>
         <div className="login-brand">
-          <div className="login-badge">
-            <VetraMark size={18} className="login-badge-mark" />
-            Welcome back
-          </div>
-
-          <h1>Your calls, handled — even when you&apos;re not there.</h1>
+          {/* The non-breaking space keeps the dash on the line it closes. */}
+          <h1>Your calls, handled&nbsp;— even when you&apos;re not there.</h1>
 
           <p>
             Sign in to see every call, booking, and follow-up in one simple dashboard.
@@ -113,6 +110,7 @@ export default function Login() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   type="email"
+                  autoComplete="username"
                   required
                 />
               </div>
@@ -125,6 +123,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
                   type="password"
+                  autoComplete="current-password"
                   required
                 />
               </div>

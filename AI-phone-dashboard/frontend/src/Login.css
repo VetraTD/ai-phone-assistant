@@ -1,166 +1,196 @@
+/* Sign-in page, in the marketing site's look: logo navy, Fraunces headlines,
+   a crisp white card, electric-blue actions. resetPassword.jsx reuses these
+   classes, so it follows the same design.
+   Palette sampled from the logo; contrast ratios are against the surface
+   each colour sits on. */
 .login-page {
+  --auth-navy: #010b29;
+  /* Body text on navy: 9.6:1 */
+  --auth-on-navy-muted: #aab6d3;
+  --auth-cyan: #00eafe;
+  /* Buttons and links on white: 7.1:1 */
+  --auth-blue: #0038fd;
+  --auth-blue-hover: #002ec3;
+  /* Secondary text on white: 6.8:1 */
+  --auth-muted: #4f5b78;
+  --auth-line: rgba(1, 11, 41, 0.12);
+
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(58, 143, 242, 0.12), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(53, 215, 210, 0.1), transparent 28%),
-    var(--vetra-bg);
-  color: var(--vetra-text);
-  overflow: hidden;
+  background: var(--auth-navy);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  /* clip, not hidden: hidden makes the page a scroll container and can cut
+     off focus rings at the edges. Only sideways overflow is clipped. */
+  overflow-x: clip;
+}
+
+.login-page ::selection {
+  background: #cfdcff;
+  color: var(--auth-navy);
+}
+
+.login-field input {
+  caret-color: var(--auth-blue);
+}
+
+.login-page *:focus-visible {
+  outline: 3px solid var(--auth-cyan);
+  outline-offset: 3px;
 }
 
 .login-shell {
   min-height: 100vh;
-  width: min(1240px, calc(100% - 64px));
+  width: min(1160px, calc(100% - 64px));
   margin: 0 auto;
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
   align-items: flex-start;
-  gap: 40px;
-  padding-top: 72px;
+  /* Rows hug their content instead of stretching to fill the min-height,
+     which left a tall gap above the card on phones. */
+  align-content: start;
+  gap: 48px;
+  padding-top: 40px;
   padding-bottom: 72px;
+}
+
+/* The reset page has no brand column: one centred card. */
+.login-shell--single {
+  grid-template-columns: 1fr;
+}
+
+.login-shell--single .login-card-wrap {
+  justify-content: center;
 }
 
 .login-top-row {
   grid-column: 1 / -1;
   display: flex;
-  justify-content: flex-start;
-  margin-bottom: 24px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.login-logo.vetra-logo {
+  color: #ffffff;
+}
+
+.login-logo .vetra-logo-mark {
+  filter: none;
 }
 
 .login-back-home {
-  font-size: 13px;
-  color: var(--vetra-muted);
-  text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 14px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 16px;
   border-radius: 999px;
-  border: 1px solid var(--vetra-border-strong);
-  background: rgba(255, 255, 255, 0.85);
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.16s ease;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 0.18s ease;
 }
 
 .login-back-home:hover {
-  background: #fff;
-  border-color: rgba(53, 215, 210, 0.5);
-  color: var(--vetra-accent);
-  transform: translateY(-1px);
+  border-color: #ffffff;
 }
 
 .login-brand {
   max-width: 560px;
-}
-
-.login-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px 8px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--vetra-border-strong);
-  background: rgba(255, 255, 255, 0.9);
-  color: #2c4055;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 28px;
-  box-shadow: 0 6px 18px var(--vetra-shadow);
-}
-
-.login-badge-mark {
-  border-radius: 6px;
+  padding-top: 8px;
 }
 
 .login-brand h1 {
-  margin: 0 0 18px;
-  font-size: clamp(36px, 4.5vw, 52px);
-  line-height: 1.05;
-  letter-spacing: -0.04em;
-  max-width: 520px;
-  color: var(--vetra-text);
+  margin: 0 0 22px;
+  font-family: var(--font-display);
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variation-settings: "opsz" 144;
+  text-wrap: balance;
+  max-width: 560px;
+  color: #ffffff;
 }
 
 .login-brand p {
   margin: 0;
-  max-width: 540px;
-  color: var(--vetra-muted);
+  max-width: 520px;
+  color: var(--auth-on-navy-muted);
   font-size: 18px;
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .login-features {
-  margin-top: 34px;
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .login-feature {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #34465a;
+  color: #ffffff;
   font-size: 16px;
 }
 
 .login-feature-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--vetra-teal);
-  box-shadow: 0 0 12px rgba(53, 215, 210, 0.5);
+  background: var(--auth-cyan);
   flex-shrink: 0;
 }
 
 .login-card-wrap {
   display: flex;
   justify-content: center;
-  position: relative;
 }
 
-.login-card-wrap::before {
-  content: "";
-  position: absolute;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(58, 143, 242, 0.18), transparent 65%);
-  bottom: -120px;
-  right: 10px;
-  filter: blur(18px);
-  pointer-events: none;
-}
-
+/* White and sharp on navy, like the landing page's "Answered by Vetra" card. */
 .login-card {
-  position: relative;
-  z-index: 1;
   width: 100%;
-  max-width: 470px;
-  padding: 38px;
+  max-width: 460px;
+  padding: 40px;
   border-radius: 24px;
-  border: 1px solid var(--vetra-border);
-  background: var(--vetra-card);
-  box-shadow: 0 28px 70px var(--vetra-shadow-strong);
-  opacity: 0;
-  transform: translateY(20px);
-  animation: login-card-in 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  background: #ffffff;
+  color: var(--auth-navy);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.45);
+  /* Visible from the first frame: the entrance only moves the card, so a
+     stalled animation (background tab, slow device) never leaves it hidden. */
+  animation: login-card-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Inside the white card, focus rings switch to the deep blue. */
+.login-card *:focus-visible {
+  outline-color: var(--auth-blue);
 }
 
 .login-card-header {
-  margin-bottom: 26px;
+  margin-bottom: 28px;
 }
 
 .login-card-header h2 {
   margin: 0 0 10px;
-  font-size: 30px;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  color: var(--vetra-text);
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: var(--auth-navy);
 }
 
 .login-card-header p {
   margin: 0;
-  color: var(--vetra-muted);
-  font-size: 14px;
+  color: var(--auth-muted);
+  font-size: 15px;
   line-height: 1.6;
 }
 
@@ -175,129 +205,166 @@
 }
 
 .login-field label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--vetra-text);
+  color: var(--auth-navy);
 }
 
 .login-field input {
   width: 100%;
   height: 52px;
-  padding: 0 15px;
+  padding: 0 16px;
   border-radius: 14px;
-  border: 1px solid var(--vetra-border-strong);
-  background: var(--vetra-bg);
-  color: var(--vetra-text);
-  font-size: 15px;
+  border: 1px solid var(--auth-line);
+  background: #f5f7fc;
+  color: var(--auth-navy);
+  font-size: 16px;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   box-sizing: border-box;
 }
 
 .login-field input::placeholder {
-  color: var(--vetra-muted-soft);
+  color: #6b7590;
 }
 
 .login-field input:focus {
-  border-color: var(--vetra-blue);
-  box-shadow: 0 0 0 4px rgba(58, 143, 242, 0.12);
+  border-color: var(--auth-blue);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 56, 253, 0.14);
 }
 
 .login-button {
   height: 52px;
   border: none;
-  border-radius: 14px;
-  background: var(--vetra-gradient);
+  border-radius: 999px;
+  background: var(--auth-blue);
   color: #ffffff;
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-  box-shadow: 0 14px 34px rgba(58, 143, 242, 0.3);
+  transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+/* resetPassword.jsx renders this class on a link with display:block. */
+a.login-button {
+  line-height: 52px;
+  text-decoration: none;
 }
 
 .login-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 40px rgba(53, 215, 210, 0.36);
+  background: var(--auth-blue-hover);
+}
+
+.login-button:active:not(:disabled) {
+  transform: scale(0.99);
 }
 
 .login-button:disabled {
-  opacity: 0.72;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .login-security-note {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--vetra-muted-soft);
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--auth-muted);
 }
 
 .login-error {
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(220, 80, 80, 0.35);
-  background: rgba(220, 80, 80, 0.08);
-  color: #b91c1c;
-  font-size: 13px;
+  border: 1px solid rgba(164, 35, 26, 0.28);
+  background: #fdecea;
+  color: #a4231a;
+  font-weight: 600;
+  font-size: 14px;
 }
 
 .login-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  color: var(--vetra-muted);
+  padding-top: 10px;
+  border-top: 1px solid var(--auth-line);
+  color: var(--auth-muted);
   font-size: 14px;
 }
 
 .login-link {
   background: transparent;
   border: none;
-  color: var(--vetra-accent);
+  color: var(--auth-blue);
   text-decoration: underline;
   text-underline-offset: 3px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.login-link:hover:not(:disabled) {
+  color: var(--auth-blue-hover);
+}
+
+.login-link:disabled {
+  color: var(--auth-muted);
+  cursor: default;
 }
 
 .login-forgot-row {
   display: flex;
   justify-content: flex-end;
-  margin-top: -4px;
-  margin-bottom: 8px;
+  margin-top: -12px;
+  margin-bottom: -6px;
 }
 
+/* Green on its own fill: 6.1:1 */
 .login-success {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(20, 104, 58, 0.25);
+  background: #e4f4ea;
+  color: #14683a;
   font-size: 14px;
-  color: var(--vetra-accent);
-  margin-top: 6px;
 }
 
 @keyframes login-card-in {
   from {
-    opacity: 0;
-    transform: translateY(26px);
+    transform: translateY(14px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .login-card {
-    opacity: 1;
-    transform: none;
     animation: none;
+  }
+
+  .login-button,
+  .login-back-home,
+  .login-field input {
+    transition: none;
   }
 }
 
 @media (max-width: 980px) {
   .login-shell {
-    width: min(100%, calc(100% - 32px));
+    width: min(100%, calc(100% - 40px));
     grid-template-columns: 1fr;
-    gap: 20px;
-    padding: 32px 0;
+    gap: 24px;
+    padding: 28px 0 48px;
+  }
+
+  .login-top-row {
+    margin-bottom: 16px;
   }
 
   .login-brand {
@@ -306,7 +373,7 @@
 
   .login-brand h1 {
     max-width: 100%;
-    font-size: 36px;
+    font-size: 40px;
   }
 
   .login-brand p {
@@ -320,13 +387,13 @@
 
   .login-card {
     max-width: 100%;
-    padding: 28px;
+    padding: 30px;
   }
 }
 
 @media (max-width: 640px) {
   .login-shell {
-    width: min(100%, calc(100% - 24px));
+    width: min(100%, calc(100% - 32px));
   }
 
   .login-brand {
@@ -338,11 +405,26 @@
   }
 
   .login-card {
-    padding: 24px;
+    padding: 26px 22px;
     border-radius: 20px;
   }
 
   .login-card-header h2 {
-    font-size: 28px;
+    font-size: 30px;
+  }
+
+  .login-card-header p,
+  .login-field label,
+  .login-footer,
+  .login-link,
+  .login-error,
+  .login-success,
+  .login-security-note {
+    font-size: 16px;
+  }
+
+  .login-back-home {
+    padding: 8px 14px;
+    font-size: 13px;
   }
 }

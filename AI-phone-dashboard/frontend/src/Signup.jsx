@@ -3,6 +3,7 @@ import { useState } from "react";
 // recurse. Same collision as Login.jsx.
 import { signUp as createAccount } from "./auth";
 import VetraMark from "./components/VetraMark";
+import VetraLogo from "./components/VetraLogo";
 import "./Signup.css";
 import { MARKETING_URL } from "./siteUrl";
 
@@ -35,6 +36,7 @@ export default function Signup({ onSwitchToLogin }) {
     <div className="signup-page">
       <div className="signup-shell">
         <div className="signup-top-row">
+          <VetraLogo to={null} name="VetraTD" className="signup-logo" />
           <a href={MARKETING_URL} className="signup-back-home">
             ← Back to website
           </a>
