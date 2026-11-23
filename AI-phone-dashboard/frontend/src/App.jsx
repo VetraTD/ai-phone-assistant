@@ -1730,7 +1730,7 @@ function App() {
               <div className="panel-header"><h2 className="panel-title">6. Getting help</h2></div>
               <div className="panel-body guide-panel-body">
                 <p style={{ margin: 0 }}>
-                  If something doesn’t look right – or you’d like help tuning greetings, or call-handling rules – reach out to us at support@vetratd.com.
+                  If something doesn’t look right – or you’d like help tuning greetings, or call-handling rules – reach out to us at josh.tite@vetratd.com.
                 </p>
               </div>
             </section>

@@ -3,8 +3,8 @@ import VetraLogo from "./components/VetraLogo";
 import "./Legal.css";
 import { MARKETING_URL } from "./siteUrl";
 
-const CONTACT_EMAIL = "support@vetratd.com";
-const SMS_CONTACT_EMAIL = "josh.tite@vetratd.com";
+// The single contact and SMS help address, used everywhere on this page.
+const CONTACT_EMAIL = "josh.tite@vetratd.com";
 // A fixed date, not today's: change it whenever the Privacy Policy or Terms
 // change, so "Last updated" means what it says.
 const LAST_UPDATED = "23 November 2026";
@@ -63,13 +63,14 @@ export default function Legal() {
               <li>Account details: your name, business name, email address, phone number, timezone and login details.</li>
               <li>Business set-up: opening hours, services, prices, booking rules and anything else you give us to configure your receptionist.</li>
               <li>Notification settings: where you want call summaries and alerts sent (email, text or app).</li>
-              <li>Billing details: your plan and payment history. Card details are handled by our payment provider, Stripe; we do not see or store your full card number.</li>
+              <li>Billing details: your plan and payment history. When card payments are available they will be handled by our payment provider, Stripe; we will not see or store your full card number.</li>
               <li>Support messages and feedback.</li>
             </ul>
             <p><strong>If you call, or are called by, a business that uses Vetra</strong></p>
             <ul className="legal-list">
               <li>Your phone number and the date, time and length of the call.</li>
               <li>What you say on the call, and a written transcript and summary of it.</li>
+              <li>A voicemail recording, if you leave one when our assistant is unavailable.</li>
               <li>Details you give, such as your name, email, the reason for your call and any appointment booked.</li>
               <li>Texts sent to or from you about the call, if you agreed to receive them.</li>
             </ul>
@@ -136,7 +137,7 @@ export default function Legal() {
               <strong>Transcripts and summaries.</strong> We create a written transcript and a short summary of each call so the business can see who called and why. These appear in the business&apos;s Vetra dashboard and may be sent to them by email or text.
             </p>
             <p>
-              <strong>No audio recordings.</strong> Vetra does not keep audio recordings of calls. Your voice is processed live so the assistant can respond, and we keep only the written transcript and summary described above. We use transcripts so the business can review its calls, and so we can resolve problems and check the quality of the service.
+              <strong>Recordings.</strong> Vetra does not record the audio of normal calls. Your voice is processed live so the assistant can respond, and we keep only the written transcript and summary described above. If our assistant is unavailable, your call may go to a voicemail, which records the message you leave so the business can listen to it. Voicemails are kept for up to 30 days.
             </p>
             <p>
               <strong>Automated decisions.</strong> The assistant may book an appointment, take a message or pass your details to the business. It does not make decisions that have legal or similarly significant effects on you. You can always ask to speak to, or be called back by, a person.
@@ -174,16 +175,16 @@ export default function Legal() {
                     <td>Phone numbers, calls and text messages</td>
                   </tr>
                   <tr>
-                    <td><strong>Google Cloud</strong> (including Gemini)</td>
-                    <td>Hosting, data storage and the AI that powers the assistant</td>
+                    <td><strong>Google Cloud and Firebase</strong> (including Gemini)</td>
+                    <td>Hosting our dashboard and services, data storage and the AI that powers the assistant</td>
                   </tr>
                   <tr>
                     <td><strong>Vercel</strong></td>
-                    <td>Hosting our website and dashboard</td>
+                    <td>Hosting our website</td>
                   </tr>
                   <tr>
                     <td><strong>Stripe</strong></td>
-                    <td>Taking and managing payments</td>
+                    <td>Taking and managing payments, once card payments are available</td>
                   </tr>
                   <tr>
                     <td><strong>Our email service provider</strong></td>
@@ -225,6 +226,10 @@ export default function Legal() {
                   <tr>
                     <td>Text messaging consent and opt-out records</td>
                     <td>For as long as we text you, then 4 years, so we can prove consent</td>
+                  </tr>
+                  <tr>
+                    <td>Voicemail recordings</td>
+                    <td>Up to 30 days</td>
                   </tr>
                   <tr>
                     <td>Client account and billing records</td>
@@ -286,7 +291,7 @@ export default function Legal() {
             </p>
             <p id="sms-terms">
               <strong>Text messaging (SMS) terms.</strong> Opting in to text messages from VetraTD is optional and is not a condition of purchase. If you opt in, you agree to receive text messages from VetraTD about your enquiry and our service at the mobile number you provide. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out at any time; you will receive a single message confirming you have been unsubscribed. Reply HELP for help, or contact us at{" "}
-              <a href={`mailto:${SMS_CONTACT_EMAIL}`} className="legal-link">{SMS_CONTACT_EMAIL}</a>. Carriers are not liable for delayed or undelivered messages. See the Privacy Policy above for how we handle your mobile information.
+              <a href={`mailto:${CONTACT_EMAIL}`} className="legal-link">{CONTACT_EMAIL}</a>. Carriers are not liable for delayed or undelivered messages. See the Privacy Policy above for how we handle your mobile information.
             </p>
             <p>
               <strong>Termination.</strong> We may suspend or terminate your access if you breach these terms or for other operational reasons. You may stop using the service at any time.
