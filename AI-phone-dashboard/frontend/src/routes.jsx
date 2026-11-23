@@ -42,7 +42,7 @@ const Home = lazy(() => import("./pages/Home.jsx"));
 const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
 const Calendar = lazy(() => import("./pages/Calendar.jsx"));
-const LegacyTrends = lazy(() => import("./legacy/LegacyTrends.jsx"));
+const Trends = lazy(() => import("./pages/Trends.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
 const Contact = lazy(() => import("./Contact.jsx"));
@@ -137,7 +137,7 @@ export default function AppRoutes() {
               <Route path="/voice-agent/:section/:item" element={<VoiceAgent />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/settings/:item" element={<Settings />} />
-              <Route path="/trends" element={<LegacyTrends />} />
+              <Route path="/trends" element={<Trends />} />
             </Route>
             {/*
               Every address an alert email has ever carried lands on Home: the
