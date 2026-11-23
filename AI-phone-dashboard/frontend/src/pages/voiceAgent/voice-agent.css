@@ -182,4 +182,8 @@
   .vt-va-save {
     bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   }
+  /* The reused settings parts use smaller text; 16 px minimum on phones. */
+  .vt-va-panel :is(p, label, span, legend, dt, dd, li, input, select, textarea, button) {
+    font-size: 16px;
+  }
 }

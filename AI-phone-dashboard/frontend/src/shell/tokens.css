@@ -139,6 +139,46 @@
   cursor: not-allowed;
 }
 
+/* A text button or link in the brand blue (Reopen, See call trends, Copy number). */
+.vt-link {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  min-height: 44px;
+  color: var(--ink-blue);
+  font-weight: 600;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+.vt-link:hover {
+  text-decoration: underline;
+}
+
+/* A plain error said next to the thing that failed. */
+.vt-inline-error p {
+  margin-top: 10px;
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* The phone-only "back to the list" link on pages whose item opens on its own screen. */
+.vt-pback {
+  display: none;
+}
+@media (max-width: 760px) {
+  .vt-pback {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    padding: 8px 12px 0;
+    color: var(--ink-blue);
+    font-weight: 600;
+    text-decoration: none;
+  }
+}
+
 /* On phones body text is at least 16 px. */
 @media (max-width: 760px) {
   .vt-app {

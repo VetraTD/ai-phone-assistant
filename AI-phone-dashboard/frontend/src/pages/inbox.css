@@ -171,9 +171,6 @@
   color: var(--muted);
   padding: 32px;
 }
-.vt-pback {
-  display: none;
-}
 .vt-dh {
   padding: 24px 28px 18px;
   border-bottom: 1px solid var(--line-2);
@@ -197,11 +194,6 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
-}
-.vt-inline-error p {
-  margin-top: 10px;
-  color: var(--red);
-  font-weight: 600;
 }
 
 .vt-db {
@@ -396,16 +388,6 @@ a.vt-ev:hover b {
   }
   .vt-inbox-has-call .vt-ilist {
     display: none;
-  }
-  .vt-pback {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 44px;
-    padding: 8px 12px 0;
-    color: var(--ink-blue);
-    font-weight: 600;
-    text-decoration: none;
   }
   .vt-dh {
     padding: 4px 16px 14px;

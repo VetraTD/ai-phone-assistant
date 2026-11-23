@@ -142,19 +142,8 @@ ul.vt-card {
   font-size: 14.5px;
 }
 
-.vt-link {
-  background: none;
-  border: 0;
-  padding: 0 4px;
-  min-height: 44px;
-  color: var(--ink-blue);
-  font-weight: 600;
+.vt-home .vt-link {
   font-size: 14.5px;
-  cursor: pointer;
-  text-decoration: none;
-}
-.vt-link:hover {
-  text-decoration: underline;
 }
 
 /* Today rail */

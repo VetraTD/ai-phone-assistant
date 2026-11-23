@@ -31,6 +31,8 @@ export default function Field({
     <div className="set-field">
       <label className="set-label" htmlFor={id}>
         {label}
+        {/* A space, so a screen reader says "Greeting optional", not "Greetingoptional". */}
+        {recommended || optional ? " " : null}
         {recommended ? <span className="set-recommended">Recommended</span> : null}
         {optional && !recommended ? <span className="set-optional">optional</span> : null}
       </label>
