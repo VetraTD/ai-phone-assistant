@@ -18,6 +18,22 @@ function FullScreen({ children }) {
   );
 }
 
+async function fetchCapabilities(businessId) {
+  try {
+    const [defs, rows] = await Promise.all([
+      api.get("/api/capabilities/definitions"),
+      api.get(`/api/business/${businessId}/capabilities`),
+    ]);
+    return {
+      definitions: defs.data,
+      capabilityRows: Array.isArray(rows.data?.capabilities) ? rows.data.capabilities : [],
+    };
+  } catch {
+    // Pages that need these say so themselves; the shell still works.
+    return { definitions: null, capabilityRows: [] };
+  }
+}
+
 /**
  * Everything between "someone opened the dashboard" and "a page can render":
  * the Identity Platform session, automatic sign-out when idle, the /api/me
@@ -29,12 +45,6 @@ function FullScreen({ children }) {
 export default function SessionGate({ children }) {
   const [session, setSession] = useState(null);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [business, setBusiness] = useState(null);
-  const [meState, setMeState] = useState("idle"); // idle | loading | ready | error
-  const [attempt, setAttempt] = useState(0);
-  const [definitions, setDefinitions] = useState(null);
-  const [capabilityRows, setCapabilityRows] = useState([]);
-  const [openCount, setOpenCount] = useState(0);
 
   useEffect(
     () =>
@@ -57,69 +67,6 @@ export default function SessionGate({ children }) {
     },
   });
 
-  useEffect(() => {
-    if (!session) {
-      setBusiness(null);
-      setMeState("idle");
-      setDefinitions(null);
-      setCapabilityRows([]);
-      setOpenCount(0);
-      return;
-    }
-    let cancelled = false;
-    setMeState("loading");
-    api
-      .get("/api/me")
-      .then((res) => {
-        if (cancelled) return;
-        setBusiness(res.data?.business || null);
-        setMeState("ready");
-      })
-      .catch(() => {
-        if (!cancelled) setMeState("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session, attempt]);
-
-  const businessId = business?.id || null;
-  const setUp = !!business?.phone_number;
-
-  const reloadCapabilities = useCallback(async () => {
-    if (!businessId) return;
-    try {
-      const [defs, rows] = await Promise.all([
-        api.get("/api/capabilities/definitions"),
-        api.get(`/api/business/${businessId}/capabilities`),
-      ]);
-      setDefinitions(defs.data);
-      setCapabilityRows(Array.isArray(rows.data?.capabilities) ? rows.data.capabilities : []);
-    } catch {
-      // Pages that need these say so themselves; the shell still works.
-      setDefinitions(null);
-      setCapabilityRows([]);
-    }
-  }, [businessId]);
-
-  useEffect(() => {
-    if (setUp) reloadCapabilities();
-  }, [setUp, reloadCapabilities]);
-
-  const value = useMemo(
-    () => ({
-      business,
-      businessId,
-      setBusiness,
-      definitions,
-      capabilityRows,
-      reloadCapabilities,
-      openCount,
-      setOpenCount,
-    }),
-    [business, businessId, definitions, capabilityRows, reloadCapabilities, openCount]
-  );
-
   if (checkingSession) {
     return (
       <FullScreen>
@@ -132,13 +79,103 @@ export default function SessionGate({ children }) {
   // (see Login.jsx), so a signed-out visitor only ever gets the sign-in screen.
   if (!session) return <Login />;
 
-  if (meState === "error") {
+  return (
+    <>
+      {idle.warning ? (
+        <div className="vt-app vt-idle" role="alert" aria-live="assertive">
+          <span>
+            {`You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
+              idle.secondsRemaining % 60
+            ).padStart(2, "0")} for security.`}
+          </span>
+          <button type="button" className="vt-btn vt-btn-primary" onClick={idle.stayActive}>
+            Stay signed in
+          </button>
+        </div>
+      ) : null}
+      {/* Keyed by the account, so signing out or switching account starts clean. */}
+      <SignedIn key={session.uid || session.id || "signed-in"}>{children}</SignedIn>
+    </>
+  );
+}
+
+function SignedIn({ children }) {
+  const [me, setMe] = useState({ status: "loading", business: null });
+  const [attempt, setAttempt] = useState(0);
+  const [caps, setCaps] = useState({ definitions: null, capabilityRows: [] });
+  const [openCount, setOpenCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get("/api/me")
+      .then((res) => {
+        if (!cancelled) setMe({ status: "ready", business: res.data?.business || null });
+      })
+      .catch(() => {
+        if (!cancelled) setMe({ status: "error", business: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
+
+  const business = me.business;
+  const businessId = business?.id || null;
+  const setUp = !!business?.phone_number;
+
+  useEffect(() => {
+    if (!setUp || !businessId) return undefined;
+    let cancelled = false;
+    fetchCapabilities(businessId).then((next) => {
+      if (!cancelled) setCaps(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [setUp, businessId]);
+
+  const reloadCapabilities = useCallback(async () => {
+    if (businessId) setCaps(await fetchCapabilities(businessId));
+  }, [businessId]);
+
+  const setBusiness = useCallback(
+    (next) =>
+      setMe((prev) => ({
+        ...prev,
+        business: typeof next === "function" ? next(prev.business) : next,
+      })),
+    []
+  );
+
+  const value = useMemo(
+    () => ({
+      business,
+      businessId,
+      setBusiness,
+      definitions: caps.definitions,
+      capabilityRows: caps.capabilityRows,
+      reloadCapabilities,
+      openCount,
+      setOpenCount,
+    }),
+    [business, businessId, setBusiness, caps, reloadCapabilities, openCount]
+  );
+
+  if (me.status === "error") {
     return (
       <FullScreen>
         <h1 className="vt-state-title">Your account didn't load</h1>
         <p className="vt-state-text">{LOAD_ERROR}</p>
         <div className="vt-state-actions">
-          <button type="button" className="vt-btn vt-btn-primary" onClick={() => setAttempt((n) => n + 1)}>
+          <button
+            type="button"
+            className="vt-btn vt-btn-primary"
+            onClick={() => {
+              setMe({ status: "loading", business: null });
+              setAttempt((n) => n + 1);
+            }}
+          >
             Try again
           </button>
           <button
@@ -155,7 +192,7 @@ export default function SessionGate({ children }) {
     );
   }
 
-  if (meState !== "ready") {
+  if (me.status !== "ready") {
     return (
       <FullScreen>
         <p role="status">Loading your calls…</p>
@@ -173,21 +210,5 @@ export default function SessionGate({ children }) {
     );
   }
 
-  return (
-    <BusinessContext.Provider value={value}>
-      {idle.warning ? (
-        <div className="vt-app vt-idle" role="alert" aria-live="assertive">
-          <span>
-            {`You will be signed out in ${Math.floor(idle.secondsRemaining / 60)}:${String(
-              idle.secondsRemaining % 60
-            ).padStart(2, "0")} for security.`}
-          </span>
-          <button type="button" className="vt-btn vt-btn-primary" onClick={idle.stayActive}>
-            Stay signed in
-          </button>
-        </div>
-      ) : null}
-      {children}
-    </BusinessContext.Provider>
-  );
+  return <BusinessContext.Provider value={value}>{children}</BusinessContext.Provider>;
 }
