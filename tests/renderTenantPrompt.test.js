@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderTenantPrompt, payloadToConfig } from "../scripts/render-tenant-prompt.js";
 import { buildSystemInstruction } from "../services/gemini.js";
+import { loadConfig } from "../services/db.js";
 
 // A reserved, fictional business: example.com style names only.
 const BASE = {
@@ -70,13 +71,24 @@ describe("renderTenantPrompt", () => {
     expect(renderTenantPrompt(p).prompt).toMatch(/check_appointment_availability/);
   });
 
-  it("payloadToConfig builds the exact config the prompt is rendered from", () => {
-    // The eval runner tests a real tenant payload through this; if it drifted
-    // from what renderTenantPrompt renders, a sim would test a different agent.
-    const config = payloadToConfig(BASE);
-    const prompt = buildSystemInstruction("greeting", null, config, { greetingSpoken: false });
-    expect(prompt).toBe(renderTenantPrompt(BASE).prompt);
-    expect(config.businessName).toBe("Example Plumbing Co");
+  it("payloadToConfig is loadConfig over the business row and the capability rows the importer writes", () => {
+    // Built independently here, from the importer's row shape, so a change to
+    // how payloadToConfig adapts rows (dropping a capability, the enabled
+    // default, the id spellings) fails this rather than agreeing with itself.
+    const p = clone(BASE);
+    p.business.business_hours = null;
+    p.business.transfer_phone_number = "+442071234567";
+    p.capabilities.push({ capability: "quotes", config: {} });
+    const rows = [
+      { capability_id: "messages", enabled: true, config: { notes: "Ask whether it is a leak or a quote." } },
+      { capability_id: "appointments", enabled: false, config: {} },
+      { capability_id: "quotes", enabled: true, config: {} },
+    ];
+    const expected = loadConfig({ id: "payload-check", ...p.business }, rows);
+    expect(payloadToConfig(p)).toEqual(expected);
+    // And the prompt the script prints is built from that same config.
+    const prompt = buildSystemInstruction("greeting", null, expected, { greetingSpoken: false });
+    expect(renderTenantPrompt(p).prompt).toBe(prompt);
   });
 
   it("payloadToConfig refuses a payload with no business object", () => {

@@ -146,7 +146,14 @@ export function parseArgs(argv) {
       case "--judge": opts.noJudge = false; break;
       case "--matrix": opts.matrix = true; break;
       case "--matrix-file": opts.matrixFile = next(); break;
-      case "--scenarios": opts.scenariosDir = next(); break;
+      case "--scenarios": {
+        // Thrown, not just flagged: a missing value would otherwise fall back to
+        // the built-in suite and spend money on the wrong scenarios.
+        const dir = next();
+        if (!dir || dir.startsWith("--")) throw new Error("--scenarios needs a folder after it");
+        opts.scenariosDir = dir;
+        break;
+      }
       default:
         console.error(`Unknown flag: ${a}`);
         process.exitCode = 1;
@@ -189,6 +196,9 @@ export function resolveScenarioConfig(scenario, fixtures = FIXTURES) {
   if (scenario.config) {
     if (scenario.fixture) {
       throw new Error(`scenario "${scenario.name}" has both "config" and "fixture"; use one`);
+    }
+    if (scenario.configPatch) {
+      throw new Error(`scenario "${scenario.name}" has both "config" and "configPatch"; put the change in its config`);
     }
     return { config: scenario.config, extras: { ...(scenario.extrasPatch || {}) } };
   }

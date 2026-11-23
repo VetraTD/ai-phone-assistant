@@ -134,6 +134,10 @@ export default {
 To test a real tenant before it is imported, give the scenario a complete
 `config` instead of a fixture: `config: payloadToConfig(payload)` (from
 `scripts/render-tenant-prompt.js`, the same `loadConfig` the call path uses).
+It cannot see database column defaults: a field the payload leaves out is
+absent here but gets the column's DEFAULT on import (`business_hours` defaults
+to Mon-Fri 9-5, so a 24/7 business must say `"business_hours": null`). Set every
+field you rely on, and dry-run the import against the local database.
 Such a scenario must not also name a `fixture` (a fixture's extras belong to
 another business); its extras come from `extrasPatch` alone. An import payload
 carries no knowledge-base rows, so if the tenant has any, pass them as

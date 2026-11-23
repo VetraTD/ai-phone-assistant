@@ -48,6 +48,19 @@ describe("parseArgs", () => {
     expect(parseArgs(["--scenarios", "some/dir"]).scenariosDir).toBe("some/dir");
   });
 
+  it("--scenarios with no folder after it is an error, not a silent run of the built-in suite", () => {
+    // A run that silently falls back to the 37 built-in scenarios spends money
+    // on the wrong suite.
+    for (const argv of [["--scenarios"], ["--scenarios", "--judge"]]) {
+      const prev = process.exitCode;
+      try {
+        expect(() => parseArgs(argv)).toThrow(/--scenarios needs a folder/);
+      } finally {
+        process.exitCode = prev;
+      }
+    }
+  });
+
   it("still rejects an unknown flag rather than ignoring it", () => {
     const prev = process.exitCode;
     try {

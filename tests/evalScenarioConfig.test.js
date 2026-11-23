@@ -45,6 +45,12 @@ describe("resolveScenarioConfig", () => {
     );
   });
 
+  it("refuses a configPatch next to a scenario's own config, instead of ignoring it", () => {
+    expect(() => resolveScenarioConfig({ name: "x", config: { a: 1 }, configPatch: { b: 2 } }, FIXTURES)).toThrow(
+      /both "config" and "configPatch"/
+    );
+  });
+
   it("an unknown fixture with no config of its own still fails loudly", () => {
     expect(() => resolveScenarioConfig({ fixture: "nope" }, FIXTURES)).toThrow(/unknown fixture "nope"/);
   });
