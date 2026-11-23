@@ -1,0 +1,67 @@
+/* Settings (spec §8): the Voice agent's list-and-panel layout (voice-agent.css),
+ * plus Sign out at the foot of the list and the read-only panels' text. */
+
+.vt-set-items {
+  padding-top: 8px;
+}
+.vt-set-signout {
+  padding: 20px 20px 0;
+  margin-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+
+.vt-set-figure {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.vt-set-text,
+.vt-set-help li {
+  max-width: 62ch;
+  color: var(--muted);
+}
+.vt-set-text a,
+.vt-set-help + p a {
+  color: var(--ink-blue);
+  font-weight: 600;
+}
+.vt-set-help {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}
+.vt-set-status p {
+  margin-top: 8px;
+}
+.vt-set-warn {
+  color: var(--red);
+  font-weight: 600;
+}
+.vt-set-inline {
+  padding: 0;
+}
+
+.vt-set-usage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0 0 8px;
+}
+.vt-set-usage div {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  padding: 14px 16px;
+  background: var(--surface);
+}
+.vt-set-usage dt {
+  color: var(--muted);
+  font-size: 14px;
+}
+.vt-set-usage dd {
+  margin: 4px 0 0;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+}

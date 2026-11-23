@@ -108,15 +108,20 @@ router.get("/api/usage", authenticate, withTenantHandler(async (req, res) => {
   try {
     const businessId = req.businessId;
 
+    // The month is the BUSINESS's month: from the 1st at local midnight to the
+    // next 1st, worked out in local time and then turned into instants, so a
+    // call on the last evening of the month in Chicago is not next month's.
+    const tzRes = await pool.query(`SELECT timezone FROM businesses WHERE id = $1 LIMIT 1`, [businessId]);
+    const tz = tzRes.rows[0]?.timezone || DEFAULT_TIMEZONE;
     const usageRes = await pool.query(
       `SELECT
         COUNT(*)::int AS calls_this_month,
         COALESCE(SUM(duration_seconds), 0)::bigint AS total_seconds
        FROM calls
        WHERE business_id = $1
-         AND started_at >= date_trunc('month', CURRENT_DATE)
-         AND started_at < date_trunc('month', CURRENT_DATE) + interval '1 month'`,
-      [businessId]
+         AND started_at >= (date_trunc('month', now() AT TIME ZONE $2) AT TIME ZONE $2)
+         AND started_at < ((date_trunc('month', now() AT TIME ZONE $2) + interval '1 month') AT TIME ZONE $2)`,
+      [businessId, tz]
     );
 
     const row = usageRes.rows[0];

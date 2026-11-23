@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
 import { useUnsavedChangesGuard } from "../shell/useUnsavedChangesGuard";
+import DraftSaveBar from "../shell/DraftSaveBar";
 import { useBusinessDraft } from "../settings/useBusinessDraft";
 import { CapabilityPanel } from "../settings/CapabilitiesSection";
 import AIBehaviorSection from "../settings/AIBehaviorSection";
@@ -242,22 +243,7 @@ export default function VoiceAgent() {
         <div className="set-root vt-va-set">{renderPanel()}</div>
       </section>
 
-      {/* Outside the panel, so it also shows on a phone's list screen. */}
-      <div className={`vt-va-save${saveMessage ? "" : " vt-va-save-empty"}`}>
-        <span role="status" aria-live="polite">
-          {saveMessage}
-        </span>
-        {dirty ? (
-          <span className="vt-va-save-actions">
-            <button type="button" className="vt-btn vt-btn-quiet" onClick={discard} aria-disabled={saving || undefined}>
-              Discard
-            </button>
-            <button type="button" className="vt-btn vt-btn-primary" onClick={save} aria-disabled={saving || undefined}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </span>
-        ) : null}
-      </div>
+      <DraftSaveBar message={saveMessage} dirty={dirty} saving={saving} onSave={save} onDiscard={discard} />
       {leaveDialog}
     </div>
   );

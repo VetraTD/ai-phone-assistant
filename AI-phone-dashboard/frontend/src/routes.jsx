@@ -43,7 +43,7 @@ const Inbox = lazy(() => import("./pages/Inbox.jsx"));
 const VoiceAgent = lazy(() => import("./pages/VoiceAgent.jsx"));
 const Calendar = lazy(() => import("./pages/Calendar.jsx"));
 const LegacyTrends = lazy(() => import("./legacy/LegacyTrends.jsx"));
-const LegacySettings = lazy(() => import("./legacy/LegacySettings.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx"));
 const Legal = lazy(() => import("./Legal.jsx"));
 const Contact = lazy(() => import("./Contact.jsx"));
 const ResetPassword = lazy(() => import("./resetPassword.jsx"));
@@ -135,8 +135,8 @@ export default function AppRoutes() {
               <Route path="/voice-agent" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section" element={<VoiceAgent />} />
               <Route path="/voice-agent/:section/:item" element={<VoiceAgent />} />
-              <Route path="/settings" element={<LegacySettings />} />
-              <Route path="/settings/:item" element={<LegacySettings />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/:item" element={<Settings />} />
               <Route path="/trends" element={<LegacyTrends />} />
             </Route>
             {/*
