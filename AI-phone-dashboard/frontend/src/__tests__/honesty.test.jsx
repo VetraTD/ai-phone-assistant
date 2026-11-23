@@ -23,8 +23,7 @@ vi.mock("../siteUrl", () => ({
 }));
 
 import AppRoutes from "../routes";
-import AccountSection from "../settings/AccountSection";
-import { GROUPS } from "../settings/groups";
+import { SETTINGS_ITEMS } from "../pages/settings/items";
 
 afterEach(() => {
   cleanup();
@@ -46,17 +45,12 @@ describe("the dashboard shows only what is real", () => {
     expect(existsSync(join(cwd(), "src/LanguageSwitcher.jsx"))).toBe(false);
   });
 
-  it("Account shows no plan or billing status", () => {
-    render(<AccountSection business={{ name: "Brightwork Family Dental" }} usage={null} />);
-    expect(screen.queryByText("Starter")).toBeNull();
-    expect(screen.queryByText(/billing status/i)).toBeNull();
-    expect(screen.queryByText(/billing & plan|current plan|card payments/i)).toBeNull();
-  });
-
   it("the settings menu promises no texts, plan, billing or integrations", () => {
     // Texts are off in production and billing and integrations are not built,
     // so the menu that leads to these panels must not offer them either.
-    const words = GROUPS.map((g) => [g.label, g.caption, g.title, g.description].join(" ")).join(" | ");
+    // The Settings page itself is checked for billing, plan and team panels in
+    // pages/__tests__/Settings.test.jsx.
+    const words = SETTINGS_ITEMS.map((i) => i.label).join(" | ");
     expect(words).not.toMatch(/\btext(ed|s)?\b|\bplan\b|billing|integration|connected apps/i);
   });
 
