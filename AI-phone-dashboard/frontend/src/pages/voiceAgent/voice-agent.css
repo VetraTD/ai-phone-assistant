@@ -144,9 +144,25 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-dialog);
-  box-shadow: var(--shadow-pop);
   font-weight: 600;
 }
+/* The settings parts (src/settings) in the dashboard's look (spec §10): flat
+ * cards with hairline borders, the card radius, ink blue for the active state
+ * and focus. Scoped here so nothing outside the Voice agent and Settings
+ * changes. */
+.vt-va .set-root {
+  --set-elevation: none;
+  --set-radius-panel: var(--r-card);
+  --vetra-blue: var(--ink-blue);
+  --vetra-border: var(--line);
+}
+.vt-va .set-root input:focus-visible,
+.vt-va .set-root select:focus-visible,
+.vt-va .set-root textarea:focus-visible {
+  border-color: var(--ink-blue);
+  box-shadow: 0 0 0 3px rgba(0, 56, 253, 0.16);
+}
+
 .vt-va-save-empty {
   display: none;
 }

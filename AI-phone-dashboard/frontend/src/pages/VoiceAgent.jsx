@@ -16,7 +16,7 @@ import KnowledgeBaseEditor from "../settings/KnowledgeBaseEditor";
 import TransferRulesSection from "../settings/TransferRulesSection";
 import { TRANSFER_POLICIES } from "../settings/constants";
 import { buildSections, DEFAULT_ITEM, DEFAULT_SECTION } from "./voiceAgent/items";
-import { formatPhone } from "./voiceAgent/formatPhone";
+import { formatPhone } from "../calls/format";
 import "../settings/Settings.css";
 import "./voiceAgent/voice-agent.css";
 

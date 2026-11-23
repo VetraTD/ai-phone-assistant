@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { useBusiness } from "../shell/BusinessContext";
 import "./trends.css";
 
 const LOAD_ERROR = "Couldn't load your call trends. Check your connection, then try again.";
@@ -58,7 +57,15 @@ function CountList({ rows }) {
   );
 }
 
-function insights(data, fallbackTz) {
+/** An hour of the day in the dashboard's words: "9 am", "noon", "11 pm", "midnight". */
+function hourWords(h) {
+  const hour = ((h % 24) + 24) % 24;
+  if (hour === 0) return "midnight";
+  if (hour === 12) return "noon";
+  return hour < 12 ? `${hour} am` : `${hour - 12} pm`;
+}
+
+function insights(data) {
   const lines = [];
   const mix = data.caller_mix;
   if (mix) {
@@ -69,15 +76,15 @@ function insights(data, fallbackTz) {
   }
   const peak = data.peak_hour;
   if (peak && typeof peak.hour === "number") {
-    const pad = (h) => String(h).padStart(2, "0");
-    lines.push(`Peak hour this period: ${pad(peak.hour)}:00–${pad((peak.hour + 1) % 24)}:00`);
+    lines.push(`Busiest hour this period: ${hourWords(peak.hour)} to ${hourWords(peak.hour + 1)}`);
   }
   const bh = data.business_hours;
   if (bh) {
     const total = n(bh.in_hours) + n(bh.out_hours);
+    // A fixed 9 am to 5 pm on the business's clock (analytics.js), not its
+    // opening hours; every time on the dashboard is already in business time.
     if (total > 0) {
-      const tz = bh.timezone || fallbackTz || "";
-      lines.push(`${Math.round((n(bh.out_hours) / total) * 100)}% of calls came outside 09:00–17:00${tz ? ` (${tz})` : ""}`);
+      lines.push(`${Math.round((n(bh.out_hours) / total) * 100)}% of calls came outside 9 am to 5 pm`);
     }
   }
   return lines;
@@ -88,7 +95,6 @@ function insights(data, fallbackTz) {
  * same data, same periods, from GET /api/analytics-breakdown.
  */
 export default function Trends() {
-  const { business } = useBusiness();
   const [period, setPeriod] = useState("90d");
   const [state, setState] = useState({ status: "loading", period: null, data: null });
   const [attempt, setAttempt] = useState(0);
@@ -154,13 +160,13 @@ export default function Trends() {
       ) : n(data.total_calls_3m) === 0 ? (
         <p className="vt-tr-state">No calls in this period yet.</p>
       ) : (
-        <TrendsBody data={data} period={period} tz={business?.timezone} />
+        <TrendsBody data={data} period={period} />
       )}
     </div>
   );
 }
 
-function TrendsBody({ data, period, tz }) {
+function TrendsBody({ data, period }) {
   const sc = data.status_counts || {};
   const outcomes = [
     ["Completed", n(sc.completed)],
@@ -172,15 +178,17 @@ function TrendsBody({ data, period, tz }) {
   if (n(sc.in_progress) > 0) outcomes.push(["In progress", n(sc.in_progress)]);
   const outcomeTotal = outcomes.reduce((sum, [, v]) => sum + v, 0);
   const answerRate = outcomeTotal > 0 ? Math.round((n(sc.completed) / outcomeTotal) * 100) : 0;
-  const lines = insights(data, tz);
+  const lines = insights(data);
   const sentiment = data.sentiment_counts || {};
   const actions = data.actions || {};
+  const rated = n(sentiment.positive) + n(sentiment.neutral) + n(sentiment.negative) > 0;
 
   const tiles = [
     ["Calls", n(data.total_calls_3m)],
     ["Bookings made", n(actions.appointments)],
     ["Follow-ups needed", n(data.followups_needed)],
-    ["Positive calls", `${n(data.positive_calls_percent)}%`],
+    // No call rated yet is not "0% positive".
+    rated ? ["Positive calls", `${n(data.positive_calls_percent)}%`] : ["Positive calls", "–", "Not known yet"],
     ["Calls that became bookings", `${n(data.appointment_conversion_percent)}%`],
   ];
   if (data.caller_mix) tiles.push(["New callers", n(data.caller_mix.first_time)]);
@@ -192,10 +200,13 @@ function TrendsBody({ data, period, tz }) {
           Overview
         </h2>
         <dl className="vt-tr-tiles">
-          {tiles.map(([label, value]) => (
+          {tiles.map(([label, value, note]) => (
             <div key={label} className="vt-tr-tile">
               <dt>{label}</dt>
-              <dd className="vt-num">{value}</dd>
+              <dd className="vt-num">
+                {value}
+                {note ? <span className="vt-tr-tile-note">{note}</span> : null}
+              </dd>
             </div>
           ))}
         </dl>

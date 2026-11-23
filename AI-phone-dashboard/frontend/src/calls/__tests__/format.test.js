@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatTime, formatDateTime, dayHeading, telHref, callerLabel } from "../format";
+import { formatTime, formatDateTime, dayHeading, telHref, callerLabel, formatPhone, shortDay } from "../format";
 
 const TZ = "America/Chicago";
 
@@ -45,10 +45,31 @@ describe("telHref", () => {
   });
 });
 
+describe("formatPhone", () => {
+  it("groups UK and North American numbers and leaves anything else as stored", () => {
+    expect(formatPhone("+447700900113")).toBe("+44 7700 900113");
+    expect(formatPhone("+15550100199")).toBe("+1 (555) 010-0199");
+    expect(formatPhone("+33123456789")).toBe("+33123456789");
+    expect(formatPhone(null)).toBe("");
+  });
+});
+
+describe("shortDay", () => {
+  it("names an earlier day briefly; yesterday stays Yesterday", () => {
+    const now = new Date("2026-11-23T18:00:00Z");
+    expect(shortDay("2026-11-21T02:03:00Z", "America/Chicago", now)).toBe("Fri 20 Nov");
+    expect(shortDay("2026-11-22T18:00:00Z", "America/Chicago", now)).toBe("Yesterday");
+    expect(shortDay("2026-11-23T17:00:00Z", "America/Chicago", now)).toBe("Today");
+  });
+});
+
 describe("callerLabel", () => {
   it("prefers the name, then the number", () => {
     expect(callerLabel({ callerName: "Sample Caller", callerNumber: "+15550100" })).toBe("Sample Caller");
     expect(callerLabel({ callerName: "  ", callerNumber: "+15550100" })).toBe("+15550100");
+    // A whole number reads in groups, the way the front desk says it aloud.
+    expect(callerLabel({ callerNumber: "+447700900113" })).toBe("+44 7700 900113");
+    expect(callerLabel({ callerNumber: "+15550100199" })).toBe("+1 (555) 010-0199");
   });
 
   it("says Withheld number when there is nothing to show", () => {

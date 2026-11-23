@@ -71,6 +71,28 @@ export function telHref(number) {
 /** The name, else the number, else "Withheld number". */
 export function callerLabel({ callerName, callerNumber } = {}) {
   if (typeof callerName === "string" && callerName.trim()) return callerName.trim();
-  if (!isWithheld(callerNumber)) return callerNumber.trim();
+  if (!isWithheld(callerNumber)) return formatPhone(callerNumber);
   return "Withheld number";
+}
+
+/**
+ * A number as people read it: "+44 7700 900123" for a UK number,
+ * "+1 (555) 019-9001" for a North American one, else as stored. Display only:
+ * a tel: link still comes from telHref, on the number as stored.
+ */
+export function formatPhone(e164) {
+  const v = typeof e164 === "string" ? e164.trim() : "";
+  let m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(v);
+  if (m) return `+1 (${m[1]}) ${m[2]}-${m[3]}`;
+  m = /^\+44(\d{4})(\d{6})$/.exec(v);
+  if (m) return `+44 ${m[1]} ${m[2]}`;
+  return v;
+}
+
+/** "Today" | "Yesterday" | "Fri 20 Nov": short enough to sit on one line beside a time. */
+export function shortDay(iso, tz, now = new Date()) {
+  const heading = dayHeading(iso, tz, now);
+  if (heading === "Today" || heading === "Yesterday") return heading;
+  const p = parts(iso, tz, { weekday: "short", day: "numeric", month: "short" });
+  return `${p.weekday} ${p.day} ${p.month}`;
 }

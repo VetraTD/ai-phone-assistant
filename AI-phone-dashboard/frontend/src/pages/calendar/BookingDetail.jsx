@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { formatDate, formatDateTime, telHref } from "../../calls/format";
+import { formatDate, formatDateTime, formatPhone, telHref } from "../../calls/format";
 
 // The newest change a call made to this booking (migration 062).
 const CHANGE_WORDS = {
@@ -63,10 +63,10 @@ export default function BookingDetail({ booking, tz, onClose, position, variant 
       {phone ? (
         href ? (
           <a className="vt-link vt-cal-detail-phone vt-num" href={href}>
-            {phone}
+            {formatPhone(phone)}
           </a>
         ) : (
-          <p className="vt-cal-detail-phone vt-num">{phone}</p>
+          <p className="vt-cal-detail-phone vt-num">{formatPhone(phone)}</p>
         )
       ) : null}
       {notes ? <p className="vt-cal-detail-notes">{notes}</p> : null}

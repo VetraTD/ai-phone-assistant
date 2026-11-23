@@ -8,7 +8,7 @@ import DraftSaveBar from "../shell/DraftSaveBar";
 import { useBusinessDraft } from "../settings/useBusinessDraft";
 import NotificationsSection from "../settings/NotificationsSection";
 import Panel from "../settings/Panel";
-import { formatPhone } from "./voiceAgent/formatPhone";
+import { formatPhone } from "../calls/format";
 import { DEFAULT_SETTINGS_ITEM, SETTINGS_ITEMS } from "./settings/items";
 import "../settings/Settings.css";
 import "./voiceAgent/voice-agent.css";

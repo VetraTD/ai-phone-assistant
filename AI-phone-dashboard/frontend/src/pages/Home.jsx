@@ -3,7 +3,7 @@ import { useAutoRefresh } from "../shell/useAutoRefresh";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
-import { callerLabel, dayHeading, formatTime, telHref } from "../calls/format";
+import { callerLabel, formatTime, shortDay, telHref } from "../calls/format";
 import { needText } from "../calls/callStatus";
 import "./home.css";
 
@@ -44,9 +44,9 @@ function needLine(item) {
   return firstSentence(item.summary);
 }
 
-/** The day above the time, for anything not from today. */
+/** The day above the time, for anything not from today: "Yesterday" or "Fri 20 Nov". */
 function WhenCell({ iso, tz }) {
-  const day = dayHeading(iso, tz);
+  const day = shortDay(iso, tz);
   return (
     <span className="vt-when vt-num">
       {day !== "Today" ? <span className="vt-when-day">{day}</span> : null}

@@ -55,9 +55,9 @@ function LocationProbe() {
 }
 
 let setOpenCount;
-function renderInbox(path = "/inbox", { calls = [row()], callDetail = detail() } = {}) {
+function renderInbox(path = "/inbox", { calls = [row()], callDetail = detail(), keepMock = false } = {}) {
   setOpenCount = vi.fn();
-  api.get.mockImplementation((url, opts) => {
+  if (!keepMock) api.get.mockImplementation((url, opts) => {
     if (url === "/api/calls") {
       if (opts?.params?.limit === 1) return Promise.resolve({ data: { calls: [], total: calls.length } });
       return Promise.resolve({ data: { calls, total: calls.length } });
@@ -195,6 +195,30 @@ describe("Inbox call view", () => {
     expect(within(view).getByText("Cancelled a booking, Wednesday 25 November, 11:00 am")).toBeInTheDocument();
   });
 
+  it("shows a UK number in groups in the call's heading", async () => {
+    renderInbox("/inbox/c1", {
+      callDetail: detail({ call: { caller_number: "+447700900113" }, customer_requests: [] }),
+    });
+    expect(await screen.findByRole("heading", { level: 2, name: "+44 7700 900113" })).toBeInTheDocument();
+  });
+
+  it("opening a call that is not waiting on you shows it selected under All calls", async () => {
+    api.get.mockImplementation((url, opts) => {
+      if (url === "/api/calls") {
+        if (opts?.params?.limit === 1) return Promise.resolve({ data: { calls: [], total: 1 } });
+        const open = [row({ id: "c1" })];
+        const all = [row({ id: "c1" }), row({ id: "c9", caller_name_guess: "Done Caller", has_request: false, request_type: null })];
+        return Promise.resolve({ data: { calls: opts?.params?.view === "all" ? all : open, total: 2 } });
+      }
+      if (url.startsWith("/api/calls/")) return Promise.resolve({ data: detail({ call: { id: "c9" }, customer_requests: [] }) });
+      return Promise.reject(new Error("unexpected " + url));
+    });
+    renderInbox("/inbox/c9", { keepMock: true });
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/inbox/c9?view=all"));
+    const selected = await screen.findByRole("link", { name: /Done Caller/, current: true });
+    expect(selected).toBeInTheDocument();
+  });
+
   it("shows caller speech that looks like HTML literally", async () => {
     renderInbox("/inbox/c1", {
       callDetail: detail({ transcript: [{ speaker: "caller", message: "<img src=x onerror=alert(1)>", sequence: 1 }] }),
@@ -282,7 +306,8 @@ describe("Inbox after review", () => {
     });
     const view = await screen.findByRole("region", { name: /Sample Caller/ });
     expect(within(view).getByRole("link", { name: "Call back" })).toHaveAttribute("href", "tel:+15550100177");
-    expect(within(view).getByText("+15550100177")).toBeInTheDocument();
+    // Shown in groups; the tel: link keeps the number as stored.
+    expect(within(view).getByText("+1 (555) 010-0177")).toBeInTheDocument();
     expect(within(view).queryByText("+266696687")).toBeNull();
   });
 

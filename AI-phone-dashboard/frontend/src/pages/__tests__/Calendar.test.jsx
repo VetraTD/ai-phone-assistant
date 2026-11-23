@@ -120,7 +120,7 @@ describe("Calendar", () => {
     const detail = screen.getByRole("dialog");
     expect(within(detail).getByText("Tuesday 24 November, 9:00 am")).toBeInTheDocument();
     expect(within(detail).getByText("Sample Caller")).toBeInTheDocument();
-    expect(within(detail).getByRole("link", { name: "+15550100199" })).toHaveAttribute("href", "tel:+15550100199");
+    expect(within(detail).getByRole("link", { name: "+1 (555) 010-0199" })).toHaveAttribute("href", "tel:+15550100199");
     expect(within(detail).getByText("Check-up")).toBeInTheDocument();
     expect(within(detail).getByText("Booked by VetraTD on a call")).toBeInTheDocument();
     expect(within(detail).getByRole("link", { name: "Open the call" })).toHaveAttribute("href", "/inbox/c1");

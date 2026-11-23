@@ -55,7 +55,11 @@
   gap: 12px;
   margin: 0 0 16px;
 }
+/* Labels take two lines' room, so every figure sits on one line across the row. */
 .vt-tr-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
@@ -64,6 +68,16 @@
 .vt-tr-tile dt {
   color: var(--muted);
   font-size: 14px;
+  line-height: 1.35;
+  min-height: 2.7em;
+}
+.vt-tr-tile-note {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .vt-tr-tile dd {
   margin: 4px 0 0;
@@ -214,7 +228,8 @@
   .vt-tr-period select,
   .vt-tr-counts,
   .vt-tr-insights ul,
-  .vt-tr-tile dt {
+  .vt-tr-tile dt,
+  .vt-tr-tile-note {
     font-size: 16px;
   }
   /* Axis labels stay small so seven to thirteen of them fit across a phone;

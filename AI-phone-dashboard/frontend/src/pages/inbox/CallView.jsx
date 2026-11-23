@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../api";
 import { useBusiness } from "../../shell/BusinessContext";
 import { calendarAvailable } from "../../shell/nav";
-import { callerLabel, formatDateTime, localDay, telHref } from "../../calls/format";
+import { callerLabel, formatDateTime, formatPhone, localDay, telHref } from "../../calls/format";
 import { didList, statusLine } from "../../calls/callStatus";
 import CallOutcomeAnswers from "../../components/CallOutcomeAnswers";
 
@@ -56,7 +56,7 @@ function RequestBlock({ request, shownNumber }) {
   if (request.request_type === "unconfirmed_claim" && request.notes) rows.push(["Why", request.notes]);
   if (request.preferred_time) rows.push(["Best time", request.preferred_time]);
   // A number the caller left, unless it is already the one shown at the top.
-  if (request.callback_number && request.callback_number !== shownNumber) rows.push(["Number to ring", request.callback_number]);
+  if (request.callback_number && request.callback_number !== shownNumber) rows.push(["Number to ring", formatPhone(request.callback_number)]);
   for (const a of answers) rows.push([a.label, a.answer]);
   if (!rows.length) return null;
   return (
@@ -179,7 +179,8 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
   const leftNumber = requests.map((r) => r?.callback_number).find((n) => telHref(n)) || null;
   const dialled = leftNumber || (telHref(call.caller_number) ? call.caller_number : null);
   const callHref = telHref(dialled);
-  const shownNumber = dialled && dialled !== label ? dialled : null;
+  // Shown under the name, unless the name IS the number.
+  const shownNumber = dialled && formatPhone(dialled) !== label ? dialled : null;
   const line = statusLine({ call, appointments, requests, changes });
   const did = didList({ call, appointments, requests, changes, tz });
   const booking = appointments[0] || null;
@@ -210,7 +211,7 @@ export default function CallView({ callId, tz, backSearch, onHandledChange, chil
         <header className="vt-dh">
           <h2 id="vt-call-h">{label}</h2>
           <p className="vt-meta">
-            {shownNumber ? <span className="vt-num">{shownNumber}</span> : null}
+            {shownNumber ? <span className="vt-num">{formatPhone(shownNumber)}</span> : null}
             {call.started_at ? <span>{formatDateTime(call.started_at, tz)}</span> : null}
             {lengthText(call.duration_seconds) ? <span>{lengthText(call.duration_seconds)}</span> : null}
           </p>

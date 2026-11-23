@@ -95,7 +95,7 @@ ul.vt-card {
 /* Needs you rows */
 .vt-task {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   padding: 16px 18px;
@@ -129,7 +129,7 @@ ul.vt-card {
 /* Done today rows */
 .vt-drow {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   padding: 12px 18px;
@@ -280,11 +280,15 @@ a.vt-tl-row:hover .vt-tl-name {
     grid-template-columns: 1fr;
   }
   .vt-drow {
-    grid-template-columns: 64px minmax(0, 1fr) auto;
+    grid-template-columns: 88px minmax(0, 1fr) auto;
     padding: 12px 16px;
   }
+  /* On phones the rail is one more inset card, like the sections above it. */
   .vt-rail {
-    padding: 20px 16px 28px;
+    margin: 0 16px 24px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-card);
+    padding: 16px;
   }
   /* 16 px minimum for text on phones. */
   .vt-ln,
@@ -306,10 +310,9 @@ a.vt-tl-row:hover .vt-tl-name {
   }
 }
 
-/* An item left on an earlier day says which day above its time. */
+/* An item left on an earlier day says which day ("Fri 20 Nov") above its
+ * time, in the time's own weight and colour, on one line. */
 .vt-when-day {
   display: block;
-  font-weight: 700;
-  color: var(--ink);
-  white-space: normal;
+  white-space: nowrap;
 }

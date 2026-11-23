@@ -89,13 +89,17 @@ describe("Home", () => {
     expect(within(rows[0]).getByRole("link", { name: /First Caller/ })).toHaveAttribute("href", "/inbox/old");
   });
 
-  it("an item left on an earlier day says which day, not just the time", async () => {
+  it("an item left on an earlier day says which day, briefly, not just the time", async () => {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-    const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "long" }).format(new Date(twoDaysAgo));
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" })
+        .formatToParts(new Date(twoDaysAgo))
+        .map((x) => [x.type, x.value])
+    );
     api.get.mockResolvedValue({ data: home({ openItems: [item({ startedAt: twoDaysAgo })] }) });
     renderHome();
     const row = within(await screen.findByRole("list", { name: "Needs you" })).getByRole("listitem");
-    expect(within(row).getByText(new RegExp("^" + dayName))).toBeInTheDocument();
+    expect(within(row).getByText(`${p.weekday} ${p.day} ${p.month}`)).toBeInTheDocument();
   });
 
   it("Call back rings the number the caller left, else the one they called from", async () => {
@@ -224,7 +228,7 @@ describe("Home after review", () => {
 
   it("a done row from an earlier day says which day", async () => {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-    const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "long" }).format(new Date(twoDaysAgo));
+    const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, weekday: "short" }).format(new Date(twoDaysAgo));
     api.get.mockResolvedValue({
       data: home({ doneToday: [{ callId: "d1", startedAt: twoDaysAgo, callerName: "Earlier Caller", summary: "x", status: "completed", handledAt: new Date().toISOString(), handledBy: "uid-1", hadRequest: true }] }),
     });

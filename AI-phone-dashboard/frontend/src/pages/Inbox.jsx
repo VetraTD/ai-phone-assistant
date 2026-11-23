@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useBusiness } from "../shell/BusinessContext";
@@ -85,6 +85,21 @@ export default function Inbox() {
     },
     [view]
   );
+
+  // A call opened from a link (an alert email, Done today) that is not
+  // waiting on you is not in "Needs you", so nothing would show selected:
+  // show it under All calls. Once per call, so pressing Done on a call in
+  // Needs you does not move the list.
+  const placed = useRef(null);
+  useEffect(() => {
+    if (!callId || q || view !== "open" || list.status !== "ready" || placed.current === callId) return;
+    placed.current = callId;
+    if (!list.calls.some((c) => c.id === callId)) {
+      const p = new URLSearchParams(params);
+      p.set("view", "all");
+      setParams(p, { replace: true });
+    }
+  }, [callId, q, view, list, params, setParams]);
 
   const setView = (next) => {
     const p = new URLSearchParams(params);

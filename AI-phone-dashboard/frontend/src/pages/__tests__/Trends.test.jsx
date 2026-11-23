@@ -65,7 +65,9 @@ describe("Call trends", () => {
     expect(await screen.findByText("37")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Call trends" })).toBeInTheDocument();
     expect(screen.getByText("62%")).toBeInTheDocument();
-    expect(screen.getByText("Peak hour this period: 10:00–11:00")).toBeInTheDocument();
+    expect(screen.getByText("Busiest hour this period: 10 am to 11 am")).toBeInTheDocument();
+    expect(screen.getByText("19% of calls came outside 9 am to 5 pm")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("America/Chicago");
     expect(screen.getByRole("img", { name: /Nov: 27 calls/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Home/ })).toHaveAttribute("href", "/home");
     expect(api.get).toHaveBeenCalledWith("/api/analytics-breakdown", { params: { period: "90d" } });
@@ -80,6 +82,21 @@ describe("Call trends", () => {
     await waitFor(() =>
       expect(api.get).toHaveBeenLastCalledWith("/api/analytics-breakdown", { params: { period: "30d" } })
     );
+  });
+
+  it("names the hour before midnight and noon in words", async () => {
+    api.get.mockResolvedValue({ data: breakdown({ peak_hour: { hour: 23 } }) });
+    renderTrends();
+    expect(await screen.findByText("Busiest hour this period: 11 pm to midnight")).toBeInTheDocument();
+  });
+
+  it("does not say 0% positive when no call was rated", async () => {
+    api.get.mockResolvedValue({
+      data: breakdown({ positive_calls_percent: 0, sentiment_counts: { positive: 0, neutral: 0, negative: 0, unknown: 37 } }),
+    });
+    renderTrends();
+    expect(await screen.findByText("Not known yet")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).toBeNull();
   });
 
   it("says so when there are no calls", async () => {
