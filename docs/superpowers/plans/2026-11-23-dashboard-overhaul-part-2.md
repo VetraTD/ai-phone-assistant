@@ -19,7 +19,7 @@
 
 **Already shipped in part 1, so not rebuilt here:** the Inbox's "Download calls (CSV)" and Home's "See call trends" link.
 
-**Scope:** Part 2 of 2: stages 4–7, about 12–19 h. That figure does not include the owner's design notes (Task 10), which are sized once they arrive.
+**Scope:** Part 2 of 2: stages 4–7, about 11–17 h. That includes the booking-change email the owner added, and the time savings the owner approved (both 2026-11-23). The owner has no design notes, so the visual fixes come from the finish review alone (Task 10).
 
 ## Global Constraints
 
@@ -48,6 +48,7 @@ New for part 2:
 - **Low memory:**
   - Run vitest files one process at a time.
   - Run the full root suite in a mintty window with a log file. In part 1 this was `.superpowers/sdd/2026-11-22-dashboard-overhaul-part-1/root-suite.sh`; copy it into this plan's workspace.
+  - **Full runs happen at Gate B and Task 11 only** (the root suite and `npm run test:db`; owner, 2026-11-23, to save time). Each task runs its own test files first. Voice tasks also run `tests/promptSnapshot.test.js` and `tests/outboundPromptSnapshot.test.js`.
   - If a background server is stopped for memory, tell the owner and don't restart it on your own.
 - **Local data:** a full `npm run test:db` deletes `+1555…` test businesses. The local Brightwork business uses `+447700900555` for that reason. Re-seed it if it is gone (part 1 ledger, "Local-only lesson").
 - **Browser checks need a local sign-in.** The part 1 test login was deleted on 2026-11-23. At Gate A, ask the owner to approve re-creating it on the same terms, or to sign in themselves.
@@ -325,12 +326,12 @@ Today `GET /api/appointments` and `POST /api/appointments/email` compare `schedu
   - Settings: all five items;
   - Trends.
   - This needs a local sign-in; ask the owner first (see Global Constraints).
-- **Review:** one fresh reviewer (sonnet), using `review-package` on Task 1's BASE..HEAD. Fix every finding in one pass, each RED→GREEN.
+- **Review:** none at this gate (owner, 2026-11-23). The final review (Task 11, opus) covers stages 4–5 with the rest of the change set.
 - **Owner update:** done, hours vs 6–10 h, and anything needing them.
 
 ---
 
-## Stage 6: Booking changes and email links, one voice deploy (≈ 4–6 h)
+## Stage 6: Booking changes and email links, one voice deploy (≈ 5–7.5 h)
 
 ### Task 7: Record moves and cancellations against the call (2 h)
 
@@ -404,10 +405,10 @@ RETURNING appointment_id;
 - [ ] **Step 3: Run both.** Expected: FAIL, because the table and functions are missing.
 - [ ] **Step 4: Implement** the migration, the schema, the functions, the deps, `fakeDeps`, `phiAudit` (`{ action: "write", resources: ["appointments", "appointment_changes"] }`) and the adapter.
 - [ ] **Step 5: Classify the table in the export guard.** Run `tests/db/outboundExport.test.js`. If the drift guard flags `appointment_changes`, export it with the caller's appointments, since it is booking history. Erasure needs nothing extra: it cascades with the appointment.
-- [ ] **Step 6: Run** the two test files. Then run the full root suite in mintty and `npm run test:db` (re-seed local Brightwork after). Expected: green, and the prompt snapshots are unchanged.
+- [ ] **Step 6: Run** the two test files, `tests/db/outboundExport.test.js` and both prompt snapshot tests. Expected: green, and the snapshots are unchanged. The full runs wait for Gate B.
 - [ ] **Step 7: Commit** `feat(voice): record booking moves and cancellations against the call`.
 
-### Task 8: Alert emails link to the call (1–1.5 h)
+### Task 8: Alert emails link to the call, and say when a booking moved or was cancelled (2–3 h)
 
 The live voice service has `DASHBOARD_URL=https://vetra-core-edc8ca.web.app/app`. Links are built from its **origin**; never append to the path, or the result is `/app/inbox/…`, which is a 404.
 
@@ -421,6 +422,7 @@ The live voice service has `DASHBOARD_URL=https://vetra-core-edc8ca.web.app/app`
   - `lib/voice/session.js` (`state.dbCallId`);
   - `lib/postCallVerify.js` (its `callId`).
   - `lib/ownerNotices.js` needs nothing: its rows carry `call_id`.
+  - `capabilities/appointments.js` again: after a successful `.cancel(` (about line 3435) and `.reschedule(` (about line 3964), call the new `notifyAppointmentChanged`, fire-and-forget the way `notifyAppointmentBooked` is called.
 - Create: `tests/notifications.callLink.test.js`
 - Modify: `tests/notifications.phi.test.js`
 
@@ -435,17 +437,26 @@ The live voice service has `DASHBOARD_URL=https://vetra-core-edc8ca.web.app/app`
   - `notifyAppointmentBooked` reads `appointment.call_id`;
   - `renderCallRequestsEmail({ …, rows })` uses `rows[0].call_id`.
 - Unchanged: `notifyCallMissed`. The status callback knows only the Twilio SID, so the missed-call email keeps the bare address, which opens Home.
+- Produces: `export async function notifyAppointmentChanged({ businessId, kind, callId })`, where `kind` is `"moved"` or `"cancelled"` (owner, 2026-11-23: today only a new booking emails the owner).
+  - Same gates as `notifyAppointmentBooked`: `NOTIFICATIONS_ENABLED`, `checkRateLimit`, `loadBusinessNotificationConfig`. It sends email and SMS exactly as that function does.
+  - Sentence: "A caller moved their appointment." or "A caller cancelled their appointment."
+  - Subject: `Appointment moved — {business}` or `Appointment cancelled — {business}`.
+  - The body is `ownerEmailBody(businessName, sentence, callId)`, with no time, name or number, so the healthcare rule holds.
+  - It is sent for every booking system (VetraTD's own, athenahealth, web address), because the booking code knows the change succeeded whichever system holds the booking.
 
 - [ ] **Step 1: Write the failing tests.** Set `DASHBOARD_URL` before importing the module, as `notifications.phi.test.js` does.
   - `it("links to the call on the dashboard's origin")`: with `DASHBOARD_URL = "https://vetra-core-edc8ca.web.app/app"`, `dashboardLink("1c2021e1-f44f-4066-8d8d-86cd089d8e04")` returns `"https://vetra-core-edc8ca.web.app/inbox/1c2021e1-f44f-4066-8d8d-86cd089d8e04"`.
   - `it("keeps the bare address when the call is unknown")`: for `null`, `undefined`, `"undefined"` and `"CA0123456789abcdef"`, the result equals `DASHBOARD_URL`.
   - `it("each owner email carries its call's link")`: one case each for booked, customer request, unconfirmed claim and call requests. The `sendEmail` text contains `/inbox/<id>`.
   - `it("the link carries the call id and nothing else")`: the link line matches `/\/inbox\/[0-9a-f-]{36}$/`, with no phone or name.
+  - `it("a move and a cancel each email the owner, with the call's link and no caller details")`: subjects `Appointment moved — Brightwork Family Dental` and `Appointment cancelled — …`; the text contains `/inbox/<id>`; no digits from the caller's number.
+  - `it("no booking-change email when alerts are switched off")`.
+  - In `tests/capabilityEffects.test.js` (it already covers `notifyAppointmentBooked`): `it("a successful cancel or move emails the owner once; a failed one sends nothing")`.
   - For each caller listed under Files, add one assertion to its existing test file (find it with `grep -l "<function>(" tests`) that it passes the database call id.
 - [ ] **Step 2: Run them.** Expected: FAIL.
 - [ ] **Step 3: Implement it.**
-- [ ] **Step 4: Run** the notification test files, then the full root suite in mintty. Expected: green; prompt snapshots unchanged.
-- [ ] **Step 5: Commit** `feat(voice): alert emails link to the call`.
+- [ ] **Step 4: Run** the notification test files, `tests/capabilityEffects.test.js`, each caller's test file and both prompt snapshot tests. Expected: green; snapshots unchanged.
+- [ ] **Step 5: Commit** `feat(voice): alert emails link to the call, and say when a booking moved or was cancelled`.
 
 ### Task 9: Show booking changes in Inbox, Home and Calendar (1.5–2 h)
 
@@ -513,17 +524,15 @@ The live voice service has `DASHBOARD_URL=https://vetra-core-edc8ca.web.app/app`
 
 ---
 
-## Stage 7: Review and ship (≈ 2–3 h, plus the owner's design notes)
+## Stage 7: Review and ship (≈ 2–3 h)
 
-### Task 10: The owner's design notes, the finish review and DESIGN.md
+### Task 10: The finish review and DESIGN.md
 
-The owner said on 2026-11-23 that they would send their design notes at the very end.
+The owner has no design notes (2026-11-23), so the visual fixes come from the finish review, in one round.
 
-- [ ] **Step 1: Ask the owner for their design notes.** Ask for the page, what looks wrong and what they expected, with screenshots if possible.
-- [ ] **Step 2: Sort each note** into "fix now" (small, ships with this deploy), "next round" or "won't do" (with the reason). Ledger the list, and show the owner the hour estimate before starting the "fix now" items.
-- [ ] **Step 3: Fix the agreed "fix now" items.** A behaviour change gets a test that fails first. A visual change is checked in the browser at both sizes. Commit each as `fix(dashboard): <what the owner saw>`.
-- [ ] **Step 4: Finish review.** Run the Impeccable finish review (agent `impeccable:impeccable-finish-reviewer`) against the shipped pages and the spec §10 look. Fix its material items the same way.
-- [ ] **Step 5: Write `AI-phone-dashboard/frontend/DESIGN.md`** from the shipped result (agent `impeccable:impeccable-documenter`). Review it for client data, then commit `docs(dashboard): DESIGN.md from the shipped dashboard`.
+- [ ] **Step 1: Finish review.** Run the Impeccable finish review (agent `impeccable:impeccable-finish-reviewer`) against all five tabs and Call trends, and against the spec §10 look.
+- [ ] **Step 2: Fix its material items in one round.** A behaviour change gets a test that fails first. A visual change is checked in the browser at both sizes. Commit them as `fix(dashboard): finish review`.
+- [ ] **Step 3: Write `AI-phone-dashboard/frontend/DESIGN.md`** from the shipped result (agent `impeccable:impeccable-documenter`). Review it for client data, then commit `docs(dashboard): DESIGN.md from the shipped dashboard`.
 
 ### Task 11: Security review of the whole change set (spec §10a)
 
