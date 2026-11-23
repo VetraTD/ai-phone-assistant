@@ -110,6 +110,29 @@
   box-shadow: 0 0 0 4px rgba(0, 56, 253, 0.14);
 }
 
+.contact-optional {
+  font-weight: 400;
+  color: #6b7590;
+}
+.contact-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.contact-consent input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--lp-blue-ink);
+  cursor: pointer;
+}
+.contact-consent label {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4a5470;
+  cursor: pointer;
+}
 .contact-field textarea {
   resize: vertical;
   min-height: 140px;

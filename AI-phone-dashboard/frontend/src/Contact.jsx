@@ -13,10 +13,21 @@ const DEMO_TEL = `tel:${DEMO_NUMBER.replace(/[^\d+]/g, "")}`;
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+// Digits, spaces, + ( ) . - only, 7 to 32 characters.
+const PHONE_PATTERN = /^\+?[\d\s().-]{7,32}$/;
+// The backend cuts messages off at 4000 characters. Capping the typed message
+// below that leaves room for the mobile/consent lines appended on submit, so
+// the consent record is never the part that gets cut.
+const MESSAGE_MAX_LENGTH = 3800;
+
 export default function Contact() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [phone, setPhone] = useState("");
+  // SMS opt-in: optional and unticked by default. It must never be
+  // pre-ticked or required to send the form.
+  const [smsConsent, setSmsConsent] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
@@ -24,13 +35,35 @@ export default function Contact() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    const trimmedPhone = phone.trim();
+    if (smsConsent && !trimmedPhone) {
+      setError("Please enter a mobile number to receive text messages, or untick the SMS box.");
+      return;
+    }
+    if (trimmedPhone && !PHONE_PATTERN.test(trimmedPhone)) {
+      setError("Please enter a valid mobile number.");
+      return;
+    }
     setSending(true);
     try {
-      await axios.post(`${API}/api/contact`, { name, email, message });
+      // The contact endpoint only accepts name, email and message (and the
+      // vetratd.com build may post to an older backend), so the mobile number
+      // and SMS consent ride along at the end of the message. The notification
+      // email is the consent record.
+      const smsBlock = trimmedPhone
+        ? `\n\n---\nMobile: ${trimmedPhone}\nSMS consent: ${
+            smsConsent
+              ? `YES (ticked on the contact form, ${new Date().toISOString()})`
+              : "NO - do not text"
+          }`
+        : "";
+      await axios.post(`${API}/api/contact`, { name, email, message: message + smsBlock });
       setSent(true);
       setName("");
       setEmail("");
       setMessage("");
+      setPhone("");
+      setSmsConsent(false);
     } catch (err) {
       setError(err?.response?.data?.error || "Something went wrong. Please try again or email us directly.");
     } finally {
@@ -115,8 +148,41 @@ export default function Contact() {
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="How can we help?"
                   rows={5}
+                  maxLength={MESSAGE_MAX_LENGTH}
                   required
                 />
+              </div>
+              <div className="contact-field">
+                <label htmlFor="contact-phone">
+                  Mobile number <span className="contact-optional">(optional)</span>
+                </label>
+                <input
+                  id="contact-phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+1 (555) 123-4567"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={32}
+                />
+              </div>
+              <div className="contact-consent">
+                <input
+                  id="contact-sms-consent"
+                  type="checkbox"
+                  checked={smsConsent}
+                  onChange={(e) => setSmsConsent(e.target.checked)}
+                />
+                <label htmlFor="contact-sms-consent">
+                  (Optional) By checking this box, I agree to receive text messages from VetraTD about my
+                  enquiry and our service at the mobile number provided. Consent is not a condition of
+                  purchase. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt
+                  out, HELP for help, or email{" "}
+                  <a href="mailto:josh.tite@vetratd.com" className="contact-link">josh.tite@vetratd.com</a>.
+                  See our <Link to="/legal#sms-privacy" className="contact-link">Privacy Policy</Link> and{" "}
+                  <Link to="/legal#sms-terms" className="contact-link">Terms</Link>.
+                </label>
               </div>
               {error && <p className="contact-error">{error}</p>}
               <button type="submit" className="contact-submit" disabled={sending}>
