@@ -48,6 +48,8 @@ const OPT_OUT_DECLARATION = {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "opt_out",
+  // Dashboard: outbound calling only; never shown to an inbound business.
+  dashboardListing: "hidden",
   label: "Opt out / do not call",
   description:
     "Record a do-not-call request immediately, inside the call, so this contact is never dialled again. " +

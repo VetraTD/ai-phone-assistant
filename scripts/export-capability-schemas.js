@@ -42,6 +42,11 @@ export function buildSchemaExport() {
       // renders them as a locked row rather than a toggle.
       core: !!pack.core,
       adapterKind: pack.adapterKind || null,
+      // Whether the dashboard lists it: "listed", "optIn" (only where the
+      // business has it switched on) or "hidden". A property, never an id test.
+      dashboardListing: pack.dashboardListing || "listed",
+      // A named panel for settings kept on the business row, or null.
+      dashboardPanel: pack.dashboardPanel || null,
       configSchema: pack.configSchema || null,
     })),
     adapters: {

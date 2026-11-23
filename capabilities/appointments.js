@@ -1913,7 +1913,9 @@ const CHECK_AVAILABILITY_DECLARATION = {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "appointments",
-  label: "Appointments",
+  label: "Bookings",
+  // Dashboard: shown in the Voice agent's Actions.
+  dashboardListing: "listed",
   description: "Book, check, cancel and reschedule appointments.",
   core: false,
   adapterKind: "scheduling",
@@ -1959,13 +1961,13 @@ export default {
     require: {
       identity: {
         type: "identityFields",
-        label: "What must the caller provide before we look up or change an appointment?",
+        label: "Information callers must give",
         builtinOptions: ["name", "dob", "phone_on_file"],
         allowCustom: true,
       },
       confirmBeforeWrite: {
         type: "toggle",
-        label: "Read details back and require a clear yes before booking",
+        label: "Read the details back and wait for a clear yes",
         default: false,
       },
       businessHoursOnly: {
@@ -1998,7 +2000,7 @@ export default {
     },
     notes: {
       type: "longtext",
-      label: "Anything specific about how you book?",
+      label: "Your booking rules",
       placeholder: "e.g. Ask if they're a new or existing patient first",
     },
   },

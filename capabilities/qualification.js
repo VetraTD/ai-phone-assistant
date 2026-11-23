@@ -188,6 +188,8 @@ function refusal(fc, message) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "qualification",
+  // Dashboard: outbound calling only; never shown to an inbound business.
+  dashboardListing: "hidden",
   label: "Qualification questions",
   description:
     "Ask the campaign's qualification questions and record each answer. Only available on an outbound " +

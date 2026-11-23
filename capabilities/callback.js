@@ -205,6 +205,8 @@ function refusal(fc, message, extra = {}) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "callback",
+  // Dashboard: outbound calling only; never shown to an inbound business.
+  dashboardListing: "hidden",
   label: "Callback scheduling",
   description:
     "Book a specific day and time to call an outbound contact back, inside the campaign's calling " +

@@ -2,10 +2,12 @@
   "capabilities": [
     {
       "id": "appointments",
-      "label": "Appointments",
+      "label": "Bookings",
       "description": "Book, check, cancel and reschedule appointments.",
       "core": false,
       "adapterKind": "scheduling",
+      "dashboardListing": "listed",
+      "dashboardPanel": null,
       "configSchema": {
         "adapter": {
           "type": "choice",
@@ -35,7 +37,7 @@
         "require": {
           "identity": {
             "type": "identityFields",
-            "label": "What must the caller provide before we look up or change an appointment?",
+            "label": "Information callers must give",
             "builtinOptions": [
               "name",
               "dob",
@@ -45,7 +47,7 @@
           },
           "confirmBeforeWrite": {
             "type": "toggle",
-            "label": "Read details back and require a clear yes before booking",
+            "label": "Read the details back and wait for a clear yes",
             "default": false
           },
           "businessHoursOnly": {
@@ -74,17 +76,19 @@
         },
         "notes": {
           "type": "longtext",
-          "label": "Anything specific about how you book?",
+          "label": "Your booking rules",
           "placeholder": "e.g. Ask if they're a new or existing patient first"
         }
       }
     },
     {
       "id": "messages",
-      "label": "Messages & callbacks",
+      "label": "Messages",
       "description": "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
       "core": true,
       "adapterKind": null,
+      "dashboardListing": "listed",
+      "dashboardPanel": null,
       "configSchema": {
         "require": {
           "identity": {
@@ -139,10 +143,12 @@
     },
     {
       "id": "quotes",
-      "label": "Quote requests",
+      "label": "Quotes",
       "description": "Collect pricing enquiries and pass them to your team.",
       "core": false,
       "adapterKind": null,
+      "dashboardListing": "optIn",
+      "dashboardPanel": null,
       "configSchema": {
         "require": {
           "identity": {
@@ -164,10 +170,12 @@
     },
     {
       "id": "transfer",
-      "label": "Transfer to a person",
+      "label": "Transfers",
       "description": "Hand the caller to a human when they ask or when we cannot help.",
       "core": true,
       "adapterKind": null,
+      "dashboardListing": "listed",
+      "dashboardPanel": "transferRules",
       "configSchema": null
     },
     {
@@ -176,6 +184,8 @@
       "description": "The receptionist asks permission before texting a caller, and records the answer. Only used when caller text follow-ups are switched on in Settings; texts are never sent without a recorded yes.",
       "core": true,
       "adapterKind": null,
+      "dashboardListing": "hidden",
+      "dashboardPanel": null,
       "configSchema": null
     },
     {
@@ -184,6 +194,8 @@
       "description": "Ask the campaign's qualification questions and record each answer. Only available on an outbound call whose campaign lists it; never used on inbound.",
       "core": false,
       "adapterKind": null,
+      "dashboardListing": "hidden",
+      "dashboardPanel": null,
       "configSchema": null
     },
     {
@@ -192,6 +204,8 @@
       "description": "Record how an outbound call ended (qualified, not interested, wrong number, ...). Always available on an outbound call; never used on inbound.",
       "core": false,
       "adapterKind": null,
+      "dashboardListing": "hidden",
+      "dashboardPanel": null,
       "configSchema": null
     },
     {
@@ -200,6 +214,8 @@
       "description": "Book a specific day and time to call an outbound contact back, inside the campaign's calling window. Always available on an outbound call; never used on inbound.",
       "core": false,
       "adapterKind": null,
+      "dashboardListing": "hidden",
+      "dashboardPanel": null,
       "configSchema": null
     },
     {
@@ -208,6 +224,8 @@
       "description": "Record a do-not-call request immediately, inside the call, so this contact is never dialled again. Always available on an outbound call; never used on inbound.",
       "core": false,
       "adapterKind": null,
+      "dashboardListing": "hidden",
+      "dashboardPanel": null,
       "configSchema": null
     }
   ],

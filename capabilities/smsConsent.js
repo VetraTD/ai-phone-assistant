@@ -80,6 +80,8 @@ const SMS_CONSENT_PROTOCOL_SECTION =
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "sms_consent",
+  // Dashboard: texts to callers are off in production.
+  dashboardListing: "hidden",
   label: "Text confirmations",
   description:
     "The receptionist asks permission before texting a caller, and records the answer. " +

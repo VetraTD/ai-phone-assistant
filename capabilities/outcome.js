@@ -83,6 +83,8 @@ function refusal(fc, message) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "outcome",
+  // Dashboard: outbound calling only; never shown to an inbound business.
+  dashboardListing: "hidden",
   label: "Call outcome",
   description:
     "Record how an outbound call ended (qualified, not interested, wrong number, ...). Always available " +

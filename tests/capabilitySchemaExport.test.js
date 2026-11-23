@@ -73,6 +73,40 @@ describe("generated capability schemas", () => {
     expect(byId).toEqual({ internal: true, athenahealth: false, webhook: false });
   });
 
+  it("uses the plain action names the owner sees", () => {
+    const byId = Object.fromEntries(committed().capabilities.map((c) => [c.id, c]));
+    expect(byId.appointments.label).toBe("Bookings");
+    expect(byId.messages.label).toBe("Messages");
+    expect(byId.transfer.label).toBe("Transfers");
+    expect(byId.quotes.label).toBe("Quotes");
+    const appt = byId.appointments.configSchema;
+    expect(appt.require.identity.label).toBe("Information callers must give");
+    expect(appt.require.confirmBeforeWrite.label).toBe("Read the details back and wait for a clear yes");
+    expect(appt.notes.label).toBe("Your booking rules");
+  });
+
+  it("says, by a property and never by id, which actions an inbound business is shown", () => {
+    const listing = Object.fromEntries(committed().capabilities.map((c) => [c.id, c.dashboardListing]));
+    for (const value of Object.values(listing)) expect(["listed", "optIn", "hidden"]).toContain(value);
+    expect(listing).toEqual({
+      appointments: "listed",
+      messages: "listed",
+      transfer: "listed",
+      quotes: "optIn",
+      qualification: "hidden",
+      outcome: "hidden",
+      callback: "hidden",
+      opt_out: "hidden",
+      sms_consent: "hidden",
+    });
+  });
+
+  it("names a business-settings panel a pack needs, so the dashboard never tests an id", () => {
+    const panels = Object.fromEntries(committed().capabilities.map((c) => [c.id, c.dashboardPanel ?? null]));
+    expect(panels.transfer).toBe("transferRules");
+    for (const [id, panel] of Object.entries(panels)) if (id !== "transfer") expect(panel, id).toBeNull();
+  });
+
   it("does not leak engine internals into a browser bundle", () => {
     // The dashboard has no business knowing how a pack executes, and prompt
     // text and tool declarations should not ship to a client.

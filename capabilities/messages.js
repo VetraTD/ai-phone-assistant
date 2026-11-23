@@ -405,7 +405,9 @@ function messageGuidance(intent, cfg, config) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "messages",
-  label: "Messages & callbacks",
+  label: "Messages",
+  // Dashboard: shown in the Voice agent's Actions.
+  dashboardListing: "listed",
   description:
     "Take a message from any caller. A callback request is just a message flagged to call them back — same record, sorted for your team. Always on.",
   core: true,

@@ -110,7 +110,9 @@ function mergeQuoteDetail(stored, next) {
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "quotes",
-  label: "Quote requests",
+  label: "Quotes",
+  // Dashboard: shown only to a business that has it switched on (not every business takes quotes).
+  dashboardListing: "optIn",
   description: "Collect pricing enquiries and pass them to your team.",
   core: false,
   adapterKind: null,

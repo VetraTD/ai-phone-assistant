@@ -57,7 +57,12 @@ const ESCALATION_SECTION_OUTBOUND =
 /** @type {import("./_contract.js").CapabilityPack} */
 export default {
   id: "transfer",
-  label: "Transfer to a person",
+  label: "Transfers",
+  // Dashboard: shown in the Voice agent's Actions.
+  dashboardListing: "listed",
+  // Dashboard: its policy and number live on the business row; this names the
+  // panel that edits them under the action (TransferRulesSection).
+  dashboardPanel: "transferRules",
   description: "Hand the caller to a human when they ask or when we cannot help.",
   core: true,
   adapterKind: null,
