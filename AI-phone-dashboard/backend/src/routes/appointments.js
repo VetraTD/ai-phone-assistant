@@ -148,15 +148,15 @@ router.post("/api/appointments/email", authSensitiveLimiter, sensitiveLimiter, a
 
     const businessName = biz.name || "your business";
     const where = process.env.DASHBOARD_URL
-      ? `Open your Vetra dashboard to see them:\n${process.env.DASHBOARD_URL}`
-      : "Open your Vetra dashboard to see them.";
+      ? `Open your VetraTD dashboard to see them:\n${process.env.DASHBOARD_URL}`
+      : "Open your VetraTD dashboard to see them.";
     const text =
       count === 0
         ? `${businessName}\n\nNo appointments are scheduled for ${label.toLowerCase()}.\n\n${where}`
         : `${businessName}\n\n${count} appointment${count === 1 ? " is" : "s are"} scheduled ` +
           `(${label.toLowerCase()}).\n\n${where}\n\n` +
           "This email contains no patient information by design — email is not a " +
-          "private channel, so the details stay in Vetra.";
+          "private channel, so the details stay in VetraTD.";
 
     await mailer.sendMail({
       to: biz.notification_email,

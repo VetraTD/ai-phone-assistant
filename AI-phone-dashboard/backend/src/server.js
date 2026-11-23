@@ -108,17 +108,17 @@ app.post("/api/contact", contactLimiter, async (req, res) => {
       return res.status(400).json({ error: "Please provide a valid email address." });
     }
     const toEmail = process.env.CONTACT_EMAIL || process.env.SMTP_FROM_EMAIL || "support@vetratd.com";
-    const text = `Contact form submission from Vetra AI\n\nName: ${name}\nEmail: ${email}\n\nMessage:\n${message}`;
+    const text = `Contact form submission from VetraTD\n\nName: ${name}\nEmail: ${email}\n\nMessage:\n${message}`;
     // replyTo is the submitter, so hitting reply answers the prospect. The
     // From stays the authenticated SMTP identity - sending AS the submitter
     // would fail SPF at the receiver, which is how a contact form burns a
     // domain's reputation.
     await mailer.sendMail({
       to: toEmail,
-      subject: `Vetra AI contact: ${name}`,
+      subject: `VetraTD contact: ${name}`,
       text,
       replyTo: email,
-      fromName: "Vetra AI",
+      fromName: "VetraTD",
     });
     res.json({ success: true });
   } catch (err) {

@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const { mailTransportSetting, graphMailConfig, createGraphMailer } = require("./graphMail");
 
 // ---------------------------------------------------------------------------
 // Outbound email for the dashboard backend.
@@ -47,9 +48,35 @@ const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_FROM_EMAIL = process.env.SMTP_FROM_EMAIL || SMTP_USER;
 
+// ---------------------------------------------------------------------------
+// MAIL_TRANSPORT=graph: Microsoft 365, from the shared notifications@ mailbox.
+//
+// The same switch and the same four MS_GRAPH_* names the voice server reads, so
+// one set of settings means one sender everywhere. Under graph, SMTP_* counts
+// for nothing: a half-configured graph mode must read as "not configured", not
+// quietly fall back to the personal Gmail account it exists to replace.
+//
+// The display name is the mailbox's own ("VetraTD"); `fromName` is an SMTP-only
+// courtesy and is ignored here.
+// ---------------------------------------------------------------------------
+const { transport: MAIL_TRANSPORT, invalid: MAIL_TRANSPORT_INVALID } = mailTransportSetting(process.env);
+if (MAIL_TRANSPORT_INVALID) console.error("mail_transport_invalid: MAIL_TRANSPORT is neither smtp nor graph; using smtp");
+const GRAPH_CONFIG = MAIL_TRANSPORT === "graph" ? graphMailConfig(process.env) : null;
+const graphMailer = GRAPH_CONFIG ? createGraphMailer(GRAPH_CONFIG) : null;
+
 /** Whether outbound email is configured at all. */
 function isConfigured() {
+  if (MAIL_TRANSPORT === "graph") return !!graphMailer;
   return !!(SMTP_USER && SMTP_PASS);
+}
+
+/**
+ * A subject is one header line. Business names come from the database, and a
+ * stray newline in a cell has happened before, so line breaks and tabs become
+ * single spaces.
+ */
+function oneLine(value) {
+  return String(value ?? "").replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
 }
 
 let transport = null;
@@ -79,6 +106,30 @@ function getTransport() {
  * @param {{to: string, subject: string, text: string, replyTo?: string, fromName?: string}} opts
  */
 async function sendMail({ to, subject, text, replyTo, fromName }) {
+  if (MAIL_TRANSPORT === "graph") {
+    if (!graphMailer) {
+      const err = new Error("mail_not_configured");
+      err.code = "SMTP_NOT_CONFIGURED";
+      throw err;
+    }
+    const result = await graphMailer.send({
+      to,
+      subject: oneLine(subject),
+      contentType: "Text",
+      content: text,
+      replyTo,
+    });
+    if (!result.ok) {
+      // A closed reason and a status only: graphMail.js never hands back the
+      // recipient or Microsoft's own error text, and neither does this.
+      const err = new Error(result.reason);
+      err.code = "MAIL_SEND_FAILED";
+      err.status = result.status;
+      throw err;
+    }
+    return;
+  }
+
   const t = getTransport();
   if (!t) {
     // Named the same as the root repo's event, so one log query answers "did
@@ -88,9 +139,9 @@ async function sendMail({ to, subject, text, replyTo, fromName }) {
     throw err;
   }
   await t.sendMail({
-    from: fromName ? `"${fromName}" <${SMTP_FROM_EMAIL}>` : SMTP_FROM_EMAIL,
+    from: fromName ? `"${oneLine(fromName).replace(/"/g, "")}" <${SMTP_FROM_EMAIL}>` : SMTP_FROM_EMAIL,
     to,
-    subject,
+    subject: oneLine(subject),
     text,
     ...(replyTo ? { replyTo } : {}),
   });
