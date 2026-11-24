@@ -274,3 +274,28 @@ describe("the Live eval driver carries the save guard's turn state", () => {
     expect(st.unsavedCallerTurns).toBe(0);
   });
 });
+
+describe("the Live eval driver latches an unsaved refusal a later refusal hid (fix round 2)", () => {
+  it("[unsaved, no_ask] in one batch still spends the latch", async () => {
+    const batch = {
+      toolCall: {
+        functionCalls: [
+          { id: "e1", name: "end_call", args: {} },
+          { id: "e2", name: "end_call", args: {} },
+        ],
+      },
+    };
+    const { session } = makeSession({
+      script: [
+        [{ toolCall: { functionCalls: [{ id: "s1", name: "record_customer_request", args: { request_type: "message", caller_name: "Jon", message: "about the invoice" } }] } }, say("Passing that on now."), endTurn()],
+        [batch, say("Lovely, thank you."), endTurn()],
+      ],
+    });
+    await session.sendTurn("It's Jon, about the invoice.");
+    expect(session.peekTurnState().saveGuardSpent).toBe(false);
+    await session.sendTurn("Three of us and two bags.");
+    const st = session.peekTurnState();
+    expect(st.saveGuardSpent).toBe(true);
+    expect(st.saveGuardPending).toBe(true);
+  });
+});

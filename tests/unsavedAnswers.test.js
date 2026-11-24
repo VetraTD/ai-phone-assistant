@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isInformativeCallerTurn, countUnsaved } from "../lib/voice/unsavedAnswers.js";
+import { isInformativeCallerTurn, countUnsaved, readBackQuestionRe } from "../lib/voice/unsavedAnswers.js";
 
 const READ_BACK = "22 Godstone Road, RH7 6AA, is that right?";
 const SEAT = "Do you need a child seat?";
@@ -80,5 +80,22 @@ describe("read-back detection (fix round 1)", () => {
     const turns = [{ index: 1, caller: "yes", prevReply: "Can you confirm that for me" }];
     expect(countUnsaved(turns, 0, re)).toBe(0);
     expect(countUnsaved(turns, 0)).toBe(1);
+  });
+});
+
+describe("readBackQuestionRe, the regex the engine and harness pass (fix round 2)", () => {
+  const re = readBackQuestionRe("en");
+  it("a yes to a check question is a confirmation", () => {
+    expect(isInformativeCallerTurn("yes", "Two passengers, right?", re)).toBe(false);
+    expect(isInformativeCallerTurn("yes", "That's the pickup at the station, OK?", re)).toBe(false);
+    expect(isInformativeCallerTurn("yes", "22 Godstone Road, is that right?", re)).toBe(false);
+  });
+  it("a yes to an offer is an answer", () => {
+    expect(isInformativeCallerTurn("yes please", "Shall I put you down for the airport run?", re)).toBe(true);
+    expect(isInformativeCallerTurn("yes", "Would you like me to add a child seat?", re)).toBe(true);
+  });
+  it("falls back to English for an unknown language and caches", () => {
+    expect(readBackQuestionRe("fr")).toBe(readBackQuestionRe("en"));
+    expect(readBackQuestionRe("es")).not.toBe(readBackQuestionRe("en"));
   });
 });

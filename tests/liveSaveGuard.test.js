@@ -383,6 +383,35 @@ describe("fix round 1", () => {
     expect(counters().end_call_refused_unsaved).toBe(1);
   });
 
+  it("M1b: the summary records the unsaved refusal that the batch's last kind hid", async () => {
+    const summary = await summaryOf(async () => {
+      const s = await savedCall("CA_sg_m1b");
+      await s.callerSays(ANSWER);
+      await s.assistantSays("Lovely, thank you.");
+      await s.callToolBatch([["end_call", {}], ["end_call", {}]]);
+      await s.hangUp();
+    });
+    expect(summary.end_call_refusals.unsaved).toBe(1);
+    expect(summary.end_call_refusals.no_ask).toBe(1);
+  });
+
+  it("R2-1: a yes to 'Two passengers, right?' is a confirmation; a yes to an offer is an answer", async () => {
+    const check = await savedCall("CA_sg_r21a");
+    await check.assistantTurn("Two passengers, right?");
+    await check.callerSays("yes");
+    await check.assistantSays(`Lovely. ${ASK}`);
+    expect(ok(await check.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+
+    const offer = await savedCall("CA_sg_r21b");
+    await offer.assistantTurn("Shall I put you down for the airport run?");
+    await offer.callerSays("yes please");
+    await offer.assistantSays(`Lovely. ${ASK}`);
+    const [res] = await offer.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
   it("the after-save snapshot still sees the log, the stamp and the args", async () => {
     const s = await savedCall("CA_sg_snap");
     const seam = s.ws.liveSaveGuard();
