@@ -1346,9 +1346,9 @@ const SABOTAGES = [
     why:
       "A save whose reason starts with the business's skip word (URGENT) gets the booking question list, so an urgent caller is asked the booking questions instead of being put through.",
     file: "capabilities/messages.js",
-    find: "const listStarts = !skipped &&",
-    replace: "const listStarts = true /* SABOTAGE */ &&",
-    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js"],
+    find: 'skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));',
+    replace: "false; /* SABOTAGE */",
+    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js", "tests/liveOpenQuestions.test.js"],
   },
   {
     name: "lvx192r2-name-fix-bare-row",

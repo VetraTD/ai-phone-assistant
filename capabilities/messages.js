@@ -85,6 +85,9 @@ const ALL_QUESTIONS_ANSWERED_NOTE =
 const CONFIRM_FIRST_NOTE =
   "[not caller speech] First confirm the answer you just saved, the way this business's notes say (read an address back, ask for any part left out). Then: ";
 const MODEL_NOTE_PREFIX = "[not caller speech] ";
+/** Fix round 2: a save whose reason is one of the business's skip words (e.g. URGENT). */
+const SKIP_REASON_NOTE =
+  "[not caller speech] Saved. This business handles this caller's reason without its numbered questions: do now what its notes say for this kind of call, without asking those questions or whether there is anything else.";
 /** The save the end_call guard forced, with no question left open: ask once, then let them go. */
 const QUIET_SAVE_NOTE =
   "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
@@ -558,6 +561,7 @@ export default {
     let savedLabels = null;
     let listNote = null;
     let openCount = 0;
+    let skipped = false;
     if (standardTier) {
       const seen = new Set();
       savedLabels = [];
@@ -571,19 +575,23 @@ export default {
         savedLabels.push(label);
       }
       savedLabels = savedLabels.slice(-MAX_SAVED_LABELS);
+      // Fix round 2: a save whose reason starts with one of the business's skip
+      // words (e.g. "URGENT") is handled without the numbered questions. Its
+      // reply says to do what the notes say for it (paid sims: with the generic
+      // note and the completion ask, an URGENT save asked "anything else?" and
+      // never transferred in 2 of 3 runs).
+      const reason = typeof args.message === "string" ? args.message.trim().toLowerCase() : "";
+      const skipWords = capabilityConfig(ctx?.config, "messages").questionsSkipReasonPrefixes;
+      skipped =
+        hasNotes &&
+        reason !== "" &&
+        Array.isArray(skipWords) &&
+        skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));
       if (questionLikeNotes) {
         const questions = parseNotesQuestions(notes);
         // Fix round 2: the list also starts on a save with no labels yet (the
         // caller's first save, before any answer is in), so an opener that gives
-        // two answers at once is still asked the rest. A save whose reason starts
-        // with one of the business's skip words (e.g. "URGENT") keeps today's
-        // text: that caller is put through, not asked the questions.
-        const reason = typeof args.message === "string" ? args.message.trim().toLowerCase() : "";
-        const skipWords = capabilityConfig(ctx?.config, "messages").questionsSkipReasonPrefixes;
-        const skipped =
-          reason !== "" &&
-          Array.isArray(skipWords) &&
-          skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));
+        // two answers at once is still asked the rest.
         // Opus review I1: the call's FIRST save starts it too, whatever its labels
         // (a traveller's name saved as "Passenger" answers no question). M1: the
         // new starts are for a new enquiry only (an unknown type counts as one);
@@ -615,11 +623,13 @@ export default {
     const quietSave = standardTier && ctx?.saveGuardPending === true;
     const quietAllAnswered = quietSave && listNote !== null && openCount === 0;
     const preceded = Boolean(readBack) || needsNumber;
-    const questionsPart = quietAllAnswered
-      ? [preceded ? `Then: ${QUIET_SAVE_NOTE}` : `[not caller speech] ${QUIET_SAVE_NOTE}`]
-      : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
+    const questionsPart = skipped
+      ? [SKIP_REASON_NOTE]
+      : quietAllAnswered
+        ? [preceded ? `Then: ${QUIET_SAVE_NOTE}` : `[not caller speech] ${QUIET_SAVE_NOTE}`]
+        : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
     const next = (
-      deferReadBack
+      deferReadBack && !skipped
         ? [needsNumber ? NO_NUMBER_NOTE : null, NEXT_QUESTIONS_NOTE_DEFERRED]
         : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
     )
@@ -641,6 +651,8 @@ export default {
         // The call's first message save is behind us (the I8 deferral is for that one only).
         capabilityState: { messages: { firstSaveDone: true, ...(savedLabels ? { savedLabels } : {}) } },
         ...(listNote !== null ? { questionsOpen: openCount > 0 } : {}),
+        // Fix round 2: a skip-reason save; the Live runner leaves the completion ask off it.
+        ...(skipped ? { questionsSkipped: true } : {}),
         ...(quietSave ? { quietSave: true } : {}),
       },
     };

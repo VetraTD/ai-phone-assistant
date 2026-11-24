@@ -195,19 +195,41 @@ describe("the list starts on a label-less save, except a skip reason (fix round 
     expect(r.stateEffects.questionsOpen).toBe(true);
   });
 
+  // Paid sims (v8, 2026-11-24): with today's note and the completion ask, an
+  // URGENT save was followed by "anything else?" and no transfer in 2 of 3 runs.
+  // A skip save now says: do what the notes say for this reason, no questions.
+  const SKIP_NOTE =
+    "[not caller speech] Saved. This business handles this caller's reason without its numbered questions: do now what its notes say for this kind of call, without asking those questions or whether there is anything else.";
+
   it.each(["URGENT: car now from Lingfield station", "urgent - car now", "  Urgent car to Gatwick"])(
-    "a save whose reason starts with a skip prefix (%j) gets today's text",
+    "a save whose reason starts with a skip prefix (%j) gets the skip note, no list",
     async (message) => {
       const r = await save(mcfg(SKIP), { message });
-      expect(next(r)).toMatch(TODAY);
+      expect(next(r)).toBe(SKIP_NOTE);
+      expect(next(r)).not.toMatch(TODAY);
       expect(r.stateEffects.questionsOpen).toBeUndefined();
+      expect(r.stateEffects.questionsSkipped).toBe(true);
     }
   );
 
   it("a skip reason wins even when a label matches a numbered question", async () => {
     const r = await save(mcfg(SKIP), { message: "URGENT: car now", details: details("Pickup") });
-    expect(next(r)).toMatch(TODAY);
+    expect(next(r)).toBe(SKIP_NOTE);
     expect(r.stateEffects.questionsOpen).toBeUndefined();
+  });
+
+  it("the number note still leads a skip save", async () => {
+    const r = await messages.execute(
+      { id: "f", name: "record_customer_request", args: { request_type: "message", caller_name: "Dan", message: "URGENT: car now" } },
+      { config: mcfg(SKIP), callerPhone: "anonymous" }
+    );
+    expect(next(r)).toMatch(/no number to call them back on.*Saved\. This business handles this caller's reason/s);
+  });
+
+  it("a business with no notes: skip words change nothing", async () => {
+    const r = await save({ capabilities: { messages: { questionsSkipReasonPrefixes: ["URGENT"] } } }, { message: "URGENT: car now" });
+    expect(next(r)).toBeUndefined();
+    expect(r.stateEffects.questionsSkipped).toBeUndefined();
   });
 
   it("the same reason without the setting: the list (the word lives in config, not code)", async () => {

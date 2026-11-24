@@ -179,6 +179,18 @@ describe("a save in the same batch as request_transfer", () => {
     expect(counters().live_completion_ask_note_skipped_transfer ?? 0).toBe(0);
   });
 
+  // Paid sims (v8): the URGENT save on its own, before the transfer, asked
+  // "anything else?" and the call never transferred (2 of 3 runs).
+  it("a skip-reason save on its own (no transfer yet): no completion note", async () => {
+    const SKIPCFG = { ...XFER, capabilities: { messages: { enabled: true, notes: HAMMERSLEYS_NOTES, questionsSkipReasonPrefixes: ["URGENT"] } } };
+    const s = await bootLive({ config: SKIPCFG, callSid: "CA_oq_xfer_5" });
+    await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
+    const out = await s.callToolBatch([["record_customer_request", URGENT]]);
+    expect(out[0].response.next).toMatch(/This business handles this caller's reason without its numbered questions/);
+    expect(out[0].response.next_step).toBeUndefined();
+    expect(counters().live_completion_ask_note_skipped_reason).toBe(1);
+  });
+
   it("control: the same save alone still gets the completion note", async () => {
     const s = await bootLive({ config: XFER, callSid: "CA_oq_xfer_3" });
     await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
