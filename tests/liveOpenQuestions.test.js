@@ -92,24 +92,42 @@ describe("a save the end_call guard forced", () => {
   it("is quiet: no completion note, and the ask latch is not re-armed", async () => {
     const { s } = await firstSave("CA_oq_quiet", NO_NOTES);
     await s.turnEnds();
-    await s.callerSays("There will be three of us and two suitcases.");
-    await s.assistantSays(`Lovely, thank you. ${ASK}`);
+    // The ask is spoken in an EARLIER turn than the hang-up, so it only covers
+    // the work that existed then: a re-save that counted as new work would
+    // make the next end_call refuse "no_ask".
+    await s.assistantTurn("How many passengers?");
+    await s.callerSays("Three of us");
+    await s.assistantTurn(ASK);
+    // Not a close ("that's all" would satisfy the ask gate on its own).
+    await s.callerSays("Yes, there will be two suitcases as well.");
     const [refused] = await s.callTool("end_call", {});
     expect(refused.response.success).toBe(false);
     expect(counters().end_call_refused_unsaved).toBe(1);
     const refusedNoAsk = counters().end_call_refused_no_ask ?? 0;
 
-    const [resave] = await s.callTool("record_customer_request", { ...MESSAGE, message: "Taxi booking, 3 people, 2 bags" });
+    const [resave] = await s.callTool("record_customer_request", { ...MESSAGE, message: "Taxi booking, 3 people" });
     expect(resave.response.success).toBe(true);
-    expect(resave.response.next).toContain("Saved. If the caller already said they need nothing else");
     expect(resave.response.next_step).toBeUndefined();
     expect(counters().live_completion_ask_note_skipped_quiet_save).toBe(1);
-    // Only the first save's note went out.
     expect(counters().live_completion_ask_note_sent).toBe(1);
 
     const [bye] = await s.callTool("end_call", {});
     expect(bye.response.success).toBe(true);
     expect(counters().end_call_refused_no_ask ?? 0).toBe(refusedNoAsk);
     expect(counters().end_call_ask_rearmed_by_action ?? 0).toBe(0);
+  });
+
+  it("is quiet even when notes questions are open: list kept, no completion note", async () => {
+    const { s } = await firstSave("CA_oq_quiet_open", WITH_NOTES, { details: d("Pickup") });
+    await s.turnEnds();
+    await s.assistantTurn("Where to?");
+    await s.callerSays("The airport");
+    await s.assistantTurn("Lovely. Anything else?");
+    await s.callerSays("No, bye");
+    const [refused] = await s.callTool("end_call", {});
+    expect(refused.response.success).toBe(false);
+    const [resave] = await s.callTool("record_customer_request", { ...MESSAGE, details: d("Pickup") });
+    expect(resave.response.next).toContain("questions with no saved answer yet");
+    expect(resave.response.next_step).toBeUndefined();
   });
 });

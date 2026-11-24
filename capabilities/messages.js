@@ -558,17 +558,20 @@ export default {
           const open = openQuestions(questions, savedLabels);
           openCount = open.length;
           listNote = open.length
-            ? `[not caller speech] This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it instead of asking again; skip any they would rather not answer. Then save again with the same message and all the answers in details.`
+            ? `[not caller speech] This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
             : ALL_QUESTIONS_ANSWERED_NOTE;
         }
       }
     }
-    // A save the end_call guard forced is a quiet one, unless questions remain
-    // (the list wins). Question-like notes with nothing answered yet leave
-    // today's text: whether questions remain is unknown.
-    const quietSave = standardTier && ctx?.saveGuardPending === true && openCount === 0 && (listNote !== null || !questionLikeNotes);
-    const questionsPart = quietSave
-      ? [listNote, QUIET_SAVE_NOTE]
+    // A save the end_call guard forced is ALWAYS quiet (no completion note, not
+    // counted as new work). Its TEXT: open questions in scope -> the list; in
+    // scope and all answered -> the quiet sentence; out of scope or unknown ->
+    // today's questions note, unchanged.
+    const quietSave = standardTier && ctx?.saveGuardPending === true;
+    const quietAllAnswered = quietSave && listNote !== null && openCount === 0;
+    const preceded = Boolean(readBack) || needsNumber;
+    const questionsPart = quietAllAnswered
+      ? [preceded ? `Then: ${QUIET_SAVE_NOTE}` : `[not caller speech] ${QUIET_SAVE_NOTE}`]
       : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
     const next = (
       deferReadBack

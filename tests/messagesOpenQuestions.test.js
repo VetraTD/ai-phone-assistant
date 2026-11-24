@@ -112,44 +112,61 @@ describe("open questions named in the save reply", () => {
 describe("a save the end_call guard forced is a quiet one", () => {
   const QUIET =
     "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
+  const ALL = ["Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"];
+  const PENDING = { saveGuardPending: true };
 
-  it("saveGuardPending with nothing open: exactly the quiet sentence and quietSave", async () => {
-    const r = await save(cfg(undefined), {}, { saveGuardPending: true });
-    expect(next(r)).toBe(QUIET);
+  it("in scope, all answered: the quiet sentence with the model-note prefix, quietSave", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details(...ALL) }, PENDING);
+    expect(next(r)).toBe(`[not caller speech] ${QUIET}`);
     expect(r.stateEffects.quietSave).toBe(true);
-    expect(r.stateEffects.questionsOpen).not.toBe(true);
+    expect(r.stateEffects.questionsOpen).toBe(false);
   });
 
-  it("notes that are rules, not questions: still the quiet sentence", async () => {
-    const r = await save(cfg("Be brief and polite."), {}, { saveGuardPending: true });
-    expect(next(r)).toBe(QUIET);
-    expect(r.stateEffects.quietSave).toBe(true);
-  });
-
-  it("question notes with nothing answered yet (scope unknown): today's text, not quiet", async () => {
-    const r = await save(cfg("Always ask which department."), {}, { saveGuardPending: true });
-    expect(next(r)).toMatch(/^\[not caller speech\] If this business's notes list questions/);
-    expect(r.stateEffects.quietSave).not.toBe(true);
-  });
-
-  it("all notes questions answered: the quiet sentence follows the all-answered one", async () => {
-    const r = await save(cfg(HAMMERSLEYS_NOTES), {
-      details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"),
-    }, { saveGuardPending: true });
-    expect(next(r)).toBe(`[not caller speech] Every question in this business's notes has a saved answer. ${QUIET}`);
+  it("in scope, all answered, with a number note ahead: 'Then: ' leads the quiet sentence", async () => {
+    const r = await messages.execute(
+      { id: "f", name: "record_customer_request", args: { request_type: "message", caller_name: "Jon", message: "m", details: details(...ALL) } },
+      { config: cfg(HAMMERSLEYS_NOTES), callerPhone: "anonymous", saveGuardPending: true }
+    );
+    expect(next(r)).toMatch(/no number to call them back on.* Then: Saved\. If the caller already said/s);
+    expect(next(r)).not.toContain("[not caller speech] Saved.");
     expect(r.stateEffects.quietSave).toBe(true);
   });
 
-  it("with questions open, the list wins and the save is not quiet", async () => {
-    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") }, { saveGuardPending: true });
+  it("in scope with questions open: the list, and the save is still quiet", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") }, PENDING);
     expect(next(r)).toContain("questions with no saved answer yet: 2. Destination");
     expect(next(r)).not.toContain("Saved. If the caller");
-    expect(r.stateEffects.quietSave).not.toBe(true);
     expect(r.stateEffects.questionsOpen).toBe(true);
+    expect(r.stateEffects.quietSave).toBe(true);
+  });
+
+  it("out of scope (labels match nothing): today's questions note, still quiet", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Trip date", "What happened") }, PENDING);
+    expect(next(r)).toMatch(/^\[not caller speech\] If this business's notes list questions/);
+    expect(next(r)).not.toContain("Saved. If the caller");
+    expect(r.stateEffects.quietSave).toBe(true);
+  });
+
+  it("question-like notes, nothing answered yet: today's note, still quiet", async () => {
+    const r = await save(cfg("Always ask which department."), {}, PENDING);
+    expect(next(r)).toMatch(/^\[not caller speech\] If this business's notes list questions/);
+    expect(r.stateEffects.quietSave).toBe(true);
+  });
+
+  it("no notes: no questions note, still quiet", async () => {
+    const r = await save(cfg(undefined), {}, PENDING);
+    expect(next(r)).toBeUndefined();
+    expect(r.stateEffects.quietSave).toBe(true);
   });
 
   it("without saveGuardPending nothing is quiet", async () => {
     const r = await save(cfg(undefined), {});
     expect(r.stateEffects.quietSave).not.toBe(true);
+  });
+
+  it("list wording: label shown, and the short-of-time sentence", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") });
+    expect(next(r)).toContain("save it under the label shown instead of asking again");
+    expect(next(r)).toContain("If they say they are short of time, offer to leave the rest for the callback.");
   });
 });
