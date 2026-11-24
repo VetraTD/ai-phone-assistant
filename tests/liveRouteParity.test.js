@@ -89,6 +89,20 @@ describe("the call lifecycle callback accepts either Twilio account", () => {
   });
 });
 
+describe("transfer screening routes", () => {
+  // The routes are registered from lib/transferScreenRoutes.js with the
+  // validator handed in, like the outbound door routes; the mount line is
+  // what pins which validator guards them.
+  const ROUTES = fs.readFileSync(path.join(ROOT, "lib", "transferScreenRoutes.js"), "utf8");
+  it("both are mounted behind the multi-account validator", () => {
+    expect(SERVER).toMatch(/registerTransferScreenRoutes\(app, \{ validate: twilioValidationAnyAccount,/);
+  });
+  it("both paths are registered with the injected validator", () => {
+    expect(ROUTES).toContain("app.post(TRANSFER_WHISPER_PATH, validate,");
+    expect(ROUTES).toContain("app.post(TRANSFER_ACCEPT_PATH, validate,");
+  });
+});
+
 describe("the cascade route is unchanged by any of this", () => {
   it("still validates with the single-token middleware", () => {
     // Widening what the mature route accepts, for the benefit of a route it

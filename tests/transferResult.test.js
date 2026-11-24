@@ -10,6 +10,7 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "not-a-real-key";
 const mockIsEnabled = vi.fn(() => true);
 const mockLookup = vi.fn(async () => null);
 const mockEndPendingDial = vi.fn(async () => 1);
+const mockOutcome = vi.fn(async () => "unscreened");
 
 // loadConfig is the REAL implementation (delegated), so the
 // db.loadConfig -> resolveProfile wire is exercised: a rename or shape change
@@ -21,6 +22,7 @@ vi.mock("../services/db.js", async (importOriginal) => {
     isEnabled: (...a) => mockIsEnabled(...a),
     lookupBusinessByPhone: (...a) => mockLookup(...a),
     endPendingDial: (...a) => mockEndPendingDial(...a),
+    pendingDialOutcome: (...a) => mockOutcome(...a),
     loadConfig: (...a) => actual.loadConfig(...a),
   };
 });
@@ -63,6 +65,7 @@ beforeEach(() => {
   mockIsEnabled.mockReset().mockReturnValue(true);
   mockLookup.mockReset().mockResolvedValue(null);
   mockEndPendingDial.mockReset().mockResolvedValue(1);
+  mockOutcome.mockReset().mockResolvedValue("unscreened");
 });
 
 describe("POST /twilio/transfer-result: pending dial", () => {
@@ -84,12 +87,38 @@ describe("POST /twilio/transfer-result: pending dial", () => {
 });
 
 describe("POST /twilio/transfer-result", () => {
-  it("completed -> exactly a Hangup, text/xml, and no business lookup", async () => {
+  it("completed (unscreened) -> exactly a Hangup, text/xml, and no business lookup; the outcome IS read, before the dial ends", async () => {
+    const order = [];
+    mockOutcome.mockImplementation(async () => (order.push("outcome"), "unscreened"));
+    mockEndPendingDial.mockImplementation(async () => (order.push("end"), 1));
     const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/text\/xml/);
     expect(res.text).toBe("<Response><Hangup/></Response>");
     expect(mockLookup).not.toHaveBeenCalled();
+    expect(mockOutcome).toHaveBeenCalledWith("CA1");
+    expect(order).toEqual(["outcome", "end"]);
+  });
+
+  it("completed + not_accepted -> the message step (the whisper leg hung up)", async () => {
+    mockOutcome.mockResolvedValue("not_accepted");
+    mockLookup.mockResolvedValue({ id: "b1", name: "Biz", locale: "en-GB" });
+    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
+    expect(res.text).toBe(expected("Polly.Amy", UK));
+  });
+
+  it("completed + accepted -> Hangup; accepted but not bridged -> the message step", async () => {
+    mockOutcome.mockResolvedValue("accepted");
+    const done = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
+    expect(done.text).toBe("<Response><Hangup/></Response>");
+    const dropped = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "false" });
+    expect(dropped.text).toContain("<Record");
+  });
+
+  it("a failing outcome read is today's rule", async () => {
+    mockOutcome.mockRejectedValue(new Error("db down"));
+    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
+    expect(res.text).toBe("<Response><Hangup/></Response>");
   });
 
   it.each(["no-answer", "busy", "failed", "canceled"])("%s with a UK business -> message in Polly.Amy", async (status) => {

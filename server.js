@@ -62,6 +62,7 @@ import {
 import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
 import { createTwilioAccountRouter } from "./lib/outbound/twilioAccounts.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
+import { registerTransferScreenRoutes } from "./lib/transferScreenRoutes.js";
 import { registerTriggerRoute, isTriggerRoutePath } from "./lib/outbound/triggerRoute.js";
 import { postCall as outboundPostCall } from "./lib/outbound/postCall.js";
 
@@ -963,6 +964,10 @@ app.post("/twilio/message-done", twilioValidationAnyAccount, (req, res) => {
   res.type("text/xml").send("<Response><Hangup/></Response>");
 });
 
+// Transfer screening: the whisper and the press-1 accept the dispatcher's leg
+// runs before Twilio bridges it (lib/transferScreenRoutes.js).
+registerTransferScreenRoutes(app, { validate: twilioValidationAnyAccount, db, log, baseUrl: BASE_URL });
+
 // The transfer <Dial>'s action. Twilio calls it when the dialled leg ends and
 // plays our answer to the CALLER. DialCallStatus=completed means the staff
 // member picked up and the bridged call then ended: hang up, because "leave a
@@ -990,13 +995,21 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
     });
 
   try {
+    // How the dial was screened, read BEFORE the dial is ended below. A failed
+    // read is today's rule (unknown), never a guess.
+    let screening = null;
+    try {
+      screening = await db.pendingDialOutcome(callSid);
+    } catch (err) {
+      log.error("pending_dial_outcome_failed", { callSid, message: err?.message, severity: "warn" });
+    }
     // Both outcomes end it, so this runs before the hangup early return.
     try {
       await db.endPendingDial(callSid);
     } catch (err) {
       log.error("pending_dial_end_failed", { callSid, message: err?.message });
     }
-    const outcome = transferOutcome(req.body);
+    const outcome = transferOutcome(req.body, screening);
     log.info("transfer_result", { callSid, dialStatus, outcome });
     if (outcome === "hangup") return res.send("<Response><Hangup/></Response>");
 
