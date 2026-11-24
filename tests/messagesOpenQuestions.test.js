@@ -146,7 +146,8 @@ describe("a save the end_call guard forced is a quiet one", () => {
   });
 
   it("out of scope (labels match nothing): today's questions note, still quiet", async () => {
-    // A forced save always follows an earlier save (the guard needs one), so not the first.
+    // A forced save after an earlier save (the usual case; the promised-without-save
+    // path can force a first save, which then gets the list like any first save).
     const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Trip date", "What happened") }, {
       ...PENDING,
       capabilityState: { messages: { firstSaveDone: true, savedLabels: [] } },

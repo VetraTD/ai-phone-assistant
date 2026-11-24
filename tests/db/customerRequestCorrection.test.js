@@ -191,7 +191,7 @@ describeDb("a name corrected on the same call, as vetra_app (fix round 2)", () =
       row: { ...TRIP, callerName: "Aisha Patel", details: answers("22 Godstone Road RH7 6AA") },
       takeOverBareRow: true,
     });
-    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true, nameTakeover: true });
     expect(await rowsOf(callId)).toEqual([
       { request_type: "message", caller_name: "Aisha Patel", callback_number: "214 555 0123", message: "Taxi booking request" },
     ]);

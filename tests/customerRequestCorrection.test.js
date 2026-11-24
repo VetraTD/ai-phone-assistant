@@ -747,7 +747,7 @@ describe("a name corrected on the same call updates the bare row (fix round 2)",
       callerName: "Aisha Patel",
       details: D([{ label: "Pickup", answer: "22 Godstone Road, Lingfield RH7 6AA" }]),
     });
-    expect(res).toMatchObject({ corrected: true });
+    expect(res).toMatchObject({ corrected: true, nameTakeover: true });
     expect(calls.rows).toHaveLength(1);
     expect(calls.rows[0].caller_name).toBe("Aisha Patel");
     expect(calls.rows[0].message).toBe("Taxi booking request");
@@ -801,6 +801,18 @@ describe("the messages pack turns the take-over on only where notes ask numbered
     messages.onEffect(recorded({ ...trip, caller_name: "Aisha Patel" }), engine);
     await settle();
     expect(calls.rows.map((r) => r.caller_name)).toEqual(["Aisha Patel"]);
+    // Counted for the live calls, with no caller words.
+    const log = calls.logs.find((l) => l.e === "customer_request_corrected");
+    expect(log.d).toEqual({ callSid: "CA_s3", tool: "record_customer_request", nameTakeover: true });
+  });
+
+  it("an ordinary correction is not logged as a take-over", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded(MESSAGE), engine);
+    await settle();
+    messages.onEffect(recorded({ ...MESSAGE, callback_number: "214 555 0124" }), engine);
+    await settle();
+    expect(calls.logs.find((l) => l.e === "customer_request_corrected").d.nameTakeover).toBeUndefined();
   });
 
   it("no numbered notes: the same two saves stay two rows", async () => {

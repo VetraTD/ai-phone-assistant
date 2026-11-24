@@ -244,3 +244,27 @@ describe("a backchannel answers any question that is not a wh-question (review f
     expect(isInformativeCallerTurn("Yeah", "And do you need a child seat? 22 Godstone Road, is that right?", undefined, closing)).toBe(false);
   });
 });
+
+// Opus re-review minors (fix round 2).
+describe("questions a 'yeah' cannot answer, and wrap-ups anchored at the end (re-review)", () => {
+  const closing = closingRegexFor({});
+  it.each([
+    "Can you tell me where you are going?",
+    "Do you know what time your flight is?",
+    "Could you tell me the postcode?",
+    "Can you hear me?",
+    "Are you still there?",
+    "Could you say that again?",
+    "Could you spell that for me?",
+  ])("'Yeah' after %j is not an answer", (q) => {
+    expect(isInformativeCallerTurn("Yeah", q, undefined, closing)).toBe(false);
+  });
+
+  it.each(["Is that all of your luggage?", "Will that be all three of you?"])("'Yeah' after %j is an answer", (q) => {
+    expect(isInformativeCallerTurn("Yeah", q, undefined, closing)).toBe(true);
+  });
+
+  it.each(["Will that be all?", "Is that all for today?", "Is that everything?"])("'Yeah' after the wrap-up %j is not", (q) => {
+    expect(isInformativeCallerTurn("Yeah", q, undefined, closing)).toBe(false);
+  });
+});

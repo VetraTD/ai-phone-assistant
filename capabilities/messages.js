@@ -733,7 +733,11 @@ export default {
         if (!saved) return;
         if (saved.corrected) {
           // Names only: the message is the caller's own words (LVX24).
-          log.info("customer_request_corrected", { callSid, tool: "record_customer_request" });
+          log.info("customer_request_corrected", {
+            callSid,
+            tool: "record_customer_request",
+            ...(saved.nameTakeover ? { nameTakeover: true } : {}),
+          });
         }
         if (!saved.ownerNoticePending) {
           notifications
