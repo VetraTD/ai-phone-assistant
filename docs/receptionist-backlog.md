@@ -17520,8 +17520,15 @@ Recorded, not fixed (product code, outside a config-only session).
 - Unknown whether callers hear it twice or only `lib/harness/liveTextSession.js` concatenates two transcription
   segments. Check one real call's `live_call_summary` / repeated-phrase counter before treating it as a product defect.
 
-### LVX192 · Details collected after the last save are lost, while the agent says "passed to the dispatcher" · **NEW 2026-11-23 · P1** `[medium]`
-- Owner's live call CA2187342e (Hammersleys US test line, 7 min): two early saves (name, corrected number), then
+### LVX192 · Details collected after the last save are lost, while the agent says "passed to the dispatcher" · **CODE FIXED 2026-11-24 (branch fix/lvx192-save-guard), live calls pending** `[medium]`
+- Fix (inbound, generic): end_call is refused once per save while the caller has spoken since the last save (counter
+  in the reducer, front-end latches saveGuardSpent; a fresh save clears it). At hang-up an after-save note is written
+  onto the last saved message, labelled "Said after the last save (unchecked transcript)". Each save reply now names
+  the notes questions still open, and a save the guard forced is quiet. Sabotage rows: lvx192-*.
+- Known limits: sign-off and spoken-goodbye exits rely on the note, not the guard; words transcribed after Twilio's
+  stop are lost (LVX83); a stashed re-issued save puts the note on the earlier row; repair and backchannel turns
+  ("Hello?", "Mm-hmm") count as answers (corpus check pending).
+- Original report. Owner's live call CA2187342e (Hammersleys US test line, 7 min): two early saves (name, corrected number), then
   pickup, Gatwick, flight, passengers, bags and payment collected over ~5 min with NO further save; closing line
   "This has been passed to the dispatcher". The owner email carries name + number only. postcall_verify said
   `ok` (messages_recorded=2) and claim_audit saw nothing: no instrument counts unsaved answers.
@@ -17549,6 +17556,15 @@ Recorded, not fixed (product code, outside a config-only session).
   (a) end_call / "passed on" guard: refuse end_call while the caller has answered notes questions since the last
   record_customer_request, tool reply "save the request with all the details first"; (b) post-call recovery that
   re-saves details from the transcript into the row before the owner email.
+
+### LVX193 · Inbound transfer screening (whisper + press 1) · **CODE FIXED 2026-11-24 (branch fix/lvx192-save-guard), live calls pending** `[medium]`
+- A transfer answered by voicemail counted as answered (see LVX192, ASAP transfer). Now per-business
+  `transfer_screening` / `transfer_whisper` (migration 063): the staff member hears a whisper and must press 1; the
+  Dial action carries a `screened=1` flag, and transferOutcome treats a flagged dial as not accepted when
+  DialBridged is "false" or the stored verdict is not_accepted, so the caller is offered the message instead of a
+  hang-up. Unknown verdict (database down) falls to DialBridged alone; every screening path fails closed to the message.
+- Open: the Twilio fallback Function still dials unscreened when our server is down (owner accepted for the demo;
+  go-live gate). Confirm on the first real screened call which DialCallStatus / DialBridged Twilio actually sends.
 
 ### Also from these sims
 - The notes' question list beats `custom_instructions`. After a save, the tool reply asks for "this business's
