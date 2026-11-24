@@ -17528,6 +17528,12 @@ Recorded, not fixed (product code, outside a config-only session).
 - Systematic, not one call: re-scored with a "pickup saved before payment is asked" assert, the v5 config passed
   1/12 trip sims. Config "After EVERY answer, save again" (v6) raised it to ~2 in 3 calls; one v6 run still saved
   once and claimed "passed on". Prompt wording cannot guarantee a write.
+- Owner's three v6b test calls 2026-11-24 (00:44-00:51Z): EVERY booking call lost something the caller said: the
+  date and flight (CA415bf439, asked then never saved), the caller's NAME (CA13bffc75: the only save came before the
+  name; the caller gave three answers in one line and the agent skipped the remaining notes questions entirely).
+  Sims undercounted it because persona callers answer one question per turn.
+- Related, same calls: the ASAP transfer (CAe6dc69e7) reported `completed` in ~17 s, likely the owner mobile's
+  voicemail: inbound transfers have no call screening (lib/twiml.js:95), so a voicemail counts as answered.
 - Generic, every tenant whose messages notes ask questions (Digile too). Candidate code fixes, owner to choose:
   (a) end_call / "passed on" guard: refuse end_call while the caller has answered notes questions since the last
   record_customer_request, tool reply "save the request with all the details first"; (b) post-call recovery that
