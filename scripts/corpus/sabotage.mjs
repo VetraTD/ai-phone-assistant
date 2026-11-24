@@ -1275,6 +1275,43 @@ const SABOTAGES = [
     replace: "false /* SABOTAGE */",
     red: [TRANSFEROUTCOME, TRANSFERRESULT],
   },
+  // LVX192 (2026-11-24): the save guard, the after-save note, the open-questions list, screened not-accepted.
+  {
+    name: "lvx192-save-guard-refuses",
+    why:
+      "end_call stops refusing when the caller spoke after the last save. The caller's later answers are then left on the line and nowhere else (LVX192).",
+    file: "services/tools.js",
+    find: "ctx.saveGuardSpent !== true &&",
+    replace: "false /* SABOTAGE */ &&",
+    red: ["tests/endCallSaveGuard.test.js", "tests/liveSaveGuard.test.js"],
+  },
+  {
+    name: "lvx192-after-save-note-written",
+    why:
+      "finish() stops writing the after-save note onto the last saved message, so the owner never sees what the caller said after the save (LVX192).",
+    file: "lib/voice/live/index.js",
+    find: ".then(() => saveAfterSaveNote(afterSaveFacts))",
+    replace: ".then(() => null /* SABOTAGE */)",
+    red: ["tests/messageAfterSaveNote.test.js"],
+  },
+  {
+    name: "lvx192-open-questions-listed",
+    why:
+      "The save reply stops naming the notes questions still open and falls back to the generic questions note (LVX192).",
+    file: "capabilities/messages.js",
+    find: "if (questions.length >= 2 && anyAnswered(questions, savedLabels)) {",
+    replace: "if (false /* SABOTAGE */) {",
+    red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    name: "lvx192-screened-not-accepted-message",
+    why:
+      "A screened dial the staff member did not accept hangs up on the caller instead of offering the message (LVX193).",
+    file: "lib/transferOutcome.js",
+    find: "screening?.flagged === true &&",
+    replace: "false /* SABOTAGE */ &&",
+    red: [TRANSFEROUTCOME, TRANSFERRESULT],
+  },
   {
     name: "clock-stopped-in-finish",
     why:
