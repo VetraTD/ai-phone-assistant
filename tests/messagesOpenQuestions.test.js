@@ -58,9 +58,11 @@ describe("open questions named in the save reply", () => {
     expect(saved(r)).toContain("Luggage");
   });
 
-  it("a save whose labels match no numbered question: today's text", async () => {
+  it("a LATER save whose labels match no numbered question: today's text", async () => {
     for (const labels of [["Trip date", "What happened"], ["Where", "Where to"]]) {
-      const got = await save(cfg(HAMMERSLEYS_NOTES), { details: details(...labels) });
+      const got = await save(cfg(HAMMERSLEYS_NOTES), { details: details(...labels) }, {
+        capabilityState: { messages: { firstSaveDone: true, savedLabels: [] } },
+      });
       expect(next(got)).toMatch(/^\[not caller speech\] If this business's notes list questions, ask them now: new enquiries by default/);
       expect(got.stateEffects.questionsOpen).not.toBe(true);
     }
@@ -144,7 +146,11 @@ describe("a save the end_call guard forced is a quiet one", () => {
   });
 
   it("out of scope (labels match nothing): today's questions note, still quiet", async () => {
-    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Trip date", "What happened") }, PENDING);
+    // A forced save always follows an earlier save (the guard needs one), so not the first.
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Trip date", "What happened") }, {
+      ...PENDING,
+      capabilityState: { messages: { firstSaveDone: true, savedLabels: [] } },
+    });
     expect(next(r)).toMatch(/^\[not caller speech\] If this business's notes list questions/);
     expect(next(r)).not.toContain("Saved. If the caller");
     expect(r.stateEffects.quietSave).toBe(true);
@@ -251,5 +257,52 @@ describe("confirm the answer just saved before the next question (fix round 2)",
   it("healthcare tier never gets it", async () => {
     const r = await save(each({ complianceTier: "hipaa" }), { details: details("Pickup") });
     expect(next(r)).not.toContain("First confirm");
+  });
+});
+
+// Opus review I1 / M1 / M3 (fix round 2).
+describe("where the list starts, and when the confirm step leads (review fixes)", () => {
+  const each = { capabilities: { messages: { notes: HAMMERSLEYS_NOTES, confirmStyle: "each" } } };
+  const TODAY = /^\[not caller speech\] If this business's notes list questions, ask them now: new enquiries by default/;
+
+  it("I1: a first save whose only label answers no question (a traveller's name, label Passenger) starts the list", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: [{ label: "Passenger", answer: "Mary Jones" }] });
+    expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+    expect(r.stateEffects.questionsOpen).toBe(true);
+  });
+
+  it("M1: a first save from a caller who is not a new enquiry keeps today's text", async () => {
+    for (const caller_type of ["existing_customer", "personal", "supplier", "sales_pitch"]) {
+      const r = await save(cfg(HAMMERSLEYS_NOTES), { caller_type, message: "complaint about a late driver" });
+      expect(next(r)).toMatch(TODAY);
+      expect(r.stateEffects.questionsOpen).toBeUndefined();
+    }
+  });
+
+  it("M1: an unknown or 'other' caller type still counts as an enquiry", async () => {
+    for (const caller_type of [undefined, "other", "new_enquiry"]) {
+      const r = await save(cfg(HAMMERSLEYS_NOTES), caller_type ? { caller_type } : {});
+      expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+    }
+  });
+
+  it("M1: once a label answers a question the list runs whatever the caller type (round 1 rule)", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { caller_type: "existing_customer", details: details("Pickup") });
+    expect(next(r)).toContain("questions with no saved answer yet: 2. Destination");
+  });
+
+  it("M3: a re-save of answers already saved does not ask for another confirmation", async () => {
+    const r = await save(each, { details: details("Pickup") }, {
+      capabilityState: { messages: { firstSaveDone: true, savedLabels: ["Pickup"] } },
+    });
+    expect(next(r)).not.toContain("First confirm");
+    expect(next(r)).toContain("questions with no saved answer yet: 2. Destination");
+  });
+
+  it("M3: a save that adds a new answer leads with the confirm step", async () => {
+    const r = await save(each, { details: details("Pickup", "Destination") }, {
+      capabilityState: { messages: { firstSaveDone: true, savedLabels: ["Pickup"] } },
+    });
+    expect(next(r)).toMatch(/^\[not caller speech\] First confirm the answer you just saved/);
   });
 });

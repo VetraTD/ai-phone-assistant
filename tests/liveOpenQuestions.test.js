@@ -165,6 +165,20 @@ describe("a save in the same batch as request_transfer", () => {
     expect(counters().live_completion_ask_note_skipped_transfer).toBe(1);
   });
 
+  // Opus review M2: a transfer the business does not allow is refused and the
+  // caller stays on the line, so the save keeps its "anything else?" note.
+  it("a transfer that is not allowed: the save keeps the completion note", async () => {
+    const s = await bootLive({ config: { ...XFER, transferPolicy: "never" }, callSid: "CA_oq_xfer_4" });
+    await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
+    const out = await s.callToolBatch([
+      ["record_customer_request", URGENT],
+      ["request_transfer", { reason: "needs a car now" }],
+    ]);
+    const save = out.find((r) => r.name === "record_customer_request");
+    expect(save.response.next_step).toMatch(/anything else/i);
+    expect(counters().live_completion_ask_note_skipped_transfer ?? 0).toBe(0);
+  });
+
   it("control: the same save alone still gets the completion note", async () => {
     const s = await bootLive({ config: XFER, callSid: "CA_oq_xfer_3" });
     await s.callerSays("I need a car right now, it's Jon at Lingfield station.");

@@ -183,12 +183,13 @@ describeDb("a name corrected on the same call, as vetra_app (fix round 2)", () =
   const answers = (pickup) => ({ callerType: "new_enquiry", answers: [{ label: "Pickup", answer: pickup }] });
 
   it("a bare row takes the corrected name and the answers: one row", async () => {
-    const first = await saveCustomerRequest({ db, businessId: TENANT, callId, row: TRIP });
+    const first = await saveCustomerRequest({ db, businessId: TENANT, callId, row: TRIP, takeOverBareRow: true });
     const second = await saveCustomerRequest({
       db,
       businessId: TENANT,
       callId,
       row: { ...TRIP, callerName: "Aisha Patel", details: answers("22 Godstone Road RH7 6AA") },
+      takeOverBareRow: true,
     });
     expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
     expect(await rowsOf(callId)).toEqual([

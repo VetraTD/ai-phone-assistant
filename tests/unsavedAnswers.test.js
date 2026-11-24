@@ -203,3 +203,44 @@ describe("backchannels and mangled words are not answers (fix round 2)", () => {
     expect(countUnsaved(turns, 0, undefined, closing)).toBe(0);
   });
 });
+
+// Opus review I2 / M4 / M5 (fix round 2).
+describe("a backchannel answers any question that is not a wh-question (review fixes)", () => {
+  const closing = closingRegexFor({});
+
+  it.each([
+    ["Yeah", "Lovely. Just the two of you?"],
+    ["Yeah", "Child seat?"],
+    ["Yep", "Paying by card?"],
+    ["Yeah", "And that is from the station?"],
+    ["Yeah", "So two passengers and two bags?"],
+    ["Yeah", "Don't you need a return?"],
+    ["Mhm", "¿Necesita una silla de niño?"],
+  ])("I2: %j after %j is an answer", (t, q) => {
+    expect(isInformativeCallerTurn(t, q, undefined, closing)).toBe(true);
+  });
+
+  it.each([
+    ["Mhm", "And how many passengers?"],
+    ["Yeah", "Great, what's the pickup address?"],
+    ["Mhm", "¿Cuántos pasajeros?"],
+    ["Yeah", "¿Dónde le recogemos?"],
+  ])("I2: %j after the wh-question %j is not", (t, q) => {
+    expect(isInformativeCallerTurn(t, q, undefined, closing)).toBe(false);
+  });
+
+  it.each([
+    ["Okay.", "Is that everything?"],
+    ["Okay.", "Will that be all?"],
+    ["Yeah.", "Is that all for today?"],
+    ["Mhm.", "Is there anything more I can do?"],
+    ["Okay.", "Do you need a child seat?"],
+  ])("M4: %j after %j is not an answer (ok stays a closer; closing questions do not count)", (t, q) => {
+    expect(isInformativeCallerTurn(t, q, undefined, closing)).toBe(false);
+  });
+
+  it("M5: a read-back earlier in the reply does not hide the yes/no question that ends it", () => {
+    expect(isInformativeCallerTurn("Yeah", "22 Godstone Road, is that right? And do you need a child seat?", undefined, closing)).toBe(true);
+    expect(isInformativeCallerTurn("Yeah", "And do you need a child seat? 22 Godstone Road, is that right?", undefined, closing)).toBe(false);
+  });
+});

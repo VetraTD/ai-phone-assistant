@@ -701,7 +701,44 @@ describe("a name corrected on the same call updates the bare row (fix round 2)",
       businessId: "biz-1",
       callId: engine.call.callId,
       row: { requestType: "message", callerName: "Ayer", callbackNumber: "214 555 0123", message: "Taxi booking request", preferredTime: null, ...row },
+      // The messages pack sets this only at a business whose notes ask numbered
+      // questions: there a bare row is an unfinished intake, not a whole message.
+      takeOverBareRow: true,
     });
+  const genericRow = (engine, row) =>
+    saveCustomerRequest({
+      db: engine.deps.db,
+      businessId: "biz-1",
+      callId: engine.call.callId,
+      row: { requestType: "message", callbackNumber: "214 555 0123", preferredTime: null, ...row },
+    });
+
+  // Opus review C1: at a business with no numbered questions every row is bare,
+  // so the take-over must never run there: two people stay two rows.
+  it("a business without numbered questions: two people, same reason, same phone, stay two rows", async () => {
+    const { engine, calls } = makeEngine();
+    await genericRow(engine, { callerName: "Jon", message: "schedule an appointment" });
+    await genericRow(engine, { callerName: "Jane", message: "schedule an appointment" });
+    expect(calls.rows.map((r) => r.caller_name)).toEqual(["Jon", "Jane"]);
+  });
+
+  it("another person giving a different number is never a name correction", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { callerName: "Bob" });
+    await saveRow(engine, { callerName: "Sarah", callbackNumber: "972 555 0199" });
+    expect(calls.rows.map((r) => r.caller_name)).toEqual(["Bob", "Sarah"]);
+  });
+
+  it("a reason with no words of its own never takes over a row, nor is taken over", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { callerName: "Jon", message: "callback" });
+    await saveRow(engine, { callerName: "Mary", message: "lost property, a black umbrella" });
+    expect(calls.rows.map((r) => r.caller_name)).toEqual(["Jon", "Mary"]);
+    const two = makeEngine();
+    await saveRow(two.engine, {});
+    await saveRow(two.engine, { callerName: "Aisha Patel", message: "please call me back" });
+    expect(two.calls.rows).toHaveLength(2);
+  });
 
   it("a row with no answers takes the corrected name and the answers: one row", async () => {
     const { engine, calls } = makeEngine();
@@ -747,5 +784,41 @@ describe("a name corrected on the same call updates the bare row (fix round 2)",
     await saveRow(engine, { callerName: "Aisha Patel" });
     expect(calls.rows).toHaveLength(2);
     expect(calls.rows[0].caller_name).toBe("Ayer");
+  });
+});
+
+// Opus review C1: the messages pack decides where a bare row is an unfinished
+// intake -- only at a business whose notes ask numbered questions.
+describe("the messages pack turns the take-over on only where notes ask numbered questions (fix round 2)", () => {
+  const NOTES = "Ask these:\n1. Pickup: where from?\n2. Destination: where to?";
+  const trip = { request_type: "message", callback_number: "214 555 0123", message: "Taxi booking request" };
+
+  it("numbered notes: the misheard name's bare row takes the correction", async () => {
+    const { engine, calls } = makeEngine();
+    engine.call.config = { businessName: "Cabs", capabilities: { messages: { notes: NOTES } } };
+    messages.onEffect(recorded({ ...trip, caller_name: "Ayer" }), engine);
+    await settle();
+    messages.onEffect(recorded({ ...trip, caller_name: "Aisha Patel" }), engine);
+    await settle();
+    expect(calls.rows.map((r) => r.caller_name)).toEqual(["Aisha Patel"]);
+  });
+
+  it("no numbered notes: the same two saves stay two rows", async () => {
+    const { engine, calls } = makeEngine();
+    messages.onEffect(recorded({ ...trip, caller_name: "Ayer" }), engine);
+    await settle();
+    messages.onEffect(recorded({ ...trip, caller_name: "Aisha Patel" }), engine);
+    await settle();
+    expect(calls.rows).toHaveLength(2);
+  });
+
+  it("healthcare tier: never", async () => {
+    const { engine, calls } = makeEngine();
+    engine.call.config = { businessName: "Clinic", complianceTier: "hipaa", capabilities: { messages: { notes: NOTES } } };
+    messages.onEffect(recorded({ ...trip, caller_name: "Ayer" }), engine);
+    await settle();
+    messages.onEffect(recorded({ ...trip, caller_name: "Aisha Patel" }), engine);
+    await settle();
+    expect(calls.rows).toHaveLength(2);
   });
 });

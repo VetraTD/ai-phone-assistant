@@ -1310,9 +1310,36 @@ const SABOTAGES = [
     why:
       "A first save with no labels yet stops starting the open-questions list, so an opener that gives two answers at once is asked nothing else and the call closes on 'anything else?' (owner's 08:17 call).",
     file: "capabilities/messages.js",
-    find: "(savedLabels.length === 0 || anyAnswered(questions, savedLabels))",
-    replace: "(false /* SABOTAGE */ || anyAnswered(questions, savedLabels))",
+    find: "const startsHere = enquiry && (firstSave || savedLabels.length === 0);",
+    replace: "const startsHere = false /* SABOTAGE */;",
     red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    name: "lvx192r2-confirm-first",
+    why:
+      "A save that added an answer at a business that confirms each answer stops leading with 'first confirm the answer you just saved', so the pickup is never read back and a wrong postcode reaches the email (owner's calls 1-2).",
+    file: "capabilities/messages.js",
+    find: 'const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;',
+    replace: "const lead = MODEL_NOTE_PREFIX; void added; /* SABOTAGE */",
+    red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    name: "lvx192r2-backchannel-not-answer",
+    why:
+      "A bare 'Mhm.' or 'Yeah.' counts as an answer again, so the save guard refuses a goodbye with nothing left to save and the after-save note fills with backchannels (owner's 08:17 call).",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "    return backchannelAnswers(prevReply, readBackRe, closingRe);",
+    replace: "    return true; // SABOTAGE",
+    red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
+  },
+  {
+    name: "lvx192r2-transfer-batch-no-ask",
+    why:
+      "A save in the same round as request_transfer says 'ask whether there is anything else' again, so the caller hears that question while being put through (owner's call 5(i)).",
+    file: "lib/voice/live/tools.js",
+    find: '    const batchHasTransfer = calls.some((c) => c?.name === "request_transfer");',
+    replace: "    const batchHasTransfer = false; // SABOTAGE",
+    red: ["tests/liveOpenQuestions.test.js"],
   },
   {
     name: "lvx192r2-skip-words-honoured",

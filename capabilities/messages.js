@@ -584,14 +584,24 @@ export default {
           reason !== "" &&
           Array.isArray(skipWords) &&
           skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));
-        const listStarts = !skipped && (savedLabels.length === 0 || anyAnswered(questions, savedLabels));
+        // Opus review I1: the call's FIRST save starts it too, whatever its labels
+        // (a traveller's name saved as "Passenger" answers no question). M1: the
+        // new starts are for a new enquiry only (an unknown type counts as one);
+        // a complaint or an existing client keeps today's text.
+        const firstSave = ctx?.capabilityState?.messages?.firstSaveDone !== true;
+        const enquiry = decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
+        const startsHere = enquiry && (firstSave || savedLabels.length === 0);
+        const listStarts = !skipped && (startsHere || anyAnswered(questions, savedLabels));
         if (questions.length >= 2 && listStarts) {
           const open = openQuestions(questions, savedLabels);
           openCount = open.length;
-          // Confirm before the next question: only a save that carried an answer
-          // has something to confirm, and only a business that confirms each
-          // answer as given ("end" makes one read-back at the end instead).
-          const lead = now.length > 0 && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
+          // Confirm before the next question: only a save that added an answer
+          // has something to confirm (review M3: a re-save of answers already
+          // saved does not), and only a business that confirms each answer as
+          // given ("end" makes one read-back at the end instead).
+          const priorKeys = new Set((Array.isArray(prior) ? prior : []).map((l) => String(l).trim().toLowerCase()));
+          const added = now.some((l) => !priorKeys.has(String(l).trim().toLowerCase()));
+          const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
           listNote = open.length
             ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
             : `${lead}${ALL_QUESTIONS_ANSWERED_NOTE.slice(MODEL_NOTE_PREFIX.length)}`;
@@ -712,6 +722,12 @@ export default {
       // CA082a6db7: the model sent "message" on one save and "callback" on the
       // other for one request; both are this pack's, so the match looks at both.
       matchTypes: MESSAGE_PACK_TYPES,
+      // Fix round 2 (Opus review C1): only where the notes ask numbered
+      // questions is a row with no answers an unfinished intake, so a corrected
+      // name may take it over. Elsewhere every row is bare and two people on
+      // one call stay two rows.
+      takeOverBareRow:
+        !isHealthcareTier(config) && parseNotesQuestions(capabilityConfig(config, "messages").notes).length >= 2,
     })
       .then((saved) => {
         if (!saved) return;
