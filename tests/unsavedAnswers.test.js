@@ -128,7 +128,7 @@ describe("closers are not answers (LVX192 final review)", () => {
 
   it("the closing regex covers both locales and is null-safe", () => {
     expect(closing.test("goodbye")).toBe(true);
-    expect(closingRegexFor({ language: "es" })).toBeInstanceOf(RegExp);
+    expect(closingRegexFor({ languagesSpoken: ["es"] })).toBeInstanceOf(RegExp);
   });
 
   it("the 12 Gemini 3.8 corpus replies to anything-else count 0 (the old predicate read 4 as answers)", () => {
@@ -139,5 +139,23 @@ describe("closers are not answers (LVX192 final review)", () => {
     expect(replies).toHaveLength(12);
     const turns = replies.map((caller, i) => ({ index: i + 1, caller, prevReply: ANYTHING_ELSE }));
     expect(countUnsaved(turns, 0, undefined, closing)).toBe(0);
+  });
+
+  it.each([
+    "Nothing else, could the driver ring me at 07700 900123?",
+    "I'm good, can you book me for Saturday at 6 too?",
+    "That's all, is the fare 40 pounds?",
+    "Nada más, ¿me puede llamar al 600 123 456?",
+  ])("the question %j stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(true);
+  });
+
+  const YES_NO = ["Do you need a child seat?", "Will you need a return journey?", "Is that the right number for you?"];
+  const YES_THANKS = ["Yeah, thanks", "Yep, cheers", "Sure, thanks", "Yeah, cheers mate", "Yep, ta", "Yeah, mate", "Right, cheers"];
+  it.each(YES_THANKS)("%j after a yes/no question is informative", (t) => {
+    for (const q of YES_NO) expect(isInformativeCallerTurn(t, q, undefined, closing)).toBe(true);
+  });
+  it.each(YES_THANKS)("%j after anything-else is a closer", (t) => {
+    expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(false);
   });
 });
