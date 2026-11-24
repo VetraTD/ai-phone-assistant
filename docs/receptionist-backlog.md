@@ -17520,6 +17520,19 @@ Recorded, not fixed (product code, outside a config-only session).
 - Unknown whether callers hear it twice or only `lib/harness/liveTextSession.js` concatenates two transcription
   segments. Check one real call's `live_call_summary` / repeated-phrase counter before treating it as a product defect.
 
+### LVX192 · Details collected after the last save are lost, while the agent says "passed to the dispatcher" · **NEW 2026-11-23 · P1** `[medium]`
+- Owner's live call CA2187342e (Hammersleys US test line, 7 min): two early saves (name, corrected number), then
+  pickup, Gatwick, flight, passengers, bags and payment collected over ~5 min with NO further save; closing line
+  "This has been passed to the dispatcher". The owner email carries name + number only. postcall_verify said
+  `ok` (messages_recorded=2) and claim_audit saw nothing: no instrument counts unsaved answers.
+- Systematic, not one call: re-scored with a "pickup saved before payment is asked" assert, the v5 config passed
+  1/12 trip sims. Config "After EVERY answer, save again" (v6) raised it to ~2 in 3 calls; one v6 run still saved
+  once and claimed "passed on". Prompt wording cannot guarantee a write.
+- Generic, every tenant whose messages notes ask questions (Digile too). Candidate code fixes, owner to choose:
+  (a) end_call / "passed on" guard: refuse end_call while the caller has answered notes questions since the last
+  record_customer_request, tool reply "save the request with all the details first"; (b) post-call recovery that
+  re-saves details from the transcript into the row before the owner email.
+
 ### Also from these sims
 - The notes' question list beats `custom_instructions`. After a save, the tool reply asks for "this business's
   questions, in order", and rules that only sit in custom_instructions (ASAP transfer, fare wording) were skipped.
