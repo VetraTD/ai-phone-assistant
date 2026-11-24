@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { skipOnOutbound, INBOUND_ONLY } from "../lib/outbound/policy.js";
 
-const NAMES = ["askBeforeHangup", "spellingNudge", "gatherDetailsFallback"];
+const NAMES = ["askBeforeHangup", "spellingNudge", "gatherDetailsFallback", "saveGuard"];
 
 describe("skipOnOutbound truth table", () => {
   for (const name of NAMES) {

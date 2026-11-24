@@ -451,7 +451,7 @@ const CAPABILITY_DEPS = {
  *   stateEffects: {
  *     intentArgs?: object|null,
  *     endCallArgs?: object|null,
- *     endCallRefusal?: "hesitation"|"generic"|"no_ask"|"caller_question"|null,
+ *     endCallRefusal?: "hesitation"|"generic"|"no_ask"|"caller_question"|"unsaved"|null,
  *     endCallNoAskRefusal?: boolean,
  *     transferRequested?: {reason: string|null}|null,
  *     toolResult?: {name: string, success: boolean, message: string},
@@ -891,6 +891,60 @@ export async function executeToolCall(fc, ctx) {
                 name: fc.name,
                 success: false,
                 message: "Is there anything else I can help you with?",
+                callerSafe: true,
+              },
+            },
+          };
+        }
+      }
+      // -----------------------------------------------------------------
+      // LVX192. DO NOT HANG UP ON ANSWERS THE BUSINESS NEVER GOT.
+      //
+      // The owner's email carries only what record_customer_request saved. A
+      // caller who keeps answering after a save (passengers, luggage, payment)
+      // and then closes leaves those answers on the line and nowhere else.
+      // Refused ONCE per save: the front-end latches saveGuardSpent when it
+      // sees this refusal and a fresh save clears it, so it cannot loop (LVX21).
+      //
+      // Runs only where the count does. The cascade passes no
+      // unsavedCallerTurns, so this no-ops there and the positive twin stays 0.
+      // Inbound only. Placed before the LVX132 block so the save outranks the
+      // ask; that block's `if` line is untouched.
+      // -----------------------------------------------------------------
+      if (
+        typeof ctx?.unsavedCallerTurns === "number" &&
+        allowedByExistingGates &&
+        !skipOnOutbound("saveGuard", Boolean(ctx?.outboundCall)) &&
+        capabilityConfig(ctx?.config, "messages").enabled !== false
+      ) {
+        bumpCounter("end_call_save_guard_ran");
+        if (
+          ctx.saveGuardSpent !== true &&
+          ((typeof ctx.messagesSaved === "number" && ctx.messagesSaved > 0) || ctx.promisedWithoutSave === true) &&
+          ctx.unsavedCallerTurns > 0
+        ) {
+          bumpCounter("end_call_refused_unsaved");
+          return {
+            functionResponse: {
+              id: fc.id,
+              name: fc.name,
+              response: {
+                success: false,
+                message:
+                  "[not caller speech] NOT A FAILURE, the call is still open. The caller has told you more " +
+                  "since your last save, and the business only gets what is saved. Call " +
+                  "record_customer_request now with the caller's name, the same message and every detail " +
+                  "so far, then carry on. Do not say goodbye on this turn.",
+              },
+            },
+            stateEffects: {
+              // Reaches Live as endCallRefusedThisTurn and as the summary's
+              // end_call_refusals.unsaved; the front-end latches saveGuardSpent.
+              endCallRefusal: "unsaved",
+              toolResult: {
+                name: fc.name,
+                success: false,
+                message: "Just a moment.",
                 callerSafe: true,
               },
             },
