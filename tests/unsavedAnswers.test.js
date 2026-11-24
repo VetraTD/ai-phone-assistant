@@ -119,7 +119,6 @@ describe("closers are not answers (LVX192 final review)", () => {
     "No, and two bags",
     "No, but one more thing",
     "Nope, also a child seat",
-    "Yeah",
     "Sure",
   ])("%j stays informative", (t) => {
     expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(true);
@@ -160,5 +159,47 @@ describe("closers are not answers (LVX192 final review)", () => {
   });
   it.each(YES_THANKS)("%j after anything-else is a closer", (t) => {
     expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(false);
+  });
+});
+
+// Fix round 2 (owner's 08:17 call, 2026-11-24): "Mhm." and "N?o." counted as
+// answers, so the save guard refused a goodbye that had nothing left to save.
+describe("backchannels and mangled words are not answers (fix round 2)", () => {
+  const ANYTHING_ELSE = "Is there anything else I can help you with?";
+  const closing = closingRegexFor({});
+  const NOTED = "Lovely, I've noted that down.";
+  const WH = "And where would you like to go?";
+
+  it.each(["Mhm.", "Yeah.", "N?o.", "Mm-hmm.", "Uh-huh.", "Uh huh.", "Yep.", "Mhm, yeah."])(
+    "%j after anything-else is not informative",
+    (t) => {
+      expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(false);
+    }
+  );
+
+  it.each(["Mhm.", "Yeah.", "Mm-hmm.", "Uh-huh.", "Yep."])("%j after a statement or a wh-question is not informative", (t) => {
+    expect(isInformativeCallerTurn(t, NOTED, undefined, closing)).toBe(false);
+    expect(isInformativeCallerTurn(t, WH, undefined, closing)).toBe(false);
+    expect(isInformativeCallerTurn(t, "Anything else?", undefined, closing)).toBe(false);
+  });
+
+  it.each(["Mhm.", "Yeah.", "Mm-hmm."])("%j after a read-back is not informative", (t) => {
+    expect(isInformativeCallerTurn(t, READ_BACK, undefined, closing)).toBe(false);
+  });
+
+  it.each(["Mhm.", "Yeah.", "Uh-huh.", "Yep."])("%j answering a yes/no question stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, SEAT, undefined, closing)).toBe(true);
+    expect(isInformativeCallerTurn(t, "Great. And will you need a return journey?", undefined, closing)).toBe(true);
+  });
+
+  it("a word with a ? inside is read as the word ('N?o' is 'No')", () => {
+    expect(isInformativeCallerTurn("N?o.", ANYTHING_ELSE, undefined, closing)).toBe(false);
+    expect(isInformativeCallerTurn("N?o, two passengers.", SEAT, undefined, closing)).toBe(true);
+  });
+
+  it("the after-anything-else count stays 0 with the backchannels added", () => {
+    const replies = ["Mhm.", "Yeah.", "N?o.", "No.", "Uh-huh."];
+    const turns = replies.map((caller, i) => ({ index: i + 1, caller, prevReply: ANYTHING_ELSE }));
+    expect(countUnsaved(turns, 0, undefined, closing)).toBe(0);
   });
 });

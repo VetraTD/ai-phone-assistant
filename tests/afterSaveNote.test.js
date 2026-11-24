@@ -67,3 +67,24 @@ describe("afterSaveNote", () => {
     expect(afterSaveNote()).toBeNull();
   });
 });
+
+// Fix round 2: the owner's 08:17 email carried a junk after-save line made of backchannels.
+describe("afterSaveNote leaves backchannels out (fix round 2)", () => {
+  it("'Mhm.' and 'N?o.' add nothing; a yes to a yes/no question is kept", () => {
+    const n = afterSaveNote({
+      turnLog: [
+        T(2, "Mhm.", "Lovely, I've noted that down."),
+        T(3, "N?o.", "Is there anything else I can help you with?"),
+        T(4, "Yeah.", "Do you need a child seat?"),
+      ],
+      savedThroughTurn: 1,
+    });
+    expect(n.answer).toBe('"Do you need a child seat?" — Yeah.');
+  });
+
+  it("only backchannels gives no note at all", () => {
+    expect(
+      afterSaveNote({ turnLog: [T(2, "Mhm.", "Lovely, noted."), T(3, "Uh-huh.", "And where to?")], savedThroughTurn: 1 })
+    ).toBeNull();
+  });
+});
