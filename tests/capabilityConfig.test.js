@@ -307,6 +307,26 @@ describe("loadConfig — allowPricierNumbers (migration 053)", () => {
   });
 });
 
+describe("loadConfig - transferScreening and transferWhisper (migration 063)", () => {
+  it("transferScreening is true only for a real boolean true", () => {
+    expect(loadConfig({ ...BUSINESS, transfer_screening: true }, []).transferScreening).toBe(true);
+    for (const v of [false, null, undefined, "true", 1, "t"]) {
+      expect(loadConfig({ ...BUSINESS, transfer_screening: v }, []).transferScreening).toBe(false);
+    }
+  });
+  it("transferWhisper is a trimmed string, empty or non-string becomes null", () => {
+    expect(loadConfig({ ...BUSINESS, transfer_whisper: "  Press 1.  " }, []).transferWhisper).toBe("Press 1.");
+    for (const v of ["", "   ", null, undefined, 5, {}]) {
+      expect(loadConfig({ ...BUSINESS, transfer_whisper: v }, []).transferWhisper).toBeNull();
+    }
+  });
+  it("null business gets the defaults", () => {
+    const c = loadConfig(null);
+    expect(c.transferScreening).toBe(false);
+    expect(c.transferWhisper).toBeNull();
+  });
+});
+
 describe("loadConfig — transferNoAnswer (migration 052)", () => {
   it("passes own_voicemail through", () => {
     expect(loadConfig({ ...BUSINESS, transfer_no_answer: "own_voicemail" }, []).transferNoAnswer).toBe("own_voicemail");

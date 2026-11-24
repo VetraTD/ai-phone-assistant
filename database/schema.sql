@@ -61,6 +61,9 @@ CREATE TABLE businesses (
     CHECK (transfer_no_answer IN ('take_message', 'own_voicemail')),
   -- Per-client switch-on for numbers costing 10-60 cents/min (migration 053).
   allow_pricier_numbers        boolean NOT NULL DEFAULT false,
+  -- Inbound transfer screening (migration 063): the dispatcher must press 1.
+  transfer_screening           boolean NOT NULL DEFAULT false,
+  transfer_whisper             text CHECK (char_length(transfer_whisper) <= 200),
   languages_spoken             jsonb DEFAULT '["en"]',
   custom_instructions          text,
   -- Notification settings (migration 006) — read/written by
@@ -2004,7 +2007,9 @@ CREATE TABLE IF NOT EXISTS pending_dials (
   dialled_number text NOT NULL,
   started_at     timestamptz NOT NULL DEFAULT now(),
   expires_at     timestamptz NOT NULL,
-  ended_at       timestamptz
+  ended_at       timestamptz,
+  screened       boolean NOT NULL DEFAULT false,
+  accepted_at    timestamptz
 );
 CREATE INDEX IF NOT EXISTS pending_dials_open_idx ON pending_dials (business_id, expires_at) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS pending_dials_call_sid_idx ON pending_dials (call_sid);
@@ -2212,6 +2217,121 @@ REVOKE ALL ON FUNCTION app_ai_seconds_today(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_ai_seconds_today(uuid, text, text) TO vetra_app;
 COMMENT ON FUNCTION app_ai_seconds_today(uuid, text, text) IS
   'Repeat-caller alert: AI seconds this caller used at this business today (UTC); time after a transfer is not counted.';
+
+-- ------------------------------------------------------------
+-- Transfer screening functions (migration 063)
+-- ------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION app_record_screened_pending_dial(
+  p_business    uuid,
+  p_call_sid    text,
+  p_caller      text,
+  p_dialled     text,
+  p_timeout_sec integer
+)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_id bigint;
+BEGIN
+  IF p_business IS NULL OR p_call_sid IS NULL OR btrim(p_call_sid) = ''
+     OR p_dialled IS NULL OR btrim(p_dialled) = '' THEN
+    RAISE EXCEPTION 'app_record_screened_pending_dial: business, call sid and dialled number are required';
+  END IF;
+  DELETE FROM pending_dials WHERE started_at < now() - interval '1 day';
+  INSERT INTO pending_dials (business_id, call_sid, caller_number, dialled_number, expires_at, screened)
+  VALUES (
+    p_business,
+    p_call_sid,
+    NULLIF(btrim(p_caller), ''),
+    btrim(p_dialled),
+    now() + make_interval(secs => LEAST(GREATEST(COALESCE(p_timeout_sec, 20), 5), 120) + 15),
+    true
+  )
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+
+REVOKE ALL ON FUNCTION app_record_screened_pending_dial(uuid, text, text, text, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_record_screened_pending_dial(uuid, text, text, text, integer) TO vetra_app;
+COMMENT ON FUNCTION app_record_screened_pending_dial(uuid, text, text, text, integer) IS
+  'Transfer screening: app_record_pending_dial for a dial that carries a whisper; the row is born screened. Expires at timeout + 15 s.';
+
+CREATE OR REPLACE FUNCTION app_pending_dial_business(p_call_sid text)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT pd.business_id
+    FROM pending_dials pd
+   WHERE pd.call_sid = p_call_sid
+     AND pd.screened
+     AND pd.ended_at IS NULL
+   ORDER BY pd.id DESC
+   LIMIT 1;
+$$;
+
+REVOKE ALL ON FUNCTION app_pending_dial_business(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_pending_dial_business(text) TO vetra_app;
+COMMENT ON FUNCTION app_pending_dial_business(text) IS
+  'Transfer screening: the business of the newest open screened dial of this parent call, else NULL.';
+
+CREATE OR REPLACE FUNCTION app_accept_pending_dial(p_call_sid text)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_n integer;
+BEGIN
+  IF p_call_sid IS NULL OR btrim(p_call_sid) = '' THEN
+    RETURN 0;
+  END IF;
+  UPDATE pending_dials
+     SET accepted_at = now()
+   WHERE call_sid = p_call_sid
+     AND screened
+     AND ended_at IS NULL;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END $$;
+
+REVOKE ALL ON FUNCTION app_accept_pending_dial(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_accept_pending_dial(text) TO vetra_app;
+COMMENT ON FUNCTION app_accept_pending_dial(text) IS
+  'Transfer screening: stamps accepted_at on the open screened dials of a parent call (the dispatcher pressed 1); returns how many.';
+
+CREATE OR REPLACE FUNCTION app_pending_dial_outcome(p_call_sid text)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT COALESCE(
+    (SELECT CASE
+              WHEN NOT pd.screened THEN 'unscreened'
+              WHEN pd.accepted_at IS NOT NULL THEN 'accepted'
+              ELSE 'not_accepted'
+            END
+       FROM pending_dials pd
+      WHERE pd.call_sid = p_call_sid
+      ORDER BY pd.id DESC
+      LIMIT 1),
+    'unscreened'
+  );
+$$;
+
+REVOKE ALL ON FUNCTION app_pending_dial_outcome(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_pending_dial_outcome(text) TO vetra_app;
+COMMENT ON FUNCTION app_pending_dial_outcome(text) IS
+  'Transfer screening: unscreened, accepted or not_accepted, judged on the newest dial row of this parent call; no row is unscreened.';
 
 -- ------------------------------------------------------------
 -- appointment_changes (migration 062): booking moves and cancellations,

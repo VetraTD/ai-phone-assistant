@@ -513,6 +513,8 @@ export function loadConfig(business, capabilityRows = null) {
       transferPolicy: "always",
       transferNoAnswer: "take_message",
       allowPricierNumbers: false,
+      transferScreening: false,
+      transferWhisper: null,
       languagesSpoken: ["en"],
       customInstructions: null,
       voiceProvider: "elevenlabs",
@@ -569,6 +571,14 @@ export function loadConfig(business, capabilityRows = null) {
       : "take_message",
     // Strict: only a real boolean true switches pricier numbers on (migration 053).
     allowPricierNumbers: business.allow_pricier_numbers === true,
+    // Inbound transfer screening (migration 063): strict, like the switch above.
+    // Whether it is EFFECTIVE also depends on transferNoAnswer (never with
+    // own_voicemail); the dial sites decide that, not this loader.
+    transferScreening: business.transfer_screening === true,
+    transferWhisper:
+      typeof business.transfer_whisper === "string" && business.transfer_whisper.trim()
+        ? business.transfer_whisper.trim()
+        : null,
     languagesSpoken: Array.isArray(business.languages_spoken) ? business.languages_spoken : ["en"],
     customInstructions: business.custom_instructions || null,
     voiceProvider: business.voice_provider || "elevenlabs",
@@ -785,11 +795,14 @@ export async function lookupBusinessByPhone(twilioNumber) {
 
 /**
  * Record a transfer dial that may still be ringing (loop guard).
+ * `screened` marks a dial that carries a whisper (migration 063): the row is
+ * born screened through app_record_screened_pending_dial.
  * @returns {Promise<number|string|null>} the new row id, null when no database
  */
-export async function recordPendingDial({ businessId, callSid, callerNumber, dialledNumber, timeoutSec }) {
+export async function recordPendingDial({ businessId, callSid, callerNumber, dialledNumber, timeoutSec, screened }) {
   if (!pool) return null;
-  const res = await pool.query(`SELECT app_record_pending_dial($1,$2,$3,$4,$5) AS id`, [
+  const fn = screened === true ? "app_record_screened_pending_dial" : "app_record_pending_dial";
+  const res = await pool.query(`SELECT ${fn}($1,$2,$3,$4,$5) AS id`, [
     businessId,
     callSid,
     callerNumber ?? null,
@@ -799,6 +812,37 @@ export async function recordPendingDial({ businessId, callSid, callerNumber, dia
   const id = res.rows[0].id;
   noteAccess("recordPendingDial", { rowCount: 1 });
   return id;
+}
+
+/**
+ * The business of the open screened dial of a parent call (the whisper route
+ * has no tenant scope of its own). Throws on a database error.
+ * @returns {Promise<string|null>} null when none, or when no database
+ */
+export async function pendingDialBusiness(callSid) {
+  if (!pool) return null;
+  const res = await pool.query(`SELECT app_pending_dial_business($1) AS b`, [callSid ?? null]);
+  return res.rows[0].b ?? null;
+}
+
+/**
+ * The dispatcher pressed 1: stamp the open screened dials of a parent call.
+ * @returns {Promise<number|null>} rows stamped, null when no database
+ */
+export async function acceptPendingDial(callSid) {
+  if (!pool) return null;
+  const res = await pool.query(`SELECT app_accept_pending_dial($1) AS n`, [callSid ?? null]);
+  return res.rows[0].n;
+}
+
+/**
+ * How the newest dial of a parent call was screened.
+ * @returns {Promise<'unscreened'|'accepted'|'not_accepted'|null>} null when no database
+ */
+export async function pendingDialOutcome(callSid) {
+  if (!pool) return null;
+  const res = await pool.query(`SELECT app_pending_dial_outcome($1) AS v`, [callSid ?? null]);
+  return res.rows[0].v;
 }
 
 /**

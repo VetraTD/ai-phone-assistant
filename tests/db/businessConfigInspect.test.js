@@ -134,6 +134,8 @@ d("db-inspect --business config read-back", () => {
     expect(row.main_phone_last4).toBeNull();
     expect(row.outbound_enabled).toBe(false);
     expect(row.transfer_no_answer).toBe("take_message");
+    expect(row.transfer_screening).toBe(false);
+    expect(row.transfer_whisper).toBeNull();
   });
 
   it("returns [] for an unknown number", async () => {

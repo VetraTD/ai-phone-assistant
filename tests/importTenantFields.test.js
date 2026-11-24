@@ -136,3 +136,38 @@ describe("import-tenant BUSINESS_FIELDS vs the migration history", () => {
     expect(fields).toContain("phone_number");
   });
 });
+
+describe("import-tenant transfer screening fields", () => {
+  it("both fields are imported, and exist in the migration history", () => {
+    const fields = importerFields();
+    expect(fields).toContain("transfer_screening");
+    expect(fields).toContain("transfer_whisper");
+    const history = columnHistory();
+    expect(history.transfer_screening?.act).toBe("add");
+    expect(history.transfer_whisper?.act).toBe("add");
+  });
+
+  it("they are written on an update", async () => {
+    const c = fakeClient({ existing: true });
+    await importTenant(c, payloadWith({ transfer_screening: true, transfer_whisper: "Press 1." }));
+    const upd = c.sql.find((s) => /^\s*UPDATE businesses/i.test(s));
+    expect(upd).toMatch(/transfer_screening = /);
+    expect(upd).toMatch(/transfer_whisper = /);
+  });
+
+  it("screening with transfer_no_answer own_voicemail is refused before any write", async () => {
+    const c = fakeClient({ existing: true });
+    await expect(
+      importTenant(c, payloadWith({ transfer_screening: true, transfer_no_answer: "own_voicemail" }))
+    ).rejects.toThrow(/own_voicemail/);
+    expect(wrote(c)).toBe(false);
+  });
+
+  it("a non-boolean screening value, or a bad whisper, is refused", async () => {
+    for (const extra of [{ transfer_screening: "true" }, { transfer_whisper: "x".repeat(201) }, { transfer_whisper: "a\nb" }]) {
+      const c = fakeClient({ existing: true });
+      await expect(importTenant(c, payloadWith(extra))).rejects.toThrow(/transfer_/);
+      expect(wrote(c)).toBe(false);
+    }
+  });
+});

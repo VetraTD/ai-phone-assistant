@@ -104,9 +104,35 @@ const BUSINESS_FIELDS = [
   // against the migration history so the next dropped column cannot repeat it.
   "sms_followup_enabled",
   "sms_templates",
+  // Inbound transfer screening (migration 063); see checkTransferScreening.
+  "transfer_screening",
+  "transfer_whisper",
 ];
 
 const COMPLIANCE_TIERS = ["standard", "hipaa"];
+
+/**
+ * Transfer screening needs a person to press 1: refuse a payload that asks for
+ * it together with transfer_no_answer = own_voicemail, and bad values, before
+ * anything is written. `transfer_no_answer` is not an imported field, but a
+ * payload that names it is still checked against it.
+ */
+function checkTransferScreening(business) {
+  const { transfer_screening: screening, transfer_whisper: whisper } = business;
+  if (screening !== undefined && screening !== null && typeof screening !== "boolean") {
+    throw new Error("business.transfer_screening must be true or false.");
+  }
+  if (whisper !== undefined && whisper !== null) {
+    if (typeof whisper !== "string" || /[\r\n]/.test(whisper) || whisper.length > 200) {
+      throw new Error("business.transfer_whisper must be one line of at most 200 characters.");
+    }
+  }
+  if (screening === true && business.transfer_no_answer === "own_voicemail") {
+    throw new Error(
+      "business.transfer_screening=true cannot be combined with transfer_no_answer=own_voicemail (nobody can press 1 on a voicemail greeting). Nothing was written."
+    );
+  }
+}
 
 // Named so the refusal is specific rather than a general "looks like PHI".
 const REFUSED_TABLES = [
@@ -190,6 +216,8 @@ export function parsePayload(b64) {
     );
   }
 
+  checkTransferScreening(business);
+
   const known = {};
   const ignored = [];
   for (const [k, v] of Object.entries(business)) {
@@ -212,6 +240,8 @@ export async function importTenant(client, { business, ignored, capabilities }) 
   }
 
   const phone = business.phone_number ? String(business.phone_number).trim() : null;
+
+  checkTransferScreening(business);
 
   await client.query("BEGIN");
   try {

@@ -102,6 +102,15 @@ const FIELDS = [
   // WE set it; there is no dashboard screen. Off by default: only numbers at or
   // under 10 cents/min are dialled automatically. Exactly "true" or "false".
   "allow_pricier_numbers",
+  // Inbound transfer screening (migration 063): the dispatcher hears a whisper
+  // and must press 1, or the call counts as unanswered. WE set it; no dashboard
+  // screen. Exactly "true" or "false". Refused with transfer_no_answer =
+  // own_voicemail (a voicemail greeting cannot press 1, and that mode hands the
+  // caller to the voicemail on purpose).
+  "transfer_screening",
+  // The whisper text, at most 200 characters on one line. Empty (NULL) means the
+  // built-in wording; --copy of a NULL clears it.
+  "transfer_whisper",
 ];
 
 /**
@@ -119,10 +128,27 @@ const VALIDATORS = {
   transfer_phone_number: (v) =>
     E164.test(v) ? null : `must be E.164, + then 7-15 digits, no spaces or formatting (got a value ending ${last4(v)})`,
   allow_pricier_numbers: (v) => (v === "true" || v === "false" ? null : "must be exactly true or false"),
+  transfer_screening: (v) => (v === "true" || v === "false" ? null : "must be exactly true or false"),
+  transfer_whisper: (v) =>
+    /[\r\n]/.test(v) ? "must be one line, no newlines" : v.length > 200 ? "must be at most 200 characters" : null,
 };
 function refusal(field, value, flag) {
   const err = VALIDATORS[field]?.(value);
   return err ? `Refusing: ${flag} ${field} ${err}.` : null;
+}
+
+/**
+ * Screening needs a person to press 1, so it cannot be combined with the mode
+ * that sends an unanswered transfer to the business's own voicemail.
+ * `changes` is what this command writes; `current` is the row as it stands.
+ */
+function screeningRefusal(changes, current) {
+  const pick = (f) => (f in changes ? changes[f] : current?.[f]);
+  const screening = String(pick("transfer_screening")) === "true";
+  if (screening && pick("transfer_no_answer") === "own_voicemail") {
+    return "Refusing: transfer_screening=true cannot be combined with transfer_no_answer=own_voicemail (nobody can press 1 on a voicemail greeting).";
+  }
+  return null;
 }
 
 /**
@@ -193,6 +219,16 @@ for (let i = 0; i < argv.length; i += 1) {
 // known yet: the check after the copy decides.
 if (SETS.transfer_phone_number !== undefined && (SETS.allow_pricier_numbers !== undefined || !COPY.includes("allow_pricier_numbers"))) {
   const bad = transferPriceRefusal(SETS.transfer_phone_number, SETS.allow_pricier_numbers === "true", "--set");
+  if (bad) {
+    console.error(bad);
+    process.exit(1);
+  }
+}
+
+// With nothing known about the stored row yet, check what this command writes;
+// the check after the row is read repeats it against the stored values.
+if (SETS.transfer_screening !== undefined || SETS.transfer_no_answer !== undefined) {
+  const bad = screeningRefusal(SETS, null);
   if (bad) {
     console.error(bad);
     process.exit(1);
@@ -290,6 +326,15 @@ try {
   // write, with the allow_pricier_numbers value THIS command writes (if any).
   if (changes.transfer_phone_number !== null && changes.transfer_phone_number !== undefined) {
     const bad = transferPriceRefusal(changes.transfer_phone_number, changes.allow_pricier_numbers === "true", "--copy/--set");
+    if (bad) {
+      console.error(bad);
+      process.exit(1);
+    }
+  }
+
+  // The combination, judged on the row as it will be AFTER this command.
+  {
+    const bad = screeningRefusal(changes, target);
     if (bad) {
       console.error(bad);
       process.exit(1);

@@ -98,3 +98,35 @@ describe("set-business-config: transfer_phone_number price check", () => {
     expect(r.stderr).toContain("Refusing");
   });
 });
+
+describe("set-business-config: transfer screening", () => {
+  it("transfer_screening is exactly true or false", () => {
+    for (const bad of ["yes", "TRUE", "1"]) {
+      const r = run("transfer_screening", bad);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("Refusing: --set transfer_screening");
+    }
+    PASSED(run("transfer_screening", "true"));
+    PASSED(run("transfer_screening", "false"));
+  });
+  it("transfer_whisper: at most 200 characters, no newlines", () => {
+    expect(run("transfer_whisper", "x".repeat(201)).status).toBe(1);
+    expect(run("transfer_whisper", "one\ntwo").status).toBe(1);
+    expect(run("transfer_whisper", "one\r\ntwo").stderr).toContain("Refusing: --set transfer_whisper");
+    PASSED(run("transfer_whisper", "x".repeat(200)));
+    PASSED(run("transfer_whisper", "Urgent taxi request. Press 1 to take it."));
+  });
+  it("refuses transfer_screening=true together with transfer_no_answer=own_voicemail, either order", () => {
+    for (const pairs of [
+      [["transfer_screening", "true"], ["transfer_no_answer", "own_voicemail"]],
+      [["transfer_no_answer", "own_voicemail"], ["transfer_screening", "true"]],
+    ]) {
+      const r = runMany(pairs);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("Refusing");
+      expect(r.stderr).toContain("own_voicemail");
+    }
+    PASSED(runMany([["transfer_screening", "true"], ["transfer_no_answer", "take_message"]]));
+    PASSED(runMany([["transfer_screening", "false"], ["transfer_no_answer", "own_voicemail"]]));
+  });
+});

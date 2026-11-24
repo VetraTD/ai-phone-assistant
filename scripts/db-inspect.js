@@ -51,7 +51,8 @@ const cfg = {
 //
 //   --business <e164>   tenant CONFIG only. Name, timezone, hours, policy,
 //                       allowed_tasks, and whether general_info holds anything.
-//                       Also transfer_policy, transfer_no_answer, live_voice,
+//                       Also transfer_policy, transfer_no_answer, transfer_screening,
+//                       transfer_whisper, live_voice,
 //                       locale, outbound_enabled, and transfer_phone_last4 /
 //                       main_phone_last4 -- those two numbers are ONLY ever
 //                       printed as their last 4 digits (masked in SQL, see
