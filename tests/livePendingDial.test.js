@@ -296,6 +296,46 @@ describe("Live inbound transfer: pending dial", () => {
     expect(db.recordPendingDial.mock.calls[0][0].timeoutSec).toBe(45);
   });
 
+  describe("screening", () => {
+    const BUSINESS_NUMBER = "+441372656055";
+    it("screening on: <Number url> whisper, callerId = the business number, row screened with that callerId and +16 s", async () => {
+      const { db, updates } = await inboundTransfer(NORMAL, { extra: { transferScreening: true } });
+      const twiml = updates[0].twiml;
+      expect(twiml).toContain(`callerId="${BUSINESS_NUMBER}"`);
+      expect(twiml).not.toContain(CALLER);
+      expect(twiml).toContain(`<Number url="https://voice.example.com/twilio/transfer-whisper?b=${BIZ}" method="POST">${NORMAL}</Number>`);
+      expect(db.recordPendingDial).toHaveBeenCalledWith({
+        businessId: BIZ,
+        callSid: OUT_SID,
+        callerNumber: BUSINESS_NUMBER,
+        dialledNumber: NORMAL,
+        timeoutSec: 36,
+        screened: true,
+      });
+    });
+
+    it("screening on with the dispatcher's own voicemail: today's TwiML and today's row", async () => {
+      const { db, updates } = await inboundTransfer(NORMAL, {
+        extra: { transferScreening: true, transferNoAnswer: "own_voicemail" },
+      });
+      expect(updates[0].twiml).not.toContain("<Number");
+      expect(updates[0].twiml).toContain(`callerId="${CALLER}"`);
+      expect(db.recordPendingDial).toHaveBeenCalledWith({
+        businessId: BIZ,
+        callSid: OUT_SID,
+        callerNumber: CALLER,
+        dialledNumber: NORMAL,
+        timeoutSec: 45,
+      });
+    });
+
+    it("screening off: no whisper, caller's number", async () => {
+      const { updates } = await inboundTransfer(NORMAL, { extra: { transferScreening: false } });
+      expect(updates[0].twiml).not.toContain("<Number");
+      expect(updates[0].twiml).toContain(`callerId="${CALLER}"`);
+    });
+  });
+
   it("an anonymous or withheld caller is recorded as null, never the placeholder", async () => {
     for (const callerPhone of ["anonymous", "+266696687", "+7378742833", "+86282452253", "+2562533"]) {
       const { db } = await inboundTransfer(NORMAL, { callerPhone });

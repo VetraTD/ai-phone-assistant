@@ -1545,6 +1545,25 @@ describe("session.js — v2 pipeline orchestrator", () => {
     expect(await runCascadeTransfer()).toMatch(/timeout="20"/);
   });
 
+  it("9a-ii-d. screening on: whisper URL, callerId = the business number, row screened (+16 s)", async () => {
+    db.recordPendingDial.mockClear();
+    const twiml = await runCascadeTransfer({ config: { transferScreening: true } });
+    expect(twiml).toMatch(/<Number url="[^"]*\/twilio\/transfer-whisper\?b=biz1" method="POST">\+15551234567<\/Number>/);
+    const callerId = twiml.match(/callerId="([^"]*)"/)[1];
+    expect(callerId).not.toBe("+15559999999");
+    const row = db.recordPendingDial.mock.calls[0][0];
+    expect(row).toMatchObject({ businessId: "biz1", screened: true, callerNumber: callerId, timeoutSec: 36 });
+  });
+
+  it("9a-ii-e. screening on with own_voicemail: today's TwiML and row", async () => {
+    db.recordPendingDial.mockClear();
+    const twiml = await runCascadeTransfer({ config: { transferScreening: true, transferNoAnswer: "own_voicemail" } });
+    expect(twiml).not.toContain("<Number");
+    expect(twiml).toContain('callerId="+15559999999"');
+    expect(db.recordPendingDial.mock.calls[0][0]).not.toHaveProperty("screened");
+    expect(db.recordPendingDial.mock.calls[0][0].timeoutSec).toBe(45);
+  });
+
   it("9a-ii-c. an anonymous caller (no number) -> the transfer TwiML has no callerId attribute", async () => {
     const twiml = await runCascadeTransfer({ callerPhone: "" });
     expect(twiml).toContain("<Dial ");

@@ -9,6 +9,11 @@ import {
   buildDegradedVoicemailTwiml,
   buildUnroutedVoicemailTwiml,
   buildUnroutedTransferTwiml,
+  buildTransferWhisperTwiml,
+  buildTransferAcceptTwiml,
+  screeningEffective,
+  TRANSFER_WHISPER_PATH,
+  TRANSFER_ACCEPT_PATH,
 } from "../lib/twiml.js";
 
 describe("CALL_LINES", () => {
@@ -128,5 +133,37 @@ describe("buildUnroutedTransferTwiml voice escaping", () => {
     const x = buildUnroutedTransferTwiml("+1555", "+1666", "us", 'Polly."Amy');
     expect(x).toContain('<Say voice="Polly.&quot;Amy">');
     expect(x).not.toContain('voice="Polly."Amy"');
+  });
+});
+
+describe("transfer screening TwiML", () => {
+  it("paths", () => {
+    expect(TRANSFER_WHISPER_PATH).toBe("/twilio/transfer-whisper");
+    expect(TRANSFER_ACCEPT_PATH).toBe("/twilio/transfer-accept");
+  });
+  it("buildTransferTwiml with whisperUrl wraps the number in <Number url>", () => {
+    expect(
+      buildTransferTwiml({ number: "+1555", callerId: "+1666", ringTone: "us", actionUrl: "https://b/a", whisperUrl: "https://b/w?b=x&y=1" })
+    ).toBe(
+      '<Response><Dial ringTone="us" timeout="20" timeLimit="3600" action="https://b/a" method="POST" callerId="+1666"><Number url="https://b/w?b=x&amp;y=1" method="POST">+1555</Number></Dial></Response>'
+    );
+  });
+  it("the whisper document", () => {
+    expect(buildTransferWhisperTwiml({ text: 'Hi <you> & "me"', sayVoice: "Polly.Amy", actionUrl: "https://b/acc" })).toBe(
+      '<Response><Gather numDigits="1" timeout="6" action="https://b/acc" method="POST">' +
+        '<Say voice="Polly.Amy">Hi &lt;you&gt; &amp; &quot;me&quot;</Say><Pause length="1"/><Say voice="Polly.Amy">Hi &lt;you&gt; &amp; &quot;me&quot;</Say>' +
+        "</Gather><Hangup/></Response>"
+    );
+  });
+  it("the accept document", () => {
+    expect(buildTransferAcceptTwiml(true)).toBe("<Response></Response>");
+    expect(buildTransferAcceptTwiml(false)).toBe("<Response><Hangup/></Response>");
+  });
+  it("screeningEffective", () => {
+    expect(screeningEffective({ transferScreening: true })).toBe(true);
+    expect(screeningEffective({ transferScreening: true, transferNoAnswer: "own_voicemail" })).toBe(false);
+    expect(screeningEffective({ transferScreening: "true" })).toBe(false);
+    expect(screeningEffective({})).toBe(false);
+    expect(screeningEffective(null)).toBe(false);
   });
 });
