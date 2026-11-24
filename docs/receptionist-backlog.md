@@ -17528,12 +17528,23 @@ Recorded, not fixed (product code, outside a config-only session).
 - Systematic, not one call: re-scored with a "pickup saved before payment is asked" assert, the v5 config passed
   1/12 trip sims. Config "After EVERY answer, save again" (v6) raised it to ~2 in 3 calls; one v6 run still saved
   once and claimed "passed on". Prompt wording cannot guarantee a write.
-- Owner's three v6b test calls 2026-11-24 (00:44-00:51Z): EVERY booking call lost something the caller said: the
-  date and flight (CA415bf439, asked then never saved), the caller's NAME (CA13bffc75: the only save came before the
-  name; the caller gave three answers in one line and the agent skipped the remaining notes questions entirely).
-  Sims undercounted it because persona callers answer one question per turn.
-- Related, same calls: the ASAP transfer (CAe6dc69e7) reported `completed` in ~17 s, likely the owner mobile's
-  voicemail: inbound transfers have no call screening (lib/twiml.js:95), so a voicemail counts as answered.
+- Owner's three v6b test calls 2026-11-24 (00:44-00:51Z): both booking calls lost something the caller said: the
+  date (never asked) and the flight (asked, then left OUT of the final save: an omission, not an after-save loss) on
+  CA415bf439; on CA13bffc75 the caller gave three answers in one line and the agent skipped the remaining notes
+  questions entirely (passengers, luggage, payment never asked). (Corrected: an earlier note said CA13bffc75 lost the
+  caller's name. Turn events log when the reply ENDS; the save came after the name.) Sims undercounted all of this
+  because persona callers answer one question per turn.
+- Related, same calls: the ASAP transfer (CAe6dc69e7): Twilio child leg answered after 1 s, 16 s connected: the
+  owner's mobile was busy and its voicemail answered. Inbound transfers have no call screening (lib/twiml.js:95), so
+  a voicemail counts as answered and the caller hears the dispatcher's personal voicemail.
+- **Digile has it too** (log census 2026-11-24, 41 calls 11-10..11-22, read-only): 3 of the 30 calls with a save had
+  a caller answer AFTER the last save, each followed by a "passed on" claim (CAecaa4bd1 company name; CA681e83d6 the
+  lead's preferred consultation day/time; CAbe4cb1ea a re-asked answer). Of the 11 no-save calls: CA08e7e668 read a
+  message back and said "Ilija will get back to you" with NO save (owner's own number: a test call); CAd6459d24 said
+  "I'll pass your message on" with no save (an SEO seller); CA7e8221f7 took a name then the caller hung up before the
+  reason. Census method: tool_duration(record_customer_request) vs live_debug_assistant_turn; an answer is unsaved
+  when the question's turn ENDED after the last save (logged `ts` field is a string: use the entry timestamp).
+  Omissions (answer said before the save but left out of it) are invisible in logs (args not logged).
 - Generic, every tenant whose messages notes ask questions (Digile too). Candidate code fixes, owner to choose:
   (a) end_call / "passed on" guard: refuse end_call while the caller has answered notes questions since the last
   record_customer_request, tool reply "save the request with all the details first"; (b) post-call recovery that
