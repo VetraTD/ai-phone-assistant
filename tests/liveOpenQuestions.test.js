@@ -131,3 +131,45 @@ describe("a save the end_call guard forced", () => {
     expect(resave.response.next_step).toBeUndefined();
   });
 });
+
+// Fix round 2 (owner's call 5(i), 2026-11-24): an URGENT save and request_transfer
+// in one batch -- the save reply still said "ask whether there is anything else",
+// and the caller heard "anything else?" while being put through.
+describe("a save in the same batch as request_transfer", () => {
+  const XFER = { ...BASE, transferPhoneNumber: "+18175550199", capabilities: {} };
+  const URGENT = { ...MESSAGE, message: "URGENT: car now from Lingfield station" };
+
+  it("save then transfer: no completion note on the save", async () => {
+    const s = await bootLive({ config: XFER, callSid: "CA_oq_xfer_1" });
+    await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
+    const out = await s.callToolBatch([
+      ["record_customer_request", URGENT],
+      ["request_transfer", { reason: "needs a car now" }],
+    ]);
+    const save = out.find((r) => r.name === "record_customer_request");
+    expect(save.response.success).toBe(true);
+    expect(save.response.next_step).toBeUndefined();
+    expect(counters().live_completion_ask_note_skipped_transfer).toBe(1);
+    expect(counters().live_completion_ask_note_sent ?? 0).toBe(0);
+  });
+
+  it("transfer then save: no completion note either", async () => {
+    const s = await bootLive({ config: XFER, callSid: "CA_oq_xfer_2" });
+    await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
+    const out = await s.callToolBatch([
+      ["request_transfer", { reason: "needs a car now" }],
+      ["record_customer_request", URGENT],
+    ]);
+    const save = out.find((r) => r.name === "record_customer_request");
+    expect(save.response.next_step).toBeUndefined();
+    expect(counters().live_completion_ask_note_skipped_transfer).toBe(1);
+  });
+
+  it("control: the same save alone still gets the completion note", async () => {
+    const s = await bootLive({ config: XFER, callSid: "CA_oq_xfer_3" });
+    await s.callerSays("I need a car right now, it's Jon at Lingfield station.");
+    const out = await s.callToolBatch([["record_customer_request", URGENT]]);
+    expect(out[0].response.next_step).toMatch(/anything else/i);
+    expect(counters().live_completion_ask_note_skipped_transfer ?? 0).toBe(0);
+  });
+});
