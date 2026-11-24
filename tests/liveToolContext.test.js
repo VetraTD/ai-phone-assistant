@@ -310,6 +310,85 @@ describe("Live tool context — the fields tools actually depend on arrive", () 
   });
 });
 
+// LVX192. The save guard's four inputs, and the one fact Task 5 reads. A number
+// is the wire: services/tools.js runs the guard only when unsavedCallerTurns is
+// a number, so a field produced and not copied here is a guard that never runs.
+describe("Live tool context -- the save guard's wire (LVX192)", () => {
+  const TURN = {
+    step: "gather_details",
+    callerTurnCount: 3,
+    unsavedCallerTurns: 2,
+    messagesSaved: 1,
+    promisedWithoutSave: false,
+    saveGuardSpent: true,
+    saveGuardPending: true,
+  };
+
+  it("carries all five fields through to the tool", async () => {
+    const ctx = await ctxFor(() => TURN);
+    expect(ctx.unsavedCallerTurns).toBe(2);
+    expect(ctx.messagesSaved).toBe(1);
+    expect(ctx.promisedWithoutSave).toBe(false);
+    expect(ctx.saveGuardSpent).toBe(true);
+    expect(ctx.saveGuardPending).toBe(true);
+  });
+
+  it("leaves the count undefined where nobody counts, so the gate no-ops", async () => {
+    const ctx = await ctxFor(() => ({ step: "gather_details", callerTurnCount: 3 }));
+    expect(ctx.unsavedCallerTurns).toBeUndefined();
+    expect(ctx.messagesSaved).toBeUndefined();
+    expect(ctx.saveGuardSpent).toBe(false);
+    expect(ctx.promisedWithoutSave).toBe(false);
+  });
+
+  it("a save earlier in the SAME batch clears the count for the end_call after it", async () => {
+    const execute = vi.fn(async (fc) => ({
+      functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
+    }));
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ ...TURN, saveGuardSpent: false, promisedWithoutSave: true, messagesSaved: 0 }),
+    });
+    const out = await runner.handleToolCall({
+      functionCalls: [
+        { id: "1", name: "end_call", args: {} },
+        { id: "2", name: "record_customer_request", args: { request_type: "message", caller_name: "Jon", message: "m" } },
+        { id: "3", name: "end_call", args: {} },
+      ],
+    });
+    const [first, , third] = execute.mock.calls.map((c) => c[1]);
+    expect(first.unsavedCallerTurns).toBe(2);
+    expect(third.unsavedCallerTurns).toBe(0);
+    expect(third.messagesSaved).toBe(1);
+    expect(third.promisedWithoutSave).toBe(false);
+    expect(out.customerRequestSaves).toEqual([
+      { request_type: "message", caller_name: "Jon", callback_number: undefined, message: "m", caller_type: undefined },
+    ]);
+  });
+
+  it("an unsaved refusal earlier in the batch spends the latch for the next call", async () => {
+    const execute = vi.fn(async (fc, ctx) => ({
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false } },
+      stateEffects: { endCallRefusal: ctx.saveGuardSpent ? null : "unsaved" },
+    }));
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ ...TURN, saveGuardSpent: false }),
+    });
+    const out = await runner.handleToolCall({
+      functionCalls: [
+        { id: "1", name: "end_call", args: {} },
+        { id: "2", name: "end_call", args: {} },
+      ],
+    });
+    expect(execute.mock.calls.map((c) => c[1].saveGuardSpent)).toEqual([false, true]);
+    expect(out.endCallRefusal).toBe("unsaved");
+  });
+});
 
 // Final review M5 (2026-10-02): a completed action spends the write-order
 // state of its pack, not just the stash. Otherwise a proposal the ceiling

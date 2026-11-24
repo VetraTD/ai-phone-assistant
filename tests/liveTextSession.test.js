@@ -228,3 +228,49 @@ describe("the socket is given back", () => {
     expect(live.connect).toHaveBeenCalledTimes(1);
   });
 });
+
+// LVX192. The sims exercise the same save guard the phone does.
+describe("the Live eval driver carries the save guard's turn state", () => {
+  const call = (name, args) => ({ toolCall: { functionCalls: [{ id: `c_${name}`, name, args }] } });
+
+  it("hands the runner numbers and booleans, and counts one caller turn per sendTurn", async () => {
+    const { session } = makeSession({
+      script: [[say("Passing that on now."), endTurn()], [say("Right."), endTurn()]],
+    });
+    const fresh = session.peekTurnState();
+    expect(fresh.unsavedCallerTurns).toBe(0);
+    expect(fresh.messagesSaved).toBe(0);
+    expect(fresh.promisedWithoutSave).toBe(false);
+    expect(fresh.saveGuardSpent).toBe(false);
+    expect(fresh.saveGuardPending).toBe(false);
+
+    await session.sendTurn("It's Jon, about the invoice.");
+    let st = session.peekTurnState();
+    expect(typeof st.unsavedCallerTurns).toBe("number");
+    expect(st.unsavedCallerTurns).toBe(1);
+    // The reply promised and nothing was saved.
+    expect(st.promisedWithoutSave).toBe(true);
+
+    await session.sendTurn("Three of us and two bags.");
+    st = session.peekTurnState();
+    expect(st.unsavedCallerTurns).toBe(2);
+  });
+
+  it("a save clears the count and a closer after it adds nothing", async () => {
+    const { session } = makeSession({
+      script: [
+        [call("record_customer_request", { request_type: "message", caller_name: "Jon", message: "about the invoice" }), say("Passing that on now."), endTurn()],
+        [say("Anything else?"), endTurn()],
+      ],
+    });
+    await session.sendTurn("It's Jon, about the invoice.");
+    let st = session.peekTurnState();
+    expect(st.messagesSaved).toBe(1);
+    expect(st.unsavedCallerTurns).toBe(0);
+    expect(st.promisedWithoutSave).toBe(false);
+
+    await session.sendTurn("No, that's all, thanks, bye.");
+    st = session.peekTurnState();
+    expect(st.unsavedCallerTurns).toBe(0);
+  });
+});
