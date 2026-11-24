@@ -57,3 +57,28 @@ describe("countUnsaved", () => {
     expect(countUnsaved(turns, 99)).toBe(0);
   });
 });
+
+describe("read-back detection (fix round 1)", () => {
+  it("a bare yes after a tag question 'right?' is a confirmation", () => {
+    expect(isInformativeCallerTurn("yes", "Two passengers, right?")).toBe(false);
+    expect(isInformativeCallerTurn("yes", "That's the pickup at the station, OK?")).toBe(false);
+  });
+
+  it("a bare yes to an offer is an answer, not a confirmation", () => {
+    expect(isInformativeCallerTurn("yes", "Would you like me to add a child seat?")).toBe(true);
+    expect(isInformativeCallerTurn("yes please", "Shall I put you down for the airport run?")).toBe(true);
+  });
+
+  it("'bright?' is not a tag question", () => {
+    expect(isInformativeCallerTurn("yes", "Is the room bright?")).toBe(true);
+  });
+
+  it("uses the locale's read-back test when one is passed", () => {
+    const re = /confirm that/i;
+    expect(isInformativeCallerTurn("yes", "Can you confirm that for me", re)).toBe(false);
+    expect(isInformativeCallerTurn("yes", "Two passengers, right?", re)).toBe(true);
+    const turns = [{ index: 1, caller: "yes", prevReply: "Can you confirm that for me" }];
+    expect(countUnsaved(turns, 0, re)).toBe(0);
+    expect(countUnsaved(turns, 0)).toBe(1);
+  });
+});

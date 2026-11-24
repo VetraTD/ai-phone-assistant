@@ -368,6 +368,28 @@ describe("Live tool context -- the save guard's wire (LVX192)", () => {
     ]);
   });
 
+  it("surfaces the unsaved refusal even when a later refusal's kind is the one returned", async () => {
+    const kinds = ["unsaved", "no_ask"];
+    const execute = vi.fn(async (fc) => ({
+      functionResponse: { id: fc.id, name: fc.name, response: { success: false } },
+      stateEffects: { endCallRefusal: kinds.shift() },
+    }));
+    const runner = createToolRunner({
+      config: CONFIG,
+      extras: { integrations: [], businessId: "b1", callerPhone: "+1469", callId: "c1" },
+      execute,
+      turnState: () => ({ ...TURN, saveGuardSpent: false }),
+    });
+    const out = await runner.handleToolCall({
+      functionCalls: [
+        { id: "1", name: "end_call", args: {} },
+        { id: "2", name: "end_call", args: {} },
+      ],
+    });
+    expect(out.endCallRefusal).toBe("no_ask");
+    expect(out.saveGuardRefused).toBe(true);
+  });
+
   it("an unsaved refusal earlier in the batch spends the latch for the next call", async () => {
     const execute = vi.fn(async (fc, ctx) => ({
       functionResponse: { id: fc.id, name: fc.name, response: { success: false } },

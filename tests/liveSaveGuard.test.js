@@ -158,16 +158,17 @@ describe("(d) review focus", () => {
     expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
   });
 
-  it("2b: 45 turns later a fresh answer is still counted", async () => {
+  it("2b: after more than 40 informative turns and a save, a fresh answer is still counted", async () => {
     const s = await bootLive({ config: CONFIG, callSid: "CA_sg_d2b" });
+    for (let i = 0; i < 45; i += 1) {
+      await s.callerSays(`detail number ${i} about the job site`);
+      await s.assistantTurn(`Noted item ${i}, what else?`);
+    }
     await s.callerSays("It's Jon, 214 555 0123, it's about the invoice.");
     await s.assistantSays(SUMMARY);
     expect(ok(await s.callTool("record_customer_request", MESSAGE))).toBe(true);
     await s.turnEnds();
-    for (let i = 0; i < 44; i += 1) {
-      await s.callerSays("No thanks");
-      await s.assistantTurn(`Right, item ${i}. Anything at all?`);
-    }
+    expect(s.ws.liveSaveGuard().turnLog).toHaveLength(40);
     await answerThenSignOff(s);
     const [res] = await s.callTool("end_call", {});
     expect(res.response.success).toBe(false);
@@ -260,7 +261,7 @@ describe("(h) a call whose only save is a quote request", () => {
 describe("(j) saveGuardPending", () => {
   it("is true after an unsaved refusal and false after the next successful save", async () => {
     const s = await savedCall("CA_sg_j");
-    expect(s.ws.liveState?.saveGuardPending ?? false).toBe(false);
+    expect(s.ws.liveTurnState().saveGuardPending).toBe(false);
     await answerThenSignOff(s);
     await s.callTool("end_call", {});
     // Read through the one door Task 5 will use: the tool context. A probe tool
@@ -304,5 +305,89 @@ describe("(k) what the after-save note will read (Task 4)", () => {
     expect(st.promisedWithoutSave).toBe(false);
     expect(st.saveGuardSpent).toBe(false);
     expect(st.saveGuardPending).toBe(false);
+  });
+});
+
+describe("fix round 1", () => {
+  it("I1a: a save, then a new caller turn that opens with no turnComplete, then an answer: refused", async () => {
+    const s = await savedCall("CA_sg_i1a");
+    await s.feed(600, { voiced: true });
+    await s.feed(1500, { voiced: false });
+    await s.callerSays("Two bags then.");
+    expect(ok(await s.callTool("record_customer_request", { ...MESSAGE, message: "about the invoice, 2 bags" }))).toBe(true);
+    // No turnComplete: the caller starts a new turn and the old one is flushed.
+    await s.feed(600, { voiced: true });
+    await s.callerSays(ANSWER);
+    await s.assistantSays(`Lovely. ${ASK}`);
+    expect(s.ws.liveSaveGuard().turnLog.map((t) => t.index)).toEqual([1, 2]);
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
+  it("I1b: an interrupt between the save call and its result: the barge-in words are not covered", async () => {
+    const s = await savedCall("CA_sg_i1b");
+    await s.callerSays("Two bags then.");
+    s.live.push({
+      toolCall: {
+        functionCalls: [
+          { id: "fcI", name: "record_customer_request", args: { ...MESSAGE, message: "about the invoice, 2 bags" } },
+        ],
+      },
+    });
+    s.live.push({ serverContent: { interrupted: true } });
+    s.live.push({ serverContent: { inputTranscription: { text: ANSWER } } });
+    await s.settle();
+    await s.settle();
+    await s.assistantSays(`Lovely. ${ASK}`);
+    expect(s.ws.liveSaveGuard().savedThroughTurn).toBe(2);
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
+  it("I2: one loud frame is not an answer; 600 ms of speech is", async () => {
+    const quiet = await savedCall("CA_sg_i2a");
+    await quiet.feed(20, { voiced: true });
+    await quiet.feed(1500, { voiced: false });
+    await quiet.assistantTurn("Is there anything else?");
+    await quiet.callerSays("No that's all, thanks, bye");
+    await quiet.assistantSays("Goodbye.");
+    expect(ok(await quiet.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+
+    const loud = await savedCall("CA_sg_i2b");
+    await loud.feed(600, { voiced: true });
+    await loud.feed(1500, { voiced: false });
+    await loud.assistantTurn("Sorry, could you say that again?");
+    await loud.callerSays("No that's all, thanks, bye");
+    await loud.assistantSays("Goodbye.");
+    const [res] = await loud.callTool("end_call", {});
+    expect(res.response.success).toBe(false);
+    // The refusal rested on sound with no words: counted so live calls show how often.
+    expect(counters().end_call_refused_unsaved_voiced_only).toBe(1);
+  });
+
+  it("M1: a batch [unsaved refusal, no_ask refusal] still spends the latch", async () => {
+    const s = await savedCall("CA_sg_m1");
+    await s.callerSays(ANSWER);
+    // No ask in this turn, so the second end_call is refused as no_ask.
+    await s.assistantSays("Lovely, thank you.");
+    const responses = await s.callToolBatch([["end_call", {}], ["end_call", {}]]);
+    expect(responses.every((r) => r.response.success === false)).toBe(true);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+    expect(s.ws.liveTurnState().saveGuardSpent).toBe(true);
+    await s.assistantSays(ASK);
+    const res = await s.callTool("end_call", {});
+    expect(ok(res)).toBe(true);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
+  it("the after-save snapshot still sees the log, the stamp and the args", async () => {
+    const s = await savedCall("CA_sg_snap");
+    const seam = s.ws.liveSaveGuard();
+    expect(seam.turnLog.map((t) => t.index)).toEqual([1]);
+    expect(seam.savedThroughTurn).toBe(1);
+    expect(seam.lastSaveArgs.caller_name).toBe("Jon");
   });
 });
