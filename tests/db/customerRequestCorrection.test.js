@@ -176,3 +176,29 @@ describeDb("a same-call correction as vetra_app (I3)", () => {
     expect((await rowsOf(callId))[0].callback_number).toBe("214 555 0123");
   });
 });
+
+// Fix round 2 (owner's call 4): a misheard name saved alone, then corrected.
+describeDb("a name corrected on the same call, as vetra_app (fix round 2)", () => {
+  const TRIP = { ...MESSAGE, callerName: "Ayer", message: "Taxi booking request" };
+  const answers = (pickup) => ({ callerType: "new_enquiry", answers: [{ label: "Pickup", answer: pickup }] });
+
+  it("a bare row takes the corrected name and the answers: one row", async () => {
+    const first = await saveCustomerRequest({ db, businessId: TENANT, callId, row: TRIP });
+    const second = await saveCustomerRequest({
+      db,
+      businessId: TENANT,
+      callId,
+      row: { ...TRIP, callerName: "Aisha Patel", details: answers("22 Godstone Road RH7 6AA") },
+    });
+    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(await rowsOf(callId)).toEqual([
+      { request_type: "message", caller_name: "Aisha Patel", callback_number: "214 555 0123", message: "Taxi booking request" },
+    ]);
+  });
+
+  it("a row that holds answers is another traveller: two rows", async () => {
+    await saveCustomerRequest({ db, businessId: TENANT, callId, row: { ...TRIP, callerName: "Jon Doe", details: answers("1 High St") } });
+    await saveCustomerRequest({ db, businessId: TENANT, callId, row: { ...TRIP, callerName: "Mary Jones", details: answers("9 Station Rd") } });
+    expect((await rowsOf(callId)).map((r) => r.caller_name)).toEqual(["Jon Doe", "Mary Jones"]);
+  });
+});

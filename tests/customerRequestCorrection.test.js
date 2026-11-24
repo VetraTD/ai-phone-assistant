@@ -689,3 +689,63 @@ describe("M3: the after-call message is never acknowledged to the caller", () =>
     expect(owed.calls.sms).not.toHaveBeenCalled();
   });
 });
+
+// Fix round 2 (owner's call 4, 2026-11-24): the name was misheard ("Ayer"),
+// saved alone, then corrected with every answer. The correction filed a second
+// row and the email carried an empty "Ayer" entry beside the real booking.
+describe("a name corrected on the same call updates the bare row (fix round 2)", () => {
+  const D = (answers, callerType = "new_enquiry") => ({ callerType, answers });
+  const saveRow = (engine, row) =>
+    saveCustomerRequest({
+      db: engine.deps.db,
+      businessId: "biz-1",
+      callId: engine.call.callId,
+      row: { requestType: "message", callerName: "Ayer", callbackNumber: "214 555 0123", message: "Taxi booking request", preferredTime: null, ...row },
+    });
+
+  it("a row with no answers takes the corrected name and the answers: one row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, {});
+    const res = await saveRow(engine, {
+      callerName: "Aisha Patel",
+      details: D([{ label: "Pickup", answer: "22 Godstone Road, Lingfield RH7 6AA" }]),
+    });
+    expect(res).toMatchObject({ corrected: true });
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].caller_name).toBe("Aisha Patel");
+    expect(calls.rows[0].message).toBe("Taxi booking request");
+    expect(calls.rows[0].details.answers.map((a) => a.label)).toEqual(["Pickup"]);
+  });
+
+  it("a corrected name with no answers yet also lands on the bare row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, {});
+    await saveRow(engine, { callerName: "Aisha Patel" });
+    expect(calls.rows).toHaveLength(1);
+    expect(calls.rows[0].caller_name).toBe("Aisha Patel");
+  });
+
+  it("a row that already holds answers is another traveller: a new row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { callerName: "Jon Doe", details: D([{ label: "Pickup", answer: "1 High Street" }]) });
+    await saveRow(engine, { callerName: "Mary Jones", details: D([{ label: "Pickup", answer: "9 Station Road" }]) });
+    expect(calls.rows).toHaveLength(2);
+    expect(calls.rows.map((r) => r.caller_name)).toEqual(["Jon Doe", "Mary Jones"]);
+  });
+
+  it("a bare row with a different reason is a different request: a new row", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, { message: "complaint about a late driver" });
+    await saveRow(engine, { callerName: "Aisha Patel", message: "lost property, a black umbrella" });
+    expect(calls.rows).toHaveLength(2);
+  });
+
+  it("the same message on another call never takes the name", async () => {
+    const { engine, calls } = makeEngine();
+    await saveRow(engine, {});
+    engine.call.callId = "call-2";
+    await saveRow(engine, { callerName: "Aisha Patel" });
+    expect(calls.rows).toHaveLength(2);
+    expect(calls.rows[0].caller_name).toBe("Ayer");
+  });
+});
