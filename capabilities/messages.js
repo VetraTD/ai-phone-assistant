@@ -23,6 +23,7 @@ import {
 import { partyOfEffect } from "../lib/capabilities/party.js";
 import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
+import { parseNotesQuestions, openQuestions, anyAnswered } from "../lib/capabilities/notesQuestions.js";
 import { nameIsOnFile } from "../lib/nameQuality.js";
 import {
   confirmStyleOf,
@@ -71,6 +72,13 @@ const NEXT_QUESTIONS_NOTE_STANDARD =
 const NEXT_QUESTIONS_NOTE_DEFERRED =
   NEXT_QUESTIONS_NOTE_STANDARD +
   " Apart from their number, do not read anything back yet: make the one read-back after the last answer, then ask whether it is right. If they answer none of them, make it then.";
+
+/** LVX192 Task 5. Model-only, like the notes above. Cap on the labels remembered across saves. */
+const MAX_SAVED_LABELS = 20;
+const ALL_QUESTIONS_ANSWERED_NOTE = "[not caller speech] Every question in this business's notes has a saved answer.";
+/** The save the end_call guard forced, with no question left open: ask once, then let them go. */
+const QUIET_SAVE_NOTE =
+  "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
 
 function nextQuestionsNote(config) {
   return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : NEXT_QUESTIONS_NOTE_STANDARD;
@@ -521,10 +529,51 @@ export default {
       !isHealthcareTier(ctx?.config) &&
       !(detailsFromArgs(args)?.answers?.length > 0) &&
       decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
+    // LVX192 Task 5 (standard tier only): the labels saved so far this call, and
+    // the numbered notes questions with no saved answer. The list replaces
+    // today's generic note only when the caller is already in the business's
+    // question flow (a saved label answers a numbered question); otherwise
+    // today's text stands, byte for byte.
+    const standardTier = !isHealthcareTier(ctx?.config);
+    const questionLikeNotes = hasNotes && /\?|\bask\b/i.test(notes);
+    let savedLabels = null;
+    let listNote = null;
+    let openCount = 0;
+    if (standardTier) {
+      const seen = new Set();
+      savedLabels = [];
+      const prior = ctx?.capabilityState?.messages?.savedLabels;
+      const now = (detailsFromArgs(args)?.answers ?? []).map((a) => a.label);
+      for (const label of [...(Array.isArray(prior) ? prior : []), ...now]) {
+        if (typeof label !== "string") continue;
+        const key = label.trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        savedLabels.push(label);
+      }
+      savedLabels = savedLabels.slice(-MAX_SAVED_LABELS);
+      if (questionLikeNotes) {
+        const questions = parseNotesQuestions(notes);
+        if (questions.length >= 2 && anyAnswered(questions, savedLabels)) {
+          const open = openQuestions(questions, savedLabels);
+          openCount = open.length;
+          listNote = open.length
+            ? `[not caller speech] This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it instead of asking again; skip any they would rather not answer. Then save again with the same message and all the answers in details.`
+            : ALL_QUESTIONS_ANSWERED_NOTE;
+        }
+      }
+    }
+    // A save the end_call guard forced is a quiet one, unless questions remain
+    // (the list wins). Question-like notes with nothing answered yet leave
+    // today's text: whether questions remain is unknown.
+    const quietSave = standardTier && ctx?.saveGuardPending === true && openCount === 0 && (listNote !== null || !questionLikeNotes);
+    const questionsPart = quietSave
+      ? [listNote, QUIET_SAVE_NOTE]
+      : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
     const next = (
       deferReadBack
         ? [needsNumber ? NO_NUMBER_NOTE : null, NEXT_QUESTIONS_NOTE_DEFERRED]
-        : [readBack, needsNumber ? NO_NUMBER_NOTE : null, hasNotes ? nextQuestionsNote(ctx?.config) : null]
+        : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
     )
       .filter(Boolean)
       .join(" ");
@@ -542,7 +591,9 @@ export default {
         toolCallEvent: { name: fc.name, args },
         capabilityEffects: [{ capability: "messages", type: "recorded", data: args }],
         // The call's first message save is behind us (the I8 deferral is for that one only).
-        capabilityState: { messages: { firstSaveDone: true } },
+        capabilityState: { messages: { firstSaveDone: true, ...(savedLabels ? { savedLabels } : {}) } },
+        ...(listNote !== null ? { questionsOpen: openCount > 0 } : {}),
+        ...(quietSave ? { quietSave: true } : {}),
       },
     };
   },
