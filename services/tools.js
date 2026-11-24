@@ -18,7 +18,7 @@ import {
   withTenantSafe,
 } from "./db.js";
 import { executeIntegration } from "./integrations.js";
-import { packForTool } from "../capabilities/index.js";
+import { packForTool, collectTools } from "../capabilities/index.js";
 import { inAdditionWouldRefuse, afterSaveQuestion, onFileNameNote } from "../capabilities/appointments.js";
 import { unknownToolResult } from "../lib/capabilities/results.js";
 import { INTAKE_CALLER_TYPES, intakeTypeFor, messagesSpellingRequired, isHealthcareTier } from "../lib/capabilities/intakeSettings.js";
@@ -46,6 +46,15 @@ import {
   asksMoreThanOneThing,
   callerObjects,
 } from "../lib/transcriptUtils.js";
+
+/** Whether record_customer_request is declared for this business (the save guard has nothing to ask for otherwise). */
+function saveToolDeclared(config) {
+  try {
+    return collectTools(config, {}).some((t) => t?.name === "record_customer_request" || t?.declaration?.name === "record_customer_request");
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Ask for a spelling before writing a name into a record.
@@ -920,7 +929,8 @@ export async function executeToolCall(fc, ctx) {
         bumpCounter("end_call_save_guard_ran");
         if (
           ctx.saveGuardSpent !== true &&
-          ((typeof ctx.messagesSaved === "number" && ctx.messagesSaved > 0) || ctx.promisedWithoutSave === true) &&
+          ((typeof ctx.messagesSaved === "number" && ctx.messagesSaved > 0) ||
+            (ctx.promisedWithoutSave === true && saveToolDeclared(ctx.config))) &&
           ctx.unsavedCallerTurns > 0
         ) {
           bumpCounter("end_call_refused_unsaved");
@@ -934,7 +944,7 @@ export async function executeToolCall(fc, ctx) {
                   "[not caller speech] NOT A FAILURE, the call is still open. The caller has told you more " +
                   "since your last save, and the business only gets what is saved. Call " +
                   "record_customer_request now with the caller's name, the same message and every detail " +
-                  "so far, then carry on. Do not say goodbye on this turn.",
+                  "so far, then carry on. Do not say goodbye until that save is done.",
               },
             },
             stateEffects: {

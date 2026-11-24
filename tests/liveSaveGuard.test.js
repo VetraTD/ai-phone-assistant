@@ -238,6 +238,31 @@ describe("(g) a voiced turn the model could not transcribe", () => {
   });
 });
 
+describe("(i) closers the guard must not read as answers (final review)", () => {
+  it("'Ahm, nope.' to anything-else is not refused", async () => {
+    const s = await savedCall("CA_sg_i1");
+    await s.assistantSays(ASK);
+    await s.callerSays("Ahm, nope.");
+    await s.assistantSays("Thanks for calling Brightwork, goodbye.");
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+  });
+
+  it("a guard-forced save does not re-arm: a misread 'You too' is not refused again", async () => {
+    const s = await savedCall("CA_sg_i2");
+    await answerThenSignOff(s);
+    const [first] = await s.callTool("end_call", {});
+    expect(first.response.success).toBe(false);
+    const forced = await s.callTool("record_customer_request", { ...MESSAGE, message: "about the invoice, three of us, two suitcases" });
+    expect(ok(forced)).toBe(true);
+    await s.turnEnds();
+    await s.callerSays("Right, you too, mate, take it easy");
+    await s.assistantSays("Goodbye.");
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+});
+
 describe("(h) a call whose only save is a quote request", () => {
   it("is never refused as unsaved", async () => {
     const config = { ...CONFIG, capabilities: { quotes: { enabled: true } } };

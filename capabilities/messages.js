@@ -75,7 +75,8 @@ const NEXT_QUESTIONS_NOTE_DEFERRED =
 
 /** LVX192 Task 5. Model-only, like the notes above. Cap on the labels remembered across saves. */
 const MAX_SAVED_LABELS = 20;
-const ALL_QUESTIONS_ANSWERED_NOTE = "[not caller speech] Every question in this business's notes has a saved answer.";
+const ALL_QUESTIONS_ANSWERED_NOTE =
+  "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now.";
 /** The save the end_call guard forced, with no question left open: ask once, then let them go. */
 const QUIET_SAVE_NOTE =
   "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";

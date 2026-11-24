@@ -42,7 +42,7 @@ describe("LVX192 save guard at the shared gate", () => {
     const r = await call(base);
     expect(r.functionResponse.response.success).toBe(false);
     expect(r.functionResponse.response.message).toContain("record_customer_request");
-    expect(r.functionResponse.response.message).toContain("Do not say goodbye on this turn.");
+    expect(r.functionResponse.response.message).toContain("Do not say goodbye until that save is done.");
     expect(r.stateEffects.endCallRefusal).toBe("unsaved");
     expect(r.stateEffects.toolResult).toEqual({
       name: "end_call",

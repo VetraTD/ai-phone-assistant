@@ -44,6 +44,32 @@ beforeEach(() => {
 });
 
 describe("POST /twilio/transfer-whisper", () => {
+  it("hangs up when the business lookup stalls past the screen timeout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockBusinessOf.mockImplementation(() => new Promise(() => {}));
+      const pending = whisper(app, { ParentCallSid: "CA_slow1" }).then((r) => r);
+      await vi.advanceTimersByTimeAsync(3000);
+      const res = await pending;
+      expect(res.text).toBe(HANGUP);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hangs up when the business fetch stalls past the screen timeout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockFetch.mockImplementation(() => new Promise(() => {}));
+      const pending = whisper(app, { ParentCallSid: "CA_slow2" }).then((r) => r);
+      await vi.advanceTimersByTimeAsync(3000);
+      const res = await pending;
+      expect(res.text).toBe(HANGUP);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says the generic sentence with the business name, twice, in the business's voice", async () => {
     const res = await whisper(app, { ParentCallSid: "CA1" });
     expect(res.status).toBe(200);

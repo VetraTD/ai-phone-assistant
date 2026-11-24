@@ -45,7 +45,7 @@ describe("open questions named in the save reply", () => {
     const r = await save(cfg(HAMMERSLEYS_NOTES), {
       details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"),
     });
-    expect(next(r)).toBe("[not caller speech] Every question in this business's notes has a saved answer.");
+    expect(next(r)).toBe("[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now.");
     expect(r.stateEffects.questionsOpen).toBe(false);
   });
 

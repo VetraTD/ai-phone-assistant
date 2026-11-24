@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isInformativeCallerTurn, countUnsaved, readBackQuestionRe } from "../lib/voice/unsavedAnswers.js";
+import { isInformativeCallerTurn, countUnsaved, readBackQuestionRe, closingRegexFor } from "../lib/voice/unsavedAnswers.js";
 
 const READ_BACK = "22 Godstone Road, RH7 6AA, is that right?";
 const SEAT = "Do you need a child seat?";
@@ -97,5 +97,47 @@ describe("readBackQuestionRe, the regex the engine and harness pass (fix round 2
   it("falls back to English for an unknown language and caches", () => {
     expect(readBackQuestionRe("fr")).toBe(readBackQuestionRe("en"));
     expect(readBackQuestionRe("es")).not.toBe(readBackQuestionRe("en"));
+  });
+});
+
+describe("closers are not answers (LVX192 final review)", () => {
+  const ANYTHING_ELSE = "Is there anything else I can help you with?";
+  const closing = closingRegexFor({});
+
+  it.each(["Ahm", "Ahm, nope.", "Não.", "No, it's good", "You too", "Alright", "Cheers mate", "No thanks, bye", "Yeah, cheers", "Nein."])(
+    "%j after anything-else is not informative",
+    (t) => {
+      expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(false);
+    }
+  );
+
+  it.each([
+    "Ahm, it's 22 Godstone Road",
+    "Yeah, two passengers",
+    "No, but I need a child seat",
+    "Cheers, and it's for Saturday",
+    "Yeah",
+    "Sure",
+  ])("%j stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, ANYTHING_ELSE, undefined, closing)).toBe(true);
+  });
+
+  it("a bare yes to a yes/no question stays informative", () => {
+    expect(isInformativeCallerTurn("yes", SEAT, undefined, closing)).toBe(true);
+  });
+
+  it("the closing regex covers both locales and is null-safe", () => {
+    expect(closing.test("goodbye")).toBe(true);
+    expect(closingRegexFor({ language: "es" })).toBeInstanceOf(RegExp);
+  });
+
+  it("the 12 Gemini 3.8 corpus replies to anything-else count 0 (the old predicate read 4 as answers)", () => {
+    const replies = [
+      "Ahm", "Ahm, nope.", "Não.", "Não.", "No.", "No.", "No.", "No.",
+      "No, there's nothing else.", "No, thanks.", "No, that's all. Thank you.", "Aquí. No, nothing else.",
+    ];
+    expect(replies).toHaveLength(12);
+    const turns = replies.map((caller, i) => ({ index: i + 1, caller, prevReply: ANYTHING_ELSE }));
+    expect(countUnsaved(turns, 0, undefined, closing)).toBe(0);
   });
 });
