@@ -116,6 +116,9 @@ describe("closers are not answers (LVX192 final review)", () => {
     "Yeah, two passengers",
     "No, but I need a child seat",
     "Cheers, and it's for Saturday",
+    "No, and two bags",
+    "No, but one more thing",
+    "Nope, also a child seat",
     "Yeah",
     "Sure",
   ])("%j stays informative", (t) => {
