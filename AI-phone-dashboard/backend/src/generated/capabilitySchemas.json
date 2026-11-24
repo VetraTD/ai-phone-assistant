@@ -124,6 +124,12 @@
           },
           "default": "end"
         },
+        "questionsSkipReasonPrefixes": {
+          "type": "list",
+          "label": "Message reasons that skip the question list",
+          "maxItems": 5,
+          "maxLength": 40
+        },
         "spellUpFront": {
           "type": "choice",
           "label": "Ask callers to spell their name up front?",

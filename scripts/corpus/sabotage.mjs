@@ -1299,9 +1299,38 @@ const SABOTAGES = [
     why:
       "The save reply stops naming the notes questions still open and falls back to the generic questions note (LVX192).",
     file: "capabilities/messages.js",
-    find: "if (questions.length >= 2 && anyAnswered(questions, savedLabels)) {",
+    find: "if (questions.length >= 2 && listStarts) {",
     replace: "if (false /* SABOTAGE */) {",
     red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  // LVX192 fix round 2 (2026-11-24): the list on a label-less first save, the
+  // skip words, and a corrected name taking over the bare row.
+  {
+    name: "lvx192r2-list-starts-label-less",
+    why:
+      "A first save with no labels yet stops starting the open-questions list, so an opener that gives two answers at once is asked nothing else and the call closes on 'anything else?' (owner's 08:17 call).",
+    file: "capabilities/messages.js",
+    find: "(savedLabels.length === 0 || anyAnswered(questions, savedLabels))",
+    replace: "(false /* SABOTAGE */ || anyAnswered(questions, savedLabels))",
+    red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    name: "lvx192r2-skip-words-honoured",
+    why:
+      "A save whose reason starts with the business's skip word (URGENT) gets the booking question list, so an urgent caller is asked the booking questions instead of being put through.",
+    file: "capabilities/messages.js",
+    find: "const listStarts = !skipped &&",
+    replace: "const listStarts = true /* SABOTAGE */ &&",
+    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js"],
+  },
+  {
+    name: "lvx192r2-name-fix-bare-row",
+    why:
+      "A name corrected on the same call files a second row instead of updating the bare first save, so the owner's email carries an empty entry under the misheard name ('Ayer').",
+    file: "lib/capabilities/customerRequests.js",
+    find: "const match = sameKind || samePersonOnly || nameFix;",
+    replace: "const match = sameKind || samePersonOnly; void nameFix; /* SABOTAGE */",
+    red: ["tests/customerRequestCorrection.test.js"],
   },
   {
     name: "lvx192-screened-not-accepted-message",

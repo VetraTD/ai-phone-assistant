@@ -66,9 +66,12 @@ describe("open questions named in the save reply", () => {
     }
   });
 
-  it("no labels at all (the first save): today's text", async () => {
+  it("no labels at all (the first save): the list starts, every question open (fix round 2)", async () => {
     const got = await save(cfg(HAMMERSLEYS_NOTES));
-    expect(next(got)).toMatch(/^\[not caller speech\] If this business's notes list questions/);
+    expect(next(got)).toContain(
+      "This business's questions with no saved answer yet: 1. Pickup, 2. Destination, 3. When, 4. Passengers, 5. Luggage, 6. Payment."
+    );
+    expect(got.stateEffects.questionsOpen).toBe(true);
   });
 
   it("notes without a question mark or the word ask: today's text", async () => {
@@ -168,5 +171,85 @@ describe("a save the end_call guard forced is a quiet one", () => {
     const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") });
     expect(next(r)).toContain("save it under the label shown instead of asking again");
     expect(next(r)).toContain("If they say they are short of time, offer to leave the rest for the callback.");
+  });
+});
+
+// Fix round 2 (owner's 08:17 call, 2026-11-24): the caller opened with the pickup
+// and the time, the first save carried only the name, the list never started,
+// and the call closed on "anything else?" with no trip questions asked.
+describe("the list starts on a label-less save, except a skip reason (fix round 2)", () => {
+  const mcfg = (msg = {}, extra = {}) => ({ ...extra, capabilities: { messages: { notes: HAMMERSLEYS_NOTES, ...msg } } });
+  const SKIP = { questionsSkipReasonPrefixes: ["URGENT"] };
+  const TODAY = /^\[not caller speech\] If this business's notes list questions, ask them now: new enquiries by default/;
+
+  it("a second label-less save (name corrected) still lists every question", async () => {
+    const r = await save(mcfg(), {}, { capabilityState: { messages: { firstSaveDone: true, savedLabels: [] } } });
+    expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+    expect(r.stateEffects.questionsOpen).toBe(true);
+  });
+
+  it.each(["URGENT: car now from Lingfield station", "urgent - car now", "  Urgent car to Gatwick"])(
+    "a save whose reason starts with a skip prefix (%j) gets today's text",
+    async (message) => {
+      const r = await save(mcfg(SKIP), { message });
+      expect(next(r)).toMatch(TODAY);
+      expect(r.stateEffects.questionsOpen).toBeUndefined();
+    }
+  );
+
+  it("a skip reason wins even when a label matches a numbered question", async () => {
+    const r = await save(mcfg(SKIP), { message: "URGENT: car now", details: details("Pickup") });
+    expect(next(r)).toMatch(TODAY);
+    expect(r.stateEffects.questionsOpen).toBeUndefined();
+  });
+
+  it("the same reason without the setting: the list (the word lives in config, not code)", async () => {
+    const r = await save(mcfg(), { message: "URGENT: car now" });
+    expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+  });
+
+  it("a booking at a business with skip prefixes still gets the list", async () => {
+    const r = await save(mcfg(SKIP), { message: "Taxi booking request" });
+    expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+  });
+});
+
+// Fix round 2 (owner's calls 1-2): the list said "ask them now in that order" and
+// the pickup was never read back, so "RH7 642" reached the email.
+describe("confirm the answer just saved before the next question (fix round 2)", () => {
+  const each = (extra = {}) => ({ ...extra, capabilities: { messages: { notes: HAMMERSLEYS_NOTES, confirmStyle: "each" } } });
+  const LEAD =
+    "[not caller speech] First confirm the answer you just saved, the way this business's notes say (read an address back, ask for any part left out). Then: ";
+
+  it("confirmStyle each + a labelled save: the confirm step leads the list", async () => {
+    const r = await save(each(), { details: details("Pickup") });
+    expect(next(r)).toBe(
+      LEAD +
+        "This business's questions with no saved answer yet: 2. Destination, 3. When, 4. Passengers, 5. Luggage, 6. Payment. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details."
+    );
+  });
+
+  it("confirmStyle each + all answered: the confirm step leads the all-answered sentence", async () => {
+    const r = await save(each(), { details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment") });
+    expect(next(r)).toBe(
+      LEAD + "Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now."
+    );
+  });
+
+  it("a label-less save has nothing to confirm: no confirm step", async () => {
+    const r = await save(each());
+    expect(next(r)).toMatch(/^\[not caller speech\] This business's questions with no saved answer yet: 1\. Pickup/);
+    expect(next(r)).not.toContain("First confirm");
+  });
+
+  it("confirmStyle end (one read-back at the end): no confirm step, today's list text", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") });
+    expect(next(r)).toMatch(/^\[not caller speech\] This business's questions with no saved answer yet: 2\. Destination/);
+    expect(next(r)).not.toContain("First confirm");
+  });
+
+  it("healthcare tier never gets it", async () => {
+    const r = await save(each({ complianceTier: "hipaa" }), { details: details("Pickup") });
+    expect(next(r)).not.toContain("First confirm");
   });
 });

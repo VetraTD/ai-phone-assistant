@@ -443,3 +443,42 @@ describe("messages — callbackLine (who calls back and how soon)", () => {
     expect(validateCapabilityConfig({ callbackLine: CALLBACK }, appointments, "biz-1").callbackLine).toBeUndefined();
   });
 });
+
+// Fix round 2 (LVX192): reasons that skip the numbered-question list. An
+// operator setting, validated like every other knob: kept when it is a short
+// list of short strings, dropped (never thrown) otherwise.
+describe("messages — questionsSkipReasonPrefixes", () => {
+  const validate = (raw) => validateCapabilityConfig(raw, messages, "biz-1");
+
+  it("keeps a short list of words, trimmed", () => {
+    expect(validate({ questionsSkipReasonPrefixes: ["URGENT", "  Lost property "] }).questionsSkipReasonPrefixes).toEqual([
+      "URGENT",
+      "Lost property",
+    ]);
+  });
+
+  it("drops a non-list, and keeps only the usable entries of a list", () => {
+    expect(validate({ questionsSkipReasonPrefixes: "URGENT" }).questionsSkipReasonPrefixes).toBeUndefined();
+    expect(validate({ questionsSkipReasonPrefixes: [] }).questionsSkipReasonPrefixes).toBeUndefined();
+    expect(validate({ questionsSkipReasonPrefixes: ["", 7, null, "x".repeat(41), "URGENT"] }).questionsSkipReasonPrefixes).toEqual([
+      "URGENT",
+    ]);
+  });
+
+  it("keeps at most five", () => {
+    const out = validate({ questionsSkipReasonPrefixes: ["a1", "a2", "a3", "a4", "a5", "a6"] });
+    expect(out.questionsSkipReasonPrefixes).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+  });
+
+  it("survives loadConfig, so an imported tenant's setting reaches the call", () => {
+    const config = loadConfig(BUSINESS, [
+      { capability_id: "messages", enabled: true, adapter: null, adapter_config: {}, config: { questionsSkipReasonPrefixes: ["URGENT"] } },
+    ]);
+    expect(config.capabilities.messages.questionsSkipReasonPrefixes).toEqual(["URGENT"]);
+  });
+
+  it("a pack that does not declare it never takes it", () => {
+    const out = validateCapabilityConfig({ questionsSkipReasonPrefixes: ["URGENT"] }, appointments, "biz-1");
+    expect(out.questionsSkipReasonPrefixes).toBeUndefined();
+  });
+});

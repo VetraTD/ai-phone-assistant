@@ -77,6 +77,14 @@ const NEXT_QUESTIONS_NOTE_DEFERRED =
 const MAX_SAVED_LABELS = 20;
 const ALL_QUESTIONS_ANSWERED_NOTE =
   "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now.";
+/**
+ * Fix round 2 (owner's calls 1-2: the pickup was never read back, so "RH7 642"
+ * reached the email). Leads the list or the all-answered sentence on a save that
+ * carried answers, at a business that confirms each answer as it is given.
+ */
+const CONFIRM_FIRST_NOTE =
+  "[not caller speech] First confirm the answer you just saved, the way this business's notes say (read an address back, ask for any part left out). Then: ";
+const MODEL_NOTE_PREFIX = "[not caller speech] ";
 /** The save the end_call guard forced, with no question left open: ask once, then let them go. */
 const QUIET_SAVE_NOTE =
   "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
@@ -454,6 +462,16 @@ export default {
       },
       default: "end",
     },
+    // LVX192 fix round 2. Reasons that skip the numbered-question list: a save
+    // whose message starts with one of these (e.g. "URGENT") gets the generic
+    // questions note, so an urgent caller is put through rather than asked the
+    // booking questions. Operator-set on import; no dashboard control yet.
+    questionsSkipReasonPrefixes: {
+      type: "list",
+      label: "Message reasons that skip the question list",
+      maxItems: 5,
+      maxLength: 40,
+    },
     // When the assistant asks the caller to spell their name before the reason
     // for the call, rather than only when it is needed.
     spellUpFront: {
@@ -555,12 +573,28 @@ export default {
       savedLabels = savedLabels.slice(-MAX_SAVED_LABELS);
       if (questionLikeNotes) {
         const questions = parseNotesQuestions(notes);
-        if (questions.length >= 2 && anyAnswered(questions, savedLabels)) {
+        // Fix round 2: the list also starts on a save with no labels yet (the
+        // caller's first save, before any answer is in), so an opener that gives
+        // two answers at once is still asked the rest. A save whose reason starts
+        // with one of the business's skip words (e.g. "URGENT") keeps today's
+        // text: that caller is put through, not asked the questions.
+        const reason = typeof args.message === "string" ? args.message.trim().toLowerCase() : "";
+        const skipWords = capabilityConfig(ctx?.config, "messages").questionsSkipReasonPrefixes;
+        const skipped =
+          reason !== "" &&
+          Array.isArray(skipWords) &&
+          skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));
+        const listStarts = !skipped && (savedLabels.length === 0 || anyAnswered(questions, savedLabels));
+        if (questions.length >= 2 && listStarts) {
           const open = openQuestions(questions, savedLabels);
           openCount = open.length;
+          // Confirm before the next question: only a save that carried an answer
+          // has something to confirm, and only a business that confirms each
+          // answer as given ("end" makes one read-back at the end instead).
+          const lead = now.length > 0 && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
           listNote = open.length
-            ? `[not caller speech] This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
-            : ALL_QUESTIONS_ANSWERED_NOTE;
+            ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
+            : `${lead}${ALL_QUESTIONS_ANSWERED_NOTE.slice(MODEL_NOTE_PREFIX.length)}`;
         }
       }
     }

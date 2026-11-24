@@ -92,6 +92,27 @@ function validateCapabilityConfig(raw, capabilityId, schemas) {
     }
   }
 
+  // Every list the pack's schema declares (the messages pack's
+  // questionsSkipReasonPrefixes, any added later): kept when every entry is
+  // text within the schema's bounds, refused otherwise -- the same bounds the
+  // engine loader keeps (lib/capabilities/configSchema.js). A save replaces the
+  // whole config, so a list this did not keep would be wiped.
+  for (const [key, node] of Object.entries(schema)) {
+    if (node?.type !== "list") continue;
+    const value = raw[key];
+    if (value === undefined || value === null) continue;
+    const maxLength = Number.isInteger(node.maxLength) ? node.maxLength : 40;
+    const maxItems = Number.isInteger(node.maxItems) ? node.maxItems : 5;
+    const items = Array.isArray(value)
+      ? value.map((v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : null))
+      : null;
+    if (!items || items.some((v) => !v || v.length > maxLength) || items.length > maxItems) {
+      errors.push(`"${node.label || key}" must be a list of at most ${maxItems} entries of 1-${maxLength} characters`);
+    } else if (items.length) {
+      config[key] = items;
+    }
+  }
+
   const require = raw.require;
   if (require !== undefined) {
     if (typeof require !== "object" || require === null || Array.isArray(require)) {

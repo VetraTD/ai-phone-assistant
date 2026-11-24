@@ -91,3 +91,28 @@ describe("every setting the engine reads survives a dashboard save", () => {
     expect(config.require.requiredFields).toEqual(["company", "postcode"]);
   });
 });
+
+// Fix round 2 (LVX192): an operator list on the messages pack. A dashboard save
+// replaces the whole config, so a key the validator does not keep is wiped.
+describe("a list setting survives a dashboard save (questionsSkipReasonPrefixes)", () => {
+  const save = (raw) => validateCapabilityConfig(raw, "messages", schemas);
+
+  it("keeps the list, trimmed", () => {
+    const { config, errors } = save({ notes: "Ask for the pickup.", questionsSkipReasonPrefixes: ["URGENT", " Lost property "] });
+    expect(errors).toEqual([]);
+    expect(config.questionsSkipReasonPrefixes).toEqual(["URGENT", "Lost property"]);
+  });
+
+  it("refuses a value the engine would drop", () => {
+    expect(save({ questionsSkipReasonPrefixes: "URGENT" }).errors.length).toBe(1);
+    expect(save({ questionsSkipReasonPrefixes: ["x".repeat(41)] }).errors.length).toBe(1);
+    expect(save({ questionsSkipReasonPrefixes: ["a", "b", "c", "d", "e", "f"] }).errors.length).toBe(1);
+    expect(save({ questionsSkipReasonPrefixes: [7] }).errors.length).toBe(1);
+  });
+
+  it("an empty list is absence, not an error", () => {
+    const { config, errors } = save({ questionsSkipReasonPrefixes: [] });
+    expect(errors).toEqual([]);
+    expect(config.questionsSkipReasonPrefixes).toBeUndefined();
+  });
+});

@@ -38,7 +38,7 @@ const WIRED_KEYS = {
     "require.identity",
   ],
   quotes: ["notes", "require.identity"],
-  messages: ["callbackLine", "confirmStyle", "notes", "require.identity", "spellUpFront"],
+  messages: ["callbackLine", "confirmStyle", "notes", "questionsSkipReasonPrefixes", "require.identity", "spellUpFront"],
 };
 
 /** Dot-paths of every schema node that declares a `type`. */
@@ -309,5 +309,30 @@ describe("quotes & messages — identity + notes have effect", () => {
     expect(buildStaticSystemPrefix(hipaa({ confirmStyle: "each", spellUpFront: "everyone" }), extras)).toBe(
       buildStaticSystemPrefix(hipaa({}), extras)
     );
+  });
+});
+
+describe("messages questionsSkipReasonPrefixes has effect (fix round 2)", () => {
+  it("a save whose reason starts with a listed word gets the generic note, not the numbered list", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const notes = "Ask these:\n1. Pickup: where from?\n2. Destination: where to?";
+    const cfgWith = (extra) =>
+      loadConfig({
+        id: "b1",
+        name: "Co",
+        allowed_tasks: [],
+        business_capabilities: [
+          { capability_id: "messages", enabled: true, adapter: null, adapter_config: {}, config: { notes, ...extra } },
+        ],
+      });
+    const run = async (config) =>
+      (
+        await messages.execute(
+          { id: "f", name: "record_customer_request", args: { request_type: "message", caller_name: "Jon", message: "URGENT: car now" } },
+          { config, callerPhone: "+12145550123" }
+        )
+      ).functionResponse.response.next;
+    expect(await run(cfgWith({}))).toContain("questions with no saved answer yet: 1. Pickup, 2. Destination.");
+    expect(await run(cfgWith({ questionsSkipReasonPrefixes: ["URGENT"] }))).not.toContain("questions with no saved answer yet");
   });
 });
