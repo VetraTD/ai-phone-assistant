@@ -145,8 +145,16 @@ describe("transfer screening TwiML", () => {
     expect(
       buildTransferTwiml({ number: "+1555", callerId: "+1666", ringTone: "us", actionUrl: "https://b/a", whisperUrl: "https://b/w?b=x&y=1" })
     ).toBe(
-      '<Response><Dial ringTone="us" timeout="20" timeLimit="3600" action="https://b/a" method="POST" callerId="+1666"><Number url="https://b/w?b=x&amp;y=1" method="POST">+1555</Number></Dial></Response>'
+      '<Response><Dial ringTone="us" timeout="20" timeLimit="3600" action="https://b/a?screened=1" method="POST" callerId="+1666"><Number url="https://b/w?b=x&amp;y=1" method="POST">+1555</Number></Dial></Response>'
     );
+  });
+  it("whisperUrl joins screened=1 onto an action URL that already has a query", () => {
+    expect(
+      buildTransferTwiml({ number: "+1555", ringTone: "us", actionUrl: "https://b/a?x=1", whisperUrl: "https://b/w" })
+    ).toContain('action="https://b/a?x=1&amp;screened=1"');
+  });
+  it("without whisperUrl the action URL is untouched", () => {
+    expect(buildTransferTwiml({ number: "+1555", ringTone: "us", actionUrl: "https://b/a" })).not.toContain("screened");
   });
   it("the whisper document", () => {
     expect(buildTransferWhisperTwiml({ text: 'Hi <you> & "me"', sayVoice: "Polly.Amy", actionUrl: "https://b/acc" })).toBe(

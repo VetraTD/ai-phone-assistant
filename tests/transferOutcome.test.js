@@ -18,27 +18,35 @@ describe("transferOutcome", () => {
   });
 });
 
-describe("transferOutcome: screened dials", () => {
+describe("transferOutcome: screened (flagged) dials", () => {
   const done = { DialCallStatus: "completed" };
+  const flagged = (outcome) => ({ flagged: true, outcome });
   it("accepted + DialBridged true -> hangup", () => {
-    expect(transferOutcome({ ...done, DialBridged: "true" }, "accepted")).toBe("hangup");
+    expect(transferOutcome({ ...done, DialBridged: "true" }, flagged("accepted"))).toBe("hangup");
   });
   it("accepted + DialBridged false (pressed 1, leg dropped before the bridge) -> message", () => {
-    expect(transferOutcome({ ...done, DialBridged: "false" }, "accepted")).toBe("message");
+    expect(transferOutcome({ ...done, DialBridged: "false" }, flagged("accepted"))).toBe("message");
   });
   it("accepted + DialBridged absent -> hangup", () => {
-    expect(transferOutcome(done, "accepted")).toBe("hangup");
+    expect(transferOutcome(done, flagged("accepted"))).toBe("hangup");
   });
-  it("accepted but the dial did not complete -> message (today's rule)", () => {
-    expect(transferOutcome({ DialCallStatus: "no-answer" }, "accepted")).toBe("message");
+  it("accepted but the dial did not complete -> message", () => {
+    expect(transferOutcome({ DialCallStatus: "no-answer" }, flagged("accepted"))).toBe("message");
   });
   it("not_accepted -> message whatever DialCallStatus and DialBridged say", () => {
-    expect(transferOutcome({ ...done, DialBridged: "true" }, "not_accepted")).toBe("message");
-    expect(transferOutcome(done, "not_accepted")).toBe("message");
-    expect(transferOutcome({ DialCallStatus: "busy" }, "not_accepted")).toBe("message");
+    expect(transferOutcome({ ...done, DialBridged: "true" }, flagged("not_accepted"))).toBe("message");
+    expect(transferOutcome(done, flagged("not_accepted"))).toBe("message");
   });
-  it.each([[undefined], [null], ["unscreened"]])("outcome %j -> today's rule, DialBridged ignored", (outcome) => {
-    expect(transferOutcome({ ...done, DialBridged: "false" }, outcome)).toBe("hangup");
-    expect(transferOutcome({ DialCallStatus: "busy" }, outcome)).toBe("message");
+  it("outcome unknown (null: no row, or the read failed): DialBridged decides", () => {
+    expect(transferOutcome({ ...done, DialBridged: "false" }, flagged(null))).toBe("message");
+    expect(transferOutcome({ ...done, DialBridged: "true" }, flagged(null))).toBe("hangup");
+    expect(transferOutcome({ ...done, DialBridged: "false" }, flagged("unscreened"))).toBe("message");
+  });
+});
+
+describe("transferOutcome: unflagged dials ignore everything about screening", () => {
+  it.each([[undefined], [null]])("screening %j -> today's rule, DialBridged ignored", (screening) => {
+    expect(transferOutcome({ DialCallStatus: "completed", DialBridged: "false" }, screening)).toBe("hangup");
+    expect(transferOutcome({ DialCallStatus: "busy" }, screening)).toBe("message");
   });
 });

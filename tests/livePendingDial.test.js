@@ -303,6 +303,7 @@ describe("Live inbound transfer: pending dial", () => {
       const twiml = updates[0].twiml;
       expect(twiml).toContain(`callerId="${BUSINESS_NUMBER}"`);
       expect(twiml).not.toContain(CALLER);
+      expect(twiml).toContain('action="https://voice.example.com/twilio/transfer-result?screened=1"');
       expect(twiml).toContain(`<Number url="https://voice.example.com/twilio/transfer-whisper?b=${BIZ}" method="POST">${NORMAL}</Number>`);
       expect(db.recordPendingDial).toHaveBeenCalledWith({
         businessId: BIZ,
@@ -320,6 +321,7 @@ describe("Live inbound transfer: pending dial", () => {
       });
       expect(updates[0].twiml).not.toContain("<Number");
       expect(updates[0].twiml).toContain(`callerId="${CALLER}"`);
+      expect(updates[0].twiml).not.toContain("screened");
       expect(db.recordPendingDial).toHaveBeenCalledWith({
         businessId: BIZ,
         callSid: OUT_SID,

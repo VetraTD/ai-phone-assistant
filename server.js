@@ -17,7 +17,7 @@ import { WebSocketServer } from "ws";
 import { handleVoiceSessionConnection } from "./lib/voice/session.js";
 import * as callState from "./lib/callState.js";
 import { normalizePhoneNumber, last4 } from "./lib/phone.js";
-import { inboundGuardTwiml, isRealCallerNumber, isOwnNumber, callerIdentityNumber, AI_MINUTES_ALERT_SEC } from "./lib/inboundGuards.js";
+import { inboundGuardTwiml, withTimeout, isRealCallerNumber, isOwnNumber, callerIdentityNumber, AI_MINUTES_ALERT_SEC } from "./lib/inboundGuards.js";
 import { getCacheStats } from "./services/geminiCache.js";
 import { STEPS } from "./lib/callState.js";
 import { log } from "./lib/logger.js";
@@ -62,7 +62,7 @@ import {
 import { registerOutboundInternalRoutes, buildOutboundDeps, isOutboundInternalPath } from "./lib/outbound/internalRoutes.js";
 import { createTwilioAccountRouter } from "./lib/outbound/twilioAccounts.js";
 import { registerOutboundDoorRoutes } from "./lib/outbound/doorRoutes.js";
-import { registerTransferScreenRoutes } from "./lib/transferScreenRoutes.js";
+import { registerTransferScreenRoutes, SCREEN_DB_TIMEOUT_MS } from "./lib/transferScreenRoutes.js";
 import { registerTriggerRoute, isTriggerRoutePath } from "./lib/outbound/triggerRoute.js";
 import { postCall as outboundPostCall } from "./lib/outbound/postCall.js";
 
@@ -995,13 +995,18 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
     });
 
   try {
-    // How the dial was screened, read BEFORE the dial is ended below. A failed
-    // read is today's rule (unknown), never a guess.
-    let screening = null;
-    try {
-      screening = await db.pendingDialOutcome(callSid);
-    } catch (err) {
-      log.error("pending_dial_outcome_failed", { callSid, message: err?.message, severity: "warn" });
+    // Only a dial whose action URL carries the screened flag reads how it was
+    // screened (before the dial is ended below); every other dial takes today's
+    // path with no extra round trip. A failed or slow read is "unknown": the
+    // bridge flag alone decides.
+    let screening;
+    if (req.query?.screened === "1") {
+      screening = { flagged: true, outcome: null };
+      try {
+        screening.outcome = await withTimeout(db.pendingDialOutcome(callSid), SCREEN_DB_TIMEOUT_MS);
+      } catch (err) {
+        log.error("pending_dial_outcome_failed", { callSid, message: err?.message, severity: "warn" });
+      }
     }
     // Both outcomes end it, so this runs before the hangup early return.
     try {
@@ -1010,7 +1015,14 @@ app.post("/twilio/transfer-result", twilioValidationAnyAccount, async (req, res)
       log.error("pending_dial_end_failed", { callSid, message: err?.message });
     }
     const outcome = transferOutcome(req.body, screening);
-    log.info("transfer_result", { callSid, dialStatus, outcome });
+    log.info("transfer_result", {
+      callSid,
+      dialStatus,
+      outcome,
+      screened: screening?.flagged === true,
+      screening: screening ? screening.outcome : null,
+      dialBridged: req.body?.DialBridged ?? null,
+    });
     if (outcome === "hangup") return res.send("<Response><Hangup/></Response>");
 
     let sayVoice = null;

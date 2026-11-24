@@ -41,12 +41,14 @@ vi.mock("../lib/twiml.js", async (importOriginal) => {
 });
 
 import { CALL_LINES, buildMessageTwiml } from "../lib/twiml.js";
+import { log } from "../lib/logger.js";
 
 const BASE = "https://test.example.com";
 const UK = "+441372656055";
 const US = "+15550001111";
 const FROM = "+447700900123";
 const post = (app, body) => request(app).post("/twilio/transfer-result").type("form").send(body);
+const postFlagged = (app, body) => request(app).post("/twilio/transfer-result?screened=1").type("form").send(body);
 const expected = (voice, to) =>
   buildMessageTwiml({
     line: CALL_LINES.noAnswer,
@@ -87,38 +89,74 @@ describe("POST /twilio/transfer-result: pending dial", () => {
 });
 
 describe("POST /twilio/transfer-result", () => {
-  it("completed (unscreened) -> exactly a Hangup, text/xml, and no business lookup; the outcome IS read, before the dial ends", async () => {
-    const order = [];
-    mockOutcome.mockImplementation(async () => (order.push("outcome"), "unscreened"));
-    mockEndPendingDial.mockImplementation(async () => (order.push("end"), 1));
-    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
+  it("completed on an UNFLAGGED dial -> exactly a Hangup, text/xml, no business lookup, and zero outcome reads", async () => {
+    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "false" });
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/text\/xml/);
     expect(res.text).toBe("<Response><Hangup/></Response>");
     expect(mockLookup).not.toHaveBeenCalled();
+    expect(mockOutcome).not.toHaveBeenCalled();
+  });
+
+  it("a FLAGGED dial reads the outcome before the dial ends", async () => {
+    const order = [];
+    mockOutcome.mockImplementation(async () => (order.push("outcome"), "accepted"));
+    mockEndPendingDial.mockImplementation(async () => (order.push("end"), 1));
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
+    expect(res.text).toBe("<Response><Hangup/></Response>");
     expect(mockOutcome).toHaveBeenCalledWith("CA1");
     expect(order).toEqual(["outcome", "end"]);
   });
 
-  it("completed + not_accepted -> the message step (the whisper leg hung up)", async () => {
+  it("flagged + not_accepted + DialBridged true -> the message step", async () => {
     mockOutcome.mockResolvedValue("not_accepted");
     mockLookup.mockResolvedValue({ id: "b1", name: "Biz", locale: "en-GB" });
-    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
     expect(res.text).toBe(expected("Polly.Amy", UK));
   });
 
-  it("completed + accepted -> Hangup; accepted but not bridged -> the message step", async () => {
-    mockOutcome.mockResolvedValue("accepted");
-    const done = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
-    expect(done.text).toBe("<Response><Hangup/></Response>");
-    const dropped = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "false" });
-    expect(dropped.text).toContain("<Record");
+  it("flagged + no row (the dial-time write failed) + completed + DialBridged false -> the message step", async () => {
+    mockOutcome.mockResolvedValue(null);
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "false" });
+    expect(res.text).toContain("<Record");
   });
 
-  it("a failing outcome read is today's rule", async () => {
+  it("flagged + the outcome read throws + DialBridged false -> the message step", async () => {
     mockOutcome.mockRejectedValue(new Error("db down"));
-    const res = await post(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed" });
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "false" });
+    expect(res.text).toContain("<Record");
+  });
+
+  it("flagged + the outcome read throws + DialBridged true -> Hangup", async () => {
+    mockOutcome.mockRejectedValue(new Error("db down"));
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
     expect(res.text).toBe("<Response><Hangup/></Response>");
+  });
+
+  it("flagged + an outcome read that never settles is cut off (null) and DialBridged decides", async () => {
+    mockOutcome.mockImplementation(() => new Promise(() => {}));
+    const res = await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
+    expect(res.text).toBe("<Response><Hangup/></Response>");
+  }, 15000);
+
+  it("the transfer_result log line carries the screening flag, the verdict and DialBridged, and no numbers", async () => {
+    mockOutcome.mockResolvedValue("accepted");
+    const info = vi.spyOn(log, "info");
+    await postFlagged(app, { CallSid: "CA1", To: UK, From: FROM, DialCallStatus: "completed", DialBridged: "true" });
+    const line = info.mock.calls.find((c) => c[0] === "transfer_result");
+    expect(line[1]).toEqual({
+      callSid: "CA1",
+      dialStatus: "completed",
+      outcome: "hangup",
+      screened: true,
+      screening: "accepted",
+      dialBridged: "true",
+    });
+    await post(app, { CallSid: "CA2", To: UK, From: FROM, DialCallStatus: "busy" });
+    const plain = info.mock.calls.filter((c) => c[0] === "transfer_result").at(-1);
+    expect(plain[1]).toMatchObject({ screened: false, screening: null, dialBridged: null });
+    expect(JSON.stringify(info.mock.calls)).not.toContain("7700900123");
+    info.mockRestore();
   });
 
   it.each(["no-answer", "busy", "failed", "canceled"])("%s with a UK business -> message in Polly.Amy", async (status) => {

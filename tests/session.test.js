@@ -1549,6 +1549,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     db.recordPendingDial.mockClear();
     const twiml = await runCascadeTransfer({ config: { transferScreening: true } });
     expect(twiml).toMatch(/<Number url="[^"]*\/twilio\/transfer-whisper\?b=biz1" method="POST">\+15551234567<\/Number>/);
+    expect(twiml).toMatch(/action="[^"]*\/twilio\/transfer-result\?screened=1"/);
     const callerId = twiml.match(/callerId="([^"]*)"/)[1];
     expect(callerId).not.toBe("+15559999999");
     const row = db.recordPendingDial.mock.calls[0][0];
@@ -1560,6 +1561,7 @@ describe("session.js — v2 pipeline orchestrator", () => {
     const twiml = await runCascadeTransfer({ config: { transferScreening: true, transferNoAnswer: "own_voicemail" } });
     expect(twiml).not.toContain("<Number");
     expect(twiml).toContain('callerId="+15559999999"');
+    expect(twiml).not.toContain("screened");
     expect(db.recordPendingDial.mock.calls[0][0]).not.toHaveProperty("screened");
     expect(db.recordPendingDial.mock.calls[0][0].timeoutSec).toBe(45);
   });

@@ -25,7 +25,7 @@ vi.mock("../services/db.js", async (importOriginal) => {
 import { log } from "../lib/logger.js";
 
 const whisper = (app, body, q = "?b=b1") => request(app).post(`/twilio/transfer-whisper${q}`).type("form").send(body);
-const accept = (app, body) => request(app).post("/twilio/transfer-accept").type("form").send(body);
+const accept = (app, body, q = "") => request(app).post(`/twilio/transfer-accept${q}`).type("form").send(body);
 const HANGUP = "<Response><Hangup/></Response>";
 const ROW = { id: "b1", name: "Hammersleys Taxis", locale: "en-GB" };
 
@@ -50,7 +50,7 @@ describe("POST /twilio/transfer-whisper", () => {
     expect(res.headers["content-type"]).toMatch(/text\/xml/);
     const line = "Call from the Hammersleys Taxis AI receptionist. Press 1 to take it.";
     expect(res.text).toBe(
-      '<Response><Gather numDigits="1" timeout="6" action="https://test.example.com/twilio/transfer-accept" method="POST">' +
+      '<Response><Gather numDigits="1" timeout="6" action="https://test.example.com/twilio/transfer-accept?p=CA1" method="POST">' +
         `<Say voice="Polly.Amy">${line}</Say><Pause length="1"/><Say voice="Polly.Amy">${line}</Say></Gather><Hangup/></Response>`
     );
     expect(mockBusinessOf).toHaveBeenCalledWith("CA1");
@@ -115,4 +115,46 @@ describe("POST /twilio/transfer-accept", () => {
     mockAccept.mockReset().mockResolvedValue(null);
     expect((await accept(app, { ParentCallSid: "CA1", Digits: "1" })).text).toBe(HANGUP);
   });
+
+  it("the whisper puts the parent sid on the accept URL, encoded", async () => {
+    const res = await whisper(app, { ParentCallSid: "CA 1&2" });
+    expect(res.text).toContain('action="https://test.example.com/twilio/transfer-accept?p=CA%201%262"');
+  });
+
+  it("no ParentCallSid in the body: the ?p= value is used", async () => {
+    const res = await accept(app, { Digits: "1" }, "?p=CA9");
+    expect(res.text).toBe("<Response></Response>");
+    expect(mockAccept).toHaveBeenCalledWith("CA9");
+  });
+
+  it("body and ?p= agree -> bridge; the body's value is used", async () => {
+    const res = await accept(app, { ParentCallSid: "CA1", Digits: "1" }, "?p=CA1");
+    expect(res.text).toBe("<Response></Response>");
+    expect(mockAccept).toHaveBeenCalledWith("CA1");
+  });
+
+  it("body and ?p= differ -> Hangup and no stamp", async () => {
+    const res = await accept(app, { ParentCallSid: "CA1", Digits: "1" }, "?p=CA2");
+    expect(res.text).toBe(HANGUP);
+    expect(mockAccept).not.toHaveBeenCalled();
+  });
+
+  it("neither present -> Hangup (nothing to stamp)", async () => {
+    mockAccept.mockResolvedValue(0);
+    const res = await accept(app, { Digits: "1" });
+    expect(res.text).toBe(HANGUP);
+  });
+
+  it("a stamp that never settles is cut off: retried once, then Hangup", async () => {
+    mockAccept.mockImplementation(() => new Promise(() => {}));
+    const res = await accept(app, { ParentCallSid: "CA1", Digits: "1" });
+    expect(res.text).toBe(HANGUP);
+    expect(mockAccept).toHaveBeenCalledTimes(2);
+  }, 20000);
+
+  it("a first attempt that hangs and a second that succeeds -> bridge", async () => {
+    mockAccept.mockImplementationOnce(() => new Promise(() => {})).mockResolvedValueOnce(1);
+    const res = await accept(app, { ParentCallSid: "CA1", Digits: "1" });
+    expect(res.text).toBe("<Response></Response>");
+  }, 20000);
 });
