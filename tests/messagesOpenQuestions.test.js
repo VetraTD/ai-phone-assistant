@@ -329,3 +329,62 @@ describe("where the list starts, and when the confirm step leads (review fixes)"
     expect(next(r)).toMatch(/^\[not caller speech\] First confirm the answer you just saved/);
   });
 });
+
+// Owner re-test call 1 (2026-11-25): the owner's number had called before, so the
+// model reported an existing customer, and the round-2 list start (new enquiries
+// only, ruling R7/M1) did not run on the first save. A per-business choice says
+// who the numbered questions are for; the default keeps today's behaviour.
+describe("who the numbered questions are for (questionsFor)", () => {
+  const forCustomers = (extra = {}) => ({
+    capabilities: { messages: { notes: HAMMERSLEYS_NOTES, questionsFor: "customers", ...extra } },
+  });
+  const TODAY = /^\[not caller speech\] If this business's notes list questions, ask them now: new enquiries by default/;
+
+  it("customers: a returning customer's first save starts the list, every question open", async () => {
+    const r = await save(forCustomers(), { caller_type: "existing_customer" });
+    expect(next(r)).toContain(
+      "This business's questions with no saved answer yet: 1. Pickup, 2. Destination, 3. When, 4. Passengers, 5. Luggage, 6. Payment."
+    );
+    expect(r.stateEffects.questionsOpen).toBe(true);
+  });
+
+  it("customers: the type set by set_call_intent (ctx.callerType) counts too", async () => {
+    const r = await save(forCustomers(), {}, { callerType: "existing_customer" });
+    expect(next(r)).toContain("questions with no saved answer yet: 1. Pickup,");
+  });
+
+  it("customers: the list tells the model returning customers are asked too", async () => {
+    const r = await save(forCustomers(), { caller_type: "existing_customer", details: details("Pickup") });
+    expect(next(r)).toContain("(new and returning customers, other callers only when the notes say so)");
+    expect(next(r)).not.toContain("new enquiries by default");
+  });
+
+  it("customers: personal callers, suppliers and sales pitches still keep today's text", async () => {
+    for (const caller_type of ["personal", "supplier", "sales_pitch"]) {
+      const r = await save(forCustomers(), { caller_type, message: "a word with the owner" });
+      expect(next(r)).toMatch(TODAY);
+      expect(r.stateEffects.questionsOpen).toBeUndefined();
+    }
+  });
+
+  it("default (no setting, or new_callers): a returning customer's first save keeps today's text, byte for byte", async () => {
+    const plain = await save(cfg(HAMMERSLEYS_NOTES), { caller_type: "existing_customer" });
+    const named = await save(
+      { capabilities: { messages: { notes: HAMMERSLEYS_NOTES, questionsFor: "new_callers" } } },
+      { caller_type: "existing_customer" }
+    );
+    expect(next(plain)).toMatch(TODAY);
+    expect(next(named)).toBe(next(plain));
+  });
+
+  it("default: a new enquiry's list text is unchanged (new enquiries by default)", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), { details: details("Pickup") });
+    expect(next(r)).toContain("(new enquiries by default, other callers only when the notes say so)");
+  });
+
+  it("healthcare tier ignores the setting", async () => {
+    const hipaa = { complianceTier: "hipaa", capabilities: { messages: { notes: HAMMERSLEYS_NOTES, questionsFor: "customers" } } };
+    const r = await save(hipaa, { caller_type: "existing_customer" });
+    expect(next(r) ?? "").not.toContain("questions with no saved answer yet");
+  });
+});

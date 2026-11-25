@@ -28,6 +28,7 @@ import { nameIsOnFile } from "../lib/nameQuality.js";
 import {
   confirmStyleOf,
   spellUpFrontOf,
+  questionsForOf,
   isHealthcareTier,
   intakeTypeFor,
   decisionTypeOf,
@@ -475,6 +476,20 @@ export default {
       maxItems: 5,
       maxLength: 40,
     },
+    // Owner re-test call 1 (2026-11-25): who the numbered questions in the notes
+    // are for. "new_callers" (the default) is the behaviour before this setting;
+    // "customers" also asks a returning customer (a taxi regular books a new
+    // trip every call). Personal callers, suppliers and sales pitches never.
+    questionsFor: {
+      type: "choice",
+      label: "Who should be asked the numbered questions?",
+      options: ["new_callers", "customers"],
+      optionLabels: {
+        new_callers: "New callers only",
+        customers: "New and returning customers",
+      },
+      default: "new_callers",
+    },
     // When the assistant asks the caller to spell their name before the reason
     // for the call, rather than only when it is needed.
     spellUpFront: {
@@ -597,7 +612,11 @@ export default {
         // new starts are for a new enquiry only (an unknown type counts as one);
         // a complaint or an existing client keeps today's text.
         const firstSave = ctx?.capabilityState?.messages?.firstSaveDone !== true;
-        const enquiry = decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
+        // Owner re-test call 1: a business whose questions are for customers
+        // (questionsFor "customers") starts them for a returning customer too.
+        const callerType = decisionTypeOf(intakeTypeFor(args, ctx));
+        const returningToo = questionsForOf(ctx?.config) === "customers";
+        const enquiry = callerType === "new_enquiry" || (returningToo && callerType === "existing_customer");
         const startsHere = enquiry && (firstSave || savedLabels.length === 0);
         const listStarts = !skipped && (startsHere || anyAnswered(questions, savedLabels));
         if (questions.length >= 2 && listStarts) {
@@ -611,7 +630,7 @@ export default {
           const added = now.some((l) => !priorKeys.has(String(l).trim().toLowerCase()));
           const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
           listNote = open.length
-            ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (new enquiries by default, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
+            ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (${returningToo ? "new and returning customers" : "new enquiries by default"}, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
             : `${lead}${ALL_QUESTIONS_ANSWERED_NOTE.slice(MODEL_NOTE_PREFIX.length)}`;
         }
       }

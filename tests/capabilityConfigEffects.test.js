@@ -38,7 +38,7 @@ const WIRED_KEYS = {
     "require.identity",
   ],
   quotes: ["notes", "require.identity"],
-  messages: ["callbackLine", "confirmStyle", "notes", "questionsSkipReasonPrefixes", "require.identity", "spellUpFront"],
+  messages: ["callbackLine", "confirmStyle", "notes", "questionsFor", "questionsSkipReasonPrefixes", "require.identity", "spellUpFront"],
 };
 
 /** Dot-paths of every schema node that declares a `type`. */
@@ -334,5 +334,34 @@ describe("messages questionsSkipReasonPrefixes has effect (fix round 2)", () => 
       ).functionResponse.response.next;
     expect(await run(cfgWith({}))).toContain("questions with no saved answer yet: 1. Pickup, 2. Destination.");
     expect(await run(cfgWith({ questionsSkipReasonPrefixes: ["URGENT"] }))).not.toContain("questions with no saved answer yet");
+  });
+});
+
+describe("messages questionsFor has effect (owner re-test call 1)", () => {
+  it("customers: a returning customer's first save gets the numbered list; the default does not", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const notes = "Ask these:\n1. Pickup: where from?\n2. Destination: where to?";
+    const cfgWith = (extra) =>
+      loadConfig({
+        id: "b1",
+        name: "Co",
+        allowed_tasks: [],
+        business_capabilities: [
+          { capability_id: "messages", enabled: true, adapter: null, adapter_config: {}, config: { notes, ...extra } },
+        ],
+      });
+    const run = async (config) =>
+      (
+        await messages.execute(
+          {
+            id: "f",
+            name: "record_customer_request",
+            args: { request_type: "message", caller_name: "Jon", message: "Taxi booking request", caller_type: "existing_customer" },
+          },
+          { config, callerPhone: "+12145550123" }
+        )
+      ).functionResponse.response.next;
+    expect(await run(cfgWith({}))).not.toContain("questions with no saved answer yet");
+    expect(await run(cfgWith({ questionsFor: "customers" }))).toContain("questions with no saved answer yet: 1. Pickup, 2. Destination.");
   });
 });

@@ -79,7 +79,7 @@ describe("every setting the engine reads survives a dashboard save", () => {
   }
 
   it("keeps the messages pack's intake choices together with its other settings", () => {
-    const raw = { notes: "Ask which department", callbackLine: "Sam will call you back.", confirmStyle: "each", spellUpFront: "leads" };
+    const raw = { notes: "Ask which department", callbackLine: "Sam will call you back.", confirmStyle: "each", spellUpFront: "leads", questionsFor: "customers" };
     const { config, errors } = validateCapabilityConfig(raw, "messages", schemas);
     expect(errors).toEqual([]);
     expect(config).toEqual(raw);

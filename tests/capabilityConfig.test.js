@@ -482,3 +482,28 @@ describe("messages — questionsSkipReasonPrefixes", () => {
     expect(out.questionsSkipReasonPrefixes).toBeUndefined();
   });
 });
+
+// Owner re-test call 1 (2026-11-25): who the numbered questions are for. A plain
+// choice, validated like confirmStyle: kept when it is one of the options,
+// dropped (never thrown) otherwise.
+describe("messages — questionsFor", () => {
+  const validate = (raw) => validateCapabilityConfig(raw, messages, "biz-1");
+
+  it("keeps either option", () => {
+    expect(validate({ questionsFor: "customers" }).questionsFor).toBe("customers");
+    expect(validate({ questionsFor: "new_callers" }).questionsFor).toBe("new_callers");
+  });
+
+  it("drops anything else", () => {
+    for (const bad of ["everyone", "Customers", 1, true, null]) {
+      expect(validate({ questionsFor: bad }).questionsFor).toBeUndefined();
+    }
+  });
+
+  it("survives loadConfig, so an imported tenant's setting reaches the call", () => {
+    const config = loadConfig(BUSINESS, [
+      { capability_id: "messages", enabled: true, adapter: null, adapter_config: {}, config: { questionsFor: "customers" } },
+    ]);
+    expect(config.capabilities.messages.questionsFor).toBe("customers");
+  });
+});

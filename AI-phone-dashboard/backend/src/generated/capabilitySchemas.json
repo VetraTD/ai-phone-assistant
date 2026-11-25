@@ -130,6 +130,19 @@
           "maxItems": 5,
           "maxLength": 40
         },
+        "questionsFor": {
+          "type": "choice",
+          "label": "Who should be asked the numbered questions?",
+          "options": [
+            "new_callers",
+            "customers"
+          ],
+          "optionLabels": {
+            "new_callers": "New callers only",
+            "customers": "New and returning customers"
+          },
+          "default": "new_callers"
+        },
         "spellUpFront": {
           "type": "choice",
           "label": "Ask callers to spell their name up front?",
