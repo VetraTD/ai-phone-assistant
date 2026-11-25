@@ -1342,6 +1342,24 @@ const SABOTAGES = [
     red: ["tests/liveOpenQuestions.test.js"],
   },
   {
+    name: "lvx192r3-questions-for-customers",
+    why:
+      "A business whose numbered questions are for customers stops starting them for a returning customer, so a taxi regular's first save is asked nothing else (owner re-test call 1).",
+    file: "capabilities/messages.js",
+    find: 'const returningToo = questionsForOf(ctx?.config) === "customers";',
+    replace: "const returningToo = false; // SABOTAGE",
+    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js"],
+  },
+  {
+    name: "lvx192r3-email-resolves-relative-day",
+    why:
+      "The owner email stops adding the date to 'Sunday' or 'tomorrow', so the dispatcher gets 'When: 3:00 p.m. Sunday' and has to work the date out (owner re-test call 1).",
+    file: "services/notifications.js",
+    find: 'lines.push(`${shown}: ${answer ? answer + resolvedDayNote(answer, row.created_at, timezone) : "not given"}`);',
+    replace: 'lines.push(`${shown}: ${answer || "not given"}`); // SABOTAGE',
+    red: ["tests/notifications.callRequests.test.js"],
+  },
+  {
     name: "lvx192r2-skip-words-honoured",
     why:
       "A save whose reason starts with the business's skip word (URGENT) gets the booking question list, so an urgent caller is asked the booking questions instead of being put through.",

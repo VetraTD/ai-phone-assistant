@@ -9,6 +9,7 @@ import * as db from "./db.js";
 import { checkText } from "../lib/dialCost.js";
 import { effectiveTier } from "../lib/compliance.js";
 import { isRealCallerNumber, isOwnNumber } from "../lib/inboundGuards.js";
+import { resolvedDayNote } from "../lib/relativeDay.js";
 import { createGraphMailer, graphMailConfig, mailTransportSetting } from "./graphMail.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -414,10 +415,13 @@ function rowLines(row, timezone) {
     // "Number:: ...", which still starts like the fixed line.
     const bare = question.replace(/[\s:.,;!?\-–—]+$/u, "") || question;
     const shown = FIXED_FIELDS.has(bare.toLowerCase()) ? `Answer - ${bare}` : bare;
-    if (question || answer) lines.push(`${shown}: ${answer || "not given"}`);
+    // Owner re-test call 1: "Sunday" or "tomorrow" gets the date it means.
+    if (question || answer) {
+      lines.push(`${shown}: ${answer ? answer + resolvedDayNote(answer, row.created_at, timezone) : "not given"}`);
+    }
   }
   const preferred = oneLine(row.preferred_time);
-  if (preferred) lines.push(`Preferred time: ${preferred}`);
+  if (preferred) lines.push(`Preferred time: ${preferred}${resolvedDayNote(preferred, row.created_at, timezone)}`);
   lines.push(`Call time: ${callTimeText(row.created_at, timezone)}`);
   return lines.join("\n");
 }

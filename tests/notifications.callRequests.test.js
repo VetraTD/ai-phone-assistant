@@ -431,3 +431,28 @@ describe("notifyUnconfirmedClaim", () => {
     expect(mail.subject).not.toContain("4477");
   });
 });
+
+// Owner re-test call 1 (2026-11-25): a relative day in an answer gets its date.
+describe("renderCallRequestsEmail: the date a relative day means", () => {
+  it("adds the date next to an answer and the preferred time; leaves other lines alone", async () => {
+    const n = await load();
+    const { text } = render(n, [
+      {
+        ...row,
+        message: "Taxi booking request for Sunday",
+        preferred_time: "tomorrow morning",
+        created_at: "2026-11-25T01:04:00Z",
+        details: {
+          answers: [
+            { label: "When", answer: "3:00 p.m. Sunday" },
+            { label: "Payment", answer: "Cash" },
+          ],
+        },
+      },
+    ]);
+    expect(text).toContain("When: 3:00 p.m. Sunday (Sun 29 Nov)");
+    expect(text).toContain("Payment: Cash\n");
+    expect(text).toContain("Preferred time: tomorrow morning (Thu 26 Nov? said at 01:04, check the day)");
+    expect(text).toContain("Reason: Taxi booking request for Sunday\n");
+  });
+});
