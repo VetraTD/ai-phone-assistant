@@ -17485,6 +17485,12 @@ Nothing written on either (postcall_verify ok, 0 rows) -- correct, nothing was a
 - A different person on the same phone hears someone else's name (and learns it is booked). Owner ruled earlier that
   an on-file name is said, never spelled, and kept "Is that under <most-booked>?" on shared numbers -- this was a
   statement, not that question. Owner to decide: confirm ("Am I speaking with Jonathan?") or accept as is.
+- **Seen again 2026-11-25, messages-only business (Hammersleys re-test calls 3 and 4).** The shipped caution
+  ("Names below may belong to someone else on this phone…", services/gemini.js:1126) is emitted ONLY when an upcoming
+  appointment carries a client_name. For a business without appointments the name reaches the model through the
+  last-call summary with no caution: call 3 the name was not heard twice, then "Thank you, Jane" (on file); call 4
+  (urgent) saved caller_name "Jane" and started the transfer 2 s after asking, before the caller answered. Generic
+  fix candidate: emit the caution whenever the caller context carries any name. Owner parked it for round 3.
 
 ### LVX189 · Contact number asked 7 times in a row, caller's questions ignored · **NEW 2026-10-22 · P1** — same defect as LVX169, worse shape
 - CAe52b758 00:48:33–00:49:31Z: "What's the best contact number…" on 7 consecutive turns (`live_repeated_phrase`
@@ -17520,7 +17526,15 @@ Recorded, not fixed (product code, outside a config-only session).
 - Unknown whether callers hear it twice or only `lib/harness/liveTextSession.js` concatenates two transcription
   segments. Check one real call's `live_call_summary` / repeated-phrase counter before treating it as a product defect.
 
-### LVX192 · Details collected after the last save are lost, while the agent says "passed to the dispatcher" · **CODE FIXED 2026-11-24 (branch fix/lvx192-save-guard), live calls pending** `[medium]`
+### LVX192 · Details collected after the last save are lost, while the agent says "passed to the dispatcher" · **LIVE 2026-11-24/25 (voice:1891104, voice-uk-prod-00124-hcl); owner re-test calls PASS 2026-11-25** `[medium]`
+- Fix round 2 (2026-11-24/25, ledger .superpowers/sdd/2026-11-24-hammersleys-round2/progress.md): the list also
+  starts on a label-less first save; a reason starting with a `questionsSkipReasonPrefixes` entry (Hammersleys
+  "URGENT") skips it; each-style businesses confirm the saved answer first; "Mhm"/"N?o" no longer count as answers;
+  a corrected name updates the bare row instead of filing a second one; no "anything else?" in a round with a
+  transfer. Then, after owner call 1 failed (a regular typed existing_customer got no questions): messages
+  `questionsFor` ("new_callers" default | "customers") and the owner email adds the date a relative day means
+  ("Friday 3 p.m. (Fri 27 Nov)", lib/relativeDay.js). Five owner calls on the US test line passed the round's
+  targets; leftovers are LVX188 and LVX194-LVX196.
 - Fix (inbound, generic): end_call is refused once per save while the caller has spoken since the last save (counter
   in the reducer, front-end latches saveGuardSpent; a fresh save clears it). At hang-up an after-save note is written
   onto the last saved message, labelled "Said after the last save (unchecked transcript)". Each save reply now names
@@ -17557,7 +17571,9 @@ Recorded, not fixed (product code, outside a config-only session).
   record_customer_request, tool reply "save the request with all the details first"; (b) post-call recovery that
   re-saves details from the transcript into the row before the owner email.
 
-### LVX193 · Inbound transfer screening (whisper + press 1) · **CODE FIXED 2026-11-24 (branch fix/lvx192-save-guard), live calls pending** `[medium]`
+### LVX193 · Inbound transfer screening (whisper + press 1) · **LIVE 2026-11-24; verified on owner calls 11-24 and 11-25** `[medium]`
+- 2026-11-25 owner urgent call (…acc359): transfer_result screened=true, screening "accepted", DialBridged "true",
+  DialCallStatus "completed" when the dispatcher pressed 1.
 - A transfer answered by voicemail counted as answered (see LVX192, ASAP transfer). Now per-business
   `transfer_screening` / `transfer_whisper` (migration 063): the staff member hears a whisper and must press 1; the
   Dial action carries a `screened=1` flag, and transferOutcome treats a flagged dial as not accepted when
@@ -17578,3 +17594,48 @@ Recorded, not fixed (product code, outside a config-only session).
   tenant whose requests are not bookings.
 - `scripts/corpus/sabotage.mjs --census` row `p4-d1-preset-sends-to` is stale: `970d51a` deleted
   `AI-phone-dashboard/frontend/src/callsQueryParams.js`. Not touched here.
+
+### LVX194 · Call endings: silence and repeated goodbyes around "anything else?" · **NEW 2026-11-25 · round 3** `[medium]`
+- Hammersleys owner re-test calls (voice-uk-prod-00123-p8n, debug transcript on):
+  - …7eab36: "anything else?", end_call 4 s later before the answer -> refused (hesitation gate; caller "Mhm.") ->
+    the goodbye was suppressed and latched silent -> ~16 s of dead air -> caller "What" -> recovered.
+  - …6c0d37: "anything else?" and the goodbye in one turn -> exit held -> "Hello? Are you still there?" -> goodbye again.
+  - …2fdea1: a silence nudge fired 1.5 s after the exit armed (exit ran 0.1 s later; probably not heard).
+- Side effect: the owner email carries junk after-save lines ("Said after the last save (unchecked transcript):
+  What", "… 'Are you still there?' — Ayer no").
+- Touches turn-taking and the hesitation gate, so it waits for round 3 with LVX181 ("umm" answered as a turn).
+
+### LVX195 · Misheard opener declined, then end_call before the caller answered · **NEW 2026-11-25 · round 3** `[medium]`
+- …2b8a13 (30 s): the opener (likely "a taxi to Gatwick please") came through as "I need an accident report with
+  police"; the AI said it could not help and asked "How else can I assist you?", then called end_call 3 s later,
+  before the caller spoke. Caller "No." -> goodbye. A taxi line would do better to ask "did you need a taxi?".
+- Mishearing is the model's own ASR (live transcript is lossy); the end_call-before-the-answer part is LVX194's family.
+
+### LVX196 · "That is confirmed for Saturday…" on a time read-back · **NEW 2026-11-25 · P2** `[cheap]`
+- …1b5d26: after the caller gave the pick-up day and time, "That is confirmed for Saturday, November 28th at 7 a.m."
+  The tenant's custom instructions forbid "confirmed"; a caller can hear it as booked. Same family as the
+  "You are booked" read-back (see "Also from these sims" under LVX193): a generic guard would cover every tenant
+  whose requests are not bookings.
+
+### LVX197 · Code-checked answers ("big fix") · **PARKED 2026-11-25 (owner R11): measure first** `[large]`
+- Idea: check saved answers in code (postcode shape, passenger range, child-seat age, a date present, pick-up before
+  departure) and send a fix-it note instead of relying on notes wording. Owner ruled: decide after Jason's first week
+  by counting offline how many saved answers would have failed the checks. No code yet.
+
+### LVX198 · A dashboard Messages save drops questionsFor and questionsSkipReasonPrefixes · **NEW 2026-11-25 · P1 before dashboard use** `[cheap]`
+- The dashboard validator keeps both keys in code (backend capabilityConfigValidation, capabilitySchemas.json
+  re-exported), but dashboard-api is NOT deployed with it. A dashboard save replaces the whole config
+  (routes/capabilities.js), so saving the Messages card on a Hammersleys tenant today would wipe both settings.
+  Only the owner's US test login can reach it. Fix: deploy dashboard-api from this branch.
+
+### Also parked from Hammersleys fix round 2
+- Needs and luggage asked as one question ("any specific needs, like luggage or a child seat?"); a "No" saved both
+  as none (…6c0d37). A caller with bags may not say so.
+- "Same pickup as last time?" for a returning caller: owner idea, not designed.
+- A business whose notes have ONE numbered question gets no open-questions list (capabilities/messages.js:643
+  `questions.length >= 2`).
+- A call from the business's own phone (its transfer number) has no caller number by design
+  (lib/inboundGuards.js callerIdentityNumber), so the AI says "your number did not come through". Tell clients
+  who test from their dispatch phone.
+- Digile census after-measure (LVX192): 0 Digile calls since 2026-11-24 06:27Z on 11-25; re-run when there are some
+  (`.superpowers/hammersleys/census/analyze-unsaved-answers.mjs`, validate on CAecaa4bd1 first).
