@@ -302,6 +302,16 @@ describe("quotes & messages — identity + notes have effect", () => {
     expect(new Set([at("no"), at("leads"), at("everyone")]).size).toBe(3);
   });
 
+  it("messages questionsFor → the static prefix names who the business's questions are for (review M10)", async () => {
+    const { buildStaticSystemPrefix } = await import("../services/gemini.js");
+    const extras = { knowledge: [], integrations: [], transferAllowed: true };
+    const at = (v) => buildStaticSystemPrefix(packConfig("messages", { notes: "Ask: 1. Pickup? 2. When?", ...(v ? { questionsFor: v } : {}) }), extras);
+    expect(at(undefined)).toContain("if its notes list any: new enquiries by default, other callers only when the notes say so.");
+    expect(at("new_callers")).toBe(at(undefined));
+    expect(at("customers")).toContain("if its notes list any: new and returning customers by default, other callers only when the notes say so.");
+    expect(at("customers")).not.toContain("new enquiries by default");
+  });
+
   it("messages intake settings are ignored on the healthcare tier", async () => {
     const { buildStaticSystemPrefix } = await import("../services/gemini.js");
     const extras = { knowledge: [], integrations: [], transferAllowed: true };

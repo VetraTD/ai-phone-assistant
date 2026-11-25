@@ -359,10 +359,12 @@ describe("who the numbered questions are for (questionsFor)", () => {
     expect(next(r)).not.toContain("new enquiries by default");
   });
 
-  it("customers: personal callers, suppliers and sales pitches still keep today's text", async () => {
+  it("customers: personal callers, suppliers and sales pitches get no list; the general note names customers (review M10)", async () => {
     for (const caller_type of ["personal", "supplier", "sales_pitch"]) {
       const r = await save(forCustomers(), { caller_type, message: "a word with the owner" });
-      expect(next(r)).toMatch(TODAY);
+      expect(next(r)).toMatch(
+        /^\[not caller speech\] If this business's notes list questions, ask them now: new and returning customers by default, other callers only when the notes say so\./
+      );
       expect(r.stateEffects.questionsOpen).toBeUndefined();
     }
   });

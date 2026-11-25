@@ -1,71 +1,69 @@
-// Owner re-test call 1 (2026-11-25): the email said "When: 3:00 p.m. Sunday",
-// not a date, although the notes asked for one. The email now adds the date a
-// relative day word means, worked out from the call time in the business's
-// time zone, and leaves anything it cannot pin to one day as the caller said it.
-import { describe, expect, it } from "vitest";
-import { resolvedDayNote } from "../lib/relativeDay.js";
+// ---------------------------------------------------------------------------
+// LVX61. On a real call at 21:37 on Thursday 3 September, with
+//
+//   Current: Thursday, September 3, 2026, 9:37 PM (America/Chicago).
+//   When scheduling, always calculate from this real date.
+//
+// in its prompt, the assistant said "I see you already have an appointment
+// scheduled for today, Friday, September 4th, at 3 pm." It had the date, it had
+// an explicit instruction to calculate from it, and it still called tomorrow
+// today. Nothing detects that: no tool was involved, the appointment is real,
+// and the only wrong word is a relative one.
+//
+// This is not more prompt text telling it to try harder — the prompt already
+// says that and was ignored. It is the server doing the arithmetic once and
+// handing over the answer, so there is nothing left for the model to compute.
+// ---------------------------------------------------------------------------
+import { describe, it, expect } from "vitest";
+import { relativeDayLabel } from "../lib/capabilities/datetime.js";
 
-const WED_0104 = "2026-11-25T01:04:00Z"; // Wed 25 Nov 2026, 01:04 in London (GMT)
-const TUE_1629 = "2026-11-24T16:29:00Z"; // Tue 24 Nov 2026, 16:29 in London
-const LONDON = "Europe/London";
+const CHICAGO = "America/Chicago";
 
-describe("resolvedDayNote", () => {
-  it.each([
-    ["3:00 p.m. Sunday", WED_0104, " (Sun 29 Nov)"],
-    ["BA2490, 5:00 p.m., Sunday", WED_0104, " (Sun 29 Nov)"],
-    ["this Sunday at 3", WED_0104, " (Sun 29 Nov)"],
-    ["SUNDAY", WED_0104, " (Sun 29 Nov)"],
-    ["8:00 AM tomorrow", TUE_1629, " (Wed 25 Nov)"],
-    ["Friday at 3:30 p.m.", TUE_1629, " (Fri 27 Nov)"],
-    ["Monday morning", TUE_1629, " (Mon 30 Nov)"],
-    ["today", TUE_1629, " (Tue 24 Nov)"],
-    ["tonight at 9", TUE_1629, " (Tue 24 Nov)"],
-    ["today at 6", WED_0104, " (Wed 25 Nov)"],
-  ])("%s, said at %s -> %s", (text, at, note) => {
-    expect(resolvedDayNote(text, at, LONDON)).toBe(note);
+// The exact instant of the defect: Thursday 2026-09-03 21:37 America/Chicago.
+const THU_2137 = Date.parse("2026-09-04T02:37:00Z");
+
+describe("relativeDayLabel — the server computes the relative day, not the model", () => {
+  it("calls the NEXT calendar day tomorrow (the LVX61 sentence)", () => {
+    // Friday 2026-09-04 15:00 Chicago — what it called "today".
+    expect(relativeDayLabel("2026-09-04T20:00:00Z", CHICAGO, THU_2137)).toBe("tomorrow");
   });
 
-  it("tomorrow or tonight said between midnight and 5am: the date, flagged to check", () => {
-    expect(resolvedDayNote("tomorrow at 6am", WED_0104, LONDON)).toBe(" (Thu 26 Nov? said at 01:04, check the day)");
-    expect(resolvedDayNote("tonight", WED_0104, LONDON)).toBe(" (Wed 25 Nov? said at 01:04, check the day)");
+  it("calls the same calendar day today", () => {
+    // Thursday 2026-09-03 22:30 Chicago, still the same local date as 21:37.
+    expect(relativeDayLabel("2026-09-04T03:30:00Z", CHICAGO, THU_2137)).toBe("today");
   });
 
-  it.each([
-    "next Sunday",
-    "every Sunday",
-    "Sundays",
-    "Sunday week",
-    "the day after tomorrow",
-    "Saturday or Sunday",
-    "Thu 26 Nov at 3pm",
-    "26/11 at 3pm",
-    "November 26, 2026 at 07:15",
-    "26th at 3pm",
-    "5:00 AM",
-    "",
-    "Cash",
-  ])("leaves %j as said", (text) => {
-    expect(resolvedDayNote(text, WED_0104, LONDON)).toBe("");
+  it("gives no relative word for anything further out", () => {
+    // Saturday. There is no short word for it, so the model gets nothing and
+    // the prompt tells it to name the weekday and date instead.
+    expect(relativeDayLabel("2026-09-05T20:00:00Z", CHICAGO, THU_2137)).toBeNull();
+    expect(relativeDayLabel("2026-09-10T20:00:00Z", CHICAGO, THU_2137)).toBeNull();
   });
 
-  it("the weekday the call is on is left as said (today or a week away)", () => {
-    expect(resolvedDayNote("Tuesday at 4", TUE_1629, LONDON)).toBe("");
+  it("is computed in the BUSINESS timezone, not the process timezone", () => {
+    // 2026-09-04T02:37Z is already Friday in London and still Thursday in
+    // Chicago. An appointment at 2026-09-04T20:00Z is Friday in both, so the
+    // same instant pair is "tomorrow" in Chicago and "today" in London.
+    expect(relativeDayLabel("2026-09-04T20:00:00Z", CHICAGO, THU_2137)).toBe("tomorrow");
+    expect(relativeDayLabel("2026-09-04T20:00:00Z", "Europe/London", THU_2137)).toBe("today");
   });
 
-  it("uses the business's time zone, not UTC", () => {
-    // 01:04 UTC Wed is 19:04 Tue in Chicago: tomorrow is Wednesday there.
-    expect(resolvedDayNote("tomorrow at 8", WED_0104, "America/Chicago")).toBe(" (Wed 25 Nov)");
+  it("crosses a month boundary by calendar date, not by adding 24 hours", () => {
+    // Monday 2026-08-31 23:00 Chicago -> Tuesday 1 September is "tomorrow".
+    const aug31 = Date.parse("2026-09-01T04:00:00Z");
+    expect(relativeDayLabel("2026-09-01T18:00:00Z", CHICAGO, aug31)).toBe("tomorrow");
   });
 
-  it("no time zone: UTC; a bad zone: UTC; a bad call time: nothing", () => {
-    expect(resolvedDayNote("tomorrow", TUE_1629, null)).toBe(" (Wed 25 Nov)");
-    expect(resolvedDayNote("tomorrow", TUE_1629, "Not/AZone")).toBe(" (Wed 25 Nov)");
-    expect(resolvedDayNote("tomorrow", "not a date", LONDON)).toBe("");
-    expect(resolvedDayNote("tomorrow", null, LONDON)).toBe("");
+  it("returns null rather than a wrong word for unparseable input", () => {
+    expect(relativeDayLabel(null, CHICAGO, THU_2137)).toBeNull();
+    expect(relativeDayLabel("not a date", CHICAGO, THU_2137)).toBeNull();
+    expect(relativeDayLabel(undefined, CHICAGO, THU_2137)).toBeNull();
   });
 
-  it("non-text input: nothing", () => {
-    expect(resolvedDayNote(undefined, TUE_1629, LONDON)).toBe("");
-    expect(resolvedDayNote(5, TUE_1629, LONDON)).toBe("");
+  it("falls back to the default timezone rather than the process zone", () => {
+    // Same contract as speakableDateTime and toLocalNaiveDateTime: an unset
+    // business timezone must not silently mean "whatever zone the server runs
+    // in", which is how one row got read back two different ways.
+    expect(relativeDayLabel("2026-09-04T20:00:00Z", undefined, THU_2137)).toBe("tomorrow");
   });
 });

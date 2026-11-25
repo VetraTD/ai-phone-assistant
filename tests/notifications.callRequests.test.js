@@ -455,4 +455,38 @@ describe("renderCallRequestsEmail: the date a relative day means", () => {
     expect(text).toContain("Preferred time: tomorrow morning (Thu 26 Nov? said at 01:04, check the day)");
     expect(text).toContain("Reason: Taxi booking request for Sunday\n");
   });
+
+  it("an address or a past trip never gets a date (review I2/I3)", async () => {
+    const n = await load();
+    const { text } = render(n, [
+      {
+        ...row,
+        preferred_time: null,
+        created_at: "2026-11-25T12:00:00Z",
+        details: {
+          answers: [
+            { label: "Pickup", answer: "12 Friday Street, Chepstow" },
+            { label: "Trip date", answer: "Saturday night" },
+            { label: "Item", answer: "wallet left on Sunday" },
+          ],
+        },
+      },
+    ]);
+    expect(text).toContain("Pickup: 12 Friday Street, Chepstow\n");
+    expect(text).toContain("Trip date: Saturday night\n");
+    expect(text).toContain("Item: wallet left on Sunday\n");
+  });
+
+  it("works the date out in the business's own time zone", async () => {
+    const n = await load();
+    const at = (timezone) =>
+      render(
+        n,
+        [{ ...row, preferred_time: null, created_at: "2026-11-25T01:04:00Z", details: { answers: [{ label: "When", answer: "tomorrow 8am" }] } }],
+        timezone
+      ).text;
+    // 01:04 UTC Wed is 19:04 Tue in Chicago.
+    expect(at("America/Chicago")).toContain("When: tomorrow 8am (Wed 25 Nov)\n");
+    expect(at("Europe/London")).toContain("When: tomorrow 8am (Thu 26 Nov? said at 01:04, check the day)\n");
+  });
 });

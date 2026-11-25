@@ -9,7 +9,7 @@ import * as db from "./db.js";
 import { checkText } from "../lib/dialCost.js";
 import { effectiveTier } from "../lib/compliance.js";
 import { isRealCallerNumber, isOwnNumber } from "../lib/inboundGuards.js";
-import { resolvedDayNote } from "../lib/relativeDay.js";
+import { resolvedDayNote, dayNoteLabel } from "../lib/relativeDay.js";
 import { createGraphMailer, graphMailConfig, mailTransportSetting } from "./graphMail.js";
 
 const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -415,9 +415,10 @@ function rowLines(row, timezone) {
     // "Number:: ...", which still starts like the fixed line.
     const bare = question.replace(/[\s:.,;!?\-–—]+$/u, "") || question;
     const shown = FIXED_FIELDS.has(bare.toLowerCase()) ? `Answer - ${bare}` : bare;
-    // Owner re-test call 1: "Sunday" or "tomorrow" gets the date it means.
+    // Owner re-test call 1: "Sunday" or "tomorrow" under a when-label gets the date it means.
     if (question || answer) {
-      lines.push(`${shown}: ${answer ? answer + resolvedDayNote(answer, row.created_at, timezone) : "not given"}`);
+      const note = answer && dayNoteLabel(question) ? resolvedDayNote(answer, row.created_at, timezone) : "";
+      lines.push(`${shown}: ${answer ? answer + note : "not given"}`);
     }
   }
   const preferred = oneLine(row.preferred_time);

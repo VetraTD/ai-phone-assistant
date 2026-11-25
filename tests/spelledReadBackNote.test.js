@@ -369,6 +369,16 @@ describe("one read-back at the end (fix wave I8)", () => {
     expect(res.next).toContain('"Daniel, D-A-N-I-E-L"');
   });
 
+  it("questionsFor customers: an existing client's first save is deferred like a lead's (review I5)", async () => {
+    const customers = { capabilities: { messages: { notes: "Ask which company they are with.", questionsFor: "customers" } } };
+    const res = replyOf(await run(JD, { ...lead, callerType: "existing_customer", config: customers }));
+    expect(res.next).not.toMatch(READ_BACK);
+    expect(res.next).toMatch(/after the last answer/i);
+    // Control: the same client at a business without the setting still gets the letters now.
+    const plain = replyOf(await run(JD, { ...lead, callerType: "existing_customer" }));
+    expect(plain.next).toMatch(READ_BACK);
+  });
+
   it("a type never reported or unclear is a lead: deferred too", async () => {
     for (const callerType of [null, "other"]) {
       const res = replyOf(await run(JD, { ...lead, callerType }));

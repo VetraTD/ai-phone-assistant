@@ -93,8 +93,25 @@ const SKIP_REASON_NOTE =
 const QUIET_SAVE_NOTE =
   "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
 
+/**
+ * Owner re-test call 1: a business whose numbered questions are for customers
+ * (questionsFor "customers") says so wherever the default "new enquiries" scope
+ * is stated (review M10); every other business keeps its text byte for byte.
+ */
+const NEW_ENQUIRIES_SCOPE = "new enquiries by default";
+const CUSTOMERS_SCOPE = "new and returning customers by default";
+function scopedNote(text, config) {
+  return questionsForOf(config) === "customers" ? text.replace(NEW_ENQUIRIES_SCOPE, CUSTOMERS_SCOPE) : text;
+}
+
+/** Is this caller one the business's numbered questions are for? A new enquiry (or a type not yet known), and with questionsFor "customers" a returning customer too. */
+function questionsAreFor(args, ctx) {
+  const type = decisionTypeOf(intakeTypeFor(args, ctx));
+  return type === "new_enquiry" || (type === "existing_customer" && questionsForOf(ctx?.config) === "customers");
+}
+
 function nextQuestionsNote(config) {
-  return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : NEXT_QUESTIONS_NOTE_STANDARD;
+  return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : scopedNote(NEXT_QUESTIONS_NOTE_STANDARD, config);
 }
 
 /**
@@ -348,7 +365,10 @@ function standardLines(cfg, config, { callback = false } = {}) {
   // (fix wave M8a); a business with none does not carry it on every turn.
   if (hasMessageNotes(config)) {
     lines.push(
-      `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`
+      scopedNote(
+        `Then ask this business's own questions, if its notes list any: new enquiries by default, other callers only when the notes say so. Ask all of them, in the business's order, one at a time, skipping any the caller already answered. If the caller says they are short of time, offer to leave the rest for the callback. Then save again with the same message and the answers in details.`,
+        config
+      )
     );
   }
   lines.push(
@@ -565,7 +585,9 @@ export default {
       ctx?.capabilityState?.messages?.firstSaveDone !== true &&
       !isHealthcareTier(ctx?.config) &&
       !(detailsFromArgs(args)?.answers?.length > 0) &&
-      decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";
+      // Review I5: the callers the questions are for (with questionsFor
+      // "customers", a returning customer too) hear one read-back, at the end.
+      questionsAreFor(args, ctx);
     // LVX192 Task 5 (standard tier only): the labels saved so far this call, and
     // the numbered notes questions with no saved answer. The list replaces
     // today's generic note only when the caller is already in the business's
@@ -614,9 +636,8 @@ export default {
         const firstSave = ctx?.capabilityState?.messages?.firstSaveDone !== true;
         // Owner re-test call 1: a business whose questions are for customers
         // (questionsFor "customers") starts them for a returning customer too.
-        const callerType = decisionTypeOf(intakeTypeFor(args, ctx));
         const returningToo = questionsForOf(ctx?.config) === "customers";
-        const enquiry = callerType === "new_enquiry" || (returningToo && callerType === "existing_customer");
+        const enquiry = questionsAreFor(args, ctx);
         const startsHere = enquiry && (firstSave || savedLabels.length === 0);
         const listStarts = !skipped && (startsHere || anyAnswered(questions, savedLabels));
         if (questions.length >= 2 && listStarts) {
@@ -649,7 +670,7 @@ export default {
         : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
     const next = (
       deferReadBack && !skipped
-        ? [needsNumber ? NO_NUMBER_NOTE : null, NEXT_QUESTIONS_NOTE_DEFERRED]
+        ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
         : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
     )
       .filter(Boolean)

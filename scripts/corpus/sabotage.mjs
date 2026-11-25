@@ -1346,18 +1346,36 @@ const SABOTAGES = [
     why:
       "A business whose numbered questions are for customers stops starting them for a returning customer, so a taxi regular's first save is asked nothing else (owner re-test call 1).",
     file: "capabilities/messages.js",
-    find: 'const returningToo = questionsForOf(ctx?.config) === "customers";',
-    replace: "const returningToo = false; // SABOTAGE",
-    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js"],
+    find: 'return type === "new_enquiry" || (type === "existing_customer" && questionsForOf(ctx?.config) === "customers");',
+    replace: 'return type === "new_enquiry"; // SABOTAGE',
+    red: ["tests/messagesOpenQuestions.test.js", "tests/capabilityConfigEffects.test.js", "tests/spelledReadBackNote.test.js"],
   },
   {
     name: "lvx192r3-email-resolves-relative-day",
     why:
       "The owner email stops adding the date to 'Sunday' or 'tomorrow', so the dispatcher gets 'When: 3:00 p.m. Sunday' and has to work the date out (owner re-test call 1).",
     file: "services/notifications.js",
-    find: 'lines.push(`${shown}: ${answer ? answer + resolvedDayNote(answer, row.created_at, timezone) : "not given"}`);',
-    replace: 'lines.push(`${shown}: ${answer || "not given"}`); // SABOTAGE',
+    find: 'const note = answer && dayNoteLabel(question) ? resolvedDayNote(answer, row.created_at, timezone) : "";',
+    replace: 'const note = ""; // SABOTAGE',
     red: ["tests/notifications.callRequests.test.js"],
+  },
+  {
+    name: "lvx192r3-email-date-when-labels-only",
+    why:
+      "The owner email adds a date to any answer with a day word, so '12 Friday Street' or a lost item's 'Trip date: Saturday night' gets a future date the dispatcher may act on (review I2/I3).",
+    file: "services/notifications.js",
+    find: 'const note = answer && dayNoteLabel(question) ? resolvedDayNote(answer, row.created_at, timezone) : "";',
+    replace: 'const note = answer ? resolvedDayNote(answer, row.created_at, timezone) : ""; // SABOTAGE',
+    red: ["tests/notifications.callRequests.test.js"],
+  },
+  {
+    name: "lvx192r3-day-note-past-and-dates",
+    why:
+      "A past event ('left it on Saturday') or a date the caller gave in words ('the sixth of December') gets a future date in brackets, and the dispatcher sends a car on the wrong day (review C1/I2).",
+    file: "lib/relativeDay.js",
+    find: "  if (NOT_ONE_DAY_RE.test(text) || PAST_RE.test(text) || hasDate(text)) return \"\";",
+    replace: "  if (NOT_ONE_DAY_RE.test(text)) return \"\"; // SABOTAGE",
+    red: ["tests/relativeDayNote.test.js"],
   },
   {
     name: "lvx192r2-skip-words-honoured",
@@ -4297,7 +4315,7 @@ const SABOTAGES = [
     name: "readback-defer-leads-only",
     why: "Fix wave I8 / P28: the deferral stops being limited to leads, so an existing client at a notes business has the read-back held back too. tests/spelledReadBackNote.test.js saves as an existing client.",
     file: "capabilities/messages.js",
-    find: '      decisionTypeOf(intakeTypeFor(args, ctx)) === "new_enquiry";',
+    find: "      questionsAreFor(args, ctx);",
     replace: "      true; // SABOTAGE",
     red: ["tests/spelledReadBackNote.test.js", "tests/liveSpelledReadBack.test.js"],
   },
@@ -4353,8 +4371,8 @@ const SABOTAGES = [
     name: "withheld-number-first",
     why: "Fix wave P32 N3: a withheld caller's number note goes after the business questions again, so a lead who hangs up during them leaves no way to call back. tests/spelledReadBackNote.test.js pins the order.",
     file: "capabilities/messages.js",
-    find: "        ? [needsNumber ? NO_NUMBER_NOTE : null, NEXT_QUESTIONS_NOTE_DEFERRED]",
-    replace: "        ? [NEXT_QUESTIONS_NOTE_DEFERRED, needsNumber ? NO_NUMBER_NOTE : null] // SABOTAGE",
+    find: "        ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]",
+    replace: "        ? [scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config), needsNumber ? NO_NUMBER_NOTE : null] // SABOTAGE",
     red: ["tests/spelledReadBackNote.test.js"],
   },
   {
