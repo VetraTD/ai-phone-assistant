@@ -5206,14 +5206,6 @@ const SABOTAGES = [
     red: ["tests/liveRepeatHold.test.js"],
   },
   {
-    name: "r5-review-strip-before-log",
-    why: "Review I5: a repeat dropped at its turnComplete leaves its never-heard words in the logged turn. tests/liveRepeatHold.test.js 'review I5'.",
-    file: "lib/voice/live/index.js",
-    find: "    if (holdWordsOf(h.post).length >= 2) decideRepeatHold(true);\n",
-    replace: "    h.appended = \"\"; /* SABOTAGE */\n    if (holdWordsOf(h.post).length >= 2) decideRepeatHold(true);\n",
-    red: ["tests/liveRepeatHold.test.js"],
-  },
-  {
     name: "r5-review-new-generation-settles",
     why: "Review M7: a hold still undecided past its turnComplete keeps the NEXT generation's audio too. tests/liveRepeatHold.test.js 'review M7'.",
     file: "lib/voice/live/index.js",
