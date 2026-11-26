@@ -109,6 +109,78 @@ const QUIET_SAVE_NOTE =
   "Saved. If the caller already said they need nothing else, say a short goodbye and call end_call; otherwise ask whether there is anything else.";
 
 /**
+ * Hammersleys round 5, Task 5 (owner call 4). The opener gave pickup,
+ * destination and time in one breath and the first save carried them, but
+ * nothing said them back, so a misheard "Fifth Street" (Plaistow Street) went
+ * into the email uncorrected. Model-only, FIRST in `next`. Lists only details
+ * this save ADDED (a label no earlier save had) whose words the caller has not
+ * heard from the assistant yet.
+ */
+const SAY_BACK_LEAD =
+  "[not caller speech] Before your next question, say back what you saved that the caller has not heard yet: ";
+const SAY_BACK_MAX_ITEMS = 3;
+const SAY_BACK_MAX_CHARS = 60;
+const CARDINALS = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+};
+const ORDINALS = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+  eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17,
+  eighteenth: 18, nineteenth: 19, twentieth: 20, thirtieth: 30,
+};
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50 };
+const UNIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth";
+const MONTH_OR_THE =
+  "the|jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december";
+const ORDINAL_WORDS = Object.keys(ORDINALS).join("|");
+/**
+ * Spoken numbers as digits, so "seven Plaistow Street" hears the saved "7" and
+ * "November twenty-seventh" the saved "27". An ordinal alone converts only in a
+ * date ("the fifth", "November fifth", "fifth of"), never "Fifth Street".
+ */
+function numberWordsToDigits(text) {
+  return text
+    .toLowerCase()
+    .replace(new RegExp(`\\b(twenty|thirty|forty|fifty)[\\s-]+(${UNIT_WORDS})\\b`, "g"), (_, t, u) =>
+      String(TENS[t] + (CARDINALS[u] ?? ORDINALS[u]))
+    )
+    .replace(new RegExp(`\\b(${MONTH_OR_THE})\\s+(${ORDINAL_WORDS})\\b`, "g"), (_, pre, o) => `${pre} ${ORDINALS[o]}`)
+    .replace(new RegExp(`\\b(${ORDINAL_WORDS})\\s+of\\b`, "g"), (_, o) => `${ORDINALS[o]} of`)
+    .replace(new RegExp(`\\b(${Object.keys(CARDINALS).join("|")})\\b`, "g"), (w) => String(CARDINALS[w]));
+}
+const squashAlnum = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+/**
+ * The details this save added that the assistant has not said: a value is heard
+ * when every word of it with a digit or three letters appears in what was said
+ * this call (earlier turns plus this turn before the call), as written or with
+ * its spoken numbers as digits. Separators are ignored, so a spelled "R-H-7
+ * 6-A-U" hears "RH7 6AU".
+ */
+function unheardDetails(args, ctx, priorLabels) {
+  const said = `${ctx.assistantSaidThisCall} ${typeof ctx.inTurnReplyText === "string" ? ctx.inTurnReplyText : ""}`;
+  const heardIn = [squashAlnum(said), squashAlnum(numberWordsToDigits(said))];
+  const prior = new Set((Array.isArray(priorLabels) ? priorLabels : []).map((l) => String(l).trim().toLowerCase()));
+  const out = [];
+  for (const { label, answer } of detailsFromArgs(args)?.answers ?? []) {
+    if (prior.has(label.trim().toLowerCase())) continue;
+    const words = answer
+      .split(/[\s,;/]+/)
+      .filter((w) => /\d/.test(w) || (w.match(/\p{L}/gu) || []).length >= 3)
+      .map(squashAlnum)
+      .filter(Boolean);
+    const heard = words.length > 0 && words.every((w) => heardIn.some((h) => h.includes(w)));
+    if (heard) continue;
+    const value = answer.slice(0, SAY_BACK_MAX_CHARS).trim().replace(/[.,;:\s]+$/, "");
+    out.push({ label, value });
+    if (out.length >= SAY_BACK_MAX_ITEMS) break;
+  }
+  return out;
+}
+const sayBackNote = (items) => `${SAY_BACK_LEAD}${items.map((i) => `${i.label} ${i.value}`).join("; ")}.`;
+
+/**
  * Owner re-test call 1: a business whose numbered questions are for customers
  * (questionsFor "customers") says so wherever the default "new enquiries" scope
  * is stated (review M10); every other business keeps its text byte for byte.
@@ -699,12 +771,28 @@ export default {
       !quietSave &&
       questionsPart.some(Boolean);
     if (alreadyAsked) bumpCounter("tool_reply_already_asked_save");
+    // Round 5 Task 5: say back what this save added that the caller has not
+    // heard. Live + inbound + standard tier, a business that confirms each
+    // answer, in its question flow; never when the turn already ended with a
+    // question (it waits for the next save), a skip-reason save or the forced one.
+    const sayBack =
+      standardTier &&
+      typeof ctx?.assistantSaidThisCall === "string" &&
+      !ctx?.outboundCall &&
+      confirmStyleOf(ctx?.config) === "each" &&
+      listNote !== null &&
+      !replyEndsWithQuestion(ctx?.inTurnReplyText) &&
+      !skipped &&
+      !quietSave
+        ? unheardDetails(args, ctx, ctx?.capabilityState?.messages?.savedLabels)
+        : [];
+    if (sayBack.length) bumpCounter("tool_reply_say_back");
     const next = (
       alreadyAsked
         ? [ALREADY_ASKED_NOTE]
         : deferReadBack && !skipped
           ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
-          : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
+          : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
     )
       .filter(Boolean)
       .join(" ");

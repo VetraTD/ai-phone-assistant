@@ -5068,6 +5068,22 @@ const SABOTAGES = [
     replace: "+ (openUnsaved ? 1 : 0) + 0; /* SABOTAGE */",
     red: ["tests/liveSaveGuard.test.js"],
   },
+  {
+    name: "r5-say-back-unheard",
+    why: "Round 5 Task 5 (owner call 4): the save reply stops asking for a say-back of details the caller never heard, so a misheard opener street goes into the email uncorrected. tests/messagesSayBack.test.js reads next.",
+    file: "capabilities/messages.js",
+    find: "[sayBack.length ? sayBackNote(sayBack) : null, readBack,",
+    replace: "[null /* SABOTAGE */, readBack,",
+    red: ["tests/messagesSayBack.test.js"],
+  },
+  {
+    name: "r5-say-back-added-only",
+    why: "Round 5 Task 5: a detail an earlier save already carried is listed for say-back again on every later save (a recap the owner ruled out, R26). tests/messagesSayBack.test.js 'not listed again'.",
+    file: "capabilities/messages.js",
+    find: "    if (prior.has(label.trim().toLowerCase())) continue;\n",
+    replace: "",
+    red: ["tests/messagesSayBack.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
