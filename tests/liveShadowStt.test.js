@@ -71,6 +71,7 @@ describe("shadowKeyterms — the business name and its 'Local names' line", () =
       "B", "Oxted", "Hurst Green", "Dormansland", "Edenbridge",
     ]);
     expect(shadowKeyterms({ businessName: "B", generalInfo: "LOCAL NAMES – Lingfield, Felbridge" })).toEqual(["B", "Lingfield", "Felbridge"]);
+    expect(shadowKeyterms({ businessName: "B", generalInfo: "Local names - Oxted, Godstone" })).toEqual(["B", "Oxted", "Godstone"]);
     // A name with "and" inside a word is not split.
     expect(shadowKeyterms({ businessName: "B", generalInfo: "Local names: Sandhurst, Andover" })).toEqual(["B", "Sandhurst", "Andover"]);
   });
@@ -226,10 +227,15 @@ describe("the engine wiring", () => {
     expect(db.withTenantSafe.mock.calls.some(([id, , o]) => id === BIZ && o?.operation === "shadow_stt")).toBe(true);
   });
 
-  it("review M1: switched on but not listed: skipped and counted, never contacted", async () => {
-    const { connect } = await call({ env: { ...ON, LIVE_SHADOW_STT: "some-other-business" } });
+  it("review M1: switched on but not eligible (non-EU region): skipped and counted, never contacted", async () => {
+    const { connect } = await call({ env: { ...ON, DEEPGRAM_REGION: "us" } });
     expect(connect).not.toHaveBeenCalled();
     expect(counters().live_shadow_stt_skipped).toBe(1);
+  });
+  it("re-review M1: another business's call (not listed) is silent: not counted as skipped", async () => {
+    const { connect } = await call({ env: { ...ON, LIVE_SHADOW_STT: "some-other-business" } });
+    expect(connect).not.toHaveBeenCalled();
+    expect(counters().live_shadow_stt_skipped ?? 0).toBe(0);
   });
 
   it("never for a healthcare tenant, even when switched on", async () => {

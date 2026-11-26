@@ -334,6 +334,33 @@ describe("round 4 — keep the start of speech said over us (R29)", () => {
     // the 1 s of sparse noise before it (54+ before the fix).
     expect(out.released).toBeLessThanOrEqual(26);
   });
+  // Opus re-review C1: the density walk-back must never hand over LESS voice
+  // than the old gate's 500 ms window did. An "Okay", a 120 ms dip, then a
+  // syllable just starting as our audio ends: the old gate forwarded all of
+  // the Okay; a walk-back that stops at the thin tail would cut it (LVX70).
+  it("re-review C1: an 'Okay', a dip, then a syllable starting at our end: the whole Okay is handed over", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    const okay = Array.from({ length: 12 }, (_, i) => Buffer.from([100 + i]));
+    for (const f of okay) g.push({ frame: f, playing: true, ...SPEAKING_OVER });
+    for (let i = 0; i < 6; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 2; i++) g.push({ frame: frame(7), playing: true, ...VOICE });
+    const out = g.push({ ...END_OF_PLAYBACK });
+    for (const f of okay) expect(out.forward).toContain(f);
+    expect(out.dropped).toBe(0);
+  });
+  it("re-review C1: a barge never hands over less than the old ring and the barging frame", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    const word = Array.from({ length: 8 }, (_, i) => Buffer.from([120 + i]));
+    for (const f of word) g.push({ frame: f, playing: true, ...SPEAKING_OVER });
+    for (let i = 0; i < 6; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    g.push({ frame: frame(7), playing: true, ...VOICE });
+    const out = g.push({ frame: frame(99), playing: true, ...BARGE });
+    expect(out.barge).toBe(true);
+    for (const f of word) expect(out.forward).toContain(f);
+  });
+
   // Opus review I2: what a hand-over carries, in voiced frames, for the
   // engine's "the caller made a sound" facts.
   it("review I2: a hand-over reports its voiced frames", () => {

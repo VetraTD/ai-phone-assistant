@@ -350,6 +350,20 @@ describe("a one-word reply to 'anything else?' is not an answer (round 4)", () =
       expect(isInformativeCallerTurn(t, prev, undefined, closing)).toBe(false);
     }
   });
+  // Opus re-review I1: the locale closing regex misses common wrap-up wordings.
+  it.each([
+    "Lovely. Anything else?",
+    "Can I help with anything else?",
+    "Is that everything?",
+    "Is that all for today?",
+    "Is there anything more I can help with?",
+  ])("re-review I1: 'esse' after %j carries nothing", (q) => {
+    expect(isInformativeCallerTurn("esse", q, readBackQuestionRe("en"), closing)).toBe(false);
+  });
+  it("re-review I1: 'Have I got everything right?' is still a read-back check, not a wrap-up", () => {
+    expect(isInformativeCallerTurn("Heathrow.", "Have I got everything right?", readBackQuestionRe("en"), closing)).toBe(true);
+  });
+
   // Opus review I4: after "Are you still there?" the likely reply is the answer
   // to the question still pending -- not covered by the 19/50 measurement.
   it("review I4: one word after a nudge stays an answer", () => {

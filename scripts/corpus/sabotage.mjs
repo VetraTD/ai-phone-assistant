@@ -1020,8 +1020,8 @@ const SABOTAGES = [
     why:
       "reads 'Did I get everything right?' (and 'anything more about the problem?') as a wrap-up, so a one-word correction ('Heathrow.') is dropped from the save guard and the owner's email -- a wrong value left on file.",
     file: "lib/voice/unsavedAnswers.js",
-    find: "  if ((readBackRe instanceof RegExp ? readBackRe : READ_BACK_RE).test(q)) return false;\n  if (closingRe instanceof RegExp) return closingRe.test(q);",
-    replace: "  if (closingRe instanceof RegExp) return WRAP_UP_RE.test(q) || closingRe.test(q); // SABOTAGE",
+    find: "  if ((readBackRe instanceof RegExp ? readBackRe : READ_BACK_RE).test(q)) return false;\n  if (closingRe instanceof RegExp && closingRe.test(q)) return true;",
+    replace: "  if (closingRe instanceof RegExp && (WRAP_UP_RE.test(q) || closingRe.test(q))) return true; // SABOTAGE",
     red: ["tests/unsavedAnswers.test.js"],
   },
   {
@@ -1053,6 +1053,26 @@ const SABOTAGES = [
     find: "      try {\n        s.close();\n      } catch {\n        // already gone\n      }\n      throw err;",
     replace: "      throw err; // SABOTAGE: the socket is left retrying",
     red: ["tests/sttDeepgramFinalize.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus re-review C1.
+    name: "gate-handover-floor-is-old-window",
+    why:
+      "lets the density walk-back hand over LESS than the old gate's 500 ms window. An 'Okay', a 120 ms dip, then a syllable starting as our audio ends: the Okay is cut again -- the LVX70 loss (Live never learns the caller answered).",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "    return Math.min(walked, Math.max(windowStart, firstVoiced - leadFrames));",
+    replace: "    return walked; // SABOTAGE",
+    red: ["tests/liveHalfDuplex.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus re-review I1.
+    name: "one-word-common-wrap-ups",
+    why:
+      "forgets the wrap-up wordings the locale regex does not list ('Lovely. Anything else?', 'Is that all for today?'). After them a one-word garble ('esse') again refuses the goodbye and writes a junk email line.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "  return WRAP_UP_ASK_RE.test(q);",
+    replace: "  return false; // SABOTAGE",
+    red: ["tests/unsavedAnswers.test.js"],
   },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
