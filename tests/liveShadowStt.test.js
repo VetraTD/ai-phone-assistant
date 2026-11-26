@@ -128,6 +128,43 @@ describe("createShadowStt — beside the call, never in its way", () => {
     expect(out.frames_dropped).toBe(1);
   });
 
+  // Round 5 Task 4 (R46): the umm hold reads the shadow's words as they land.
+  it("round 5: onText gets every interim and final with its time; segments still hold finals only", async () => {
+    let t = 0;
+    const { connect, calls } = fakeConnect();
+    const seen = [];
+    const sh = createShadowStt({
+      callSid: "CA_s2t", language: "en-GB", keyterms: [], connect, log: { info: vi.fn(), error: vi.fn() }, now: () => t,
+      onText: (text, meta) => seen.push({ text, ...meta }),
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sh.connected()).toBe(true);
+    t = 1000;
+    calls[0].opts.onInterim("Ahm", { confidence: 0.5 });
+    t = 1600;
+    calls[0].say("Ahm.");
+    expect(seen).toEqual([{ text: "Ahm", final: false, atMs: 1000 }, { text: "Ahm.", final: true, atMs: 1600 }]);
+    const out = await sh.close();
+    expect(out.segments.map((s) => s.text)).toEqual(["Ahm."]);
+    expect(sh.connected()).toBe(false);
+  });
+
+  it("round 5: a throwing onText never breaks the stream; a failed connect is not connected", async () => {
+    const { connect, calls } = fakeConnect();
+    const sh = createShadowStt({
+      callSid: "CA_s2x", language: "en-GB", keyterms: [], connect, log: { info: vi.fn(), error: vi.fn() }, now: () => 0,
+      onText: () => { throw new Error("boom"); },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(() => calls[0].opts.onInterim("Two")).not.toThrow();
+    expect(() => calls[0].say("Two.")).not.toThrow();
+    sh.push(Buffer.from([1]));
+    expect((await sh.close()).segments).toHaveLength(1);
+    const bad = createShadowStt({ callSid: "CA_s2y", language: "en-GB", keyterms: [], connect: fakeConnect({ fail: true }).connect, log: { info: vi.fn(), error: vi.fn() } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(bad.connected()).toBe(false);
+  });
+
   it("keeps Deepgram's finals with their time and confidence, and finalizes on close", async () => {
     let t = 0;
     const { connect, calls } = fakeConnect();
