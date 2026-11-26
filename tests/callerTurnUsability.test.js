@@ -83,6 +83,18 @@ describe("isHesitationOnly — a hesitation is not consent", () => {
     expect(isHesitationOnly(undefined)).toBe(false);
   });
 
+  // Hammersleys round 4 (call 3, 2026-11-26): Live writes "umm" as "Ahm".
+  it("treats Live's spellings of umm as a hesitation: ahm, uhm, ehm", () => {
+    for (const t of ["Ahm", "ahm.", "Ahm...", "Ahmm", "Uhm", "uhm,", "Ehm", "ahm, uhm"]) {
+      expect(isHesitationOnly(t), t).toBe(true);
+    }
+  });
+  it("never reads the word 'am', or ahm before real words, as a hesitation", () => {
+    for (const t of ["am", "Am", "Ahm, 5 Plaistow Street", "ham", "hem", "Uhm, Tuesday"]) {
+      expect(isHesitationOnly(t), t).toBe(false);
+    }
+  });
+
   it("handles a repeated hesitation and stray punctuation", () => {
     expect(isHesitationOnly("uh... um,")).toBe(true);
     expect(isHesitationOnly("Uhh, ahh")).toBe(true);

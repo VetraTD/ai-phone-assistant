@@ -800,8 +800,38 @@ const SABOTAGES = [
     why:
       "lets the age release fire after the caller has resumed. Past turnComplete Live sends no interrupted, so a caller who pauses ~2 s and then answers hears the stale re-ask straight after their answer whenever Live’s copy of their words lands late.",
     file: "lib/voice/live/index.js",
-    find: "      else if (!ummHold.resumed && age >= UMM_MAX_HOLD_MS && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\");",
-    replace: "      else if (age >= UMM_MAX_HOLD_MS && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\"); // SABOTAGE",
+    find: "      else if (!ummHold.resumed && age >= (hes ? UMM_HESITATION_MAX_HOLD_MS : UMM_MAX_HOLD_MS) && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\");",
+    replace: "      else if (age >= (hes ? UMM_HESITATION_MAX_HOLD_MS : UMM_MAX_HOLD_MS) && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\"); // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 1.
+    name: "umm-ahm-hesitation",
+    why:
+      "forgets that Live writes umm as 'Ahm'. Call 3 (CA…283a9a) at 37.0 s: 'Ahm' alone after 'Where would you like to be picked up from?' was not seen as a hesitation, so the reply was not held and a re-ask played over the thinking caller (~8 s lost).",
+    file: "lib/transcriptUtils.js",
+    find: "const HESITATION_TOKEN_RE = /^(?:u+h+m*|u+m+|h+m+|m+|e+r+m?|a+h+m*|e+h+m*)$/i;",
+    replace: "const HESITATION_TOKEN_RE = /^(?:u+h+|u+m+|h+m+|m+|e+r+m?|a+h+|e+h)$/i; // SABOTAGE",
+    red: ["tests/callerTurnUsability.test.js", "tests/transcriptUtils.test.js", "tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 1.
+    name: "umm-hesitation-skips-voiced-cap",
+    why:
+      "puts a long 'ummmm' back under the 600 ms voiced cap. A thinking sound longer than 600 ms is then never held, and the model's re-ask plays over the caller while they think.",
+    file: "lib/voice/live/index.js",
+    find: "    if (isHesitationOnly(turnUserText)) return true;",
+    replace: "    if (false) return true; // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 1.
+    name: "umm-hesitation-waits-longer",
+    why:
+      "releases a held reply to 'Ahm' after 2 s of quiet like a fragment. A caller who says 'Ahm' and thinks for 2-3 s hears the re-ask just before their answer.",
+    file: "lib/voice/live/index.js",
+    find: "      const hes = ummHold.kind === \"hesitation\";",
+    replace: "      const hes = false; // SABOTAGE",
     red: ["tests/liveUmmHold.test.js"],
   },
   // -------------------------------------------------------------------------

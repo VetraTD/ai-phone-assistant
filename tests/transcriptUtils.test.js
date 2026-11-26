@@ -393,7 +393,7 @@ describe("looksNonEnglish — the half isUnusableTranscript cannot see", () => {
 // pass straight through: "No.", "Two", "10", "BA240", "Mhm.", "N?o." (ASR "No").
 // ---------------------------------------------------------------------------
 describe("isWordlessFragment() — round 3 umm hold", () => {
-  it.each(["", "   ", "A", "a", "el", "as", "아, 응애.", "Umm", "uh...", "?", "Mm."])("%j is wordless", (t) => {
+  it.each(["", "   ", "A", "a", "el", "as", "아, 응애.", "Umm", "uh...", "?", "Mm.", "Ahm", "Uhm."])("%j is wordless", (t) => {
     expect(isWordlessFragment(t)).toBe(true);
   });
   it.each([

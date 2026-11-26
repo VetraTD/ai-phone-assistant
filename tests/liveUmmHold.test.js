@@ -248,6 +248,92 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
   });
 });
 
+// Hammersleys round 4 (call 3 at 37.0 s): "Ahm" alone after "Where would you
+// like to be picked up from?" got a re-ask. Live writes umm as "Ahm", and a
+// long "ummmm" is more voice than UMM_MAX_VOICED_MS. A turn whose words are
+// ONLY a hesitation is held whatever its length, and waits longer (3 s) for
+// the caller to go on. Vague fragments ("A", "el") keep the 600 ms cap: a real
+// 1.56 s answer once had the transcript "A" at reply time (call 2 at 62.0 s).
+describe("Hammersleys round 4 — a hesitation is held whatever its length", () => {
+  beforeEach(() => clearStats());
+
+  it("'Ahm' after our question is held", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(380, 600);
+    await s.callerSays("Ahm");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_umm_hold_started).toBe(1);
+  });
+
+  it("a long umm (900 ms of voice) is held", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(900, 600);
+    await s.callerSays("Umm.");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_umm_hold_started).toBe(1);
+  });
+
+  it("control: a vague fragment with 900 ms of voice keeps the cap and plays at once", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(900, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_started ?? 0).toBe(0);
+  });
+
+  it("a hesitation hold waits 3 s of quiet: still held at 2.5 s, played at 3 s", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(900, 600);
+    await s.callerSays("Ahm");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    await s.feed(1900); // ~2.5 s since their voice
+    expect(s.enqueue).not.toHaveBeenCalled();
+    await s.feed(700); // ~3.2 s
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_released).toBe(1);
+  });
+
+  it("the caller goes on after 'Ahm': their words drop the kept reply", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(900, 600);
+    await s.callerSays("Uhm");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    await s.assistantTurn("Could you give me the pickup address, with the house number and postcode?");
+    await s.feed(1200);
+    await s.feed(1500, { voiced: true });
+    await s.callerSays(" 5 Plaistow Street, Lingfield.");
+    expect(c().live_umm_hold_dropped).toBe(1);
+    expect(s.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("'Ahm' whose real words land late, with no new voice, plays at once (the answer was already said)", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(2200, 600);
+    await s.callerSays("Ahm");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    await s.callerSays(", 5 Plaistow Street, Lingfield.");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_released).toBe(1);
+    expect(c().live_umm_hold_dropped ?? 0).toBe(0);
+  });
+});
+
 describe("LVX181 round 3 — what is never held", () => {
   beforeEach(() => clearStats());
 
