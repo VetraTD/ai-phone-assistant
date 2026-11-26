@@ -1055,6 +1055,27 @@ const SABOTAGES = [
     red: ["tests/sttDeepgramFinalize.test.js"],
   },
   {
+    // Hammersleys round 4, owner calls: the comparison script shipped without
+    // being in the image.
+    name: "shadow-compare-in-image",
+    why:
+      "drops the Deepgram-vs-Live comparison script from the image again: the migrate job fails `Cannot find module` when the owner's test calls are compared.",
+    file: "Dockerfile",
+    find: "COPY scripts/shadow-compare.js ./scripts/shadow-compare.js",
+    replace: "# SABOTAGE: not copied",
+    red: ["tests/cloudbuildSmoke.test.js"],
+  },
+  {
+    // Hammersleys round 4, owner calls: smoke-verifiers imports the script.
+    name: "shadow-compare-import-safe",
+    why:
+      "runs the comparison on import: the image build's smoke import prints the usage and exits 2, so every voice build fails.",
+    file: "scripts/shadow-compare.js",
+    find: "if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {",
+    replace: "if (true) { // SABOTAGE",
+    red: ["tests/shadowCompare.test.js"],
+  },
+  {
     // Hammersleys round 4, Opus re-review C1.
     name: "gate-handover-floor-is-old-window",
     why:

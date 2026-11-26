@@ -150,6 +150,11 @@ COPY scripts/outbound-admin.js ./scripts/outbound-admin.js
 COPY scripts/block-caller.js ./scripts/block-caller.js
 # Batch-3 S5. Prints each number's Twilio fallback URL (read-only), same migrate-job route.
 COPY scripts/fallback-urls.js ./scripts/fallback-urls.js
+# Hammersleys round 4. The Deepgram-vs-Live hard-word table for one test call
+# (read-only, tenant-scoped), same migrate-job route. Shipped once WITHOUT this
+# line and failed `Cannot find module` on first use; smoke-verifiers imports it
+# now and tests/cloudbuildSmoke.test.js checks both lists.
+COPY scripts/shadow-compare.js ./scripts/shadow-compare.js
 COPY database ./database
 
 # An explicit file list rather than `COPY . .`, and it is worth the maintenance:

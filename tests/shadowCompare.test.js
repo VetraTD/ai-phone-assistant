@@ -2,7 +2,26 @@
 // word the owner says on a test call, which transcript heard it, and what each
 // heard instead. Only the hard words and their nearest matches are reported.
 import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { hardWordTable, closestMatch } from "../lib/voice/shadowCompare.js";
+
+// Round 4: the image's smoke-verifiers step IMPORTS every migrate-job script,
+// so the comparison script must do nothing on import (a pathToFileURL main
+// guard, like fallback-urls.js). Without one it prints its usage and exits 2,
+// failing the build.
+describe("scripts/shadow-compare.js", () => {
+  it("does nothing when imported (main guard): the build's smoke import can load it", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const out = execFileSync(
+      process.execPath,
+      ["--input-type=module", "-e", "await import('./scripts/shadow-compare.js'); console.log('loaded')"],
+      { cwd: root, encoding: "utf8", env: { ...process.env, DATABASE_URL: "" }, timeout: 30_000 }
+    );
+    expect(out).toContain("loaded");
+  });
+});
 
 describe("closestMatch", () => {
   it("finds the exact phrase, case and punctuation aside", () => {
@@ -41,6 +60,35 @@ describe("hardWordTable", () => {
     });
     expect(rows[0].word).toBe("one two three four");
     expect(rows[0].live_closest.split(" ").length).toBeLessThanOrEqual(4);
+  });
+  // Owner calls, round 4: how soon after the caller spoke did Deepgram's words
+  // arrive? The segment that holds each hard word's best match gives its time
+  // (ms since the shadow stream started). Times only, no extra words.
+  it("with segments: each row carries the arrival time of the Deepgram segment holding the best match", () => {
+    const rows = hardWordTable({
+      live: "Play Store Street",
+      segments: [
+        { t_ms: 4200, text: "Hi, I'd like a taxi." },
+        { t_ms: 9800, text: "From 5 Plaistow Street, Lingfield." },
+        { t_ms: 15100, text: "To Dormans Land." },
+      ],
+      words: ["Plaistow Street", "Dormansland", "Gatwick"],
+    });
+    expect(rows.slice(0, 2).map((r) => [r.word, r.deepgram_exact, r.deepgram_t_ms])).toEqual([
+      ["Plaistow Street", true, 9800],
+      ["Dormansland", false, 15100],
+    ]);
+    expect(rows[1].deepgram_closest).toBe("dormans");
+    expect(rows[2].deepgram_exact).toBe(false);
+  });
+  it("no segments heard: the time is null", () => {
+    const [row] = hardWordTable({ live: "", segments: [], words: ["Lingfield"] });
+    expect(row.deepgram_t_ms).toBeNull();
+  });
+  it("without segments the time is null (the plain-text form is unchanged)", () => {
+    const [row] = hardWordTable({ live: "", deepgram: "Lingfield", words: ["Lingfield"] });
+    expect(row.deepgram_exact).toBe(true);
+    expect(row.deepgram_t_ms).toBeNull();
   });
   it("caps the list at 12 words", () => {
     const words = Array.from({ length: 20 }, (_, i) => `w${i}`);

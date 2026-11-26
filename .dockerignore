@@ -49,6 +49,7 @@ scripts
 !scripts/outbound-admin.js
 !scripts/block-caller.js
 !scripts/fallback-urls.js
+!scripts/shadow-compare.js
 docs
 latency-runs
 infra

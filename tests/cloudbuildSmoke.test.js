@@ -57,6 +57,27 @@ describe("cloudbuild.yaml smoke steps import what they need to catch a broken im
     expect(block).toMatch(/no port bound/);
   });
 
+  // Hammersleys round 4: scripts/shadow-compare.js was written, tested and
+  // documented as a migrate-job script, deployed WITHOUT being in the image
+  // (the Dockerfile and .dockerignore name scripts one by one), and failed
+  // `Cannot find module` on its first real use. Every script the
+  // smoke-verifiers step imports must be in BOTH lists, and the comparison
+  // script must be one of them.
+  it("round 4: the `smoke-verifiers` step imports scripts/shadow-compare.js", () => {
+    expect(stepBlock("smoke-verifiers")).toMatch(/\/app\/scripts\/shadow-compare\.js/);
+  });
+  it("round 4: every script smoke-verifiers imports is COPY'd by the Dockerfile and negated in .dockerignore", () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const dockerfile = readFileSync(path.join(root, "Dockerfile"), "utf8");
+    const dockerignore = readFileSync(path.join(root, ".dockerignore"), "utf8").split(/\r?\n/);
+    const scripts = [...stepBlock("smoke-verifiers").matchAll(/\/app\/(scripts\/[\w.-]+\.js)/g)].map((m) => m[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const s of scripts) {
+      expect(dockerfile, `${s} COPY`).toContain(`COPY ${s} ./${s}`);
+      expect(dockerignore, `${s} negation`).toContain(`!${s}`);
+    }
+  });
+
   it("the `smoke-verifiers` step imports scripts/outbound-admin.js, alongside the three imports it already had", () => {
     const block = stepBlock("smoke-verifiers");
     expect(block).toMatch(/\/app\/scripts\/outbound-admin\.js/);
