@@ -80,11 +80,17 @@ const MAX_SAVED_LABELS = 20;
  * Hammersleys round 3 (owner ruling R16, 2026-11-26): the hand-off line carries
  * "anything else?" in the same reply. Call B said "…passed to the dispatcher,
  * who will confirm." and stopped; the caller's "Thank you" then cost a separate
- * "Is there anything else?" turn and a goodbye turn (~21 s). Only when the
- * notes' last step asks nothing, so two questions never stack (LVX25).
+ * "Is there anything else?" turn and a goodbye turn (~21 s). Only when nothing
+ * else in the reply asks something, so two questions never stack (LVX25); a
+ * reply that must ask for the number or read a spelled name back gets the old
+ * sentence (Opus review I4, decided in code).
  */
+const ALL_QUESTIONS_ANSWERED_BASE =
+  "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now";
 const ALL_QUESTIONS_ANSWERED_NOTE =
-  "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.";
+  ALL_QUESTIONS_ANSWERED_BASE +
+  "; if nothing in this reply asks the caller a question, end it by asking whether there is anything else they need.";
+const ALL_QUESTIONS_ANSWERED_NO_ASK_NOTE = ALL_QUESTIONS_ANSWERED_BASE + ".";
 /**
  * Fix round 2 (owner's calls 1-2: the pickup was never read back, so "RH7 642"
  * reached the email). Leads the list or the all-answered sentence on a save that
@@ -659,7 +665,7 @@ export default {
           const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
           listNote = open.length
             ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (${returningToo ? "new and returning customers" : "new enquiries by default"}, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
-            : `${lead}${ALL_QUESTIONS_ANSWERED_NOTE.slice(MODEL_NOTE_PREFIX.length)}`;
+            : `${lead}${(readBack || needsNumber ? ALL_QUESTIONS_ANSWERED_NO_ASK_NOTE : ALL_QUESTIONS_ANSWERED_NOTE).slice(MODEL_NOTE_PREFIX.length)}`;
         }
       }
     }

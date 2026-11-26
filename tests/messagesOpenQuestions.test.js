@@ -45,8 +45,21 @@ describe("open questions named in the save reply", () => {
     const r = await save(cfg(HAMMERSLEYS_NOTES), {
       details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"),
     });
-    expect(next(r)).toBe("[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.");
+    expect(next(r)).toBe("[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if nothing in this reply asks the caller a question, end it by asking whether there is anything else they need.");
     expect(r.stateEffects.questionsOpen).toBe(false);
+  });
+
+  // Opus review I4: when the reply must already ask something (the number
+  // did not come through), the all-answered sentence must not stack a second
+  // question on it.
+  it("all answered but the number must be asked: no anything-else clause", async () => {
+    const r = await save(cfg(HAMMERSLEYS_NOTES), {
+      callback_number: "",
+      details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"),
+    }, { callerPhone: "anonymous" });
+    expect(next(r)).toContain("there is no number to call them back on");
+    expect(next(r)).toContain("Every numbered question in this business's notes has a saved answer.");
+    expect(next(r)).not.toMatch(/anything else/);
   });
 
   it("caps the remembered labels at 20", async () => {
@@ -261,7 +274,7 @@ describe("confirm the answer just saved before the next question (fix round 2)",
   it("confirmStyle each + all answered: the confirm step leads the all-answered sentence", async () => {
     const r = await save(each(), { details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment") });
     expect(next(r)).toBe(
-      LEAD + "Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need."
+      LEAD + "Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if nothing in this reply asks the caller a question, end it by asking whether there is anything else they need."
     );
   });
 

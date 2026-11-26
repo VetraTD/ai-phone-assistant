@@ -700,8 +700,18 @@ const SABOTAGES = [
     why:
       "drops the ask from the all-answered note. Call B: the hand-off line ('…passed to the dispatcher, who will confirm.') stopped there, so the caller's 'Thank you' cost a separate 'Is there anything else?' turn and a goodbye turn -- ~21 s from hand-off to hang-up against 9 s on d8eaf5, where the ask rode the hand-off.",
     file: "capabilities/messages.js",
-    find: "do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.\";",
-    replace: "do it now.\"; // SABOTAGE",
+    find: "  \"; if nothing in this reply asks the caller a question, end it by asking whether there is anything else they need.\";",
+    replace: "  \".\"; // SABOTAGE",
+    red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26), Opus review I4.
+    name: "r3-no-ask-stacked-on-number",
+    why:
+      "always adds the anything-else clause, even when the same reply must ask for the caller's number (or read a spelled name back): two questions stacked in one turn (LVX25), and a caller answering the first one loses the second.",
+    file: "capabilities/messages.js",
+    find: "(readBack || needsNumber ? ALL_QUESTIONS_ANSWERED_NO_ASK_NOTE : ALL_QUESTIONS_ANSWERED_NOTE)",
+    replace: "(ALL_QUESTIONS_ANSWERED_NOTE /* SABOTAGE */)",
     red: ["tests/messagesOpenQuestions.test.js"],
   },
   {
