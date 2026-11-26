@@ -684,6 +684,38 @@ const SABOTAGES = [
     replace: "          if (false && sendTurnNote(\"language\", LANGUAGE_NOTE)) { // SABOTAGE",
     red: [LANG],
   },
+  {
+    // Hammersleys round 3 (2026-11-26), owner ruling R16.
+    name: "r3-handoff-carries-ask",
+    why:
+      "drops the ask from the all-answered note. Call B: the hand-off line ('…passed to the dispatcher, who will confirm.') stopped there, so the caller's 'Thank you' cost a separate 'Is there anything else?' turn and a goodbye turn -- ~21 s from hand-off to hang-up against 9 s on d8eaf5, where the ask rode the hand-off.",
+    file: "capabilities/messages.js",
+    find: "do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.\";",
+    replace: "do it now.\"; // SABOTAGE",
+    red: ["tests/messagesOpenQuestions.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26).
+    name: "r3-closer-after-ask",
+    why:
+      "drops the lone-repair-word and the after-wrap-up 'no' rules. 7eab36's 'What' (after 'Are you still there?') and 6c0d37's 'Ayer no' (after 'anything else? … wonderful day') count as unsaved answers again: the save guard refuses the goodbye and the owner email carries 'Said after the last save' junk lines.",
+    file: "lib/voice/unsavedAnswers.js",
+    find:
+      "  if (words.length === 1 && REPAIR_WORDS.has(words[0])) return false;\n  // Round 3: \"Ayer no\" after a wrap-up / nudge / goodbye closes the call.\n  const afterWrapUp = afterAnythingElse ||",
+    replace:
+      "  // SABOTAGE: no repair-word rule\n  // Round 3: \"Ayer no\" after a wrap-up / nudge / goodbye closes the call.\n  const afterWrapUp = false && afterAnythingElse ||",
+    red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26).
+    name: "r3-theres-nothing-closer",
+    why:
+      "takes \"there's\" out of the closer words. Call A's 'No. There's nothing.' after 'anything else?' counts as an unsaved answer again and reaches the owner email as a junk line.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "  // Round 3 (call A): \"No. There's nothing.\"\n  \"there's\", \"theres\",\n",
+    replace: "  // SABOTAGE: no there's\n",
+    red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.

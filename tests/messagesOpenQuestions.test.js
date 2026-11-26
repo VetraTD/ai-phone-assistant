@@ -45,7 +45,7 @@ describe("open questions named in the save reply", () => {
     const r = await save(cfg(HAMMERSLEYS_NOTES), {
       details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment"),
     });
-    expect(next(r)).toBe("[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now.");
+    expect(next(r)).toBe("[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.");
     expect(r.stateEffects.questionsOpen).toBe(false);
   });
 
@@ -261,7 +261,7 @@ describe("confirm the answer just saved before the next question (fix round 2)",
   it("confirmStyle each + all answered: the confirm step leads the all-answered sentence", async () => {
     const r = await save(each(), { details: details("Pickup", "Destination", "When", "Passengers", "Luggage", "Payment") });
     expect(next(r)).toBe(
-      LEAD + "Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now."
+      LEAD + "Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need."
     );
   });
 

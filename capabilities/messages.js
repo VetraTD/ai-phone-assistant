@@ -76,8 +76,15 @@ const NEXT_QUESTIONS_NOTE_DEFERRED =
 
 /** LVX192 Task 5. Model-only, like the notes above. Cap on the labels remembered across saves. */
 const MAX_SAVED_LABELS = 20;
+/**
+ * Hammersleys round 3 (owner ruling R16, 2026-11-26): the hand-off line carries
+ * "anything else?" in the same reply. Call B said "…passed to the dispatcher,
+ * who will confirm." and stopped; the caller's "Thank you" then cost a separate
+ * "Is there anything else?" turn and a goodbye turn (~21 s). Only when the
+ * notes' last step asks nothing, so two questions never stack (LVX25).
+ */
 const ALL_QUESTIONS_ANSWERED_NOTE =
-  "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now.";
+  "[not caller speech] Every numbered question in this business's notes has a saved answer. If the notes give a further step after them, do it now; if that step asks the caller nothing, end the same reply by asking whether there is anything else they need.";
 /**
  * Fix round 2 (owner's calls 1-2: the pickup was never read back, so "RH7 642"
  * reached the email). Leads the list or the all-answered sentence on a save that

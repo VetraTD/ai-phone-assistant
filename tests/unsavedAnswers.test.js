@@ -268,3 +268,47 @@ describe("questions a 'yeah' cannot answer, and wrap-ups anchored at the end (re
     expect(isInformativeCallerTurn("Yeah", q, undefined, closing)).toBe(false);
   });
 });
+
+// Hammersleys round 3 (2026-11-26). Three caller lines from real call endings
+// counted as unsaved answers: they blocked the goodbye through the save guard
+// AND reached the owner's email as "Said after the last save" junk lines.
+//   7eab36  "Are you still there?" -> "What"
+//   6c0d37  "…anything else? … wonderful day." -> "Ayer no"   (ASR garble of "no")
+//   call A  "anything else?" -> "No. There's nothing."
+describe("closer answers at the end of a call are not answers (round 3)", () => {
+  const closing = closingRegexFor({});
+  const HANDOFF_ASK = "Your request has been passed to our dispatcher, who will confirm. Is there anything else I can help you with today?";
+  const NUDGE = "Hello? Are you still there?";
+  const ASK_AND_BYE =
+    "Is there anything else I can assist you with today? Thank you for calling, and I hope you have a wonderful day.";
+
+  it("'No. There's nothing.' after anything-else is a closer", () => {
+    expect(isInformativeCallerTurn("No. There's nothing.", HANDOFF_ASK, undefined, closing)).toBe(false);
+  });
+
+  it.each(["What", "What?", "Sorry?", "Pardon?", "Hello?"])("a lone %j carries nothing to save", (t) => {
+    expect(isInformativeCallerTurn(t, NUDGE, undefined, closing)).toBe(false);
+    expect(isInformativeCallerTurn(t, SEAT, undefined, closing)).toBe(false);
+  });
+
+  it.each([ASK_AND_BYE, NUDGE, HANDOFF_ASK])("'Ayer no' after %j is a closer", (prev) => {
+    expect(isInformativeCallerTurn("Ayer no", prev, undefined, closing)).toBe(false);
+  });
+
+  // Controls: the same words where they DO answer something, and real content.
+  it("'Ayer no' answering a yes/no question stays informative (it is the answer no)", () => {
+    expect(isInformativeCallerTurn("Ayer no", SEAT, undefined, closing)).toBe(true);
+  });
+  it.each([
+    "And I'll be paying with cash.",
+    "No, two cases actually",
+    "No, there's two of us",
+    "No, two",
+    "What time will the driver come?",
+  ])("%j after anything-else stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, HANDOFF_ASK, undefined, closing)).toBe(true);
+  });
+  it("'Yes, Saturday at 7' after a nudge stays informative", () => {
+    expect(isInformativeCallerTurn("Yes, Saturday at 7", NUDGE, undefined, closing)).toBe(true);
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { afterSaveNote, AFTER_SAVE_LABEL } from "../lib/voice/afterSaveNote.js";
+import { closingRegexFor } from "../lib/voice/unsavedAnswers.js";
 
 const T = (index, caller, prevReply = "", voiced = false) => ({ index, caller, prevReply, voiced });
 
@@ -86,5 +87,31 @@ describe("afterSaveNote leaves backchannels out (fix round 2)", () => {
     expect(
       afterSaveNote({ turnLog: [T(2, "Mhm.", "Lovely, noted."), T(3, "Uh-huh.", "And where to?")], savedThroughTurn: 1 })
     ).toBeNull();
+  });
+});
+
+// Hammersleys round 3: the junk lines from calls 7eab36, 6c0d37 and A.
+describe("afterSaveNote skips end-of-call closers (round 3)", () => {
+  const closingRe = closingRegexFor({});
+  it("writes nothing for 'What', 'Ayer no' and 'No. There's nothing.'", () => {
+    expect(
+      afterSaveNote({
+        turnLog: [
+          T(2, "What", "Hello? Are you still there?"),
+          T(3, "Ayer no", "Is there anything else I can assist you with today? Thank you for calling, and have a wonderful day."),
+          T(4, "No. There's nothing.", "Is there anything else I can help with?"),
+        ],
+        savedThroughTurn: 1,
+        closingRe,
+      })
+    ).toBeNull();
+  });
+  it("still writes a real answer given at the end", () => {
+    const n = afterSaveNote({
+      turnLog: [T(2, "And I'll be paying with cash.", "Is there anything else I can help with?")],
+      savedThroughTurn: 1,
+      closingRe,
+    });
+    expect(n.answer).toBe('"Is there anything else I can help with?" — And I\'ll be paying with cash.');
   });
 });
