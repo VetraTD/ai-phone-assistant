@@ -12,6 +12,7 @@ import {
   isUnusableTranscript,
   callerLeftQuestionOpen,
   MAX_CALLER_QUESTION_HOLDS,
+  isWordlessFragment,
 } from "../lib/transcriptUtils.js";
 
 // LVX185. The caller's answer to "anything else?" was a question, and the call
@@ -381,5 +382,28 @@ describe("looksNonEnglish — the half isUnusableTranscript cannot see", () => {
     expect(looksNonEnglish(null)).toBe(false);
     expect(looksNonEnglish("")).toBe(false);
     expect(looksNonEnglish(42)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LVX181 / Hammersleys round 3: the "umm" reply hold decides on THIS. A caller
+// sound after our question that carries no word the transcript could spell.
+// Real transcripts of those sounds on 2026-11-24..26: "A", "a", "el", "as",
+// empty, and (probe, synthetic umm) "아, 응애.". Real short answers that must
+// pass straight through: "No.", "Two", "10", "BA240", "Mhm.", "N?o." (ASR "No").
+// ---------------------------------------------------------------------------
+describe("isWordlessFragment() — round 3 umm hold", () => {
+  it.each(["", "   ", "A", "a", "el", "as", "아, 응애.", "Umm", "uh...", "?", "Mm."])("%j is wordless", (t) => {
+    expect(isWordlessFragment(t)).toBe(true);
+  });
+  it.each([
+    "No.", "Yes", "Yeah", "Two", "10", "BA240", "Mhm.", "N?o.", "OK", "Hi", "pm", "si",
+    "A South", "I live like", "Eh, me and after tomorrow 7:00 a.m.",
+  ])("%j carries a word", (t) => {
+    expect(isWordlessFragment(t)).toBe(false);
+  });
+  it("tolerates non-strings as empty", () => {
+    expect(isWordlessFragment(undefined)).toBe(true);
+    expect(isWordlessFragment(null)).toBe(true);
   });
 });

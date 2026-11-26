@@ -736,6 +736,26 @@ const SABOTAGES = [
     replace: "            // SABOTAGE: the turn-end hold never latches",
     red: ["tests/liveSilentExitAfterGoodbye.test.js"],
   },
+  {
+    // Hammersleys round 3 (2026-11-26), LVX181.
+    name: "umm-hold-starts",
+    why:
+      "never holds. Call B (CAfd5c1c…fdaf): after 'What day and time would you like to be picked up?' the caller's thinking sound came through as 'A' and the model's re-ask played over them (~9 s lost); 5 such re-asks on 4 of 11 booking calls. Sabotaged, every reply to a wordless sound plays at once again.",
+    file: "lib/voice/live/index.js",
+    find: "      ummGen = shouldHoldUmm() ? \"holding\" : \"pass\";",
+    replace: "      ummGen = \"pass\"; // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26), LVX181.
+    name: "umm-drop-spares-next-generation",
+    why:
+      "a drop after the kept reply's turnComplete marks the NEXT generation as discard. Then the caller's real answer ('Saturday at seven') gets a reply nobody hears -- dead air created by the fix itself.",
+    file: "lib/voice/live/index.js",
+    find: "    if (!h.turnCompleted) ummGen = \"discard\";",
+    replace: "    ummGen = \"discard\"; // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.
