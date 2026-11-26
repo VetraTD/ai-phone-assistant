@@ -874,6 +874,56 @@ const SABOTAGES = [
     replace: "callerContext.lastCallSummary",
     red: ["tests/a1OnFileNote.test.js"],
   },
+  {
+    // Hammersleys round 4 (2026-11-26), item 5, owner ruling R29.
+    name: "gate-onset-kept",
+    why:
+      "hands over only the newest voiced frame (+200 ms) on a barge or release, not the start of the caller's stretch of speech. On 33 calls every loss of 200 ms or more was the start of speech said over our reply falling out of the ring (call 1's corrections lost 100-120 ms each, then were misheard).",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "    for (let i = last - 1; i >= 0 && start - i <= gapFrames; i--) if (lookback[i].voiced) start = i;",
+    replace: "    // SABOTAGE: the stretch is never walked back",
+    red: ["tests/liveHalfDuplex.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 5.
+    name: "gate-continuation-release",
+    why:
+      "drops speech that is still going as our audio ends when under 200 ms of it was held: the start of an answer begun just before our last word is thrown away and the model hears it without its first syllable.",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "      const carriesOn = keepStart && Boolean(voiced) && voicedInNewest(continueFrames) > 0;",
+    replace: "      const carriesOn = false; // SABOTAGE",
+    red: ["tests/liveHalfDuplex.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 5.
+    name: "gate-ring-kept-long",
+    why:
+      "shrinks the ring back to 500 ms, so speech said over a long reply falls out of it again before the interruption registers (68/571 utterances on 33 calls lost voiced audio this way).",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "  const maxFrames = keepStart ? Math.max(windowFrames, Math.ceil(KEEP_MS / FRAME_MS)) : windowFrames;",
+    replace: "  const maxFrames = windowFrames; // SABOTAGE",
+    red: ["tests/liveHalfDuplex.test.js", "tests/liveUtteranceRecord.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 5.
+    name: "gate-kill-switch-wired",
+    why:
+      "ignores LIVE_GATE_KEEP_START=off. The switch is the one-command rollback for the gate change on a live line; unwired, turning it off changes nothing and the only rollback left is a redeploy.",
+    file: "lib/voice/live/index.js",
+    find: "  const gate = createHalfDuplexGate({ keepStart: !gateKeepStartOff });",
+    replace: "  const gate = createHalfDuplexGate(); // SABOTAGE",
+    red: ["tests/liveUtteranceRecord.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 5 instrument.
+    name: "utterance-dropped-before-open",
+    why:
+      "stops charging frames lost while no utterance was open to the next utterance. Then live_utterance says the previous answer lost them (call 1: the name answer 'Sam Price.' carried 360 ms lost during our NEXT reply) and a gate loss at the start of an answer cannot be read off the record.",
+    file: "lib/voice/live/index.js",
+    find: "    else droppedWhileClosed += dropped || 0;",
+    replace: "    else droppedWhileClosed += 0; // SABOTAGE",
+    red: ["tests/liveUtteranceRecord.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.

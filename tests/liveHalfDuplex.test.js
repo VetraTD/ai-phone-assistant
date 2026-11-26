@@ -213,3 +213,134 @@ describe("barge-in", () => {
     expect(g.push({ frame: frame(3), playing: true, atMs: 1000, ...TALKING }).barge).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 4 (2026-11-26), owner ruling R29 "keep the start".
+//
+// Measured on 33 prod calls: 68/571 caller utterances lost voiced audio, and
+// every loss of 200 ms or more came from the 500 ms ring OVERFLOWING while we
+// talked -- the caller's speech started over our reply and its start fell out
+// before the interruption registered (call 1's corrections lost 100-120 ms
+// each; the end-of-playback rule can drop at most 180 ms). The ring now keeps
+// up to 1.5 s, and what it hands over starts just before the first voiced
+// frame of the caller's current stretch of speech, so their first word
+// survives and less of our own echo goes with it. Speech that is still going
+// as our audio ends is handed over even under 200 ms. A short sound said over
+// us that ended well before our audio did ("okay" mid-reply) is still dropped:
+// sent late, it could read as the answer to the question we end on.
+// ---------------------------------------------------------------------------
+const VOICE = { voiced: true, isActive: true, voicedRunMs: 120 }; // speech that has not yet reached bargeMs
+const GAP = { voiced: false, isActive: true, voicedRunMs: 0 }; // a short dip inside speech
+const BARGE = { voiced: true, isActive: true, voicedRunMs: 320 };
+
+describe("round 4 — keep the start of speech said over us (R29)", () => {
+  it("a barge hands over the caller's first word, said 1 s before the interruption registered", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 30; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    // Choppy speech for 1 s: 3 voiced frames, 2 dips -- never a 300 ms run.
+    const first = frame(200);
+    g.push({ frame: first, playing: true, ...VOICE });
+    for (let i = 0; i < 49; i++) g.push({ frame: frame(2), playing: true, ...(i % 5 < 3 ? VOICE : GAP) });
+    const out = g.push({ frame: frame(99), playing: true, ...BARGE });
+
+    expect(out.barge).toBe(true);
+    expect(out.forward).toContain(first);
+    expect(out.forward.at(-1)).toEqual(frame(99));
+    expect(out.dropped).toBe(0);
+  });
+
+  it("speech still going as our audio ends is handed over, though under 200 ms", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 6; i++) g.push({ frame: frame(10 + i), playing: true, ...VOICE }); // 120 ms
+    const out = g.push({ frame: frame(50), playing: false, ...VOICE }); // their voice carries on
+
+    expect(out.released).toBeGreaterThanOrEqual(6);
+    expect(out.forward).toContainEqual(frame(10));
+    expect(out.forward.at(-1)).toEqual(frame(50));
+    expect(out.dropped).toBe(0);
+  });
+
+  it("a release starts just before the speech: leading echo and room tone are not sent", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 12; i++) g.push({ frame: frame(10 + i), playing: true, ...SPEAKING_OVER }); // 240 ms
+    const out = g.push({ ...END_OF_PLAYBACK });
+
+    // 12 voiced frames + at most 200 ms (10 frames) of lead-in, not the 500 ms ring.
+    expect(out.released).toBeGreaterThanOrEqual(12);
+    expect(out.released).toBeLessThanOrEqual(22);
+    expect(out.forward).toContainEqual(frame(10));
+  });
+
+  it("control: an 'okay' said over us that ended well before our audio is still dropped", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 15; i++) g.push({ frame: frame(5), playing: true, ...SPEAKING_OVER }); // 300 ms
+    for (let i = 0; i < 30; i++) g.push({ frame: frame(1), playing: true, ...ROOM }); // 600 ms of us alone
+    const out = g.push({ ...END_OF_PLAYBACK });
+
+    expect(out.released).toBe(0);
+    expect(out.forward).toEqual([]);
+  });
+
+  it("control: an isolated blip that does not carry on past our audio is still dropped", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 20; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 5; i++) g.push({ frame: frame(7), playing: true, ...VOICE }); // 100 ms
+    for (let i = 0; i < 3; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    const out = g.push({ ...END_OF_PLAYBACK });
+
+    expect(out.released).toBe(0);
+    expect(out.forward).toEqual([]);
+    expect(out.dropped).toBe(5);
+  });
+
+  it("echo risk: our own audio coming back (below the VAD floor) over a 1.5 s ring is never handed over", () => {
+    // Echo peaks at RMS 211 against the VAD's 700 floor, so it is never
+    // "voiced". A longer ring must not turn our echo into caller audio.
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 90; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    g.push({ frame: frame(7), playing: true, ...VOICE }); // one stray loud frame
+    for (let i = 0; i < 20; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    const out = g.push({ ...END_OF_PLAYBACK });
+
+    expect(out.forward).toEqual([]);
+    expect(out.released).toBe(0);
+  });
+
+  it("stays bounded: talking over a very long reply holds at most 1.5 s", () => {
+    const g = createHalfDuplexGate();
+    let held = 0;
+    for (let i = 0; i < 2000; i++) held += g.push({ frame: frame(3), playing: true, ...(i % 5 < 3 ? VOICE : GAP) }).held;
+    const out = g.push({ ...END_OF_PLAYBACK });
+
+    expect(held).toBe(2000);
+    expect(out.forward.length).toBeLessThanOrEqual(75);
+  });
+
+  it("counts a voiced frame that falls out of the 1.5 s ring as an overflow drop", () => {
+    const g = createHalfDuplexGate();
+    let dropped = 0;
+    let overflow = 0;
+    for (let i = 0; i < 100; i++) {
+      const out = g.push({ frame: frame(3), playing: true, ...VOICE });
+      dropped += out.dropped;
+      overflow += out.droppedOverflow;
+    }
+    expect(dropped).toBe(25);
+    expect(overflow).toBe(25);
+  });
+
+  it("keepStart: false (LIVE_GATE_KEEP_START=off) is today's gate: the start is lost", () => {
+    const g = createHalfDuplexGate({ keepStart: false });
+    for (let i = 0; i < 30; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    const first = frame(200);
+    g.push({ frame: first, playing: true, ...VOICE });
+    for (let i = 0; i < 49; i++) g.push({ frame: frame(2), playing: true, ...(i % 5 < 3 ? VOICE : GAP) });
+    const out = g.push({ frame: frame(99), playing: true, ...BARGE });
+
+    expect(out.barge).toBe(true);
+    expect(out.forward).not.toContain(first);
+    expect(out.forward.length).toBe(26);
+  });
+});

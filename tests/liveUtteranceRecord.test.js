@@ -101,7 +101,7 @@ function modelAudio(ms) {
   return buf.toString("base64");
 }
 
-async function boot() {
+async function boot({ env = {} } = {}) {
   const ws = new FakeSocket();
   const live = fakeLive();
   let clock = 0;
@@ -112,7 +112,7 @@ async function boot() {
       now: () => clock,
       connect: live.connect,
       database: fakeDb(),
-      env: {},
+      env,
       execute: vi.fn(async (fc) => ({
         functionResponse: { id: fc.id, name: fc.name, response: { success: true } },
         stateEffects: { toolResult: { name: fc.name, success: true, message: "ok" } },
@@ -146,6 +146,13 @@ async function boot() {
      */
     talk: (ms) => feed(VOICED, ms),
     quiet: (ms) => feed(SILENCE, ms),
+    /** Speech under the VAD's 200 ms activation: 100 ms on, 100 ms off. Never opens an utterance or barges. */
+    mumble: (ms) => {
+      for (let t = 0; t < ms; t += 200) {
+        feed(VOICED, 100);
+        feed(SILENCE, 100);
+      }
+    },
     transcript: (text) => live.push({ serverContent: { inputTranscription: { text } } }),
     /** ws close is what runs finish(), which drains the pending records. */
     hangup: () => ws.emit("close"),
@@ -257,5 +264,70 @@ describe("LVX70 -- what the vendor was actually given, per caller utterance", ()
     expect(c().live_utterance_observed).toBe(1);
     expect(c().live_utterance_late_transcript).toBe(1);
     expect(c().live_utterance_no_transcript).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 4 (2026-11-26). The gate's losses, by path. A voiced frame
+// that falls out of the ring while no utterance is open was charged to the
+// PREVIOUS utterance (currentUtt), which is how call 1's name answer "Sam
+// Price." came to carry 360 ms lost while the caller talked over our NEXT
+// reply. dropped_voiced keeps that meaning (the 33-call baseline uses it);
+// dropped_overflow says which part fell out of the ring while we played, and
+// dropped_before_open charges the same frames to the utterance that came next.
+// ---------------------------------------------------------------------------
+function utteranceLogs(run) {
+  const lines = [];
+  const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    if (typeof chunk === "string" && chunk.includes('"event":"live_utterance"')) lines.push(chunk);
+    return true;
+  });
+  return run().then(
+    () => {
+      spy.mockRestore();
+      return lines
+        .flatMap((l) => l.split("\n"))
+        .filter((l) => l.includes('"event":"live_utterance"'))
+        .map((l) => JSON.parse(l))
+        .sort((a, b) => a.utterance - b.utterance);
+    },
+    (e) => {
+      spy.mockRestore();
+      throw e;
+    }
+  );
+}
+
+async function overTalk(env) {
+  const s = await boot({ env });
+  s.talk(400); // utterance 1, while we are silent
+  s.quiet(600);
+  s.speak(8000);
+  s.mumble(2000); // 50 voiced frames over our reply, never an utterance
+  s.talk(400); // utterance 2 opens over us and barges
+  s.quiet(200);
+  s.hangup();
+}
+
+describe("round 4 -- the gate's losses by path", () => {
+  beforeEach(() => clearStats());
+
+  it("frames lost while no utterance is open: still on U1, all overflow, and charged to U2 as before-open", async () => {
+    const [u1, u2] = await utteranceLogs(() => overTalk({}));
+    expect(u1.utterance).toBe(1);
+    // 15 of the mumble's 50 voiced frames fall out of a 75-frame ring before
+    // utterance 2 opens (plus any its own first frames push out).
+    expect(u1.dropped_voiced).toBeGreaterThanOrEqual(15);
+    expect(u1.dropped_overflow).toBe(u1.dropped_voiced);
+    expect(u1.dropped_before_open).toBe(0);
+    expect(u2.utterance).toBe(2);
+    expect(u2.dropped_before_open).toBe(u1.dropped_voiced);
+  });
+
+  it("LIVE_GATE_KEEP_START=off is the 500 ms ring again: 50 frames less room, 25+ more voiced frames lost", async () => {
+    const [kept] = await utteranceLogs(() => overTalk({}));
+    clearStats();
+    const [old] = await utteranceLogs(() => overTalk({ LIVE_GATE_KEEP_START: "off" }));
+    expect(old.dropped_voiced).toBeGreaterThanOrEqual(kept.dropped_voiced + 20);
   });
 });
