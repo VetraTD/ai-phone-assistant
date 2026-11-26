@@ -1547,7 +1547,8 @@ const SABOTAGES = [
     why:
       "A FORCED goodbye sets exitAfterTurn directly instead of waiting for the next turn boundary. The open turn it cut ends with turnComplete, arms the exit, and the call hangs up before any goodbye was spoken (batch-3 S2, review M1).",
     file: "lib/voice/live/index.js",
-    find: '      if (forced && (modelSpeaking || String(turnReplyText || "").trim())) goodbyeExitPending = true;',
+    // Re-pointed in round 3 (review M2 added the kept-umm-reply clause).
+    find: '      if (forced && (modelSpeaking || (ummHold && !ummHold.turnCompleted) || String(turnReplyText || "").trim())) goodbyeExitPending = true;',
     replace: "      if (false /* SABOTAGE */) goodbyeExitPending = true;",
     red: [CLOCK],
   },
