@@ -62,6 +62,22 @@ describe("say back what the caller has not heard", () => {
     expect(next(r)).not.toMatch(/say back[^.]*Pickup/);
   });
 
+  it("sim r5-sayback-1: a say-back put off by a question is owed to the next save, not lost", async () => {
+    // Turn 2: "Got it, picking up from 7 Plaistow Street, Lingfield. Could you give the postcode?" + the opener save.
+    const asked = "Got it, picking up from 7 Plaistow Street, Lingfield. Could you please provide the postcode for that address?";
+    const first = await save(d([["Pickup", "7 Plaistow Street, Lingfield"], ["Destination", "Dormansland"], ["When", "Fri 27 Nov 8:30 a.m."]]), { inTurnReplyText: asked });
+    expect(next(first)).toBe(ALREADY_ASKED_NOTE);
+    expect(first.stateEffects.capabilityState.messages.sayBackOwed).toEqual(["Pickup", "Destination", "When"]);
+    // Turn 3: the postcode, a statement before the save.
+    const second = await save(d([["Pickup", "7 Plaistow Street, Lingfield, RH7 6AU"], ["Destination", "Dormansland"], ["When", "Fri 27 Nov 8:30 a.m."]]), {
+      assistantSaidThisCall: `${GREETING} ${asked}`,
+      inTurnReplyText: "Got it, R-H-7 6-A-U.",
+      capabilityState: { messages: first.stateEffects.capabilityState.messages },
+    });
+    expect(next(second).startsWith(`${SAY_BACK_LEAD}Destination Dormansland; When Fri 27 Nov 8:30 a.m. `)).toBe(true);
+    expect(second.stateEffects.capabilityState.messages.sayBackOwed).toEqual([]);
+  });
+
   it("the turn already ended with a question: no note (Task 1's note instead)", async () => {
     const r = await save(OPENER, { inTurnReplyText: "Lovely. Can I take your name?" });
     expect(next(r)).toBe(ALREADY_ASKED_NOTE);

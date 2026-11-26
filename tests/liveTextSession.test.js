@@ -167,6 +167,28 @@ describe("it drives the real tool runner", () => {
     expect(live.sent.toolResponses).toHaveLength(1);
   });
 
+  // Hammersleys round 5: the Live-only tool replies (already asked, say-back,
+  // intake path, spelled read-back) gate on assistantSaidThisCall being a string
+  // and read inTurnReplyText. Without them the sims measured the pre-round-5
+  // replies (13 paid runs, 2026-11-26).
+  it("round 5: the tool context carries the turn's words so far and what was said before", async () => {
+    const { session, live } = makeSession({
+      script: [
+        [say("Hello, thanks for calling. How can I help?"), endTurn()],
+        [
+          say("Sure. Can I take your name?"),
+          { toolCall: { functionCalls: [{ id: "i1", name: "set_call_intent", args: { intent: "take_message", caller_type: "new_enquiry" } }] } },
+          endTurn(),
+        ],
+      ],
+    });
+    await session.sendTurn("Hi.");
+    expect(session.peekTurnState().assistantSaidThisCall).toContain("How can I help?");
+    await session.sendTurn("I'd like to leave a message.");
+    const r = live.sent.toolResponses.at(-1).functionResponses[0].response;
+    expect(r.next).toMatch(/^\[not caller speech\] Saved\. You have already asked your next question/);
+  });
+
   it("advances the reducer's step, so the eval's finalState means something", async () => {
     const { session } = makeSession({
       script: [[say("Sure, what day works for you?"), endTurn()]],

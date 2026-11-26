@@ -158,13 +158,15 @@ const squashAlnum = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "
  * its spoken numbers as digits. Separators are ignored, so a spelled "R-H-7
  * 6-A-U" hears "RH7 6AU".
  */
-function unheardDetails(args, ctx, priorLabels) {
+function unheardDetails(args, ctx, priorLabels, owedLabels = []) {
   const said = `${ctx.assistantSaidThisCall} ${typeof ctx.inTurnReplyText === "string" ? ctx.inTurnReplyText : ""}`;
   const heardIn = [squashAlnum(said), squashAlnum(numberWordsToDigits(said))];
   const prior = new Set((Array.isArray(priorLabels) ? priorLabels : []).map((l) => String(l).trim().toLowerCase()));
+  const owed = new Set((Array.isArray(owedLabels) ? owedLabels : []).map((l) => String(l).trim().toLowerCase()));
   const out = [];
   for (const { label, answer } of detailsFromArgs(args)?.answers ?? []) {
-    if (prior.has(label.trim().toLowerCase())) continue;
+    // Added by this save, or put off by an earlier one (sayBackOwed).
+    if (prior.has(label.trim().toLowerCase()) && !owed.has(label.trim().toLowerCase())) continue;
     const words = answer
       .split(/[\s,;/]+/)
       .filter((w) => /\d/.test(w) || (w.match(/\p{L}/gu) || []).length >= 3)
@@ -775,17 +777,32 @@ export default {
     // heard. Live + inbound + standard tier, a business that confirms each
     // answer, in its question flow; never when the turn already ended with a
     // question (it waits for the next save), a skip-reason save or the forced one.
-    const sayBack =
+    const sayBackEligible =
       standardTier &&
       typeof ctx?.assistantSaidThisCall === "string" &&
       !ctx?.outboundCall &&
       confirmStyleOf(ctx?.config) === "each" &&
       listNote !== null &&
-      !replyEndsWithQuestion(ctx?.inTurnReplyText) &&
       !skipped &&
-      !quietSave
-        ? unheardDetails(args, ctx, ctx?.capabilityState?.messages?.savedLabels)
-        : [];
+      !quietSave;
+    // Sim r5-sayback-1: a say-back put off because the turn ended with a question
+    // is OWED to the next save, or the opener's other details are never said back.
+    const priorOwed = Array.isArray(ctx?.capabilityState?.messages?.sayBackOwed)
+      ? ctx.capabilityState.messages.sayBackOwed
+      : [];
+    const priorSaved = Array.isArray(ctx?.capabilityState?.messages?.savedLabels) ? ctx.capabilityState.messages.savedLabels : [];
+    const priorLabelKeys = new Set(priorSaved.map((l) => String(l).trim().toLowerCase()));
+    const addedLabels = (detailsFromArgs(args)?.answers ?? [])
+      .map((a) => a.label)
+      .filter((l) => typeof l === "string" && !priorLabelKeys.has(l.trim().toLowerCase()));
+    let sayBackOwed = priorOwed;
+    let sayBack = [];
+    if (sayBackEligible && replyEndsWithQuestion(ctx?.inTurnReplyText)) {
+      sayBackOwed = [...new Set([...priorOwed, ...addedLabels])];
+    } else if (sayBackEligible) {
+      sayBack = unheardDetails(args, ctx, priorSaved, priorOwed);
+      sayBackOwed = [];
+    }
     if (sayBack.length) bumpCounter("tool_reply_say_back");
     const next = (
       alreadyAsked
@@ -810,7 +827,13 @@ export default {
         toolCallEvent: { name: fc.name, args },
         capabilityEffects: [{ capability: "messages", type: "recorded", data: args }],
         // The call's first message save is behind us (the I8 deferral is for that one only).
-        capabilityState: { messages: { firstSaveDone: true, ...(savedLabels ? { savedLabels } : {}) } },
+        capabilityState: {
+          messages: {
+            firstSaveDone: true,
+            ...(savedLabels ? { savedLabels } : {}),
+            ...(sayBackEligible || priorOwed.length ? { sayBackOwed } : {}),
+          },
+        },
         ...(listNote !== null ? { questionsOpen: openCount > 0 } : {}),
         // Fix round 2: a skip-reason save; the Live runner leaves the completion ask off it.
         ...(skipped ? { questionsSkipped: true } : {}),

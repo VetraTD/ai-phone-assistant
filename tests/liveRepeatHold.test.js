@@ -234,13 +234,52 @@ describe("round 5: the repeat hold", () => {
     }
   });
 
+  it("re-review 3: a longer acknowledgement before the same question is still a repeat", async () => {
+    const s = await boot({ callSid: "CA_rh_ack5" });
+    await s.spokeThenSaved("Lovely. Which terminal do you need?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("Okay, great, thank you. And which terminal do you need?");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+  });
+
+  it("re-review 3: the old question plus a new clause is played ('...and how many suitcases?')", async () => {
+    for (const [i, [q, next]] of [
+      ["Got it. How many passengers?", "How many passengers, and how many suitcases?"],
+      ["Thanks. Is that right?", "Is that right? And what time would you like picking up?"],
+    ].entries()) {
+      clearStats();
+      const s = await boot({ callSid: `CA_rh_clause${i}` });
+      await s.spokeThenSaved(q);
+      s.enqueue.mockClear();
+      await s.audio(800);
+      await s.assistantSays(next);
+      expect(s.enqueue, next).toHaveBeenCalled();
+      expect(c().live_repeat_hold_dropped ?? 0, next).toBe(0);
+    }
+  });
+
+  it("re-review 3: a short tail after the same question ('North or South?') is still a repeat", async () => {
+    const s = await boot({ callSid: "CA_rh_tail" });
+    await s.spokeThenSaved("Got it. Which terminal do you need?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("Which terminal do you need, North or South?");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+  });
+
   it("review I4: words of a dropped repeat that land after its turnComplete do not reach the next turn", async () => {
     const s = await boot({ callSid: "CA_rh_late" });
     await s.spokeThenSaved();
     await s.audio(800);
     await s.assistantSays(" Which terminal at Gatwick do you need?");
+    await s.turnEnds(); // dropped at its generation's end
     expect(c().live_repeat_hold_dropped).toBe(1);
-    await s.turnEnds();
     // The caller answers the first copy; their turn opens (flushing the old turn)...
     await s.callerSays("North.");
     await s.feed(300, { voiced: true });
