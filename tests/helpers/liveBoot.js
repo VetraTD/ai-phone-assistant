@@ -198,6 +198,9 @@ export async function bootLive({
   // fails, which is the "Deepgram unavailable" branch.
   clipHoldStt,
   clipHoldSttTimeoutMs,
+  // Round 4: the Deepgram shadow transcript's connect. NEVER the real vendor
+  // from a test: the default refuses (the shadow is off unless env says so).
+  shadowConnect,
   // Final fix wave I1: a promise the fake vendor connect awaits before it
   // resolves (a cold connect); a test releases it after the hang-up.
   connectGate,
@@ -241,6 +244,7 @@ export async function bootLive({
     ...(clipDrainSettleMs !== undefined ? { clipDrainSettleMs } : {}),
     clipHoldStt: clipHoldStt ?? (async () => { throw new Error("no Deepgram in tests"); }),
     ...(clipHoldSttTimeoutMs !== undefined ? { clipHoldSttTimeoutMs } : {}),
+    shadowConnect: shadowConnect ?? (async () => { throw new Error("no Deepgram in tests"); }),
     ...(verify ? { verify } : {}),
     ...(judge ? { judge } : {}),
     ...(twilioClient !== undefined ? { twilioClient } : {}),

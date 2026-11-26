@@ -924,6 +924,66 @@ const SABOTAGES = [
     replace: "    else droppedWhileClosed += 0; // SABOTAGE",
     red: ["tests/liveUtteranceRecord.test.js"],
   },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6, Deepgram shadow transcript.
+    name: "shadow-never-hipaa",
+    why:
+      "sends a healthcare tenant's caller audio to Deepgram when the shadow is switched on. Healthcare tenants have no Deepgram BAA; the constructor's own guard only refuses a hipaa DEPLOYMENT, not a hipaa tenant on a standard one.",
+    file: "lib/voice/live/shadowStt.js",
+    find: "  if (hipaa || isHealthcareTier(config)) return { on: false, reason: \"healthcare\" };",
+    replace: "  // SABOTAGE: no healthcare gate",
+    red: ["tests/liveShadowStt.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6.
+    name: "shadow-eu-only",
+    why:
+      "lets the shadow stream caller audio to Deepgram's US endpoint. UK callers' audio must be processed in the EU (DEEPGRAM_REGION=eu); the US base URL is a different processing location whatever the DPA says.",
+    file: "lib/voice/live/shadowStt.js",
+    find: "  if (!String(deepgramEnvironment(env).production || \"\").startsWith(EU_STREAM)) return { on: false, reason: \"not_eu\" };",
+    replace: "  // SABOTAGE: any region",
+    red: ["tests/liveShadowStt.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6.
+    name: "shadow-never-outbound",
+    why:
+      "runs the shadow on calls WE place. The shadow is an inbound measurement; outbound answers copy calls.answers (with its _ keys) into the outbound webhook payload, so the shadow's text would leave the system.",
+    file: "lib/voice/live/shadowStt.js",
+    find: "  if (outbound) return { on: false, reason: \"outbound\" };",
+    replace: "  // SABOTAGE: outbound too",
+    red: ["tests/liveShadowStt.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6.
+    name: "shadow-gets-raw-frames",
+    why:
+      "never feeds the shadow any audio: the Deepgram stream opens (and is billed) but transcribes nothing, and the hard-word table on the owner's calls reads empty for Deepgram -- a measurement that cannot fail.",
+    file: "lib/voice/live/index.js",
+    find: "    shadow?.push(mulawFrame);",
+    replace: "    // SABOTAGE: no frames to the shadow",
+    red: ["tests/liveShadowStt.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6.
+    name: "shadow-saved-on-call-row",
+    why:
+      "drops the shadow's finals at hang-up instead of putting them on the call row. Then shadow-compare has nothing to read and the Deepgram-vs-Live table is empty.",
+    file: "lib/voice/live/index.js",
+    find: "                  await database.mergeCallAnswers(callSid, { _shadow_stt: { v: 1, ...r } });",
+    replace: "                  void r; // SABOTAGE",
+    red: ["tests/liveShadowStt.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 6.
+    name: "deepgram-finalize-keeps-last-words",
+    why:
+      "ends the Deepgram stream without asking it to finalise what it has heard. The caller's last words (often the answer to the last question) never come back as a final.",
+    file: "lib/voice/sttDeepgram.js",
+    find: "          s.sendFinalize({ type: \"Finalize\" });",
+    replace: "          // SABOTAGE: no Finalize",
+    red: ["tests/sttDeepgramFinalize.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.
