@@ -790,8 +790,18 @@ const SABOTAGES = [
     why:
       "treats every late word as the caller carrying on. Live's copy of 'A ... yes' can land after the kept reply's turnComplete with no new voice; dropping then leaves silence, because Live thinks it has already answered -- the caller hears nothing until the first nudge.",
     file: "lib/voice/live/index.js",
-    find: "            if (lastVoicedMs > ummHold.startedAtMs) dropUmmHold(\"caller_resumed_words\");",
+    find: "            if (ummHold.resumed) dropUmmHold(\"caller_resumed_words\");",
     replace: "            if (true) dropUmmHold(\"caller_resumed_words\"); // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26), Opus re-review (new Important).
+    name: "umm-resumed-holds-release",
+    why:
+      "lets the age release fire after the caller has resumed. Past turnComplete Live sends no interrupted, so a caller who pauses ~2 s and then answers hears the stale re-ask straight after their answer whenever Live’s copy of their words lands late.",
+    file: "lib/voice/live/index.js",
+    find: "      else if (!ummHold.resumed && age >= UMM_MAX_HOLD_MS && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\");",
+    replace: "      else if (age >= UMM_MAX_HOLD_MS && quietMs >= UMM_QUIET_MS) releaseUmmHold(\"silence\"); // SABOTAGE",
     red: ["tests/liveUmmHold.test.js"],
   },
   // -------------------------------------------------------------------------

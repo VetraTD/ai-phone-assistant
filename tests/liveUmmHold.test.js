@@ -159,7 +159,7 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     expect(c().live_umm_hold_dropped ?? 0).toBe(0);
   });
 
-  it("noise after the kept reply (voice, never words): released by the cap, never stuck", async () => {
+  it("noise after the kept reply (voice, never words): played 2 s after the noise ends", async () => {
     const s = await boot();
     await s.asked();
     await s.sound(40, 600);
@@ -167,9 +167,59 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     s.enqueue.mockClear();
     await s.audio(1200);
     await s.assistantTurn(REASK);
-    await s.feed(4500, { voiced: true });
+    await s.feed(3000, { voiced: true });
+    await s.feed(1500);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    await s.feed(700);
     expect(s.enqueue).toHaveBeenCalled();
     expect(c().live_umm_hold_released).toBe(1);
+  });
+
+  it("continuous noise never strands it: the hard cap plays it", async () => {
+    const s = await boot();
+    await s.asked();
+    await s.sound(40, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    await s.assistantTurn(REASK);
+    await s.feed(10_500, { voiced: true });
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_released).toBe(1);
+  });
+
+  // Re-review (new Important): past turnComplete Live sends no interrupted, so
+  // a caller who thinks ~2 s and then answers -- with Live's copy of their
+  // words landing late -- must not hear the stale re-ask after their answer.
+  it("the caller answers after a pause, words land late: the stale re-ask never plays", async () => {
+    const s = await boot();
+    await s.asked();
+    await s.sound(40, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    await s.assistantTurn(REASK);
+    await s.feed(400);
+    await s.feed(1500, { voiced: true }); // the real answer
+    await s.feed(900); // its words not in yet
+    expect(s.enqueue).not.toHaveBeenCalled();
+    await s.callerSays("Saturday at seven, please.");
+    expect(c().live_umm_hold_dropped).toBe(1);
+    expect(s.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("one noise frame before late words is not the caller resuming: released", async () => {
+    const s = await boot();
+    await s.asked("Will you need a child seat?");
+    await s.sound(40, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    await s.assistantTurn("Sorry, was that a yes or a no?");
+    await s.feed(20, { voiced: true });
+    await s.callerSays(" yes.");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_dropped ?? 0).toBe(0);
   });
 
   it("a tool call after the kept reply's turnComplete drops it (the stale re-ask never plays first)", async () => {
