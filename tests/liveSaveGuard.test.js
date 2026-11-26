@@ -248,6 +248,18 @@ describe("(i) closers the guard must not read as answers (final review)", () => 
     expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
   });
 
+  // Round 4 (call 3, CA…283a9a): "No, thanks" came through as "esse"; the
+  // refusal turned a 9 s ending into 17 s of silence.
+  it("a one-word garble ('esse') to anything-else is not refused", async () => {
+    const s = await savedCall("CA_sg_i3");
+    await s.assistantSays(ASK);
+    await s.turnEnds(); // the hand-off ask is a turn of its own; "esse" answers it
+    await s.callerSays("esse");
+    await s.assistantSays("Thank you for calling, and have a wonderful day.");
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+  });
+
   it("a guard-forced save does not re-arm: a misread 'You too' is not refused again", async () => {
     const s = await savedCall("CA_sg_i2");
     await answerThenSignOff(s);

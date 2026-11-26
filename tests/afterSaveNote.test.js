@@ -106,6 +106,19 @@ describe("afterSaveNote skips end-of-call closers (round 3)", () => {
       })
     ).toBeNull();
   });
+  // Round 4 (call 3, CA…283a9a): the junk line '"Is there anything else I can
+  // help with?" — esse'. A one-word reply to a wrap-up ask is not written.
+  it("writes nothing for a one-word garble after the hand-off ask", () => {
+    expect(
+      afterSaveNote({
+        turnLog: [
+          T(9, "esse", "This has been passed to the dispatcher, who will confirm. Is there anything else I can help with?"),
+        ],
+        savedThroughTurn: 8,
+        closingRe,
+      })
+    ).toBeNull();
+  });
   it("still writes a real answer given at the end", () => {
     const n = afterSaveNote({
       turnLog: [T(2, "And I'll be paying with cash.", "Is there anything else I can help with?")],

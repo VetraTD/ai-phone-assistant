@@ -327,3 +327,56 @@ describe("closer answers at the end of a call are not answers (round 3)", () => 
     expect(isInformativeCallerTurn("Yes, Saturday at 7", NUDGE, undefined, closing)).toBe(true);
   });
 });
+
+// Hammersleys round 4 (call 3, CA…283a9a): "No, thanks" to the hand-off's
+// "Is there anything else I can help with?" came through as "esse". It counted
+// as an unsaved answer: end_call was refused, the goodbye went silent (17 s
+// ending) and the email got the junk line '"Is there anything else…" — esse'.
+// Measured on 50 replies to a wrap-up ask (34 fixtures + 33 prod calls): 19
+// were one word with no digit -- 15 "no", "nope", "mhm", "na", "esse" -- and
+// none carried a detail. Ruling R30: after a wrap-up ask, a nudge or a goodbye,
+// a one-word turn with no number in it carries nothing to save.
+describe("a one-word reply to 'anything else?' is not an answer (round 4)", () => {
+  const closing = closingRegexFor({});
+  const HANDOFF_ASK = "That's passed to the dispatcher, who will confirm. Is there anything else I can help with?";
+  const READBACK_HANDOFF =
+    "Got it, just one passenger. Your request is for a trip from five Plaistow Street, Lingfield to Oxted Station on Friday at eight in the morning. This has been passed to the dispatcher, who will confirm. Is there anything else I can help with?";
+  const NUDGE = "Hello? Are you still there?";
+  const ASK_AND_BYE =
+    "Is there anything else I can assist you with today? Thank you for calling, and I hope you have a wonderful day.";
+
+  it.each(["esse", "Esse.", "na", "Na.", "Eu"])("%j after the hand-off ask carries nothing", (t) => {
+    for (const prev of [HANDOFF_ASK, READBACK_HANDOFF, NUDGE, ASK_AND_BYE]) {
+      expect(isInformativeCallerTurn(t, prev, undefined, closing)).toBe(false);
+    }
+  });
+  it("accepted edge (R30): a lone 'Cash.' after anything-else is not listed either", () => {
+    expect(isInformativeCallerTurn("Cash.", HANDOFF_ASK, undefined, closing)).toBe(false);
+  });
+  it("works without the locale closing regex too (English wrap-up words)", () => {
+    expect(isInformativeCallerTurn("esse", HANDOFF_ASK)).toBe(false);
+  });
+
+  // Controls: one word that answers a real question, a number, two words.
+  it.each([
+    ["Cash.", "How will you be paying?"],
+    ["Gatwick", "Where would you like to go?"],
+    ["Smith", "What's your surname?"],
+    ["esse", "What's your name, please?"],
+  ])("%j answering %j stays informative", (t, prev) => {
+    expect(isInformativeCallerTurn(t, prev, undefined, closing)).toBe(true);
+  });
+  it.each(["Sure", "Yes.", "Right", "Absolutely"])("a yes (%j: more is coming) after anything-else stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, HANDOFF_ASK, undefined, closing)).toBe(true);
+  });
+  it.each(["Two", "two.", "5", "Three"])("the number %j after anything-else stays informative", (t) => {
+    expect(isInformativeCallerTurn(t, HANDOFF_ASK, undefined, closing)).toBe(true);
+  });
+  it.each(["Yes, Gatwick", "No, Gatwick", "Friday instead"])("two words %j after anything-else stay informative", (t) => {
+    expect(isInformativeCallerTurn(t, HANDOFF_ASK, undefined, closing)).toBe(true);
+  });
+  it("countUnsaved: the call-3 ending has nothing unsaved", () => {
+    const turns = [{ index: 9, caller: "esse", prevReply: READBACK_HANDOFF }];
+    expect(countUnsaved(turns, 8, undefined, closing)).toBe(0);
+  });
+});

@@ -20,7 +20,7 @@ import { createMarkerStripper, safeRejectedValue } from "../lib/intentMarker.js"
 import { createToolCallTextStripper } from "../lib/toolCallText.js";
 import { spellPolicy, callerHasNameOnFile } from "../lib/nameQuality.js";
 import { bumpCounter } from "../lib/voice/metrics.js";
-import { INTAKE_CALLER_TYPES, isHealthcareTier, spellUpFrontOf } from "../lib/capabilities/intakeSettings.js";
+import { INTAKE_CALLER_TYPES, isHealthcareTier, spellUpFrontOf, confirmStyleOf } from "../lib/capabilities/intakeSettings.js";
 import { SYSTEM_NOTE_PREFIX, SYSTEM_NOTE_SUFFIX } from "../lib/voice/replyState.js";
 import { speakableDateTime, relativeDayLabel } from "../lib/capabilities/datetime.js";
 import { resolveProfile } from "../lib/voice/voiceLocale.js";
@@ -1120,7 +1120,9 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
   if (callerContext.callCount > 0) {
     ctx += `They have called ${callerContext.callCount} time${callerContext.callCount === 1 ? "" : "s"} before. `;
     if (callerContext.lastCallSummary) {
-      ctx += `Last call: "${callerContext.lastCallSummary}" `;
+      // Round 4 (R31): generated text with no cap, re-sent every turn -- capped
+      // and cleaned like every other caller fact.
+      ctx += `Last call: "${sanitizeFact(callerContext.lastCallSummary, 300)}" `;
       // LVX188, Hammersleys round 3: the caution below only fired for an
       // appointment name, so a messages-only business got the summary's name
       // with none -- "Thank you, Jane" to a caller who never said it, and an
@@ -1326,7 +1328,7 @@ export function voiceAndLanguageRules(config, direction) {
   } else if (langs.length === 1 && langs[0] !== "en") {
     identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   } else {
-    identity += `\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer ("Got it, Station Road.") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;
+    identity += `\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer ("Got it, Station Road.") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;
   }
   return identity;
 }
@@ -1341,6 +1343,10 @@ export function nonNegotiableRulesSection(config, extras, direction) {
   const outbound = direction === "outbound" ? extras?.outboundCall || {} : null;
   // Caller-experience Task 3 fix: the standard tier's message clause follows the message protocol.
   const msgRuleOnStandard = !outbound && !isHealthcareTier(config);
+  // Round 4 (brief 4b): a confirmStyle "each" business confirms every answer
+  // as given and has no closing recap; "the one read-back" contradicted that.
+  // Standard-tier inbound only: the healthcare tier ignores messages settings.
+  const msgEachConfirm = msgRuleOnStandard && confirmStyleOf(config) === "each";
   // === NON-NEGOTIABLE RULES ===
   // The load-bearing behavior rules, lifted out of the GUARDRAILS wall so they
   // are not buried among a dozen other bullets. Built from an array and numbered
@@ -1378,7 +1384,7 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // one rule for every write: read back, then wait for a clear "yes". The
     // gate now saves a message as soon as it is called, and a booking after
     // ONE read-back unless the caller objects; cancellations keep the yes.
-    `${msgRuleOnStandard ? "Before saving anything but a message, read the details back ONCE, then do it. A message: save it as soon as this caller's minimum is in hand, then follow the message protocol (the questions, the one read-back, a correction saves again). A quote request" : "Before saving anything, read the details back ONCE, then do it. A message or quote request"}: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: ask ONE question that names the day, the time and the name — for example "So that's Tuesday at 3 p.m. for Jon Doe, is that right?" — wait for the answer, and book it when they answer with anything but a no; then say only "Done, you're all set." A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you go in that one read-back — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
+    `${msgRuleOnStandard ? "Before saving anything but a message, read the details back ONCE, then do it. A message: save it as soon as this caller's minimum is in hand, then follow the message protocol (the questions, " + (msgEachConfirm ? "each answer confirmed as given" : "the one read-back") + ", a correction saves again). A quote request" : "Before saving anything, read the details back ONCE, then do it. A message or quote request"}: one short summary, then record it straight away — if the caller corrects anything, record it again with the fix. A booking or a reschedule: ask ONE question that names the day, the time and the name — for example "So that's Tuesday at 3 p.m. for Jon Doe, is that right?" — wait for the answer, and book it when they answer with anything but a no; then say only "Done, you're all set." A cancellation: read it back and get a clear "yes" first. Never ask for the same yes twice. Any contact details the caller gives you ${msgEachConfirm ? "are said back as they are given" : "go in that one read-back"} — a phone number digit by digit, an email address spelled out — and an email with no "@" in it is wrong, so ask again.`,
     // From a live call: asked about "my wife Sarah", the assistant went looking
     // for a third party's booking by name — and on another it read the name
     // OUT of the record and asked the caller to confirm it, which is

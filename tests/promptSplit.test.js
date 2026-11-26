@@ -207,6 +207,46 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     }
   });
 
+  // Hammersleys round 4 (call 1, CA…9733b5, ~70-84 s): the pickup was said back
+  // wrong ("5 Cresta Street"), the caller corrected it over the say-back, and
+  // the correction was filed as the DESTINATION ("postcode for this
+  // destination"). The real destination was never asked. The say-back clause
+  // now says what a correction is.
+  it("round 4: English-only says a correction of a said-back answer fixes that answer", () => {
+    const LINE =
+      "If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question.";
+    for (const langs of [undefined, ["en"]]) {
+      const c = { ...config };
+      if (langs === undefined) delete c.languagesSpoken; else c.languagesSpoken = langs;
+      const p = buildStaticSystemPrefix(c, extras);
+      expect(p).toContain(LINE);
+      expect(p.indexOf(LINE)).toBeGreaterThan(p.indexOf("so they can correct you"));
+    }
+    expect(buildStaticSystemPrefix({ ...config, languagesSpoken: ["en", "es"] }, extras)).not.toContain(LINE);
+  });
+
+  // Hammersleys round 4 (brief 4b): a confirmStyle "each" business confirms
+  // every answer as it is given and has "no closing recap", but the
+  // non-negotiable rules still told every message business to make "the one
+  // read-back" -- a second voice asking for the recap the owner cut (R26).
+  it("round 4: confirmStyle each -- the message rule confirms each answer, with no 'one read-back'", () => {
+    const base = { ...config, languagesSpoken: ["en"] };
+    const each = { ...base, capabilities: { messages: { confirmStyle: "each" } } };
+    const eachRules = nonNegotiableRulesSection(each, extras, "inbound");
+    expect(eachRules).toContain(
+      "A message: save it as soon as this caller's minimum is in hand, then follow the message protocol (the questions, each answer confirmed as given, a correction saves again)."
+    );
+    expect(eachRules).not.toContain("(the questions, the one read-back, a correction saves again)");
+    expect(eachRules).toContain("Any contact details the caller gives you are said back as they are given — a phone number digit by digit");
+    expect(eachRules).not.toContain("go in that one read-back");
+    for (const c of [base, { ...base, capabilities: { messages: { confirmStyle: "end" } } }]) {
+      expect(nonNegotiableRulesSection(c, extras, "inbound")).toContain(
+        "then follow the message protocol (the questions, the one read-back, a correction saves again)."
+      );
+      expect(nonNegotiableRulesSection(c, extras, "inbound")).toContain("Any contact details the caller gives you go in that one read-back — ");
+    }
+  });
+
   it("LVX187: the multi-language and single non-English identity lines are byte-identical", () => {
     const REASK = "Take the most likely English meaning";
     const multi = buildStaticSystemPrefix({ ...config, languagesSpoken: ["en", "es"] }, extras);

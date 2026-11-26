@@ -657,7 +657,7 @@ const SABOTAGES = [
       "puts the old English-only wording back (\"This business operates in English ... Never apologise for the language\"): a sentence about language the model can recite to a caller who was only mis-transcribed. LVX187 replaced it with the plain re-ask; tests/promptSplit.test.js asserts the old phrases are absent and the re-ask present.",
     file: "services/gemini.js",
     find:
-      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
+      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
     replace:
       "    identity += `\\nThis business operates in English and ALWAYS replies in English. Never apologise for the language.`; // SABOTAGE",
     red: ["tests/promptSplit.test.js"],
@@ -669,7 +669,7 @@ const SABOTAGES = [
       "puts the LVX187 scripted re-ask back (\"Say: 'Sorry, I didn't catch that, could you say it again?'\"). On real calls that line was the most common re-ask -- 8 times on 7 of 30 debug-on calls, often to a caller the model had understood -- and each one costs a whole repeat. Round 3 tells the model to say back its best English reading instead; promptSplit and liveAssistantLanguage assert the say-back wording and the old sentence's absence.",
     file: "services/gemini.js",
     find:
-      "Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
+      "Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
     replace:
       "Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`; // SABOTAGE",
     red: ["tests/promptSplit.test.js", LANG],
@@ -833,6 +833,46 @@ const SABOTAGES = [
     find: "      const hes = ummHold.kind === \"hesitation\";",
     replace: "      const hes = false; // SABOTAGE",
     red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 2, ruling R30.
+    name: "r4-one-word-after-wrap-up",
+    why:
+      "reads a one-word garble after 'anything else?' as an unsaved answer. Call 3 (CA…283a9a): 'No, thanks' came through as 'esse' -> end_call refused (unsaved) -> goodbye latched silent -> 8 s silence exit (17 s ending), and the owner email got the junk line '\"Is there anything else I can help with?\" — esse'.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "    (askedWrapUp(prevReply, closingRe) || endsInGoodbyeOrNudge(prevReply))",
+    replace: "    false // SABOTAGE",
+    red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js", "tests/liveSaveGuard.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 3.
+    name: "r4-correction-fixes-said-back",
+    why:
+      "drops the rule that a correction of a said-back answer fixes THAT answer. Call 1 (CA…9733b5): the pickup was said back wrong, the caller's correction '5 Plaistow Street' was filed as the destination ('postcode for this destination'), and the email had the wrong pickup and a made-up destination.",
+    file: "services/gemini.js",
+    find: "If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. ",
+    replace: "",
+    red: ["tests/promptSplit.test.js", "tests/promptSnapshot.test.js", "tests/outboundPromptSnapshot.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), brief 4b.
+    name: "r4-each-no-one-read-back",
+    why:
+      "tells a confirmStyle 'each' business to make 'the one read-back' again. Every answer is already confirmed as given; the extra recap was ~19 s of speech at the hand-off on all three round-3 calls (owner ruling R26 cut it).",
+    file: "services/gemini.js",
+    find: "  const msgEachConfirm = msgRuleOnStandard && confirmStyleOf(config) === \"each\";",
+    replace: "  const msgEachConfirm = false; // SABOTAGE",
+    red: ["tests/promptSplit.test.js"],
+  },
+  {
+    // Hammersleys round 4 (2026-11-26), item 7, ruling R31.
+    name: "r4-summary-capped",
+    why:
+      "puts the last-call summary into every turn's prompt uncapped and uncleaned. It is generated text (up to 512 output tokens) re-sent on every Live turn, and a '===' in it reads as a prompt section header.",
+    file: "services/gemini.js",
+    find: "sanitizeFact(callerContext.lastCallSummary, 300)",
+    replace: "callerContext.lastCallSummary",
+    red: ["tests/a1OnFileNote.test.js"],
   },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
