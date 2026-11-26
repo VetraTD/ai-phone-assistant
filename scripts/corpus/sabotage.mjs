@@ -5084,6 +5084,38 @@ const SABOTAGES = [
     replace: "",
     red: ["tests/messagesSayBack.test.js"],
   },
+  {
+    name: "r5-repeat-hold-drops-copy",
+    why: "Round 5 Task 3 (owner call 2, R43): the repeat hold no longer drops a continuation that asks the question again, so the caller hears it twice. tests/liveRepeatHold.test.js asserts no media reaches Twilio.",
+    file: "lib/voice/live/index.js",
+    find: "    if (isRepeatOf(h.question, h.post, final)) {",
+    replace: "    if (false /* SABOTAGE */) {",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
+  {
+    name: "r5-repeat-hold-not-on-statement",
+    why: "Round 5 Task 3: the hold arms on any tool call the model spoke before, so a statement -> save -> question waits for words on the normal path. tests/liveRepeatHold.test.js 'statement, save, question: not held'.",
+    file: "lib/voice/live/index.js",
+    find: "    if (modelAudioTurnSeq !== turnSeq || !replyEndsWithQuestion(turnReplyText)) return;",
+    replace: "    if (modelAudioTurnSeq !== turnSeq) return; /* SABOTAGE */",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
+  {
+    name: "r5-repeat-hold-kill-switch",
+    why: "Round 5 Task 3: LIVE_REPEAT_HOLD=off stops disabling the hold, so the kill switch does nothing. tests/liveRepeatHold.test.js 'LIVE_REPEAT_HOLD=off'.",
+    file: "lib/voice/live/index.js",
+    find: "    if (repeatHoldOff || state.outboundCall || dialFirstSeconds || liveFirstLine) return;",
+    replace: "    if (state.outboundCall || dialFirstSeconds || liveFirstLine) return; /* SABOTAGE */",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
+  {
+    name: "r5-repeat-hold-cap",
+    why: "Round 5 Task 3: kept audio with no decision is never played (the 1.5 s cap is gone), so a reply whose words lag is silence. tests/liveRepeatHold.test.js 'no words within 1.5 s: played'.",
+    file: "lib/voice/live/index.js",
+    find: "      if (repeatHold.state === \"holding\" && atMs - repeatHold.startedAtMs >= REPEAT_HOLD_MAX_MS) releaseRepeatHold(\"timeout\");",
+    replace: "      if (false /* SABOTAGE */) releaseRepeatHold(\"timeout\");",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
