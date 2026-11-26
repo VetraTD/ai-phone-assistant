@@ -122,6 +122,19 @@ describe("an English-only tenant answered in another language", () => {
     expect(counters().live_assistant_turn_non_english).toBe(1);
   });
 
+  // Round 3: the English-word veto included "a", "me" and "no", which Spanish
+  // uses too, so "…el sábado a las siete…" read as English and the
+  // back-to-English note could never fire on it. Found by the sim instrument.
+  it.each([
+    "Perfecto, el sábado a las siete. ¿Cuántos pasajeros van a viajar?",
+    "Gracias, ¿a qué hora sale su vuelo?",
+    "Claro, ¿me puede dar la dirección de recogida, por favor?",
+  ])("counts the Spanish reply %j, whose 'a'/'me' are Spanish words", async (text) => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_shared" });
+    await s.assistantTurn(text);
+    expect(counters().live_assistant_turn_non_english).toBe(1);
+  });
+
   it("treats a missing languagesSpoken as English-only", async () => {
     // The tenant row's default. An absent field must not switch the check off.
     const s = await bootLive({ config: baseConfig(null), callSid: "CA_lang_default" });
@@ -214,6 +227,16 @@ describe("what must NOT be counted", () => {
     await s.assistantTurn(SPANISH);
     expect(counters().live_assistant_turn_non_english).toBe(0);
     expect(counters().live_assistant_turn_language_checked).toBe(0);
+  });
+
+  it.each([
+    "No problem, a driver will call you back about that.",
+    "Got it, a pickup at nine on Saturday from the station.",
+    "Could you tell me your full name please?",
+  ])("does not flag the English turn %j now that 'a'/'me'/'no' no longer veto alone", async (text) => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_en_shared" });
+    await s.assistantTurn(text);
+    expect(counters().live_assistant_turn_non_english).toBe(0);
   });
 
   it("ignores a turn too short to judge", async () => {
