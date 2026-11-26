@@ -685,6 +685,16 @@ const SABOTAGES = [
     red: [LANG],
   },
   {
+    // Hammersleys round 3 (2026-11-26).
+    name: "reply-veto-shared-words",
+    why:
+      "puts 'a', 'me' and 'no' back in the reply-side English veto. 'Perfecto, el sábado a las siete…' then reads as English on its 'a' alone, the non-English counter stays at 0 and the back-to-English note never fires.",
+    file: "lib/transcriptUtils.js",
+    find: "const REPLY_EN_VETO = new Set([...EN_FUNCTION_WORDS].filter((w) => ![\"a\", \"me\", \"no\"].includes(w)));",
+    replace: "const REPLY_EN_VETO = EN_FUNCTION_WORDS; // SABOTAGE",
+    red: [LANG],
+  },
+  {
     // Hammersleys round 3 (2026-11-26), owner ruling R16.
     name: "r3-handoff-carries-ask",
     why:
