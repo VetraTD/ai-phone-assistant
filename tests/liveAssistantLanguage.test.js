@@ -180,6 +180,20 @@ describe("round 3 — a non-English reply gets one note to say it again in Engli
     expect(counters().live_assistant_turn_non_english).toBe(2);
   });
 
+  // Opus review M7: an English read-back carrying ONE Spanish place-name word
+  // ("El Paso", "Los Angeles", "Las Colinas") is counted, but the note -- which
+  // makes the model say it all again -- needs two distinct markers.
+  it.each([
+    "Perfect. Pickup El Paso airport, Saturday. Correct?",
+    "Thanks, Las Colinas Boulevard, Irving. Correct?",
+  ])("counts but sends no note for the English read-back %j", async (text) => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_place" });
+    await s.callerSays("Yes.");
+    await s.assistantTurn(text);
+    expect(counters().live_assistant_turn_non_english).toBe(1);
+    expect(noteTexts(s).filter((t) => LANGUAGE_NOTE_RE.test(t))).toHaveLength(0);
+  });
+
   it("sends nothing after an English turn", async () => {
     const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_note_en" });
     await s.callerSays("Is that normal?");

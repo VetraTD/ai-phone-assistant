@@ -657,7 +657,7 @@ const SABOTAGES = [
       "puts the old English-only wording back (\"This business operates in English ... Never apologise for the language\"): a sentence about language the model can recite to a caller who was only mis-transcribed. LVX187 replaced it with the plain re-ask; tests/promptSplit.test.js asserts the old phrases are absent and the re-ask present.",
     file: "services/gemini.js",
     find:
-      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Saturday at 7.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
+      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
     replace:
       "    identity += `\\nThis business operates in English and ALWAYS replies in English. Never apologise for the language.`; // SABOTAGE",
     red: ["tests/promptSplit.test.js"],
@@ -669,7 +669,7 @@ const SABOTAGES = [
       "puts the LVX187 scripted re-ask back (\"Say: 'Sorry, I didn't catch that, could you say it again?'\"). On real calls that line was the most common re-ask -- 8 times on 7 of 30 debug-on calls, often to a caller the model had understood -- and each one costs a whole repeat. Round 3 tells the model to say back its best English reading instead; promptSplit and liveAssistantLanguage assert the say-back wording and the old sentence's absence.",
     file: "services/gemini.js",
     find:
-      "Take the most likely English meaning and say it back as their answer (\"Got it, Saturday at 7.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
+      "Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
     replace:
       "Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`; // SABOTAGE",
     red: ["tests/promptSplit.test.js", LANG],

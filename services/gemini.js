@@ -1326,7 +1326,7 @@ export function voiceAndLanguageRules(config, direction) {
   } else if (langs.length === 1 && langs[0] !== "en") {
     identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   } else {
-    identity += `\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer ("Got it, Saturday at 7.") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;
+    identity += `\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer ("Got it, Station Road.") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;
   }
   return identity;
 }
