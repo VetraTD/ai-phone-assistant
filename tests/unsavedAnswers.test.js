@@ -346,9 +346,27 @@ describe("a one-word reply to 'anything else?' is not an answer (round 4)", () =
     "Is there anything else I can assist you with today? Thank you for calling, and I hope you have a wonderful day.";
 
   it.each(["esse", "Esse.", "na", "Na.", "Eu"])("%j after the hand-off ask carries nothing", (t) => {
-    for (const prev of [HANDOFF_ASK, READBACK_HANDOFF, NUDGE, ASK_AND_BYE]) {
+    for (const prev of [HANDOFF_ASK, READBACK_HANDOFF, ASK_AND_BYE]) {
       expect(isInformativeCallerTurn(t, prev, undefined, closing)).toBe(false);
     }
+  });
+  // Opus review I4: after "Are you still there?" the likely reply is the answer
+  // to the question still pending -- not covered by the 19/50 measurement.
+  it("review I4: one word after a nudge stays an answer", () => {
+    expect(isInformativeCallerTurn("Tuesday.", NUDGE, undefined, closing)).toBe(true);
+  });
+  // Opus review I3: a read-back check is not a wrap-up, even with "everything" in it.
+  it("review I3: one word after a read-back check stays an answer", () => {
+    const prev = "So that's 5 Plaistow Street to Gatwick on Friday at eight. Did I get everything right?";
+    expect(isInformativeCallerTurn("Heathrow.", prev, readBackQuestionRe("en"), closing)).toBe(true);
+    expect(isInformativeCallerTurn("Heathrow.", prev)).toBe(true);
+  });
+  it("review I3: 'anything more about the problem?' is not a wrap-up", () => {
+    expect(isInformativeCallerTurn("Leaking.", "Is there anything more about the problem?", undefined, closing)).toBe(true);
+  });
+  // Review M4: the fillers stripped before the checks know Live's umm spellings.
+  it("review M4: 'Uhm, nope.' and 'Ehm, nope.' after anything-else are closers", () => {
+    for (const t of ["Uhm, nope.", "Ehm, nope."]) expect(isInformativeCallerTurn(t, HANDOFF_ASK, undefined, closing)).toBe(false);
   });
   it("accepted edge (R30): a lone 'Cash.' after anything-else is not listed either", () => {
     expect(isInformativeCallerTurn("Cash.", HANDOFF_ASK, undefined, closing)).toBe(false);

@@ -308,6 +308,43 @@ describe("round 4 — keep the start of speech said over us (R29)", () => {
     expect(out.released).toBe(0);
   });
 
+  // Opus review I1: sparse loud frames (a TV, line noise, echo crossing the
+  // floor) must not chain into a 1.5 s release, and a click must not release.
+  it("review I1: sparse noise over a long reply, then a voiced first frame after it, releases nothing", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 150; i++) g.push({ frame: frame(3), playing: true, ...(i % 6 === 0 ? VOICE : ROOM) });
+    const out = g.push({ frame: frame(50), playing: false, ...VOICE });
+    expect(out.released).toBe(0);
+    expect(out.forward).toEqual([frame(50)]);
+  });
+  it("review I1: a 40 ms click across the end of our audio releases nothing", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 2; i++) g.push({ frame: frame(7), playing: true, ...VOICE });
+    const out = g.push({ frame: frame(50), playing: false, ...VOICE });
+    expect(out.released).toBe(0);
+  });
+  it("review I1: sparse noise before real speech is not handed over with it", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 50; i++) g.push({ frame: frame(3), playing: true, ...(i % 6 === 0 ? VOICE : ROOM) });
+    for (let i = 0; i < 12; i++) g.push({ frame: frame(10 + i), playing: true, ...SPEAKING_OVER });
+    const out = g.push({ ...END_OF_PLAYBACK });
+    expect(out.released).toBeGreaterThanOrEqual(12);
+    // The speech, a frame of noise touching it, and the 200 ms lead-in -- not
+    // the 1 s of sparse noise before it (54+ before the fix).
+    expect(out.released).toBeLessThanOrEqual(26);
+  });
+  // Opus review I2: what a hand-over carries, in voiced frames, for the
+  // engine's "the caller made a sound" facts.
+  it("review I2: a hand-over reports its voiced frames", () => {
+    const g = createHalfDuplexGate();
+    for (let i = 0; i < 40; i++) g.push({ frame: frame(1), playing: true, ...ROOM });
+    for (let i = 0; i < 6; i++) g.push({ frame: frame(10 + i), playing: true, ...VOICE });
+    const out = g.push({ frame: frame(50), playing: false, ...VOICE });
+    expect(out.releasedVoiced).toBe(6);
+    expect(out.voicedForwarded).toBe(7);
+  });
+
   it("stays bounded: talking over a very long reply holds at most 1.5 s", () => {
     const g = createHalfDuplexGate();
     let held = 0;

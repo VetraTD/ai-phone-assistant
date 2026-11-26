@@ -260,6 +260,30 @@ describe("(i) closers the guard must not read as answers (final review)", () => 
     expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
   });
 
+  // Opus review I2 (round 4): a short sound crossing the end of our audio is
+  // now handed to Live ("keep the start"). Under 200 ms of voice and no words,
+  // it is not an unsaved answer: before round 4 every release carried 200 ms+.
+  it("a 140 ms sound across the end of our audio, no words, is not an unsaved answer", async () => {
+    const s = await savedCall("CA_sg_i4");
+    const samples = 24; // 24 kHz PCM16 per ms
+    const pcm = Buffer.alloc(1000 * samples * 2);
+    for (let i = 0; i < pcm.length / 2; i++) pcm.writeInt16LE(i % 2 ? 8000 : -8000, i * 2);
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: pcm.toString("base64") } }] } } });
+    await s.assistantSays(ASK);
+    await s.turnEnds();
+    const start = s.clock();
+    // Our audio plays to start+1000 (+150 ms grace). Quiet, then voice for the
+    // last 140 ms of it and the first frame after it -- then quiet.
+    await s.feed(1000);
+    await s.feed(140, { voiced: true });
+    await s.feed(20, { voiced: true });
+    await s.feed(800);
+    expect(counters().live_gate_speech_released ?? 0).toBeGreaterThan(0);
+    await s.assistantSays("Thank you for calling, and have a wonderful day.");
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+  });
+
   it("a guard-forced save does not re-arm: a misread 'You too' is not refused again", async () => {
     const s = await savedCall("CA_sg_i2");
     await answerThenSignOff(s);

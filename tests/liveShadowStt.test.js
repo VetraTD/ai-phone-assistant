@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { shadowSttEnabled, shadowKeyterms, createShadowStt } from "../lib/voice/live/shadowStt.js";
-import { bootLive, fakeDb } from "./helpers/liveBoot.js";
+import { bootLive, fakeDb, counters } from "./helpers/liveBoot.js";
 import { clearStats } from "../lib/voice/metrics.js";
 
 const BIZ = "7df62558-1f02-4bb9-8918-0f90528de700";
@@ -26,6 +26,12 @@ describe("shadowSttEnabled — every gate must pass", () => {
   });
   it("on for a standard inbound English call through the EU endpoint", () => {
     expect(shadowSttEnabled(facts())).toEqual({ on: true, reason: "on" });
+  });
+  it("review M1: business ids match whatever their case", () => {
+    expect(shadowSttEnabled(facts({ env: { ...ON, LIVE_SHADOW_STT: BIZ.toUpperCase() } })).on).toBe(true);
+  });
+  it("review M7: never without a business to save it under", () => {
+    expect(shadowSttEnabled(facts({ businessId: undefined }))).toEqual({ on: false, reason: "no_business" });
   });
   it("a business-id list scopes it to the listed businesses", () => {
     expect(shadowSttEnabled(facts({ env: { ...ON, LIVE_SHADOW_STT: `other-id, ${BIZ}` } })).on).toBe(true);
@@ -59,6 +65,14 @@ describe("shadowKeyterms — the business name and its 'Local names' line", () =
     expect(shadowKeyterms({ businessName: "Hammersleys Taxis", generalInfo: info })).toEqual([
       "Hammersleys Taxis", "Lingfield", "Dormansland", "Dormans Park", "Felcourt", "Dormans", "Gatwick Airport", "Three Bridges",
     ]);
+  });
+  it("review M3: a bulleted or dashed line, and 'and' or '/' between names", () => {
+    expect(shadowKeyterms({ businessName: "B", generalInfo: "- Local names: Oxted / Hurst Green, Dormansland and Edenbridge" })).toEqual([
+      "B", "Oxted", "Hurst Green", "Dormansland", "Edenbridge",
+    ]);
+    expect(shadowKeyterms({ businessName: "B", generalInfo: "LOCAL NAMES – Lingfield, Felbridge" })).toEqual(["B", "Lingfield", "Felbridge"]);
+    // A name with "and" inside a word is not split.
+    expect(shadowKeyterms({ businessName: "B", generalInfo: "Local names: Sandhurst, Andover" })).toEqual(["B", "Sandhurst", "Andover"]);
   });
   it("no line: just the business name", () => {
     expect(shadowKeyterms({ businessName: "Brightwork", generalInfo: "Open 9-5." })).toEqual(["Brightwork"]);
@@ -210,6 +224,12 @@ describe("the engine wiring", () => {
     expect(write?.[0]).toBe("CA_shadow");
     expect(write?.[1]._shadow_stt).toMatchObject({ v: 1, segments: [], frames_sent: 30 });
     expect(db.withTenantSafe.mock.calls.some(([id, , o]) => id === BIZ && o?.operation === "shadow_stt")).toBe(true);
+  });
+
+  it("review M1: switched on but not listed: skipped and counted, never contacted", async () => {
+    const { connect } = await call({ env: { ...ON, LIVE_SHADOW_STT: "some-other-business" } });
+    expect(connect).not.toHaveBeenCalled();
+    expect(counters().live_shadow_stt_skipped).toBe(1);
   });
 
   it("never for a healthcare tenant, even when switched on", async () => {

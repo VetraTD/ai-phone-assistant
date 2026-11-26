@@ -33,6 +33,15 @@ describe("hardWordTable", () => {
     ]);
     expect(rows[1].live_closest).toBe("springfield");
   });
+  it("review M5: a hard 'word' is at most 4 words, so a match never prints more of the call", () => {
+    const rows = hardWordTable({
+      live: "one two three four five six seven eight nine ten",
+      deepgram: "",
+      words: ["one two three four five six seven eight nine ten"],
+    });
+    expect(rows[0].word).toBe("one two three four");
+    expect(rows[0].live_closest.split(" ").length).toBeLessThanOrEqual(4);
+  });
   it("caps the list at 12 words", () => {
     const words = Array.from({ length: 20 }, (_, i) => `w${i}`);
     expect(hardWordTable({ live: "", deepgram: "", words })).toHaveLength(12);

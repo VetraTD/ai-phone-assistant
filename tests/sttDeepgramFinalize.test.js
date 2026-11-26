@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const sockets = [];
+const failNextOpen = { value: false };
 vi.mock("@deepgram/sdk", () => {
   class FakeSocket {
     constructor() {
@@ -18,7 +19,12 @@ vi.mock("@deepgram/sdk", () => {
       sockets.push(this);
     }
     connect() {}
-    async waitForOpen() {}
+    async waitForOpen() {
+      if (failNextOpen.value) {
+        failNextOpen.value = false;
+        throw new Error("open refused");
+      }
+    }
     on(event, cb) {
       this.handlers[event] = cb; // the SDK keeps one handler per event
     }
@@ -91,6 +97,15 @@ describe("sttDeepgram finalize() — end a stream without losing its last words"
     await done;
     await new Promise((r) => setTimeout(r, 400));
     expect(sockets.length).toBe(1);
+  });
+
+  // Opus review P1: the SDK socket is a ReconnectingWebSocket (30 retries by
+  // default). A connect whose open fails must close it, or it keeps
+  // handshaking with the API key for minutes with nobody holding it.
+  it("review P1: a failed open closes the SDK socket and rejects", async () => {
+    failNextOpen.value = true;
+    await expect(createDeepgramSttStream({ callSid: "CA_p1", onFinal: () => {} })).rejects.toThrow("open refused");
+    expect(sockets[0].closed).toBe(true);
   });
 
   it("finalize after close(), and twice, is a no-op", async () => {

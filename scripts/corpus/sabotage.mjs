@@ -657,7 +657,7 @@ const SABOTAGES = [
       "puts the old English-only wording back (\"This business operates in English ... Never apologise for the language\"): a sentence about language the model can recite to a caller who was only mis-transcribed. LVX187 replaced it with the plain re-ask; tests/promptSplit.test.js asserts the old phrases are absent and the re-ask present.",
     file: "services/gemini.js",
     find:
-      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
+      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: say the fix back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
     replace:
       "    identity += `\\nThis business operates in English and ALWAYS replies in English. Never apologise for the language.`; // SABOTAGE",
     red: ["tests/promptSplit.test.js"],
@@ -669,7 +669,7 @@ const SABOTAGES = [
       "puts the LVX187 scripted re-ask back (\"Say: 'Sorry, I didn't catch that, could you say it again?'\"). On real calls that line was the most common re-ask -- 8 times on 7 of 30 debug-on calls, often to a caller the model had understood -- and each one costs a whole repeat. Round 3 tells the model to say back its best English reading instead; promptSplit and liveAssistantLanguage assert the say-back wording and the old sentence's absence.",
     file: "services/gemini.js",
     find:
-      "Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
+      "Take the most likely English meaning and say it back as their answer (\"Got it, Station Road.\") so they can correct you; ask them to say it again only if no English meaning fits. If they then correct what you said back, that fixes that answer: say the fix back; it is not the answer to your next question. Never reply in another language. Do not mention language.`;",
     replace:
       "Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`; // SABOTAGE",
     red: ["tests/promptSplit.test.js", LANG],
@@ -820,7 +820,7 @@ const SABOTAGES = [
     why:
       "puts a long 'ummmm' back under the 600 ms voiced cap. A thinking sound longer than 600 ms is then never held, and the model's re-ask plays over the caller while they think.",
     file: "lib/voice/live/index.js",
-    find: "    if (isHesitationOnly(turnUserText)) return true;",
+    find: "    if (isHesitationOnly(turnUserText)) return ummCallerVoicedMs <= UMM_HESITATION_MAX_VOICED_MS;",
     replace: "    if (false) return true; // SABOTAGE",
     red: ["tests/liveUmmHold.test.js"],
   },
@@ -840,7 +840,7 @@ const SABOTAGES = [
     why:
       "reads a one-word garble after 'anything else?' as an unsaved answer. Call 3 (CA…283a9a): 'No, thanks' came through as 'esse' -> end_call refused (unsaved) -> goodbye latched silent -> 8 s silence exit (17 s ending), and the owner email got the junk line '\"Is there anything else I can help with?\" — esse'.",
     file: "lib/voice/unsavedAnswers.js",
-    find: "    (askedWrapUp(prevReply, closingRe) || endsInGoodbyeOrNudge(prevReply))",
+    find: "    (askedWrapUp(prevReply, readBackRe, closingRe) || endsInGoodbye(prevReply))",
     replace: "    false // SABOTAGE",
     red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js", "tests/liveSaveGuard.test.js"],
   },
@@ -850,7 +850,7 @@ const SABOTAGES = [
     why:
       "drops the rule that a correction of a said-back answer fixes THAT answer. Call 1 (CA…9733b5): the pickup was said back wrong, the caller's correction '5 Plaistow Street' was filed as the destination ('postcode for this destination'), and the email had the wrong pickup and a made-up destination.",
     file: "services/gemini.js",
-    find: "If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question. ",
+    find: "If they then correct what you said back, that fixes that answer: say the fix back; it is not the answer to your next question. ",
     replace: "",
     red: ["tests/promptSplit.test.js", "tests/promptSnapshot.test.js", "tests/outboundPromptSnapshot.test.js"],
   },
@@ -880,8 +880,8 @@ const SABOTAGES = [
     why:
       "hands over only the newest voiced frame (+200 ms) on a barge or release, not the start of the caller's stretch of speech. On 33 calls every loss of 200 ms or more was the start of speech said over our reply falling out of the ring (call 1's corrections lost 100-120 ms each, then were misheard).",
     file: "lib/voice/live/halfDuplex.js",
-    find: "    for (let i = last - 1; i >= 0 && start - i <= gapFrames; i--) if (lookback[i].voiced) start = i;",
-    replace: "    // SABOTAGE: the stretch is never walked back",
+    find: "    for (let i = last - 1; i >= 0 && start - i <= gapFrames; i--) {",
+    replace: "    for (let i = last - 1; false; i--) { // SABOTAGE: the stretch is never walked back",
     red: ["tests/liveHalfDuplex.test.js"],
   },
   {
@@ -890,7 +890,7 @@ const SABOTAGES = [
     why:
       "drops speech that is still going as our audio ends when under 200 ms of it was held: the start of an answer begun just before our last word is thrown away and the model hears it without its first syllable.",
     file: "lib/voice/live/halfDuplex.js",
-    find: "      const carriesOn = keepStart && Boolean(voiced) && voicedInNewest(continueFrames) > 0;",
+    find: "      const carriesOn = keepStart && Boolean(voiced) && voicedInNewest(continueFrames) >= carryMinFrames;",
     replace: "      const carriesOn = false; // SABOTAGE",
     red: ["tests/liveHalfDuplex.test.js"],
   },
@@ -982,6 +982,76 @@ const SABOTAGES = [
     file: "lib/voice/sttDeepgram.js",
     find: "          s.sendFinalize({ type: \"Finalize\" });",
     replace: "          // SABOTAGE: no Finalize",
+    red: ["tests/sttDeepgramFinalize.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I1.
+    name: "gate-carry-needs-100ms",
+    why:
+      "lets one voiced frame after our audio (plus one in the last 300 ms) release the held audio. A click, a TV or echo crossing the floor on a thin-margin line then hands Live up to 1.5 s of our own last sentence -- a self-reply.",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "      const carriesOn = keepStart && Boolean(voiced) && voicedInNewest(continueFrames) >= carryMinFrames;",
+    replace: "      const carriesOn = keepStart && Boolean(voiced) && voicedInNewest(continueFrames) > 0; // SABOTAGE",
+    red: ["tests/liveHalfDuplex.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I1.
+    name: "gate-stretch-dense",
+    why:
+      "chains sparse loud frames (1 in 6 voiced: a TV, line noise) into the caller's stretch, so a release hands over a second or more of noise and echo before the real speech.",
+    file: "lib/voice/live/halfDuplex.js",
+    find: "      if (!denseAround(i)) break;",
+    replace: "      // SABOTAGE: no density check",
+    red: ["tests/liveHalfDuplex.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I2.
+    name: "release-needs-200ms-voice",
+    why:
+      "marks the turn as the caller speaking whenever the gate released anything. Since 'keep the start' a 140 ms sound across the end of our audio is released; with no words it then counts as an unsaved answer and end_call is refused -- the 17 s ending R30 removed.",
+    file: "lib/voice/live/index.js",
+    find: "    if ((v.voiceActive && forwarded > 0) || releasedVoiced >= 10) callerVoicedThisTurn = true;",
+    replace: "    if ((v.voiceActive && forwarded > 0) || released > 0) callerVoicedThisTurn = true; // SABOTAGE",
+    red: ["tests/liveSaveGuard.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I3.
+    name: "one-word-not-after-readback",
+    why:
+      "reads 'Did I get everything right?' (and 'anything more about the problem?') as a wrap-up, so a one-word correction ('Heathrow.') is dropped from the save guard and the owner's email -- a wrong value left on file.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "  if ((readBackRe instanceof RegExp ? readBackRe : READ_BACK_RE).test(q)) return false;\n  if (closingRe instanceof RegExp) return closingRe.test(q);",
+    replace: "  if (closingRe instanceof RegExp) return WRAP_UP_RE.test(q) || closingRe.test(q); // SABOTAGE",
+    red: ["tests/unsavedAnswers.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I4.
+    name: "one-word-not-after-nudge",
+    why:
+      "drops a one-word answer given after 'Are you still there?'. That reply is usually the answer to the question still pending ('Tuesday.'), and the 19/50 measurement covered wrap-up asks only.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "    (askedWrapUp(prevReply, readBackRe, closingRe) || endsInGoodbye(prevReply))",
+    replace: "    (askedWrapUp(prevReply, readBackRe, closingRe) || endsInGoodbyeOrNudge(prevReply)) // SABOTAGE",
+    red: ["tests/unsavedAnswers.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review I5.
+    name: "umm-long-answer-not-held",
+    why:
+      "holds the reply to 2 s+ of voice whose transcript is still only 'Ahm'. That is a real answer with its words late: the right reply waits for 3 s of quiet (dead air), or a cough drops it.",
+    file: "lib/voice/live/index.js",
+    find: "    if (isHesitationOnly(turnUserText)) return ummCallerVoicedMs <= UMM_HESITATION_MAX_VOICED_MS;",
+    replace: "    if (isHesitationOnly(turnUserText)) return true; // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
+  {
+    // Hammersleys round 4, Opus review P1.
+    name: "deepgram-failed-open-closes",
+    why:
+      "leaves the SDK's ReconnectingWebSocket running when the first open fails (bad key, EU outage). It retries ~30 times over ~5 minutes with the API key and nothing holds it -- per call, on the shadow's line.",
+    file: "lib/voice/sttDeepgram.js",
+    find: "      try {\n        s.close();\n      } catch {\n        // already gone\n      }\n      throw err;",
+    replace: "      throw err; // SABOTAGE: the socket is left retrying",
     red: ["tests/sttDeepgramFinalize.test.js"],
   },
   // -------------------------------------------------------------------------
@@ -2440,8 +2510,8 @@ const SABOTAGES = [
     name: "echo-is-not-an-answer",
     why: "T5b: only voice the model heard counts. Our own audio echoing back while the read-back plays is withheld by the half-duplex gate and must not save a booking.",
     file: "lib/voice/live/index.js",
-    find: "    if ((v.voiced && forwarded > 0) || released > 0) callerVoicedSinceReply = true;",
-    replace: "    if (v.voiced || released > 0) callerVoicedSinceReply = true; // SABOTAGE",
+    find: "    if ((v.voiced && forwarded > 0) || releasedVoiced >= 10) callerVoicedSinceReply = true;",
+    replace: "    if (v.voiced || releasedVoiced >= 10) callerVoicedSinceReply = true; // SABOTAGE",
     red: [A1_SILENCEREADBACK],
   },
   {

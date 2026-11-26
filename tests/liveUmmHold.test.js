@@ -322,7 +322,7 @@ describe("Hammersleys round 4 — a hesitation is held whatever its length", () 
   it("'Ahm' whose real words land late, with no new voice, plays at once (the answer was already said)", async () => {
     const s = await boot();
     await s.asked("Where would you like to be picked up from?");
-    await s.sound(2200, 600);
+    await s.sound(1200, 600);
     await s.callerSays("Ahm");
     s.enqueue.mockClear();
     await s.audio(1500);
@@ -331,6 +331,23 @@ describe("Hammersleys round 4 — a hesitation is held whatever its length", () 
     expect(s.enqueue).toHaveBeenCalled();
     expect(c().live_umm_hold_released).toBe(1);
     expect(c().live_umm_hold_dropped ?? 0).toBe(0);
+  });
+});
+
+// Opus review I5: 2.2 s of voice whose transcript is still only "Ahm" is a
+// real answer with its words late, not a thinking sound. Held, its correct
+// reply would wait for 3 s of quiet (or be dropped by a cough) -- dead air.
+describe("Hammersleys round 4 review I5 — a long answer is not held as a hesitation", () => {
+  beforeEach(() => clearStats());
+  it("2.2 s of voice with only 'Ahm' so far: the reply plays at once", async () => {
+    const s = await boot();
+    await s.asked("Where would you like to be picked up from?");
+    await s.sound(2200, 600);
+    await s.callerSays("Ahm");
+    s.enqueue.mockClear();
+    await s.audio(1500);
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_started ?? 0).toBe(0);
   });
 });
 

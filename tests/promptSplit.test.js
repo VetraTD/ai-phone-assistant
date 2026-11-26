@@ -214,7 +214,7 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
   // now says what a correction is.
   it("round 4: English-only says a correction of a said-back answer fixes that answer", () => {
     const LINE =
-      "If they then correct what you said back, that fixes that answer: save the fix and say it back; it is not the answer to your next question.";
+      "If they then correct what you said back, that fixes that answer: say the fix back; it is not the answer to your next question.";
     for (const langs of [undefined, ["en"]]) {
       const c = { ...config };
       if (langs === undefined) delete c.languagesSpoken; else c.languagesSpoken = langs;
@@ -239,6 +239,9 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
     expect(eachRules).not.toContain("(the questions, the one read-back, a correction saves again)");
     expect(eachRules).toContain("Any contact details the caller gives you are said back as they are given — a phone number digit by digit");
     expect(eachRules).not.toContain("go in that one read-back");
+    // Review M5: the healthcare tier ignores messages settings, "each" included.
+    const hipaaEach = { ...each, complianceTier: "hipaa" };
+    expect(nonNegotiableRulesSection(hipaaEach, extras, "inbound")).toContain("Any contact details the caller gives you go in that one read-back — ");
     for (const c of [base, { ...base, capabilities: { messages: { confirmStyle: "end" } } }]) {
       expect(nonNegotiableRulesSection(c, extras, "inbound")).toContain(
         "then follow the message protocol (the questions, the one read-back, a correction saves again)."
