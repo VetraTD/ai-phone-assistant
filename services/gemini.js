@@ -1121,6 +1121,11 @@ function buildCallerContextSection(callerContext, timezone, profile, rules = [])
     ctx += `They have called ${callerContext.callCount} time${callerContext.callCount === 1 ? "" : "s"} before. `;
     if (callerContext.lastCallSummary) {
       ctx += `Last call: "${callerContext.lastCallSummary}" `;
+      // LVX188, Hammersleys round 3: the caution below only fired for an
+      // appointment name, so a messages-only business got the summary's name
+      // with none -- "Thank you, Jane" to a caller who never said it, and an
+      // URGENT save under "Jane" before the caller answered.
+      ctx += `A name in that last call may belong to someone else on this phone: do not call the caller by it or save it as their name until they say it on this call. `;
     }
   }
   // LVX188: a name on file may belong to someone else on a shared phone.

@@ -154,6 +154,29 @@ describe("LVX188: an on-file name is asked, never assumed", () => {
     });
     expect(bare).not.toContain("Names below may belong");
   });
+
+  // LVX188, Hammersleys round 3 (re-test calls 3 and 4, 2026-11-25): a business
+  // with no appointments gets the name only through the last-call summary, and
+  // got no caution -- "Thank you, Jane" to a caller who never said it, and an
+  // URGENT save with caller_name "Jane" before the caller answered.
+  it("a last-call summary carries the same caution, for messages-only businesses too", async () => {
+    const { buildDynamicTail } = await import("../services/gemini.js");
+    const { FIXTURES } = await import("./fixtures/businessConfigs.js");
+    const f = FIXTURES["messages-only"];
+    const CAUTION =
+      "A name in that last call may belong to someone else on this phone: do not call the caller by it or save it as their name until they say it on this call.";
+    const withSummary = buildDynamicTail("identify_intent", null, f.config, {
+      ...f.extras,
+      callerContext: { callCount: 3, lastCallSummary: "Jane Doe asked for a taxi from Lingfield to Gatwick.", upcomingAppointments: [] },
+    });
+    expect(withSummary).toContain('Last call: "Jane Doe asked for a taxi from Lingfield to Gatwick."');
+    expect(withSummary).toContain(CAUTION);
+    const noSummary = buildDynamicTail("identify_intent", null, f.config, {
+      ...f.extras,
+      callerContext: { callCount: 3, upcomingAppointments: [] },
+    });
+    expect(noSummary).not.toContain("A name in that last call");
+  });
 });
 
 // Both ends real (memory: a test proves a wire only if both ends are real):
