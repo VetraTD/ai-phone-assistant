@@ -309,3 +309,104 @@ describe("S4-F1: a caller silent after a held goodbye is hung up on without anot
     expect(c().live_silence_exit_after_goodbye).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 3, E3 (call CAde88b5…2fdea1, 2026-11-25): a nudge fired
+// 1.5 s after live_exit_armed -- inside the hang-up's grace window -- and the
+// exit cut it 0.1 s later. Nothing is said over ANY armed exit; S4-F1 above
+// covered only the quiet-latched one.
+// ---------------------------------------------------------------------------
+describe("round 3 E3: no silence line while an exit is armed", () => {
+  beforeEach(() => clearStats());
+
+  async function askedThenGoodbye() {
+    const s = await boot();
+    await s.callerSays("Could you note that I'd like a portrait session on Saturday?");
+    await s.says("I've noted that for Saturday. Is there anything else I can help you with?");
+    await s.callerSays("No, that's all, thanks.");
+    await s.says(GOODBYE);
+    expect(c().live_goodbye_armed_exit).toBe(1);
+    return s;
+  }
+
+  it("an armed goodbye exit whose mark is slow: no nudge over it, then it plays", async () => {
+    const s = await askedThenGoodbye();
+    expect(s.marks).toContain(EXIT_MARK);
+    await s.feed(14_000);
+    expect(s.silenceLines()).toEqual([]);
+    expect(c().nudges_fired ?? 0).toBe(0);
+    await s.exitPlays();
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("the caller calls the armed exit off: the ladder comes back", async () => {
+    const s = await askedThenGoodbye();
+    await s.callerSays("Oh wait, one more thing, sorry.");
+    expect(c().live_exit_cancelled_by_caller).toBe(1);
+    await s.feed(14_000);
+    expect(c().nudges_fired).toBeGreaterThanOrEqual(1);
+    expect(s.ws.readyState).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 3, E4 (call CA…6c0d37, 2026-11-25): "Is there anything else
+// I can assist you with today? Thank you for calling, and I hope you have a
+// wonderful day." in ONE turn, end_call with it. The exit is held at turn end
+// (the ask is unanswered) but the quiet latch was never set there, so 4 s later
+// the ladder said "Hello? Are you still there?" and the caller got a second
+// goodbye. A goodbye the caller heard is followed by silence, not a nudge.
+// ---------------------------------------------------------------------------
+describe("round 3 E4: ask + goodbye in one breath, held at turn end, goes quiet", () => {
+  beforeEach(() => clearStats());
+  const ASK = "Great. Is there anything else I can assist you with today?";
+  const BYE = "Thank you for calling, and I hope you have a wonderful day.";
+
+  async function heldAtTurnEnd({ goodbye }) {
+    const s = await boot();
+    await s.feed(800, { voiced: true });
+    await s.feed(1500);
+    await s.callerSays("Could you note that I'd like a portrait session on Saturday?");
+    await s.says("Saturday works. What time suits you?");
+    await s.feed(800, { voiced: true });
+    await s.feed(1500);
+    await s.callerSays("Ten in the morning, thanks.");
+    await s.says("Ten in the morning works. Will it be just you?");
+    await s.feed(800, { voiced: true });
+    await s.feed(1500);
+    await s.callerSays("Just me, thanks.");
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(3000) } }] } } });
+    await s.assistantSays(ASK);
+    const [res] = await s.callTool("end_call", {});
+    expect(res.response.success).toBe(true);
+    await s.assistantTurn(goodbye ? BYE : "");
+    expect(c().live_exit_held_in_turn_ask).toBe(1);
+    return s;
+  }
+
+  it("then silence: no 'are you still there?', the call ends quietly", async () => {
+    const s = await heldAtTurnEnd({ goodbye: true });
+    expect(c().live_goodbye_latched_silent).toBe(1);
+    await s.feed(30_000);
+    expect(s.silenceLines()).toEqual([]);
+    expect(c().live_silence_exit_after_goodbye).toBe(1);
+    await s.exitPlays();
+    expect(s.ws.readyState).toBe(3);
+  });
+
+  it("control: the ask alone (no goodbye) keeps today's nudge", async () => {
+    const s = await heldAtTurnEnd({ goodbye: false });
+    expect(c().live_goodbye_latched_silent ?? 0).toBe(0);
+    await s.feed(12_000);
+    expect(s.silenceLines()[0]).toContain("Hello? Are you still there?");
+  });
+
+  it("the caller answers the held ask: no quiet exit, the call carries on", async () => {
+    const s = await heldAtTurnEnd({ goodbye: true });
+    await s.callerSays("Actually, is there parking near you?");
+    await s.says("Yes, there is free parking right outside. Is there anything else?");
+    await s.feed(12_000);
+    expect(c().live_silence_exit_after_goodbye ?? 0).toBe(0);
+    expect(s.ws.readyState).toBe(1);
+  });
+});

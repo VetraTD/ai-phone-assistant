@@ -716,6 +716,26 @@ const SABOTAGES = [
     replace: "  // SABOTAGE: no there's\n",
     red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
   },
+  {
+    // Hammersleys round 3 (2026-11-26), E3.
+    name: "no-nudge-while-exit-armed",
+    why:
+      "puts the S4-F1 check back to the quiet-latched exit only. Call 2fdea1: a nudge fired 1.5 s after live_exit_armed, inside the hang-up's grace window, and the exit cut it 0.1 s later. Sabotaged, an exit armed by an ordinary goodbye leaves the ladder talking over the hang-up.",
+    file: "lib/voice/live/index.js",
+    find: "    if (pendingExit) {\n      ladderSince = atMs;\n      return;\n    }",
+    replace: "    if (farewellHeldQuiet && pendingExit) { // SABOTAGE\n      ladderSince = atMs;\n      return;\n    }",
+    red: ["tests/liveSilentExitAfterGoodbye.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26), E4.
+    name: "goodbye-held-at-turn-end-goes-quiet",
+    why:
+      "call 6c0d37: 'anything else?' and a goodbye in one breath hold end_call at turn end. Sabotaged, the quiet latch is never set there, the ladder says 'Hello? Are you still there?' 4 s later, and the caller gets a second goodbye.",
+    file: "lib/voice/live/index.js",
+    find: "            latchFarewellHeld(\"held_turn_end_ask\");",
+    replace: "            // SABOTAGE: the turn-end hold never latches",
+    red: ["tests/liveSilentExitAfterGoodbye.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.
