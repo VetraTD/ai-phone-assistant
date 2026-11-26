@@ -36,6 +36,8 @@ import {
   LEAD_LIKE,
 } from "../lib/capabilities/intakeSettings.js";
 import { END_READ_BACK } from "../lib/voice/intakePath.js";
+import { replyEndsWithQuestion, ALREADY_ASKED_NOTE } from "../lib/voice/turnText.js";
+import { bumpCounter } from "../lib/voice/metrics.js";
 import {
   spelledNameReadBack,
   nameVoicedIn,
@@ -681,10 +683,28 @@ export default {
       : quietAllAnswered
         ? [preceded ? `Then: ${QUIET_SAVE_NOTE}` : `[not caller speech] ${QUIET_SAVE_NOTE}`]
         : [listNote ?? (hasNotes ? nextQuestionsNote(ctx?.config) : null)];
+    // Round 5 Task 1: the model asked its next question in this turn, before
+    // this save (Live continues the turn after a tool reply, so "ask them now"
+    // would make it ask again). Live + inbound + standard tier only, and only
+    // where the reply would have asked: a save that owes a read-back, the
+    // number, a skip-reason step or the guard's quiet sentence keeps today's.
+    const alreadyAsked =
+      standardTier &&
+      typeof ctx?.assistantSaidThisCall === "string" &&
+      !ctx?.outboundCall &&
+      replyEndsWithQuestion(ctx?.inTurnReplyText) &&
+      !readBack &&
+      !needsNumber &&
+      !skipped &&
+      !quietSave &&
+      questionsPart.some(Boolean);
+    if (alreadyAsked) bumpCounter("tool_reply_already_asked_save");
     const next = (
-      deferReadBack && !skipped
-        ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
-        : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
+      alreadyAsked
+        ? [ALREADY_ASKED_NOTE]
+        : deferReadBack && !skipped
+          ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
+          : [readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
     )
       .filter(Boolean)
       .join(" ");

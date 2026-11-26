@@ -5033,6 +5033,33 @@ const SABOTAGES = [
     replace: "/\\p{L}{2,}/u.test(text) // SABOTAGE",
     red: ["tests/messageOwed.test.js"],
   },
+  // ---------------------------------------------------------------------------
+  // Hammersleys round 5 (2026-11-26).
+  // ---------------------------------------------------------------------------
+  {
+    name: "r5-save-reply-already-asked",
+    why: "Round 5 Task 1: a save made right after the model asked its next question says 'ask them now' again, so Live asks the question twice. tests/alreadyAskedThisTurn.test.js and tests/liveToolWords.test.js read the reply's next.",
+    file: "capabilities/messages.js",
+    find: "      replyEndsWithQuestion(ctx?.inTurnReplyText) &&\n      !readBack &&",
+    replace: "      false /* SABOTAGE */ &&\n      !readBack &&",
+    red: ["tests/alreadyAskedThisTurn.test.js", "tests/liveToolWords.test.js"],
+  },
+  {
+    name: "r5-intent-reply-already-asked",
+    why: "Round 5 Task 1: set_call_intent sends the intake path note ('ask ...') after the model already asked, so the question is asked twice. tests/alreadyAskedThisTurn.test.js reads the reply's next.",
+    file: "services/tools.js",
+    find: "const alreadyAsked = Boolean(pathNote) && replyEndsWithQuestion(ctx?.inTurnReplyText);",
+    replace: "const alreadyAsked = false; /* SABOTAGE */",
+    red: ["tests/alreadyAskedThisTurn.test.js"],
+  },
+  {
+    name: "r5-tool-words-logged",
+    why: "Round 5 Task 1a (R45): the words-at-the-call instrument stops, so the owner's calls cannot show whether the question's words arrived before the save. tests/liveToolWords.test.js reads the log and counters.",
+    file: "lib/voice/live/index.js",
+    find: "    noteToolWords(toolCall);\n",
+    replace: "",
+    red: ["tests/liveToolWords.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
