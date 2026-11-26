@@ -399,6 +399,8 @@ describe("isWordlessFragment() — round 3 umm hold", () => {
   it.each([
     "No.", "Yes", "Yeah", "Two", "10", "BA240", "Mhm.", "N?o.", "OK", "Hi", "pm", "si",
     "A South", "I live like", "Eh, me and after tomorrow 7:00 a.m.",
+    // Review M6: two capitals are a code, not a sound ("BA" for British Airways).
+    "BA", "LH",
   ])("%j carries a word", (t) => {
     expect(isWordlessFragment(t)).toBe(false);
   });

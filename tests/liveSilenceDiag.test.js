@@ -62,6 +62,25 @@ describe("round 3 item 4 — live_silence_diag beside the first nudge", () => {
     expect(JSON.stringify(d[0])).not.toMatch(/right|thank|Saturday/i);
   });
 
+  // Round 3 review M2: a kept "umm" reply released at its turnComplete (it was
+  // not a re-ask) must not leave the model marked as still speaking.
+  it("after a kept reply is released at turnComplete, the model is not marked speaking", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_sdiag3" });
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(1500) } }] } } });
+    await s.assistantTurn("What day would suit you?");
+    await s.feed(2500);
+    await s.feed(40, { voiced: true });
+    await s.feed(600);
+    await s.callerSays("A");
+    s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(1200) } }] } } });
+    await s.feed(0);
+    await s.assistantTurn("Take your time.");
+    await s.feed(16_000);
+    const d = diags();
+    expect(d).toHaveLength(1);
+    expect(d[0].model_generating).toBe(false);
+  });
+
   it("is logged once per silence, not on later rungs", async () => {
     const s = await bootLive({ config: CONFIG, callSid: "CA_sdiag2" });
     s.live.push({ serverContent: { modelTurn: { parts: [{ inlineData: { data: modelAudio(1500) } }] } } });

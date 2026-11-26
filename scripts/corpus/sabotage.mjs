@@ -766,6 +766,16 @@ const SABOTAGES = [
     replace: "    ummGen = \"discard\"; // SABOTAGE",
     red: ["tests/liveUmmHold.test.js"],
   },
+  {
+    // Hammersleys round 3 (2026-11-26), Opus review I1.
+    name: "umm-late-words-release",
+    why:
+      "treats every late word as the caller carrying on. Live's copy of 'A ... yes' can land after the kept reply's turnComplete with no new voice; dropping then leaves silence, because Live thinks it has already answered -- the caller hears nothing until the first nudge.",
+    file: "lib/voice/live/index.js",
+    find: "            if (lastVoicedMs > ummHold.startedAtMs) dropUmmHold(\"caller_resumed_words\");",
+    replace: "            if (true) dropUmmHold(\"caller_resumed_words\"); // SABOTAGE",
+    red: ["tests/liveUmmHold.test.js"],
+  },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that
   // attempted no appointment tool and showed the caller no time they agreed to.

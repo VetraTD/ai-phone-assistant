@@ -85,7 +85,7 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     expect(c().live_umm_hold_dropped ?? 0).toBe(0);
   });
 
-  it("the caller carries on talking before turnComplete: dropped, the rest of that generation too", async () => {
+  it("the caller carries on talking before turnComplete: their words drop it, the rest of that generation too", async () => {
     const s = await boot();
     await s.asked();
     await s.sound(40, 600);
@@ -93,6 +93,9 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     s.enqueue.mockClear();
     await s.audio(800);
     await s.feed(300, { voiced: true });
+    // Review I2: our own VAD alone is not enough -- Live may ignore that sound.
+    expect(c().live_umm_hold_dropped ?? 0).toBe(0);
+    await s.callerSays(" Saturday at seven.");
     expect(c().live_umm_hold_dropped).toBe(1);
     await s.audio(800); // more of the dropped generation
     await s.feed(500);
@@ -101,7 +104,6 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     // Live cuts its own generation on the new speech; the next reply plays at once.
     s.live.push({ serverContent: { interrupted: true } });
     await s.feed(0);
-    await s.callerSays("Saturday at seven, please.");
     await s.audio(1200);
     expect(s.enqueue).toHaveBeenCalled();
   });
@@ -117,9 +119,10 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     expect(s.enqueue).not.toHaveBeenCalled();
 
     await s.feed(300, { voiced: true });
+    expect(c().live_umm_hold_dropped ?? 0).toBe(0);
+    await s.callerSays("Saturday at seven, please.");
     expect(c().live_umm_hold_dropped).toBe(1);
     await s.feed(600);
-    await s.callerSays("Saturday at seven, please.");
     await s.audio(1200);
     expect(s.enqueue).toHaveBeenCalled();
     // A dropped re-ask never leaves a nudge behind it.
@@ -139,16 +142,47 @@ describe("LVX181 round 3 — a reply to a wordless sound after our question is h
     expect(c().live_umm_hold_dropped).toBe(1);
   });
 
-  it("an empty transcript is held, and released at once when the words turn out to be 'No.'", async () => {
+  it("a word arriving after the kept reply's turnComplete, with no new voice, is the same sound: released, not dropped", async () => {
+    // Review I1: Live's copy of "A ... yes" can land late. Dropping it would
+    // leave silence -- Live thinks it has already answered.
     const s = await boot();
     await s.asked("Will you need a child seat?");
     await s.sound(40, 600);
+    await s.callerSays("A");
     s.enqueue.mockClear();
     await s.audio(1200);
+    await s.assistantTurn("Sorry, was that a yes or a no?");
     expect(s.enqueue).not.toHaveBeenCalled();
-    await s.callerSays("No.");
+    await s.callerSays(" yes.");
     expect(s.enqueue).toHaveBeenCalled();
     expect(c().live_umm_hold_released).toBe(1);
+    expect(c().live_umm_hold_dropped ?? 0).toBe(0);
+  });
+
+  it("noise after the kept reply (voice, never words): released by the cap, never stuck", async () => {
+    const s = await boot();
+    await s.asked();
+    await s.sound(40, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    await s.assistantTurn(REASK);
+    await s.feed(4500, { voiced: true });
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_released).toBe(1);
+  });
+
+  it("a tool call after the kept reply's turnComplete drops it (the stale re-ask never plays first)", async () => {
+    const s = await boot();
+    await s.asked();
+    await s.sound(40, 600);
+    await s.callerSays("A");
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    await s.assistantTurn(REASK);
+    await s.callTool("set_call_intent", { intent: "general_question" });
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_umm_hold_dropped).toBe(1);
   });
 
   it("a tool call during the hold releases it (tool effects never wait)", async () => {
@@ -194,6 +228,16 @@ describe("LVX181 round 3 — what is never held", () => {
     await s.asked("How many passengers will there be?");
     await s.sound(200, 600);
     await s.callerSays(said);
+    s.enqueue.mockClear();
+    await s.audio(1200);
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_umm_hold_started ?? 0).toBe(0);
+  });
+
+  it("control: an empty transcript (words not in yet) is not held", async () => {
+    const s = await boot();
+    await s.asked("Will you need a child seat?");
+    await s.sound(300, 600);
     s.enqueue.mockClear();
     await s.audio(1200);
     expect(s.enqueue).toHaveBeenCalled();
