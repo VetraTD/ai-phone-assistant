@@ -187,20 +187,28 @@ describe("gemini.js — business hours rendering in prompts (legacy + weekly sha
   // LVX187: the English-only identity used to hand the model a sentence about
   // language to say aloud. It must say nothing about language and give the
   // plain re-ask. The two multi-language branches must not move a byte.
-  it("LVX187: English-only identity has no language line to recite", () => {
-    const REASK = "Sorry, I didn't catch that, could you say it again?";
+  // Hammersleys round 3: the scripted re-ask was itself the most frequent
+  // re-ask on real calls (8 times on 7 of 30 debug-on calls, 2026-11-21..26),
+  // often after the model HAD understood. The line now tells it to say back
+  // its best English reading so the caller corrects one detail, and to ask
+  // again only when no English meaning fits. No sentence to speak verbatim.
+  it("LVX187 / round 3: English-only identity says back the best English reading, no scripted re-ask", () => {
+    const OLD_REASK = "Sorry, I didn't catch that, could you say it again?";
     for (const langs of [undefined, ["en"]]) {
       const c = { ...config };
       if (langs === undefined) delete c.languagesSpoken; else c.languagesSpoken = langs;
       const p = buildStaticSystemPrefix(c, extras);
       expect(p).not.toContain("operates in English");
       expect(p).not.toContain("Never apologise for the language");
-      expect(p).toContain(REASK);
+      expect(p).not.toContain(OLD_REASK);
+      expect(p).toContain("Take the most likely English meaning and say it back as their answer");
+      expect(p).toContain("only if no English meaning fits");
+      expect(p).toContain("Never reply in another language.");
     }
   });
 
   it("LVX187: the multi-language and single non-English identity lines are byte-identical", () => {
-    const REASK = "Sorry, I didn't catch that, could you say it again?";
+    const REASK = "Take the most likely English meaning";
     const multi = buildStaticSystemPrefix({ ...config, languagesSpoken: ["en", "es"] }, extras);
     expect(multi).toContain(
       "\nYou can speak: en, es. ALWAYS reply in the language of the caller's most recent message — if they speak Spanish, reply in Spanish. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime."

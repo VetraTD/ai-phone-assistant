@@ -130,6 +130,58 @@ describe("an English-only tenant answered in another language", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// HAMMERSLEYS ROUND 3 (2026-11-26). Call A (CA15c9b7…fb66): the assistant
+// answered an English caller in Spanish for ~37 s, and the counter above was
+// the only thing that noticed. The caller did not understand that reply, so the
+// useful move is to have it said again in English straight away: one spoken
+// note, once per call, English-only tenants only.
+// ---------------------------------------------------------------------------
+const noteTexts = (s) =>
+  s.live.sent.clientContent
+    .slice(1) // [0] is the greeting kick
+    .map((m) => m?.turns?.[0]?.parts?.[0]?.text || "");
+const LANGUAGE_NOTE_RE = /Your last reply was not in English/;
+
+describe("round 3 — a non-English reply gets one note to say it again in English", () => {
+  it("sends the note after the Spanish turn, asking for a reply now", async () => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_note" });
+    await s.callerSays("Is that normal?");
+    await s.assistantTurn(SPANISH);
+
+    const sent = s.live.sent.clientContent.slice(1).filter((m) => LANGUAGE_NOTE_RE.test(m?.turns?.[0]?.parts?.[0]?.text || ""));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].turns[0].parts[0].text).toMatch(/Say it again in English/);
+    expect(sent[0].turnComplete).toBe(true);
+    expect(counters().live_language_note_sent).toBe(1);
+  });
+
+  it("sends it at most once per call", async () => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_note_once" });
+    await s.callerSays("Is that normal?");
+    await s.assistantTurn(SPANISH);
+    await s.callerSays("Sorry?");
+    await s.assistantTurn(SPANISH_LVX133);
+
+    expect(noteTexts(s).filter((t) => LANGUAGE_NOTE_RE.test(t))).toHaveLength(1);
+    expect(counters().live_assistant_turn_non_english).toBe(2);
+  });
+
+  it("sends nothing after an English turn", async () => {
+    const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_note_en" });
+    await s.callerSays("Is that normal?");
+    await s.assistantTurn("Yes, that is completely normal. How else can I help you today?");
+    expect(noteTexts(s).filter((t) => LANGUAGE_NOTE_RE.test(t))).toHaveLength(0);
+  });
+
+  it("sends nothing on a tenant that speaks Spanish", async () => {
+    const s = await bootLive({ config: baseConfig(["en", "es"]), callSid: "CA_lang_note_multi" });
+    await s.callerSays("¿Es normal?");
+    await s.assistantTurn(SPANISH);
+    expect(noteTexts(s).filter((t) => LANGUAGE_NOTE_RE.test(t))).toHaveLength(0);
+  });
+});
+
 describe("what must NOT be counted", () => {
   it("stays silent across ordinary English turns", async () => {
     const s = await bootLive({ config: baseConfig(["en"]), callSid: "CA_lang_en" });
@@ -203,6 +255,10 @@ describe("LVX149 — what an English-only tenant is told", () => {
     // And names the mis-hearing, because "reply in English" on its own competes
     // with a whole French sentence in the context and loses.
     expect(p).toMatch(/you misheard an English speaker/);
+    // Round 3: what to DO about the mis-hearing is say back the best English
+    // reading, not a scripted re-ask (which re-asked callers it had understood).
+    expect(p).toMatch(/Take the most likely English meaning and say it back/);
+    expect(p).not.toMatch(/Sorry, I didn't catch that, could you say it again\?/);
   });
 
   it("treats a missing languagesSpoken the same way", () => {

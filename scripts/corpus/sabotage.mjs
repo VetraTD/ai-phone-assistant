@@ -657,10 +657,32 @@ const SABOTAGES = [
       "puts the old English-only wording back (\"This business operates in English ... Never apologise for the language\"): a sentence about language the model can recite to a caller who was only mis-transcribed. LVX187 replaced it with the plain re-ask; tests/promptSplit.test.js asserts the old phrases are absent and the re-ask present.",
     file: "services/gemini.js",
     find:
-      "    identity += `\\nReply in English only. If a caller's words reach you in another language, you misheard an English speaker. Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`;",
+      "    identity += `\\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer (\"Got it, Saturday at 7.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
     replace:
       "    identity += `\\nThis business operates in English and ALWAYS replies in English. Never apologise for the language.`; // SABOTAGE",
     red: ["tests/promptSplit.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26).
+    name: "reask-line-restored",
+    why:
+      "puts the LVX187 scripted re-ask back (\"Say: 'Sorry, I didn't catch that, could you say it again?'\"). On real calls that line was the most common re-ask -- 8 times on 7 of 30 debug-on calls, often to a caller the model had understood -- and each one costs a whole repeat. Round 3 tells the model to say back its best English reading instead; promptSplit and liveAssistantLanguage assert the say-back wording and the old sentence's absence.",
+    file: "services/gemini.js",
+    find:
+      "Take the most likely English meaning and say it back as their answer (\"Got it, Saturday at 7.\") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;",
+    replace:
+      "Do not mention language. Say: \"Sorry, I didn't catch that, could you say it again?\"`; // SABOTAGE",
+    red: ["tests/promptSplit.test.js", LANG],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26).
+    name: "language-note-sent",
+    why:
+      "stops the back-to-English note. Call A (CA15c9b7…fb66) had the assistant answer an English caller in Spanish for ~37 s on an English-only tenant and only a counter noticed; the caller could not understand that reply. Sabotaged, the Spanish turn is counted and the call carries on in silence about it.",
+    file: "lib/voice/live/index.js",
+    find: "          if (sendTurnNote(\"language\", LANGUAGE_NOTE)) {",
+    replace: "          if (false && sendTurnNote(\"language\", LANGUAGE_NOTE)) { // SABOTAGE",
+    red: [LANG],
   },
   // -------------------------------------------------------------------------
   // LVX176 (2026-10-13). A saved message explains a claim ONLY on a call that

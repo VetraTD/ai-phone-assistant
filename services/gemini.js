@@ -1305,6 +1305,15 @@ export function voiceAndLanguageRules(config, direction) {
   // and "never apologise for the language" -- a sentence about language it could
   // recite back to a caller. The line now hands it the plain re-ask to say
   // instead, and says not to mention language at all.
+  //
+  // Hammersleys round 3 (2026-11-26). That plain re-ask became the most common
+  // re-ask on real calls: "Sorry, I didn't catch that, could you say it again?"
+  // 8 times on 7 of 30 debug-on calls, often to a caller the model HAD
+  // understood (it is the ASR; the transcript is a lossy copy). Each one costs
+  // the caller a whole repeat. The line now tells it to say back its best
+  // English reading so the caller corrects one detail, to ask again only when
+  // no English meaning fits, and never to answer in another language. Still no
+  // sentence about language to recite.
   // ---------------------------------------------------------------------------
   const langs = Array.isArray(config.languagesSpoken) ? config.languagesSpoken : [];
   if (langs.length > 1) {
@@ -1312,7 +1321,7 @@ export function voiceAndLanguageRules(config, direction) {
   } else if (langs.length === 1 && langs[0] !== "en") {
     identity += `\nSpeak ${langs[0]} by default. If the caller speaks English, switch to English. Keep tool arguments like names and notes in the caller's own words, but scheduled_at always stays an ISO datetime.`;
   } else {
-    identity += `\nReply in English only. If a caller's words reach you in another language, you misheard an English speaker. Do not mention language. Say: "Sorry, I didn't catch that, could you say it again?"`;
+    identity += `\nReply in English only. If a caller's words reach you sounding like another language, or garbled, you misheard an English speaker. Take the most likely English meaning and say it back as their answer ("Got it, Saturday at 7.") so they can correct you; ask them to say it again only if no English meaning fits. Never reply in another language. Do not mention language.`;
   }
   return identity;
 }
@@ -1401,7 +1410,13 @@ export function nonNegotiableRulesSection(config, extras, direction) {
     // appointment" and drove into the booking flow. It declines a TREATMENT the
     // practice does not offer perfectly well; it had nothing at all for a
     // request that is not about the business. See LVX63.
-    `If the caller asks for something you cannot do here, say so up front and offer what you CAN do — never attempt it and fail. If what they are asking for is not this business's line of work at all, say plainly that it is not something you can help with on this line — never reinterpret it as a request you can handle.`,
+    //
+    // LVX195 (2026-11-25): an off-domain request is often a mis-hearing -- a
+    // taxi caller came through as "I need an accident report with police", got
+    // a decline and was hung up on before speaking again. So after the plain
+    // decline: say what this business does and ask if that is what they need,
+    // and never end the call before they answer. Still no reinterpretation.
+    `If the caller asks for something you cannot do here, say so up front and offer what you CAN do — never attempt it and fail. If what they are asking for is not this business's line of work at all, say plainly that it is not something you can help with on this line — never reinterpret it as a request you can handle — then say in a few words what this business does and ask whether that is what they need, because you may have misheard them. Do not end the call before they answer.`,
     `In an emergency (chest pain, difficulty breathing, severe bleeding, poisoning, overdose), immediately tell them to call ${emergencyNumberFor(config.businessPhone)} or go to the nearest emergency room. ${outbound ? "Do not book or arrange anything else for an emergency." : "Do not schedule or take a message for emergencies."}`
   );
   return (

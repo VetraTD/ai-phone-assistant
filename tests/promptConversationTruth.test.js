@@ -171,6 +171,18 @@ describe("LVX63 — an off-domain request is declined, not reinterpreted", () =>
       "not this business's line of work at all"
     );
   });
+
+  // LVX195 (Hammersleys, CAcb9308…2b8a13): a taxi request heard as "I need an
+  // accident report with police" got "I can't help with that", then end_call
+  // 3 s later before the caller spoke. An off-domain request is often a
+  // mis-hearing: say what this business does and ask if that is what they need,
+  // and never hang up before they answer. LVX63's no-reinterpretation stays.
+  it("LVX195: an off-domain request gets what this business does + a check, never a hang-up first", () => {
+    const p = buildStaticSystemPrefix(brightwork(), {});
+    expect(p).toContain("never reinterpret it as a request you can handle");
+    expect(p).toContain("then say in a few words what this business does and ask whether that is what they need");
+    expect(p).toContain("Do not end the call before they answer.");
+  });
 });
 
 describe("LVX54 / LVX64 — the system is not a character", () => {
