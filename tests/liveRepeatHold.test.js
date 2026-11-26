@@ -207,18 +207,45 @@ describe("round 5: the repeat hold", () => {
     expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
   });
 
+  it("re-review 1: new information then the re-ask is played, never dropped whole (an offer must be heard)", async () => {
+    const s = await boot({ callSid: "CA_rh_offer" });
+    await s.spokeThenSaved("Lovely. What day works for you?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("I have Tuesday at ten or Wednesday at two open. What day works for you?");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
+  });
+
+  it("re-review 2: a different question in the same frame is played ('What's your name?' -> '...phone number?')", async () => {
+    for (const [i, [q, next]] of [
+      ["Thanks. What's your name?", "Thanks John. What's your phone number?"],
+      ["Got it. Where are you going?", "Where are you being picked up from?"],
+      ["Lovely. What's the pickup address?", "What's the pickup time?"],
+    ].entries()) {
+      clearStats();
+      const s = await boot({ callSid: `CA_rh_frame${i}` });
+      await s.spokeThenSaved(q);
+      s.enqueue.mockClear();
+      await s.audio(800);
+      await s.assistantSays(next);
+      expect(s.enqueue, next).toHaveBeenCalled();
+      expect(c().live_repeat_hold_dropped ?? 0, next).toBe(0);
+    }
+  });
+
   it("review I4: words of a dropped repeat that land after its turnComplete do not reach the next turn", async () => {
     const s = await boot({ callSid: "CA_rh_late" });
     await s.spokeThenSaved();
     await s.audio(800);
-    await s.assistantSays(" Which terminal at Gatwick do you");
+    await s.assistantSays(" Which terminal at Gatwick do you need?");
     expect(c().live_repeat_hold_dropped).toBe(1);
     await s.turnEnds();
     // The caller answers the first copy; their turn opens (flushing the old turn)...
     await s.callerSays("North.");
     await s.feed(300, { voiced: true });
     // ...and only then does the dropped repeat's tail arrive.
-    await s.assistantSays(" need?");
+    await s.assistantSays(" North or South?");
     // The model saves before it speaks: the turn's words must not read as "already asked"
     // (Task 1 and the live_tool_words instrument both read them).
     await s.callTool("record_customer_request", SAVE);

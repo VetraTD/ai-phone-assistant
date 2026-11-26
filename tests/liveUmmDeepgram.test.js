@@ -163,7 +163,7 @@ describe("round 5: the umm hold reads Deepgram when Live's text is empty", () =>
   });
 
   it("review M10: spaced hums ('Uh uh.', 'Mm mm.', 'Mm hmm.') are answers too", async () => {
-    for (const [i, word] of ["Uh uh.", "Mm mm.", "Mm hmm.", "Uh huh."].entries()) {
+    for (const [i, word] of ["Uh uh.", "Mm mm.", "Mm hmm.", "Uh huh.", "Um hmm."].entries()) {
       clearStats();
       const s = await boot({ callSid: `CA_udg_sp${i}` });
       await s.asked();
