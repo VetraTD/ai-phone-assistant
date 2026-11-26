@@ -481,3 +481,78 @@ describe("fix round 1", () => {
     expect(seam.lastSaveArgs.caller_name).toBe("Jon");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 5, Task 2: the name is always saved. Owner call 3
+// (CA...97d2d3): the caller gave "Jane Doe" when asked, the AI said it back,
+// and none of the 3 saves carried caller_name -- the email said "not given".
+// The guard counted only turns after the last save, and the name turn was
+// before every save. A name the caller gave that no save carries now counts as
+// one unsaved answer: end_call is refused once, and a caller who declines can
+// still leave (the refusal's latch).
+// ---------------------------------------------------------------------------
+describe("round 5: name owed", () => {
+  const NO_NAME = { request_type: "message", callback_number: "214 555 0123", message: "about the invoice" };
+  async function nameThenMessage(callSid, nameAnswer = "Jane Doe.") {
+    const s = await bootLive({ config: CONFIG, callSid });
+    await s.assistantTurn("Thanks for calling Brightwork. Can I take your full name, please?");
+    await s.callerSays(nameAnswer);
+    await s.assistantTurn("Thank you. What is it about?");
+    await s.callerSays("It's about the invoice.");
+    await s.assistantSays(`Lovely, I'll pass that on. ${ASK}`);
+    return s;
+  }
+
+  it("name asked and answered, saves carry no caller_name: end_call refused once; a save WITH the name then lets it go", async () => {
+    const s = await nameThenMessage("CA_r5_name_a");
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    const [refused] = await s.callTool("end_call", {});
+    expect(refused.response.success).toBe(false);
+    expect(refused.response.message).toMatch(/caller's name/);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+    expect(ok(await s.callTool("record_customer_request", { ...NO_NAME, caller_name: "Jane Doe" }))).toBe(true);
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
+  it("the caller declines: refused once, the save after it still has no name, the next end_call goes through", async () => {
+    const s = await nameThenMessage("CA_r5_name_b", "I'd rather not say.");
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    const [refused] = await s.callTool("end_call", {});
+    expect(refused.response.success).toBe(false);
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved).toBe(1);
+  });
+
+  it("no name question was asked (name on file): not refused", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_r5_name_c" });
+    await s.assistantTurn("Thanks for calling Brightwork. How can I help?");
+    await s.callerSays("It's about the invoice.");
+    await s.assistantSays(`Lovely, I'll pass that on. ${ASK}`);
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+  });
+
+  it("the name saved on the first save, a later save without it: not refused", async () => {
+    const s = await nameThenMessage("CA_r5_name_d");
+    expect(ok(await s.callTool("record_customer_request", { ...NO_NAME, caller_name: "Jane Doe" }))).toBe(true);
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    expect(ok(await s.callTool("end_call", {}))).toBe(true);
+    expect(counters().end_call_refused_unsaved ?? 0).toBe(0);
+  });
+
+  it("the name answer was voiced with no transcript yet (Live's side text late): still owed", async () => {
+    const s = await bootLive({ config: CONFIG, callSid: "CA_r5_name_e" });
+    await s.assistantTurn("Thanks for calling Brightwork. Can I take your full name, please?");
+    await s.feed(600, { voiced: true });
+    await s.feed(400);
+    await s.assistantTurn("Thank you. What is it about?");
+    await s.callerSays("It's about the invoice.");
+    await s.assistantSays(`Lovely, I'll pass that on. ${ASK}`);
+    expect(ok(await s.callTool("record_customer_request", NO_NAME))).toBe(true);
+    const [refused] = await s.callTool("end_call", {});
+    expect(refused.response.success).toBe(false);
+  });
+});

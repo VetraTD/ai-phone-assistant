@@ -5060,6 +5060,14 @@ const SABOTAGES = [
     replace: "",
     red: ["tests/liveToolWords.test.js"],
   },
+  {
+    name: "r5-name-owed",
+    why: "Round 5 Task 2 (owner call 3): a name the caller gave that no save carries stops counting as unsaved, so the call closes and the email says 'not given'. tests/liveSaveGuard.test.js 'round 5: name owed'.",
+    file: "lib/voice/live/index.js",
+    find: "+ (openUnsaved ? 1 : 0) + nameOwed();",
+    replace: "+ (openUnsaved ? 1 : 0) + 0; /* SABOTAGE */",
+    red: ["tests/liveSaveGuard.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
