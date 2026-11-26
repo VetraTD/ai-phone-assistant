@@ -17698,3 +17698,51 @@ ask rode the hand-off); every >5 s "reply" was our own first nudge after the mod
   without the read-back — owner R26, local names list); half-duplex gate drops caller speech at answer starts
   (68/571 utterances on 33 calls, 18 >= 200 ms; call 1's misheard pickup lost 360 ms); Deepgram shadow transcript
   (measure first); caller-history tokens. Owner R25: no postcode lookup.
+
+## Hammersleys fix round 4 (2026-11-26) — mishearing, umm, ending, hand-off
+
+Ledger `.superpowers/sdd/2026-11-26-hammersleys-round4/progress.md`; prod log Step L; morning guide
+`.superpowers/hammersleys/round4-morning-guide.md`. Branch fix/lvx192-save-guard c8b0375..2273dfc (local, not pushed).
+LIVE 2026-11-26T11:53Z: voice-uk-prod-00128-d7c (voice:2273dfc, debug ON, Deepgram shadow on the US test tenant
+only); same code without the shadow 00127-qg6; before round 4 00156-wet. Config v13c on both Hammersleys tenants.
+Run unattended on the owner's authorisation (R34, R35). Owner calls pending.
+
+### LVX181 follow-up · "Ahm" and long umm · **FIXED (code) 2026-11-26**
+- Live writes umm as "Ahm"; HESITATION_TOKEN_RE takes ahm/uhm/ehm (never "am"). A hesitation-only turn is held up to
+  1.5 s of voice (longer = a real answer with late words, played at once) and waits 3 s of quiet.
+
+### Garbled one-word reply to "anything else?" · **FIXED (code) 2026-11-26** (ruling R30)
+- After the locale closing question (or a common English wrap-up, or a goodbye), one word with no number and no yes is
+  not an unsaved answer ("esse" for "No, thanks": 17 s refused ending + junk email line). Not after a nudge or a
+  read-back check. Measured 19/50 one-word replies to a wrap-up ask, none a detail.
+- Accepted edge (R30/R36): a lone one-word detail or correction is not listed if the model also ends the call on it.
+
+### A correction of a said-back answer · **FIXED (prompt) 2026-11-26**
+- English-only say-back line: "If they then correct what you said back, that fixes that answer: say the fix back; it is
+  not the answer to your next question." Sims 3/3.
+
+### Hand-off without read-back (R26) + opener details · **FIXED (config v13c) 2026-11-26**
+- v13c: details in the first words saved with labels and said back, never asked again; airport -> terminal, saved
+  "Gatwick North"; hand-off words given, no read-back; local names list (villages + stations; Jason's streets pending).
+- Generic: confirmStyle "each" (standard inbound) no longer asked for "the one read-back".
+- Sims: hand-off without read-back 3/3; opener destination never re-asked 6/6; opener pickup saved + said back 2/2.
+- Open: the first save does not carry an opener destination (0/6; outcome unaffected); hand-off line left out 1/2.
+
+### Half-duplex gate drops caller speech · **FIXED (code) 2026-11-26** (ruling R29 "keep the start")
+- Measured: every loss >= 200 ms on 33 calls was ring OVERFLOW while we talk (the brief's call-1 U2 was the name answer;
+  its drops were counted after it closed). Ring 1.5 s; hand-over from 200 ms before the caller's latest dense stretch,
+  never later than the old 500 ms window; carry-on release needs 100 ms of voice. Kill switch LIVE_GATE_KEEP_START=off.
+- Instrument: live_utterance dropped_overflow, dropped_before_open (drops before an utterance opened, charged to it).
+- Not fixed by design: a short sound said entirely over us that ends early (could read as a yes to our last question).
+
+### Deepgram shadow transcript · **BUILT + ON for the US test tenant 2026-11-26** (measure only)
+- calls.answers._shadow_stt (no migration); keyterms = business name + a general_info "Local names" line; gates:
+  LIVE_SHADOW_STT on/id list, inbound, never healthcare/hipaa, EU endpoint only, English. scripts/shadow-compare.js
+  prints the hard-word table (migrate job, read-only, tenant-scoped).
+- R37 (open): dashboard /api/calls returns calls.* incl. _shadow_stt to the browser -- strip server-side before any
+  customer tenant is listed.
+- Next decision (owner): switch more tenants on, or use it (dashboard / guards / save cross-check), on the evidence.
+
+### Tokens (item 7)
+- The caller block is ~235 tokens/turn for a returning caller (not the 2.5k gap: that is conversation length). The
+  last-call summary is now capped at 300 chars and cleaned (sanitizeFact).
