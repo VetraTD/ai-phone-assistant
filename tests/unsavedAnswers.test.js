@@ -291,8 +291,23 @@ describe("closer answers at the end of a call are not answers (round 3)", () => 
     expect(isInformativeCallerTurn(t, SEAT, undefined, closing)).toBe(false);
   });
 
-  it.each([ASK_AND_BYE, NUDGE, HANDOFF_ASK])("'Ayer no' after %j is a closer", (prev) => {
+  it.each([ASK_AND_BYE, NUDGE])("'Ayer no' after %j is a closer", (prev) => {
     expect(isInformativeCallerTurn("Ayer no", prev, undefined, closing)).toBe(false);
+  });
+
+  // Opus review I3: the hand-off reply now reads the trip back AND asks
+  // "anything else?" (owner ruling R16), so a two-word correction to it must
+  // stay an answer -- the no has to come last, after a goodbye or a nudge.
+  it.each(["No, Gatwick", "No, Friday", "No, cash", "No, tomorrow", "Nope, Redhill", "No. Gatwick."])(
+    "the correction %j stays informative after the hand-off ask, a nudge, or ask+goodbye",
+    (t) => {
+      for (const prev of [HANDOFF_ASK, NUDGE, ASK_AND_BYE]) {
+        expect(isInformativeCallerTurn(t, prev, undefined, closing)).toBe(true);
+      }
+    }
+  );
+  it("after a plain anything-else (no goodbye), 'Ayer no' stays informative: the cost is a re-save, never a lost answer", () => {
+    expect(isInformativeCallerTurn("Ayer no", HANDOFF_ASK, undefined, closing)).toBe(true);
   });
 
   // Controls: the same words where they DO answer something, and real content.

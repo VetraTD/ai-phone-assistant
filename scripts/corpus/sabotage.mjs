@@ -706,14 +706,22 @@ const SABOTAGES = [
   },
   {
     // Hammersleys round 3 (2026-11-26).
-    name: "r3-closer-after-ask",
+    name: "r3-repair-word-not-answer",
     why:
-      "drops the lone-repair-word and the after-wrap-up 'no' rules. 7eab36's 'What' (after 'Are you still there?') and 6c0d37's 'Ayer no' (after 'anything else? … wonderful day') count as unsaved answers again: the save guard refuses the goodbye and the owner email carries 'Said after the last save' junk lines.",
+      "drops the lone-repair-word rule. 7eab36's 'What' (after 'Are you still there?') counts as an unsaved answer again: the save guard refuses the goodbye and the owner email carries a 'Said after the last save: What' junk line.",
     file: "lib/voice/unsavedAnswers.js",
-    find:
-      "  if (words.length === 1 && REPAIR_WORDS.has(words[0])) return false;\n  // Round 3: \"Ayer no\" after a wrap-up / nudge / goodbye closes the call.\n  const afterWrapUp = afterAnythingElse ||",
-    replace:
-      "  // SABOTAGE: no repair-word rule\n  // Round 3: \"Ayer no\" after a wrap-up / nudge / goodbye closes the call.\n  const afterWrapUp = false && afterAnythingElse ||",
+    find: "  if (words.length === 1 && REPAIR_WORDS.has(words[0])) return false;",
+    replace: "  // SABOTAGE: no repair-word rule",
+    red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
+  },
+  {
+    // Hammersleys round 3 (2026-11-26); split from r3-closer-after-ask after the Opus review (M9).
+    name: "r3-garble-no-after-goodbye",
+    why:
+      "drops the garble-then-no rule. 6c0d37's 'Ayer no' (after 'anything else? … wonderful day') and the same after 'Are you still there?' count as unsaved answers again: a refused goodbye and a junk email line.",
+    file: "lib/voice/unsavedAnswers.js",
+    find: "    endsInGoodbyeOrNudge(prevReply) &&\n    words.length === 2 &&",
+    replace: "    false && // SABOTAGE\n    words.length === 2 &&",
     red: ["tests/unsavedAnswers.test.js", "tests/afterSaveNote.test.js"],
   },
   {
