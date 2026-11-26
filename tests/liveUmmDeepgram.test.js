@@ -162,6 +162,33 @@ describe("round 5: the umm hold reads Deepgram when Live's text is empty", () =>
     }
   });
 
+  it("review M10: spaced hums ('Uh uh.', 'Mm mm.', 'Mm hmm.') are answers too", async () => {
+    for (const [i, word] of ["Uh uh.", "Mm mm.", "Mm hmm.", "Uh huh."].entries()) {
+      clearStats();
+      const s = await boot({ callSid: `CA_udg_sp${i}` });
+      await s.asked();
+      await s.sound(400, 300);
+      s.dg.say(word);
+      s.enqueue.mockClear();
+      await s.audio(1500);
+      expect(s.enqueue, word).toHaveBeenCalled();
+      expect(c().live_umm_hold_started ?? 0, word).toBe(0);
+    }
+  });
+
+  it("review M10: the caller carries on during a pending hold -> Deepgram's words drop it, not play it", async () => {
+    const s = await boot({ callSid: "CA_udg_pres" });
+    await s.asked();
+    await s.sound(500, 300);
+    s.enqueue.mockClear();
+    await s.audio(1500); // pending: Deepgram has nothing yet
+    await s.feed(400, { voiced: true }); // the caller goes on
+    s.dg.say("The Greyhound pub in Lingfield.");
+    await s.feed(3500);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_umm_hold_dropped).toBe(1);
+  });
+
   it("Deepgram text from before the caller's current sound does not count", async () => {
     const s = await boot({ callSid: "CA_udg_stale" });
     await s.asked();

@@ -110,11 +110,15 @@ describe("set_call_intent reply when the question was already asked this turn", 
   });
   const path = () => intakePathNote({ callerType: "new_enquiry", config: taxiCfg(), callerNumberReal: true, outbound: false });
 
-  it("ends with a question: the intake path is not sent; the reply says it was already asked", async () => {
+  it("ends with a question: 'already asked, wait' first, then the intake path for when they answer (review I2)", async () => {
     const out = await executeToolCall(fc, ctx("Sure. Can I take your name, please?"));
     const r = out.functionResponse.response;
-    expect(r.next).toBe(ALREADY_ASKED_NOTE);
-    expect(r.next).not.toBe(path());
+    expect(r.next.startsWith(ALREADY_ASKED_NOTE)).toBe(true);
+    // The path's lines are the only copy the model gets this call: they must survive.
+    const body = path().replace(/^\[not caller speech\]\s*/, "");
+    expect(r.next).toContain(body);
+    expect(r.next).toContain("When they answer");
+    expect(r.next.match(/\[not caller speech\]/g)).toHaveLength(1);
     expect(counters().tool_reply_already_asked_intent).toBe(1);
   });
   it("a statement: today's path note", async () => {

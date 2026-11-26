@@ -572,11 +572,14 @@ export async function executeToolCall(fc, ctx) {
             })
           : null;
       // Round 5 Task 1: the model already asked its question in this turn, so the
-      // path note's "ask ..." would make it ask again; say wait instead. Only where
-      // a path note would have gone (Live + inbound), so every other reply is as before.
+      // path note's "ask ..." would make it ask again: say wait first. The path's
+      // lines still follow (Opus review I2): this reply is the only place the
+      // model gets them on this call. Only where a path note would have gone.
       const alreadyAsked = Boolean(pathNote) && replyEndsWithQuestion(ctx?.inTurnReplyText);
       if (alreadyAsked) bumpCounter("tool_reply_already_asked_intent");
-      const path = alreadyAsked ? ALREADY_ASKED_NOTE : pathNote;
+      const path = alreadyAsked
+        ? `${ALREADY_ASKED_NOTE} When they answer, carry on this way: ${pathNote.replace(/^\[not caller speech\]\s*/, "")}`
+        : pathNote;
       // `next` before `message`, so the reply the model reads leads with it.
       const response = { success: true, ...(path ? { next: path } : {}), ...(onFile ? { message: onFile } : {}) };
       return {

@@ -94,6 +94,27 @@ describe("Task 1 through the Live engine: the save reply after a question alread
   });
 });
 
+describe("review I9: the completion ask is not added after a question already asked", () => {
+  const PLAIN = { ...CONFIG, capabilities: {} };
+  const MSG = { request_type: "message", caller_name: "Jon Doe", callback_number: "214 555 0123", message: "about the invoice" };
+  async function said(callSid, words) {
+    const s = await bootLive({ config: PLAIN, callSid });
+    await s.callerSays("It's Jon Doe about the invoice, 214 555 0123.");
+    await s.assistantSays(words);
+    const [r] = await s.callTool("record_customer_request", MSG);
+    return r.response;
+  }
+  it("'...Is there anything else I can help with?' then the save: no second 'anything else' note", async () => {
+    const r = await said("CA_tw_ca_q", "Thanks Jon, I'll pass that on. Is there anything else I can help with?");
+    expect(r.next_step).toBeUndefined();
+    expect(counters().live_completion_ask_note_skipped_already_asked).toBe(1);
+  });
+  it("a statement then the save: the completion ask as today", async () => {
+    const r = await said("CA_tw_ca_s", "Thanks Jon, I'll pass that on.");
+    expect(r.next_step).toMatch(/anything else they need/);
+  });
+});
+
 describe("Task 1a: the words-at-the-call instrument", () => {
   it("logs q_at_call true, spoke true and the length, with no words", async () => {
     let s;

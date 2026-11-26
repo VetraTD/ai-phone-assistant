@@ -162,6 +162,106 @@ describe("round 5: the repeat hold", () => {
     expect(c().live_repeat_hold_armed ?? 0).toBe(0);
   });
 
+  // ---- Opus review fix pass (2026-11-26) -----------------------------------
+  it("review I1: our own barge clear (no interrupt from Live) drops the held continuation", async () => {
+    const s = await boot({ callSid: "CA_rh_clear" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.feed(800, { voiced: true }); // the caller talks over the first copy: the gate barges and clears
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+  });
+
+  it("review I3: an acknowledgement before the same short question is still a repeat", async () => {
+    const s = await boot({ callSid: "CA_rh_ack" });
+    await s.spokeThenSaved("Got it, 12 High Street. Which terminal do you need?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("Got it. Which terminal do you need?");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+  });
+
+  it("review I3: 'And what's your full name?' after 'What's your full name?' is a repeat", async () => {
+    const s = await boot({ callSid: "CA_rh_name" });
+    await s.spokeThenSaved("Of course. What's your full name?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("Thanks. And what's your full name?");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("review I3: a different question sharing only its opening ('What is the ...') is played", async () => {
+    const s = await boot({ callSid: "CA_rh_diff" });
+    await s.spokeThenSaved("Got it. What is the pickup address?");
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("What is the destination?");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
+  });
+
+  it("review I4: words of a dropped repeat that land after its turnComplete do not reach the next turn", async () => {
+    const s = await boot({ callSid: "CA_rh_late" });
+    await s.spokeThenSaved();
+    await s.audio(800);
+    await s.assistantSays(" Which terminal at Gatwick do you");
+    expect(c().live_repeat_hold_dropped).toBe(1);
+    await s.turnEnds();
+    // The caller answers the first copy; their turn opens (flushing the old turn)...
+    await s.callerSays("North.");
+    await s.feed(300, { voiced: true });
+    // ...and only then does the dropped repeat's tail arrive.
+    await s.assistantSays(" need?");
+    // The model saves before it speaks: the turn's words must not read as "already asked"
+    // (Task 1 and the live_tool_words instrument both read them).
+    await s.callTool("record_customer_request", SAVE);
+    expect(c().live_tool_words_q_at_call).toBe(1); // the first save only
+    expect(c().live_tool_words_no_q_at_call).toBe(1);
+    expect(c().live_repeat_hold_armed).toBe(1);
+  });
+
+  it("review I5: a two-word repeat decided at its turnComplete leaves no words in the turn", async () => {
+    const s = await boot({ callSid: "CA_rh_short" });
+    await s.spokeThenSaved("Got it. Which terminal?");
+    s.enqueue.mockClear();
+    await s.audio(600);
+    await s.assistantSays("Which terminal?");
+    await s.turnEnds();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+    await s.callerSays("North.");
+    await s.feed(600, { voiced: true });
+    await s.feed(600);
+    await s.assistantTurn("Got it, North.");
+    const said = s.ws.liveTurnState().assistantSaidThisCall;
+    expect(said.match(/which terminal/gi) || []).toHaveLength(1);
+  });
+
+  it("review M7: a hold still undecided after its turnComplete does not swallow the next generation", async () => {
+    const s = await boot({ callSid: "CA_rh_next" });
+    await s.spokeThenSaved();
+    await s.audio(600); // held, no words yet
+    await s.turnEnds();
+    s.enqueue.mockClear();
+    await s.audio(600); // a new generation (e.g. a reply to a note)
+    expect(s.enqueue).toHaveBeenCalled();
+  });
+
+  it("ruling: a question then end_call in one batch does not arm (a held goodbye could follow the hang-up)", async () => {
+    const s = await boot({ callSid: "CA_rh_end" });
+    await s.callerSays("No, that's all.");
+    await s.audio(1500);
+    await s.assistantSays("Lovely. Is there anything else?");
+    await s.callTool("end_call", {});
+    expect(c().live_repeat_hold_armed ?? 0).toBe(0);
+  });
+
   it("the umm hold never keeps a chunk the repeat hold has", async () => {
     const s = await boot({ callSid: "CA_rh_umm" });
     await s.spokeThenSaved();
