@@ -17702,10 +17702,11 @@ ask rode the hand-off); every >5 s "reply" was our own first nudge after the mod
 ## Hammersleys fix round 4 (2026-11-26) — mishearing, umm, ending, hand-off
 
 Ledger `.superpowers/sdd/2026-11-26-hammersleys-round4/progress.md`; prod log Step L; morning guide
-`.superpowers/hammersleys/round4-morning-guide.md`. Branch fix/lvx192-save-guard c8b0375..2273dfc (local, not pushed).
+`.superpowers/hammersleys/round4-morning-guide.md`. Branch fix/lvx192-save-guard c8b0375..9c287c5 (pushed 11-26).
 LIVE 2026-11-26T11:53Z: voice-uk-prod-00128-d7c (voice:2273dfc, debug ON, Deepgram shadow on the US test tenant
 only); same code without the shadow 00127-qg6; before round 4 00156-wet. Config v13c on both Hammersleys tenants.
-Run unattended on the owner's authorisation (R34, R35). Owner calls pending.
+Run unattended on the owner's authorisation (R34, R35). Owner's 4 calls done 11-26 17:36-18:36Z (results below);
+round NOT passed (emails right 2/4) -- Jason waits for round 5. Debug transcript stays ON (owner R38).
 
 ### LVX181 follow-up · "Ahm" and long umm · **FIXED (code) 2026-11-26**
 - Live writes umm as "Ahm"; HESITATION_TOKEN_RE takes ahm/uhm/ehm (never "am"). A hesitation-only turn is held up to
@@ -17746,3 +17747,29 @@ Run unattended on the owner's authorisation (R34, R35). Owner calls pending.
 ### Tokens (item 7)
 - The caller block is ~235 tokens/turn for a returning caller (not the 2.5k gap: that is conversation length). The
   last-call summary is now capped at 300 chars and cleaned (sanitizeFact).
+- Owner calls: text/turn 12.5k / 13.5k / 9.7k / 13.8k (pooled 12.3k, cap 12.9k); the per-call figure is noisy.
+
+### Owner's 4 calls (2026-11-26, from …7046, 00128-d7c + v13c)
+- Call 1 local + talk-over correction: 1:35 (round 3 3:09), 0 re-asks, every say-back right, correction fixed the
+  pickup, email RIGHT. Call 2 Gatwick in the opener: hand-off at 1:52, destination never asked, terminal only, email
+  RIGHT; 3 doubled questions (heard), 1 re-ask (flight time). Call 3 umms + mumble + "Nah": 2:02 FAIL, "Nah" closed
+  at once with no junk line, mumble understood; the "Ahm" before the pickup got a reply, pickup asked 3 times (a pub),
+  email Name "not given" FAIL. Call 4 hard words in the opener: 1:15, Plaistow Street heard as "Fifth Street" and
+  Lingfield lost, opener not said back, first name only; email pickup WRONG.
+- Every call: no hand-off read-back, hand-off -> hang-up 7.2-11.1 s, no Spanish, reply p50 1.29-1.80 s.
+- Deepgram-vs-Live table (ledger): Deepgram is no better than the MODEL at words (missed postcodes, "East Kansas"),
+  better than Live's side transcript, and much faster (~1-2 s vs 5-10 s side-transcript lag on calls 1-3).
+  "Plaistow" -> "Pleisto" twice (a keyterm case). Fillers are dropped (filler_words not set).
+- 9c287c5: scripts/shadow-compare.js was not in the image (Dockerfile/.dockerignore list scripts one by one); fixed,
+  smoke-imported, guarded by cloudbuildSmoke; migrate job on voice:9c287c5 (prod log Step M).
+
+### Round 5 candidates (from the owner's calls)
+1. **Umm hold is blind while the side transcript lags** (call 3; lag p50 5-10 s): it never holds an empty transcript.
+   Add a skip-reason counter, then decide by a fast signal (Deepgram finals; filler_words=true writes "um").
+2. **Doubled questions heard** (call 2 x3, call 4 x1 uncut): the within-turn repeat cut acts on text that lands
+   after the audio. Measure how much of the second copy plays; cut earlier.
+3. **Opener details not said back** (call 4) so a misheard street went uncorrected -- v13 says to; model skipped it.
+4. **Name**: first name only (call 4); said back but never saved (call 3, first save only at 80 s).
+5. **Named place as pickup** (owner R40): a pub/station/hotel/school + village needs no house number or postcode (v14).
+6. **Street names**: Jason's street list into "Local names" (Live) and the shadow keyterms (Deepgram).
+7. Date format drifted ("Friday, November 27" vs "Fri 27 Nov") since v13 dropped the format line (cosmetic).
