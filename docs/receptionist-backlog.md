@@ -17639,3 +17639,62 @@ Recorded, not fixed (product code, outside a config-only session).
   who test from their dispatch phone.
 - Digile census after-measure (LVX192): 0 Digile calls since 2026-11-24 06:27Z on 11-25; re-run when there are some
   (`.superpowers/hammersleys/census/analyze-unsaved-answers.mjs`, validate on CAecaa4bd1 first).
+
+
+## Hammersleys fix round 3 (2026-11-26) — call speed
+
+Ledger `.superpowers/sdd/2026-11-26-hammersleys-round3/progress.md`. Branch fix/lvx192-save-guard 0888218..HEAD.
+Baselines (31 calls 11-21..26): our scripted "Sorry, I didn't catch that, could you say it again?" 8x on 7 of 30
+debug-on calls; fragment re-asks ("A"/"a"/"el") 5 on 4 of 11 booking calls; hand-off to hang-up 21-32 s (9 s when the
+ask rode the hand-off); every >5 s "reply" was our own first nudge after the model never answered.
+
+### LVX181 · "umm" answered as a finished turn · **CODE HOLD BUILT 2026-11-26 (round 3)**
+- Owner ruling R18: the endOfSpeechSensitivity probe was skipped (the SDK documents END_SENSITIVITY_LOW as the default).
+- lib/voice/live/index.js shouldHoldUmm: after our question, a reply to a wordless caller sound (transcript "A", "el",
+  non-Latin, hesitation; NOT empty) is kept back; dropped on the caller's words / Live's interrupted / next generation;
+  played on 2 s quiet, 2.5 s + 300 ms quiet, 4 s on noise, a real word, a tool, or a non-re-ask turnComplete.
+  Kill switch LIVE_UMM_HOLD=off. Counters live_umm_hold_*; live_call_summary umm_hold.
+- Parked (review M3): a text cutter (repeat/leak) during a hold drops the whole kept reply. (M5): a dropped reply still
+  lands as the assistant transcript row and lastReplyText (the dashboard shows a line never spoken).
+
+### LVX194 · Call endings · **FIXED 2026-11-26 (round 3), owner ruling R16: ask in the hand-off**
+- All-answered note ends the reply with "anything else?" when nothing else in it asks (not with a number/read-back ask).
+- No nudge while any exit is pending; ask+goodbye held at turn end goes quiet (silent exit next rung).
+- "No. There's nothing.", a lone "What?", garble-then-no after a goodbye/nudge are not unsaved answers (no refused
+  goodbye, no junk email line). Corrections like "No, Gatwick" stay answers.
+- Not fixed (E5, 7eab36's 16 s): the model did not save after the `unsaved` refusal (refusal-is-a-request family);
+  the after-save note saved it at hang-up. Candidate: prefer the after-call note over the in-call refusal at the end.
+
+### LVX195 · Misheard opener declined · **FIXED (prompt) 2026-11-26**
+- Off-domain rule keeps LVX63 and adds: say what the business does, ask if that is what they need, no hang-up first.
+
+### LVX188 · On-file name used as if heard · **FIXED (prompt) 2026-11-26**
+- A last-call summary now carries the caution (do not call them by it or save it as their name until they say it).
+
+### Re-asks / language (round 3)
+- English-only line: say back the best English reading, ask again only if no English meaning fits (no scripted re-ask).
+- Back-to-English note: one per call after a non-English reply with >= 2 markers; never over a transfer or outbound.
+- replyLooksNonEnglish: "a"/"me"/"no" no longer veto alone (Spanish shares them). 0 flags on 306 prod turns.
+- Brief 2b not needed (R19): the unusable-transcript note already fires only on an unanswered turn (0 sent in 7 days).
+- Parked (R21): Live custom vocabulary (AudioTranscriptionConfig is an empty interface).
+
+### Silences (round 3 item 4) · **DIAGNOSTIC ONLY**
+- live_silence_diag (counts, once per our turn) beside the first nudge: separates "the gate kept the answer from Live"
+  (caller_voiced_over_us_ms / gate_* high, caller_fwd_voiced_ms ~0) from "Live heard it and never replied"
+  (transcript_chars > 0). Fix when a call shows the cause.
+
+### Round 3 live + owner calls (2026-11-26)
+- voice-uk-prod-00156-wet (voice:b9adc47) 100% since 04:57Z, debug transcript ON; config v12 on both tenants (Step K).
+- Owner calls on the US line: 1 local 189 s (from the transfer phone: number asked; email WRONG — a pickup correction
+  was filed as the destination, Oxted never asked), 2 Gatwick 191 s (email right; "Gatwick" in the opener, destination
+  still asked + 2 re-asks), 3 umm+mumble 142 s (email right + junk line). Hand-off -> hang-up 8.8 / 9.1 / 17.4 s
+  (B 21 s). No Spanish, no nudges. p50 1.50-1.69 s. Text/turn 10.6k / 13.1k / 13.1k (cap 12.9k).
+- Umm hold worked when it recognised the sound (call 2: one released after 369 ms, one dropped when the caller kept
+  talking) but missed "Ahm" alone (call 3). Say-back worked: "Augsburg Station" -> "Got it, Oxted Station".
+
+### Round 4 (owner-approved 2026-11-26, brief `.superpowers/hammersleys/fix-round-4-brief.md`)
+- "Ahm"/long umm held; one-word garble after "anything else?" not an answer (call 3's 17 s ending + "esse" junk
+  line); a correction of a said-back answer fixes that answer; config v13 (opener destination not re-asked, hand-off
+  without the read-back — owner R26, local names list); half-duplex gate drops caller speech at answer starts
+  (68/571 utterances on 33 calls, 18 >= 200 ms; call 1's misheard pickup lost 360 ms); Deepgram shadow transcript
+  (measure first); caller-history tokens. Owner R25: no postcode lookup.
