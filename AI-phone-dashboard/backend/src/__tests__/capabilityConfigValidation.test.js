@@ -103,6 +103,15 @@ describe("a list setting survives a dashboard save (questionsSkipReasonPrefixes)
     expect(config.questionsSkipReasonPrefixes).toEqual(["URGENT", "Lost property"]);
   });
 
+  it("round 6: answerParts survives a save, with its own 60-character bound", () => {
+    const entry = "Pickup: house_number, postcode_uk if street";
+    const { config, errors } = save({ notes: "Ask for the pickup.", answerParts: [entry] });
+    expect(errors).toEqual([]);
+    expect(config.answerParts).toEqual([entry]);
+    expect(save({ answerParts: ["x".repeat(60)] }).errors).toEqual([]);
+    expect(save({ answerParts: ["x".repeat(61)] }).errors.length).toBe(1);
+  });
+
   it("refuses a value the engine would drop", () => {
     expect(save({ questionsSkipReasonPrefixes: "URGENT" }).errors.length).toBe(1);
     expect(save({ questionsSkipReasonPrefixes: ["x".repeat(41)] }).errors.length).toBe(1);

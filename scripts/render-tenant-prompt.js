@@ -19,6 +19,7 @@ import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../services/db.js";
 import { buildSystemInstruction } from "../services/gemini.js";
+import { badAnswerPartsEntries, PART_NAMES } from "../lib/capabilities/answerParts.js";
 
 const LIMIT = 2000;
 
@@ -74,6 +75,12 @@ export function renderTenantPrompt(payload) {
     if (typeof notes === "string" && notes.length > LIMIT) {
       warnings.push(
         `capability ${r.capability_id} notes is ${notes.length} characters; the limit is ${LIMIT} and the rest is cut.`
+      );
+    }
+    // Round 6: an answerParts entry that does not parse is ignored on calls.
+    for (const bad of badAnswerPartsEntries(r.config?.answerParts)) {
+      warnings.push(
+        `capability ${r.capability_id} answerParts entry ${JSON.stringify(bad)} does not parse ("<Label>: <part>[, <part>...][ if street]", parts ${PART_NAMES.join(", ")}); it is ignored.`
       );
     }
   }

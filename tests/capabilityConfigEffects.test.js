@@ -38,7 +38,7 @@ const WIRED_KEYS = {
     "require.identity",
   ],
   quotes: ["notes", "require.identity"],
-  messages: ["callbackLine", "confirmStyle", "notes", "questionsFor", "questionsSkipReasonPrefixes", "require.identity", "spellUpFront"],
+  messages: ["answerParts", "callbackLine", "confirmStyle", "notes", "questionsFor", "questionsSkipReasonPrefixes", "require.identity", "spellUpFront"],
 };
 
 /** Dot-paths of every schema node that declares a `type`. */
@@ -344,6 +344,37 @@ describe("messages questionsSkipReasonPrefixes has effect (fix round 2)", () => 
       ).functionResponse.response.next;
     expect(await run(cfgWith({}))).toContain("questions with no saved answer yet: 1. Pickup, 2. Destination.");
     expect(await run(cfgWith({ questionsSkipReasonPrefixes: ["URGENT"] }))).not.toContain("questions with no saved answer yet");
+  });
+});
+
+describe("messages answerParts has effect (round 6)", () => {
+  it("through the loader: a street answer missing a part is listed with what it still needs", async () => {
+    const messages = (await import("../capabilities/messages.js")).default;
+    const notes = "Ask these:\n1. Pickup: where from?\n2. Destination: where to?";
+    const cfgWith = (extra) =>
+      loadConfig({
+        id: "b1",
+        name: "Co",
+        allowed_tasks: [],
+        business_capabilities: [
+          { capability_id: "messages", enabled: true, adapter: null, adapter_config: {}, config: { notes, ...extra } },
+        ],
+      });
+    const run = async (config) =>
+      (
+        await messages.execute(
+          {
+            id: "f",
+            name: "record_customer_request",
+            args: { request_type: "message", caller_name: "Jon", message: "Taxi", details: [{ label: "Pickup", answer: "Plaistow Street" }] },
+          },
+          { config, callerPhone: "+12145550123" }
+        )
+      ).functionResponse.response.next;
+    expect(await run(cfgWith({}))).not.toContain("still needs");
+    expect(await run(cfgWith({ answerParts: ["Pickup: house_number, postcode_uk if street"] }))).toContain(
+      "1. Pickup (still needs: house number, postcode)"
+    );
   });
 });
 

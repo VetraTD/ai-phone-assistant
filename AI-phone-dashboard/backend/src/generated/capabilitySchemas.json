@@ -143,6 +143,12 @@
           },
           "default": "new_callers"
         },
+        "answerParts": {
+          "type": "list",
+          "label": "Answers that must contain certain parts",
+          "maxItems": 5,
+          "maxLength": 60
+        },
         "spellUpFront": {
           "type": "choice",
           "label": "Ask callers to spell their name up front?",

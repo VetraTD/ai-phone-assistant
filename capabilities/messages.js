@@ -29,7 +29,8 @@ import {
   CALLER_TYPES,
 } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
-import { parseNotesQuestions, openQuestions, anyAnswered } from "../lib/capabilities/notesQuestions.js";
+import { parseNotesQuestions, openQuestions, anyAnswered, labelAnswers, labelMatches } from "../lib/capabilities/notesQuestions.js";
+import { parseAnswerParts, advanceParts, partSpoken } from "../lib/capabilities/answerParts.js";
 import { nameIsOnFile } from "../lib/nameQuality.js";
 import {
   confirmStyleOf,
@@ -43,7 +44,7 @@ import {
 } from "../lib/capabilities/intakeSettings.js";
 import { END_READ_BACK } from "../lib/voice/intakePath.js";
 import { replyEndsWithQuestion, ALREADY_ASKED_NOTE } from "../lib/voice/turnText.js";
-import { bumpCounter } from "../lib/voice/metrics.js";
+import { bumpCounter, bumpCounterBy } from "../lib/voice/metrics.js";
 import {
   spelledNameReadBack,
   nameVoicedIn,
@@ -626,6 +627,17 @@ export default {
       },
       default: "new_callers",
     },
+    // Hammersleys round 6 (design item 2): answers that must contain certain
+    // parts, "<Label>: <part>[, <part>...][ if street]" with parts from a fixed
+    // list (lib/capabilities/answerParts.js), e.g. "Pickup: house_number,
+    // postcode_uk if street". A missing part is asked once. Operator-set on
+    // import; no dashboard control yet.
+    answerParts: {
+      type: "list",
+      label: "Answers that must contain certain parts",
+      maxItems: 5,
+      maxLength: 60,
+    },
     // When the assistant asks the caller to spell their name before the reason
     // for the call, rather than only when it is needed.
     spellUpFront: {
@@ -729,6 +741,10 @@ export default {
     let listAfterAnswer = null;
     let openCount = 0;
     let skipped = false;
+    /** Round 6: the answerParts entries (null: untouched), those still owed, and those the list shows. */
+    let partsPending = null;
+    let partsOwed = [];
+    const partsShown = new Set();
     if (standardTier) {
       const seen = new Set();
       savedLabels = [];
@@ -754,6 +770,29 @@ export default {
         reason !== "" &&
         Array.isArray(skipWords) &&
         skipWords.some((w) => typeof w === "string" && w.trim() !== "" && reason.startsWith(w.trim().toLowerCase()));
+      // Hammersleys round 6 (design item 2): an answer the business says must
+      // contain certain parts (messages.answerParts) stays open with what it
+      // still needs until the assistant's own words ask for it once. A
+      // skip-reason save is exempt (an urgent caller is put through, not asked
+      // for a postcode) and leaves the parts as they were.
+      const partRules = skipped ? [] : parseAnswerParts(capabilityConfig(ctx?.config, "messages").answerParts);
+      if (partRules.length) {
+        const step = advanceParts({
+          rules: partRules,
+          pending: priorMsg.partsPending,
+          answers: thisDetails?.answers ?? [],
+          said: ctx?.assistantSaidThisCall,
+          inTurn: typeof ctx?.inTurnReplyText === "string" ? ctx.inTurnReplyText : "",
+          labelMatch: labelMatches,
+        });
+        partsPending = step.pending;
+        partsOwed = step.pending.filter((e) => e.owed.length > 0);
+        if (step.asked) bumpCounterBy("answer_parts_asked", step.asked);
+        if (step.capped) bumpCounterBy("answer_parts_capped", step.capped);
+        if (partsOwed.length) bumpCounter("tool_reply_answer_parts_listed");
+      } else if (newRequest) {
+        partsPending = [];
+      }
       if (questionLikeNotes) {
         const questions = parseNotesQuestions(notes);
         // Fix round 2: the list also starts on a save with no labels yet (the
@@ -771,7 +810,14 @@ export default {
         const startsHere = enquiry && (firstSave || savedLabels.length === 0);
         const listStarts = !skipped && (startsHere || anyAnswered(questions, savedLabels));
         if (questions.length >= 2 && listStarts) {
-          const open = openQuestions(questions, savedLabels);
+          const unanswered = openQuestions(questions, savedLabels);
+          // Round 6: a question whose answer still lacks a part stays open, with what it needs.
+          const owedFor = (q) => partsOwed.find((e) => labelAnswers(q, e.label));
+          const open = questions.filter((q) => unanswered.includes(q) || owedFor(q));
+          for (const q of open) {
+            const e = owedFor(q);
+            if (e) partsShown.add(e);
+          }
           openCount = open.length;
           // Confirm before the next question: only a save that added an answer
           // has something to confirm (review M3: a re-save of answers already
@@ -780,7 +826,12 @@ export default {
           const priorKeys = new Set((Array.isArray(prior) ? prior : []).map((l) => String(l).trim().toLowerCase()));
           const added = now.some((l) => !priorKeys.has(String(l).trim().toLowerCase()));
           const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
-          const listed = open.map((q) => `${q.n}. ${q.label}`).join(", ");
+          const listed = open
+            .map((q) => {
+              const e = owedFor(q);
+              return e ? `${q.n}. ${q.label} (still needs: ${e.owed.map(partSpoken).join(", ")})` : `${q.n}. ${q.label}`;
+            })
+            .join(", ");
           const scope = returningToo ? "new and returning customers" : "new enquiries by default";
           listAfterAnswer = open.length
             ? `When they answer, save it. ${openListText(listed, scope, "ask them after that, in that order")}`
@@ -823,13 +874,23 @@ export default {
     // open questions, so the model stopped saving and asking (no postcode, no
     // passengers, a hand-off with only the name saved). What is still to ask stays,
     // for after the caller's answer; with every question answered there is nothing to carry.
-    const afterAnswer = !alreadyAsked
+    const afterAnswerBase = !alreadyAsked
       ? null
       : listNote !== null
         ? listAfterAnswer
         : questionsPart[0]
           ? `When they answer: ${questionsPart[0].replace(/^\[not caller speech\]\s*/, "").replace("ask them now", "ask them")}`
           : null;
+    // Round 6 (design item 2): where the list does not show an owed part (no
+    // numbered notes, or a label no numbered question matches), one short line
+    // does the same job -- after the caller's answer when the model already asked.
+    const partsUnlisted = partsOwed.filter((e) => !partsShown.has(e));
+    const partsCount = partsUnlisted.reduce((n, e) => n + e.owed.length, 0);
+    const partsText = partsUnlisted.length
+      ? `${partsUnlisted.map((e) => `${e.label} still needs: ${e.owed.map(partSpoken).join(", ")}.`).join(" ")} Ask for ${partsCount > 1 ? "them" : "it"} once; if the caller does not know, go on.`
+      : null;
+    const partsLine = partsText && !alreadyAsked ? `${MODEL_NOTE_PREFIX}${partsText}` : null;
+    const afterAnswer = [afterAnswerBase, partsText && alreadyAsked ? `When they answer: ${partsText}` : null].filter(Boolean).join(" ") || null;
     // Round 5 Task 5: say back what this save added that the caller has not
     // heard. Live + inbound + standard tier, a business that confirms each
     // answer, in its question flow; never when the turn already ended with a
@@ -864,7 +925,7 @@ export default {
         ? [ALREADY_ASKED_NOTE, afterAnswer]
         : deferReadBack && !skipped
           ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
-          : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]
+          : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart, partsLine]
     )
       .filter(Boolean)
       .join(" ");
@@ -891,6 +952,7 @@ export default {
             ...(standardTier
               ? { requestAnswers: mergeDetails({ answers: Array.isArray(priorMsg.requestAnswers) ? priorMsg.requestAnswers : [] }, thisDetails)?.answers ?? [] }
               : {}),
+            ...(partsPending ? { partsPending } : {}),
           },
         },
         ...(listNote !== null ? { questionsOpen: openCount > 0 } : {}),
