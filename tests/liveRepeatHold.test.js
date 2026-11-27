@@ -338,3 +338,95 @@ describe("round 5: the repeat hold", () => {
     expect(c().live_repeat_hold_dropped).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 6, item 4: after the already-asked note the model emitted
+// "<no speech detected>" (2 of 2 fires on round-5 calls). The hold counted it
+// as three new words and played it after the 1.5 s cap; on an earlier call
+// (O1 CA591a92) such markup was spoken aloud. A tail of markup only is never
+// played; markup mixed with words is decided on the words.
+// ---------------------------------------------------------------------------
+describe("round 6: a markup-only tail", () => {
+  beforeEach(() => clearStats());
+
+  it("'<no speech detected>' after a held question: dropped at the generation's end, never played", async () => {
+    const s = await boot({ callSid: "CA_r6_mk" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("<no speech detected>");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+    expect(c().live_repeat_hold_timeout ?? 0).toBe(0);
+    expect(c().live_repeat_hold_released ?? 0).toBe(0);
+  });
+
+  it("'{pause}' alone, no turnComplete: dropped at the cap, never played", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_cap" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("{pause}");
+    await s.feed(1700);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+  });
+
+  it("markup then a new question: decided on the words, played", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_new" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("<no speech detected> ");
+    await s.assistantSays("And what time is your flight?");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_repeat_hold_released).toBe(1);
+  });
+
+  it("markup then the same question again: dropped as a repeat", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_rep" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("{pause} Which terminal at Gatwick do you need?");
+    await s.turnEnds();
+    await s.feed(2000);
+    expect(s.enqueue).not.toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped).toBe(1);
+  });
+
+  it("the next generation after a dropped markup tail plays at once (review M7 kept)", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_next" });
+    await s.spokeThenSaved();
+    await s.audio(600);
+    await s.assistantSays("<no speech detected>");
+    await s.turnEnds();
+    await s.feed(1200);
+    s.enqueue.mockClear();
+    await s.audio(600);
+    expect(s.enqueue).toHaveBeenCalled();
+  });
+
+  it("markup outside any hold is counted (live_model_markup_seen) and its audio is untouched", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_seen" });
+    await s.callerSays("Hello?");
+    s.enqueue.mockClear();
+    await s.audio(600);
+    await s.assistantSays("<noise> Hello, how can I help?");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_model_markup_seen).toBe(1);
+    await s.assistantSays(" Sorry, go on.");
+    expect(c().live_model_markup_seen).toBe(1);
+  });
+
+  it("LIVE_REPEAT_HOLD=off: nothing held, the markup audio plays as before", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_off", env: { LIVE_REPEAT_HOLD: "off" } });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
+  });
+});

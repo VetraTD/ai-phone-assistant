@@ -5398,6 +5398,30 @@ const SABOTAGES = [
     replace: "          const open = unanswered; // SABOTAGE",
     red: ["tests/messagesAnswerParts.test.js", "tests/capabilityConfigEffects.test.js"],
   },
+  {
+    name: "r6-markup-tail-dropped",
+    why: "Round 6 item 4: a held '<no speech detected>' tail is played after the 1.5 s cap (round-5 calls, 2 of 2 already-asked fires). tests/liveRepeatHold.test.js.",
+    file: "lib/voice/live/index.js",
+    find: "    if (holdWordsOf(h.post).length === 0 && hasLiveMarkup(h.post)) {",
+    replace: "    if (false /* SABOTAGE */) {",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
+  {
+    name: "r6-markup-words-stripped",
+    why: "Round 6 item 4: the hold counts markup as words ('no speech detected' = 3), so a markup-only tail is decided as new words and played. tests/liveRepeatHold.test.js.",
+    file: "lib/voice/live/index.js",
+    find: "      .replace(LIVE_MARKUP_RE, \" \")",
+    replace: "      .replace(/(?!)/g, \" \") // SABOTAGE",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
+  {
+    name: "r6-markup-seen-counted",
+    why: "Round 6 item 4: markup outside the hold goes unmeasured (live_model_markup_seen). tests/liveRepeatHold.test.js.",
+    file: "lib/voice/live/index.js",
+    find: "      if (hasLiveMarkup(sc.outputTranscription.text)) bumpCounter(\"live_model_markup_seen\");",
+    replace: "      // SABOTAGE",
+    red: ["tests/liveRepeatHold.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")
