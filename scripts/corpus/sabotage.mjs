@@ -5422,6 +5422,30 @@ const SABOTAGES = [
     replace: "      // SABOTAGE",
     red: ["tests/liveRepeatHold.test.js"],
   },
+  {
+    name: "r6-dg-closing-drops-line",
+    why: "Round 6 item 3 (R54): a plain closing Deepgram heard right but Live garbled ('No hace') still writes a junk 'Said after the last save' line. tests/afterSaveNote.test.js, tests/liveAfterSaveDeepgram.test.js.",
+    file: "lib/voice/afterSaveNote.js",
+    find: "  return texts.every((t) => !isInformativeCallerTurn(t.trim(), prevReply, facts.readBackRe, facts.closingRe));",
+    replace: "  return false; // SABOTAGE",
+    red: ["tests/afterSaveNote.test.js", "tests/liveAfterSaveDeepgram.test.js"],
+  },
+  {
+    name: "r6-dg-coverage-required",
+    why: "Round 6 item 3: the line is dropped on Deepgram's word even when the shadow did not cover the window after the last save. tests/liveAfterSaveDeepgram.test.js.",
+    file: "lib/voice/live/index.js",
+    find: "      covered: shadowLiveAtEnd && lastSaveShadowConnected && reachesBack && caughtUp,",
+    replace: "      covered: true, // SABOTAGE",
+    red: ["tests/liveAfterSaveDeepgram.test.js"],
+  },
+  {
+    name: "r6-dg-caught-up",
+    why: "Round 6 item 3: a detail said just before the hang-up, whose Deepgram final never landed, is lost when an earlier closing was all Deepgram heard. tests/liveAfterSaveDeepgram.test.js.",
+    file: "lib/voice/live/index.js",
+    find: "      callerSpeechStartAt === null || callerSpeechStartAt <= lastSaveAtMs || dgFinals.some((d) => d.atMs >= callerSpeechStartAt);",
+    replace: "      true; // SABOTAGE",
+    red: ["tests/liveAfterSaveDeepgram.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

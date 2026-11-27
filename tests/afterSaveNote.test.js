@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { afterSaveNote, AFTER_SAVE_LABEL } from "../lib/voice/afterSaveNote.js";
+import { afterSaveNote, AFTER_SAVE_LABEL, deepgramHeardOnlyClosing } from "../lib/voice/afterSaveNote.js";
 import { closingRegexFor } from "../lib/voice/unsavedAnswers.js";
 
 const T = (index, caller, prevReply = "", voiced = false) => ({ index, caller, prevReply, voiced });
@@ -126,5 +126,54 @@ describe("afterSaveNote skips end-of-call closers (round 3)", () => {
       closingRe,
     });
     expect(n.answer).toBe('"Is there anything else I can help with?" — And I\'ll be paying with cash.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hammersleys round 6, item 3 (owner R54): round-5 call 1's caller said "No,
+// that's it" (Deepgram heard it right), Live's side transcript wrote "No hace",
+// and the email got 'Said after the last save ...: "...anything else...?" — No
+// hace.' Where the Deepgram shadow covered the window after the last save and
+// heard only a plain closing, no line. Anything else: today, byte for byte.
+// ---------------------------------------------------------------------------
+describe("round 6: Deepgram heard only a closing", () => {
+  const closingRe = closingRegexFor({});
+  const ASK = "That's passed to the dispatcher, who will confirm. Is there anything else?";
+  const facts = (heardByDeepgram) => ({
+    turnLog: [T(4, "Plaistow Street", "Where from?"), T(5, "No hace", ASK)],
+    savedThroughTurn: 4,
+    closingRe,
+    ...(heardByDeepgram === undefined ? {} : { heardByDeepgram }),
+  });
+
+  it("today: the junk words become a line", () => {
+    expect(afterSaveNote(facts()).answer).toBe('"Is there anything else?" — No hace');
+  });
+
+  it("covered, Deepgram heard 'No, that's it.': no line", () => {
+    expect(deepgramHeardOnlyClosing(facts({ covered: true, texts: ["No, that's it."] }))).toBe(true);
+    expect(afterSaveNote(facts({ covered: true, texts: ["No, that's it."] }))).toBeNull();
+  });
+
+  it("covered, a closing in pieces ('No.' / 'That's all, thanks.'): no line", () => {
+    expect(afterSaveNote(facts({ covered: true, texts: ["No.", "That's all, thanks."] }))).toBeNull();
+  });
+
+  it("covered, Deepgram also heard a detail: the line stays, as today (Review Focus 5)", () => {
+    const f = facts({ covered: true, texts: ["No, that's it.", "Oh, two cases."] });
+    expect(deepgramHeardOnlyClosing(f)).toBe(false);
+    expect(afterSaveNote(f)).toEqual(afterSaveNote(facts()));
+  });
+
+  it("not covered: today", () => {
+    expect(afterSaveNote(facts({ covered: false, texts: ["No, that's it."] }))).toEqual(afterSaveNote(facts()));
+  });
+
+  it("covered but Deepgram heard nothing: today", () => {
+    expect(afterSaveNote(facts({ covered: true, texts: [] }))).toEqual(afterSaveNote(facts()));
+  });
+
+  it("no Deepgram input at all: byte-identical", () => {
+    expect(JSON.stringify(afterSaveNote(facts(undefined)))).toBe(JSON.stringify(afterSaveNote(facts())));
   });
 });
