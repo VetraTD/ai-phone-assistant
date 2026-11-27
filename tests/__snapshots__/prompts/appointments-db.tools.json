@@ -151,6 +151,14 @@
               "answer"
             ]
           }
+        },
+        "replaces_name": {
+          "type": "string",
+          "description": "Only when the caller corrects their own name after you saved it: the name you saved before, exactly as saved. Never for another person."
+        },
+        "separate_request": {
+          "type": "boolean",
+          "description": "true only for a second, separate request on this call (another trip, appointment or message). Never for a correction or more details of the earlier one."
         }
       },
       "required": [
