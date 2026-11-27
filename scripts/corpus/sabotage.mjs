@@ -5233,8 +5233,8 @@ const SABOTAGES = [
     name: "r5-review-drop-grace",
     why: "Review I4: a dropped repeat's late words, after its turnComplete, land in the next turn and read as a question already asked. tests/liveRepeatHold.test.js 'review I4'.",
     file: "lib/voice/live/index.js",
-    find: "      h.dropUntilMs = now() + REPEAT_HOLD_DROP_GRACE_MS;\n      return;",
-    replace: "      repeatHold = null; /* SABOTAGE */\n      return;",
+    find: "    if (h.turnCompleted) h.dropUntilMs = now() + REPEAT_HOLD_DROP_GRACE_MS;\n    repeatHold = h;",
+    replace: "    if (h.turnCompleted) h.dropUntilMs = now() + REPEAT_HOLD_DROP_GRACE_MS;\n    repeatHold = h.turnCompleted ? null : h; /* SABOTAGE */",
     red: ["tests/liveRepeatHold.test.js"],
   },
   {
