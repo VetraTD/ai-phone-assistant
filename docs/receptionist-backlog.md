@@ -17805,9 +17805,9 @@ config v14b on both Hammersleys tenants. Round NOT passed (emails right 3/4) -- 
   text/turn 12.4k.
 
 ### Round 6 candidates (value order)
-1. **Made-up name on an early save -> two records** (call 4): the opener save carried caller_name "John Doe" before
-   any name was said; the real name then filed a NEW row (`lib/capabilities/customerRequests.js` nameFix only takes
-   over a row with no answers). Code: a name the caller never said on this call must not anchor a row.
+1. **A corrected name files a second record** (call 4): the AI misheard "James Doe" as "John Doe" and saved the
+   opener under it; the owner corrected it and the corrected save filed a NEW row (`lib/capabilities/customerRequests.js`
+   nameFix only takes over a row with no answers). Code: a later save repeating the same trip under a new name updates it.
 2. **A saved label counts as answered** even when the address lacks number/postcode (call 4 "Plaistow Street";
    call 1 redo no village): the open-questions list sees labels, not completeness.
 3. **Junk line after a misheard "no"** (call 1 first try "No hace"; owner R54): check the Deepgram words before
