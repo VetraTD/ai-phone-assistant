@@ -17823,3 +17823,36 @@ config v14b on both Hammersleys tenants. Round NOT passed (emails right 3/4) -- 
   fragment; RR-m2 the 1 s drop grace can swallow a new generation's early text; RR-m3 a local barge on noise drops the
   rest of a held continuation; RR-m4 the completion-ask skip reads inTurnReplyText (end_call no-ask gate backstops).
 - Ruling carried: all-answered + already asked keeps the bare note (nothing left to carry).
+
+## Hammersleys fix round 6 (2026-11-27) — one record per request, complete answers, clean endings, config v15
+
+Spec `docs/superpowers/specs/2026-11-27-hammersleys-round6-design.md`; ledger
+`.superpowers/sdd/2026-11-27-hammersleys-round6/progress.md`. Branch `fix/round6-one-record`.
+
+### Built
+- One record per request: record_customer_request gains `replaces_name` and `separate_request`; saveCustomerRequest
+  checks both (a separate save that follows up the newest row is ignored; a replaces_name naming no row changes
+  nothing). R59 (owner): no "same details" fallback — a forgotten field gives a visible duplicate, counted
+  `customer_request_possible_duplicate`. Per-request state restarts only when a separate claim holds.
+- Complete answers: `messages.answerParts` ("Pickup: house_number, postcode_uk if street"), generic detectors in
+  `lib/capabilities/answerParts.js`; a missing part is listed "(still needs: ...)" until the assistant's own words ask
+  for it once; 3-reply cap; skip-reason saves exempt; a named place is never asked.
+- No junk "Said after the last save" line when the Deepgram shadow covered the window and heard only a closing.
+- A markup-only held tail ("<no speech detected>") is never played; `live_model_markup_seen` counts markup.
+
+### Receptionist-wide "same or different?" table (tests/sameOrDifferentAudit.test.js)
+| Place | File | R-visible (unsure → visible outcome) | R-say-it (AI says it) | Result |
+|---|---|---|---|---|
+| Messages / callbacks | lib/capabilities/customerRequests.js | forgotten field → two rows, never a silent merge (R59) | replaces_name / separate_request | fixed this round |
+| Appointments, name corrected | capabilities/appointments.js correct_appointment_name | refuses (asks) when it cannot tell which booking | the tool itself | pass (tests/tools.test.js) |
+| Appointments, booked again after a misheard name | appointments.js samePersonBookings + Fix 3 | one letter off → asks; both names misheard → a second booking, visible to the business, never a silent move | correct_appointment_name | pass, residual LVX199 |
+| Appointments, time corrected | appointments.js correctionAfterSave (samePersonForMove) | unsure → "move or keep both?"; clear → confirm the move; never silent | in_addition_to_existing flag | pass |
+| Same question twice | lib/voice/askLedger.js | an unrecognised rewording is a repeat the caller hears; no write path | — | pass |
+| Question answered? | lib/capabilities/notesQuestions.js | an unmatched label keeps the question open (asked again) | — | pass (+ answerParts) |
+| Outbound name on file | services/tools.js outboundNameOnFile | unsure → null → the gate asks; unverified party never | — | pass (outbound off) |
+
+- **LVX199 (owner to decide, not fixed):** both names misheard on a booking ("John Doe" for "James Dean") and the AI
+  calls book_appointment again instead of correct_appointment_name → a second booking under the right name; the
+  wrong-name one stays and holds its slot. Visible to the business (R-visible holds), but a phantom booking costs a
+  slot. Same shape as messages before round 6; the fix would be the same (the AI says it: a `replaces_name` on
+  book_appointment, or the in-addition question for any booking at the same time on the same call).
