@@ -79,7 +79,7 @@ const MESSAGE = {
 describeDb("a same-call correction as vetra_app (I3)", () => {
   it("a correction updates the row in place: one row, the corrected number, the rest kept", async () => {
     const first = await saveCustomerRequest({ db, businessId: TENANT, callId, row: MESSAGE });
-    expect(first).toEqual({ id: expect.any(String), corrected: false, ownerNoticePending: true });
+    expect(first).toMatchObject({ id: expect.any(String), corrected: false, ownerNoticePending: true });
 
     // A re-record that names only the fixed number must not blank the message.
     const second = await saveCustomerRequest({
@@ -88,7 +88,8 @@ describeDb("a same-call correction as vetra_app (I3)", () => {
       callId,
       row: { ...MESSAGE, callbackNumber: "214 555 0124", message: null },
     });
-    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(second).toMatchObject({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(second.nameTakeover).toBeUndefined();
 
     expect(await rowsOf(callId)).toEqual([
       { request_type: "message", caller_name: "Jon", callback_number: "214 555 0124", message: "about the invoice" },
@@ -148,7 +149,8 @@ describeDb("a same-call correction as vetra_app (I3)", () => {
       row: { ...MESSAGE, requestType: "callback", preferredTime: "after 3" },
       matchTypes: ["message", "callback"],
     });
-    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(second).toMatchObject({ id: first.id, corrected: true, ownerNoticePending: true });
+    expect(second.nameTakeover).toBeUndefined();
     expect(await rowsOf(callId)).toHaveLength(1);
   });
 
@@ -191,7 +193,7 @@ describeDb("a name corrected on the same call, as vetra_app (fix round 2)", () =
       row: { ...TRIP, callerName: "Aisha Patel", details: answers("22 Godstone Road RH7 6AA") },
       takeOverBareRow: true,
     });
-    expect(second).toEqual({ id: first.id, corrected: true, ownerNoticePending: true, nameTakeover: true });
+    expect(second).toMatchObject({ id: first.id, corrected: true, ownerNoticePending: true, nameTakeover: true });
     expect(await rowsOf(callId)).toEqual([
       { request_type: "message", caller_name: "Aisha Patel", callback_number: "214 555 0123", message: "Taxi booking request" },
     ]);

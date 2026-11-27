@@ -509,3 +509,36 @@ describe("review fixes: the separate claim, the ignored flag, replaces_name", ()
     expect(answersOf(t.rows[0])).toEqual(Object.fromEntries(OUT));
   });
 });
+
+// Sim r6b-two-trips-2: the same two trips in one save, the second leg labelled
+// "Return Pickup / Return Destination / Return When". One record with both legs.
+describe("one save carrying a return leg ('Return <label>')", () => {
+  const LEGS = [
+    ["Pickup", "12 High Street, Lingfield, RH7 6AU"],
+    ["Destination", "Gatwick North"],
+    ["When", "Sunday at 5 am"],
+    ["Return Pickup", "Gatwick North"],
+    ["Return Destination", "12 High Street, Lingfield, RH7 6AU"],
+    ["Return When", "Wednesday at 6 pm"],
+    ["Passengers", "2"],
+  ];
+  it("splits into the outbound and the return, the return's labels without 'Return'", () => {
+    const parts = splitByRepeatedLabels(D(LEGS));
+    expect(parts.map((p) => p.answers.map((a) => `${a.label}=${a.answer}`))).toEqual([
+      ["Pickup=12 High Street, Lingfield, RH7 6AU", "Destination=Gatwick North", "When=Sunday at 5 am", "Passengers=2"],
+      ["Pickup=Gatwick North", "Destination=12 High Street, Lingfield, RH7 6AU", "When=Wednesday at 6 pm", "Passengers=2"],
+    ]);
+  });
+  it("the return leg listed BEFORE the outbound still lands in the second part", () => {
+    const parts = splitByRepeatedLabels(D([["Return When", "Wed 6 pm"], ["When", "Sun 5 am"], ["Pickup", "A"]]));
+    expect(parts).toHaveLength(2);
+    expect(parts[0].answers.map((a) => a.answer)).toEqual(["Sun 5 am", "A"]);
+    expect(parts[1].answers.map((a) => a.answer)).toEqual(["Wed 6 pm", "A"]);
+  });
+  it("a 'Return' label with no plain label beside it is left alone", () => {
+    expect(splitByRepeatedLabels(D([["Pickup", "A"], ["Return date", "Mon"]]))).toHaveLength(1);
+  });
+  it("'Pickup time' beside 'Pickup' is a different question, not a second leg", () => {
+    expect(splitByRepeatedLabels(D([["Pickup", "A"], ["Pickup time", "8 am"]]))).toHaveLength(1);
+  });
+});

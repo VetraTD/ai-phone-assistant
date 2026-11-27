@@ -5480,6 +5480,14 @@ const SABOTAGES = [
     red: ["tests/customerRequestsRound6.test.js"],
   },
   {
+    name: "r6-return-leg-split",
+    why: "Sim r6b-two-trips-2: a return leg saved as 'Return Pickup / Return When' beside the outbound stays one record. tests/customerRequestsRound6.test.js.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "    return m && plain.has(labelKey(m[1])) ? { ...a, label: squash(m[1]), leg: 1 } : a;",
+    replace: "    return a; // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
     name: "r6-best-match-row",
     why: "Sim r6-two-trips-1: with two rows of one caller, a correction of trip 1 lands on trip 2 (the newest). tests/customerRequestsRound6.test.js.",
     file: "lib/capabilities/customerRequests.js",
