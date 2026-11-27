@@ -17773,3 +17773,53 @@ round NOT passed (emails right 2/4) -- Jason waits for round 5. Debug transcript
 5. **Named place as pickup** (owner R40): a pub/station/hotel/school + village needs no house number or postcode (v14).
 6. **Street names**: Jason's street list into "Local names" (Live) and the shadow keyterms (Deepgram).
 7. Date format drifted ("Friday, November 27" vs "Fri 27 Nov") since v13 dropped the format line (cosmetic).
+
+## Hammersleys fix round 5 (2026-11-26/27) — doubled questions, name, say-back, umm via Deepgram, config v14
+Ledger `.superpowers/sdd/2026-11-26-hammersleys-round5/progress.md` (rulings R45-R58, every call judged). Prod
+voice-uk-prod-00166-pow @ba608d7 (debug ON per owner R57; LIVE_SHADOW_STT + LIVE_UMM_DEEPGRAM = US test tenant);
+config v14b on both Hammersleys tenants. Round NOT passed (emails right 3/4) -- Jason waits.
+
+### Built (generic, kill switches where timing is touched)
+- "Already asked, wait" tool replies (save + set_call_intent) when the turn's words already end with "?" (probe:
+  on gemini-3.8-live the "?" is in the transcript at the toolCall 18/18). live_tool_words counters.
+- Name guard: a turn that asked the name and got an answer, with no name saved, counts as unsaved for end_call.
+- Opener say-back: a save that adds details the caller has not heard asks for them to be said back (owed to the
+  next save when the turn already ended with a question).
+- Repeat hold (LIVE_REPEAT_HOLD=off): holds Live's continuation after a tool reply (<= 1.5 s) and drops it when it
+  repeats the question already asked.
+- Umm hold reads the Deepgram shadow when Live's transcript is empty (LIVE_UMM_DEEPGRAM, <= 700 ms pending);
+  skip-reason counters.
+- Config v14b: named place + village needs no number/postcode; ask the full name; date "Fri 27 Nov".
+- My defect, found by the owner's first call 1 and fixed the same night (ba608d7): the bare "already asked" save
+  reply dropped the open-questions list, so the model stopped saving and asking (no postcode, passengers skipped,
+  hand-off with only the name saved). The list now follows the note, worded for after the answer.
+
+### Owner's calls on 00166 (…7046)
+- Call 1 local 1:36, email right (no village), 2 re-asks (the model missed "Saturday at 8 am"; Deepgram exact).
+- Call 2 Gatwick: destination never asked, email right, hand-off 2:11 (postcode read back wrong twice).
+- Call 3 umms + pub: 1:38, pub accepted as name + village, "Ahm" held and dropped, email right; the "Ummm" before
+  the name was "Ya"/"yeah" to both ASRs and got a reply.
+- Call 4 fast opener: 1:01, opener said back, the already-asked reply fired (nothing said twice); email WRONG (two
+  records, pickup "Plaistow Street" only, "half eight" heard as 7:30 by both ASRs).
+- Every call: no question heard twice, hang-up 7-10 s after "anything else?", p50 1.41-1.71 s, no Spanish; pooled
+  text/turn 12.4k.
+
+### Round 6 candidates (value order)
+1. **Made-up name on an early save -> two records** (call 4): the opener save carried caller_name "John Doe" before
+   any name was said; the real name then filed a NEW row (`lib/capabilities/customerRequests.js` nameFix only takes
+   over a row with no answers). Code: a name the caller never said on this call must not anchor a row.
+2. **A saved label counts as answered** even when the address lacks number/postcode (call 4 "Plaistow Street";
+   call 1 redo no village): the open-questions list sees labels, not completeness.
+3. **Junk line after a misheard "no"** (call 1 first try "No hace"; owner R54): check the Deepgram words before
+   adding "Said after the last save".
+4. **Clear answers the model missed, Deepgram got** ("Saturday at 8 am"): a Deepgram cross-check on a re-ask.
+5. **Repeat hold holds a "<no speech detected>" tail 1.5 s** (2 of 2 already-asked fires): treat markup-only text
+   as nothing and drop at once.
+6. **Postcode read back wrong twice** on the airport call (~28 s; hand-off 2:11).
+7. "Ummm" heard as "yeah" by both ASRs -> answered (call 3).
+- Deferred minors (round-5 review): #6 the repeat-hold arm is spent only by our VAD's turn open; #8 a caller who
+  declined the name is refused once more after each later save; #9b say-back stacks with CONFIRM_FIRST; #10a shadow
+  connected() stays true while Deepgram reconnects; RR-m1 a guard clear in the transcript handler keeps the current
+  fragment; RR-m2 the 1 s drop grace can swallow a new generation's early text; RR-m3 a local barge on noise drops the
+  rest of a held continuation; RR-m4 the completion-ask skip reads inTurnReplyText (end_call no-ask gate backstops).
+- Ruling carried: all-answered + already asked keeps the bare note (nothing left to carry).
