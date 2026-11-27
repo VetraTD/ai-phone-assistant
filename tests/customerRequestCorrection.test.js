@@ -803,7 +803,7 @@ describe("the messages pack turns the take-over on only where notes ask numbered
     expect(calls.rows.map((r) => r.caller_name)).toEqual(["Aisha Patel"]);
     // Counted for the live calls, with no caller words.
     const log = calls.logs.find((l) => l.e === "customer_request_corrected");
-    expect(log.d).toEqual({ callSid: "CA_s3", tool: "record_customer_request", nameTakeover: true });
+    expect(log.d).toEqual({ callSid: "CA_s3", tool: "record_customer_request", how: "matched", nameTakeover: true });
   });
 
   it("an ordinary correction is not logged as a take-over", async () => {

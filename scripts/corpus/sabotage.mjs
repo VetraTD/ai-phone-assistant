@@ -5285,6 +5285,55 @@ const SABOTAGES = [
     replace: "    if (false /* SABOTAGE */) {",
     red: ["tests/liveUmmDeepgram.test.js"],
   },
+  // ---- Hammersleys round 6 (design 2026-11-27) ----
+  {
+    name: "r6-separate-files-new",
+    why: "Round 6 item 5: a second trip marked separate_request is merged onto the first, so the first trip is overwritten. tests/customerRequestsRound6.test.js.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "            if (separateClaimHolds(existing[0].details, row.details)) {",
+    replace: "            if (false /* SABOTAGE */) {",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
+    name: "r6-separate-followup-ignored",
+    why: "Round 6 item 5: the model resends separate_request on each save of the second trip; without the follow-up check every resend files another row. tests/customerRequestsRound6.test.js.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "    shared += 1;",
+    replace: "    shared += 0; // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
+    name: "r6-replaces-name-merges",
+    why: "Round 6 item 1 (round-5 call 4): a corrected name files a second record when the first row holds answers. tests/customerRequestsRound6.test.js.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "            named = existing.find((r) => nameWords(r.caller_name).length > 0 && samePerson(r.caller_name, replacesName)) || null;",
+    replace: "            named = null; // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
+    name: "r6-possible-duplicate-counted",
+    why: "Round 6 R59: a new row under another name with the same trip goes uncounted, so a forgotten replaces_name cannot be measured on live calls. tests/customerRequestsRound6.test.js.",
+    file: "lib/capabilities/customerRequests.js",
+    find: "          equalAnswerCount(r.details, row.details) >= 2",
+    replace: "          equalAnswerCount(r.details, row.details) >= 99 // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
+    name: "r6-request-state-resets",
+    why: "Round 6 item 5: after a separate request the first trip's labels answer the second trip's questions, so they are never asked. tests/customerRequestsRound6.test.js.",
+    file: "capabilities/messages.js",
+    find: "    const priorMsg = newRequest ? { firstSaveDone: priorRaw.firstSaveDone } : priorRaw;",
+    replace: "    const priorMsg = priorRaw; // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
+  {
+    name: "r6-claims-passed",
+    why: "Round 6 item 1/5: onEffect drops the model's separate_request, so the claim never reaches saveCustomerRequest. tests/customerRequestsRound6.test.js.",
+    file: "capabilities/messages.js",
+    find: "      separateRequest: args.separate_request === true,",
+    replace: "      separateRequest: false, // SABOTAGE",
+    red: ["tests/customerRequestsRound6.test.js"],
+  },
 ];
 
 const only = process.argv.includes("--only")

@@ -21,7 +21,13 @@ import {
   capabilityConfig,
 } from "../lib/capabilities/requirements.js";
 import { partyOfEffect } from "../lib/capabilities/party.js";
-import { saveCustomerRequest, detailsFromArgs, CALLER_TYPES } from "../lib/capabilities/customerRequests.js";
+import {
+  saveCustomerRequest,
+  detailsFromArgs,
+  mergeDetails,
+  separateClaimHolds,
+  CALLER_TYPES,
+} from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
 import { parseNotesQuestions, openQuestions, anyAnswered } from "../lib/capabilities/notesQuestions.js";
 import { nameIsOnFile } from "../lib/nameQuality.js";
@@ -344,6 +350,18 @@ const RECORD_CUSTOMER_REQUEST_DECLARATION = {
           },
           required: ["label", "answer"],
         },
+      },
+      // Hammersleys round 6 (design item 1): the AI says what code cannot tell
+      // from the text -- a corrected name, or a second request. Code checks it.
+      replaces_name: {
+        type: "string",
+        description:
+          "Only when the caller corrects their own name after you saved it: the name you saved before, exactly as saved. Never for another person.",
+      },
+      separate_request: {
+        type: "boolean",
+        description:
+          "true only for a second, separate request on this call (another trip, appointment or message). Never for a correction or more details of the earlier one.",
       },
     },
     required: ["request_type"],
@@ -669,6 +687,19 @@ export default {
     const hasNotes = typeof notes === "string" && notes.trim() !== "";
     const hasCallback = typeof args.callback_number === "string" && args.callback_number.trim() !== "";
     const needsNumber = !hasCallback && !isRealCallerNumber(ctx?.callerPhone);
+    // Hammersleys round 6 (design item 1): the current request's answers, in
+    // memory only. A second, separate request whose claim holds (the same check
+    // saveCustomerRequest makes against the newest row) starts the per-request
+    // state over, or its questions would count as answered by the first one's
+    // labels and never be asked. An ignored claim resets nothing.
+    const priorRaw = ctx?.capabilityState?.messages || {};
+    const thisDetails = detailsFromArgs(args);
+    const priorRequestAnswers = Array.isArray(priorRaw.requestAnswers) ? priorRaw.requestAnswers : [];
+    const newRequest =
+      !isHealthcareTier(ctx?.config) &&
+      args.separate_request === true &&
+      separateClaimHolds({ answers: priorRequestAnswers }, thisDetails);
+    const priorMsg = newRequest ? { firstSaveDone: priorRaw.firstSaveDone } : priorRaw;
     // S4-F3: the spelled read-back first, then the number, then the questions.
     const readBack = spelledReadBackNote(args, ctx);
     // I8: a lead at a business with its own questions, saving before any answer is in:
@@ -701,7 +732,7 @@ export default {
     if (standardTier) {
       const seen = new Set();
       savedLabels = [];
-      const prior = ctx?.capabilityState?.messages?.savedLabels;
+      const prior = priorMsg.savedLabels;
       const now = (detailsFromArgs(args)?.answers ?? []).map((a) => a.label);
       for (const label of [...(Array.isArray(prior) ? prior : []), ...now]) {
         if (typeof label !== "string") continue;
@@ -732,7 +763,7 @@ export default {
         // (a traveller's name saved as "Passenger" answers no question). M1: the
         // new starts are for a new enquiry only (an unknown type counts as one);
         // a complaint or an existing client keeps today's text.
-        const firstSave = ctx?.capabilityState?.messages?.firstSaveDone !== true;
+        const firstSave = priorMsg.firstSaveDone !== true;
         // Owner re-test call 1: a business whose questions are for customers
         // (questionsFor "customers") starts them for a returning customer too.
         const returningToo = questionsForOf(ctx?.config) === "customers";
@@ -813,10 +844,8 @@ export default {
       !quietSave;
     // Sim r5-sayback-1: a say-back put off because the turn ended with a question
     // is OWED to the next save, or the opener's other details are never said back.
-    const priorOwed = Array.isArray(ctx?.capabilityState?.messages?.sayBackOwed)
-      ? ctx.capabilityState.messages.sayBackOwed
-      : [];
-    const priorSaved = Array.isArray(ctx?.capabilityState?.messages?.savedLabels) ? ctx.capabilityState.messages.savedLabels : [];
+    const priorOwed = Array.isArray(priorMsg.sayBackOwed) ? priorMsg.sayBackOwed : [];
+    const priorSaved = Array.isArray(priorMsg.savedLabels) ? priorMsg.savedLabels : [];
     const priorLabelKeys = new Set(priorSaved.map((l) => String(l).trim().toLowerCase()));
     const addedLabels = (detailsFromArgs(args)?.answers ?? [])
       .map((a) => a.label)
@@ -857,7 +886,11 @@ export default {
           messages: {
             firstSaveDone: true,
             ...(savedLabels ? { savedLabels } : {}),
-            ...(sayBackEligible || priorOwed.length ? { sayBackOwed } : {}),
+            // A new request clears the old one's owed say-back (the merge is shallow).
+            ...(sayBackEligible || priorOwed.length || newRequest ? { sayBackOwed } : {}),
+            ...(standardTier
+              ? { requestAnswers: mergeDetails({ answers: Array.isArray(priorMsg.requestAnswers) ? priorMsg.requestAnswers : [] }, thisDetails)?.answers ?? [] }
+              : {}),
           },
         },
         ...(listNote !== null ? { questionsOpen: openCount > 0 } : {}),
@@ -950,14 +983,26 @@ export default {
       // one call stay two rows.
       takeOverBareRow:
         !isHealthcareTier(config) && parseNotesQuestions(capabilityConfig(config, "messages").notes).length >= 2,
+      // Round 6 (design item 1): the AI's own claims, checked by saveCustomerRequest.
+      replacesName: typeof args.replaces_name === "string" ? args.replaces_name : null,
+      separateRequest: args.separate_request === true,
     })
       .then((saved) => {
         if (!saved) return;
+        // Round 6: counts only (no words), so live calls show how often the AI
+        // fills each field and how often an answer is overwritten.
+        if (saved.how === "separate") bumpCounter("customer_request_separate");
+        if (saved.how === "separate_ignored") bumpCounter("customer_request_separate_ignored");
+        if (saved.how === "name_replaced") bumpCounter("customer_request_name_replaced");
+        if (saved.replacesUnmatched) bumpCounter("customer_request_replaces_unmatched");
+        if (saved.answersReplaced > 0) bumpCounter("customer_request_answer_replaced");
+        if (saved.possibleDuplicate) bumpCounter("customer_request_possible_duplicate");
         if (saved.corrected) {
           // Names only: the message is the caller's own words (LVX24).
           log.info("customer_request_corrected", {
             callSid,
             tool: "record_customer_request",
+            how: saved.how,
             ...(saved.nameTakeover ? { nameTakeover: true } : {}),
           });
         }
