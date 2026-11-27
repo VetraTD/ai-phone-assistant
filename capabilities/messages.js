@@ -26,6 +26,7 @@ import {
   detailsFromArgs,
   mergeDetails,
   separateClaimHolds,
+  splitByRepeatedLabels,
   CALLER_TYPES,
 } from "../lib/capabilities/customerRequests.js";
 import { isRealCallerNumber } from "../lib/inboundGuards.js";
@@ -741,10 +742,9 @@ export default {
     let listAfterAnswer = null;
     let openCount = 0;
     let skipped = false;
-    /** Round 6: the answerParts entries (null: untouched), those still owed, and those the list shows. */
+    /** Round 6: the answerParts entries (null: untouched) and those still owed. */
     let partsPending = null;
     let partsOwed = [];
-    const partsShown = new Set();
     if (standardTier) {
       const seen = new Set();
       savedLabels = [];
@@ -814,10 +814,6 @@ export default {
           // Round 6: a question whose answer still lacks a part stays open, with what it needs.
           const owedFor = (q) => partsOwed.find((e) => labelAnswers(q, e.label));
           const open = questions.filter((q) => unanswered.includes(q) || owedFor(q));
-          for (const q of open) {
-            const e = owedFor(q);
-            if (e) partsShown.add(e);
-          }
           openCount = open.length;
           // Confirm before the next question: only a save that added an answer
           // has something to confirm (review M3: a re-save of answers already
@@ -881,16 +877,20 @@ export default {
         : questionsPart[0]
           ? `When they answer: ${questionsPart[0].replace(/^\[not caller speech\]\s*/, "").replace("ask them now", "ask them")}`
           : null;
-    // Round 6 (design item 2): where the list does not show an owed part (no
-    // numbered notes, or a label no numbered question matches), one short line
-    // does the same job -- after the caller's answer when the model already asked.
-    const partsUnlisted = partsOwed.filter((e) => !partsShown.has(e));
-    const partsCount = partsUnlisted.reduce((n, e) => n + e.owed.length, 0);
-    const partsText = partsUnlisted.length
-      ? `${partsUnlisted.map((e) => `${e.label} still needs: ${e.owed.map(partSpoken).join(", ")}.`).join(" ")} Ask for ${partsCount > 1 ? "them" : "it"} once; if the caller does not know, go on.`
-      : null;
-    const partsLine = partsText && !alreadyAsked ? `${MODEL_NOTE_PREFIX}${partsText}` : null;
-    const afterAnswer = [afterAnswerBase, partsText && alreadyAsked ? `When they answer: ${partsText}` : null].filter(Boolean).join(" ") || null;
+    // Round 6 (design item 2) + sim r6-street-1: an owed part is asked FIRST and
+    // in so many words -- the "(still needs: ...)" note inside the list alone was
+    // ignored on 3 replies running. Before the next question on a normal reply;
+    // for after the caller's answer when the model already asked its question.
+    const partsCount = partsOwed.reduce((n, e) => n + e.owed.length, 0);
+    const partsLine =
+      partsOwed.length && !alreadyAsked
+        ? `${MODEL_NOTE_PREFIX}${partsOwed.map((e) => `${e.label} still needs: ${e.owed.map(partSpoken).join(", ")}.`).join(" ")} Ask for ${partsCount > 1 ? "them" : "it"} in your next question, once; if the caller does not know, go on.`
+        : null;
+    const partsAfter =
+      partsOwed.length && alreadyAsked
+        ? `When they answer, ask next for ${partsOwed.map((e) => `what ${e.label} still needs: ${e.owed.map(partSpoken).join(", ")}`).join(" and ")} (once; if they do not know, go on).`
+        : null;
+    const afterAnswer = [partsAfter, afterAnswerBase].filter(Boolean).join(" ") || null;
     // Round 5 Task 5: say back what this save added that the caller has not
     // heard. Live + inbound + standard tier, a business that confirms each
     // answer, in its question flow; never when the turn already ended with a
@@ -925,7 +925,7 @@ export default {
         ? [ALREADY_ASKED_NOTE, afterAnswer]
         : deferReadBack && !skipped
           ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
-          : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart, partsLine]
+          : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, partsLine, ...questionsPart]
     )
       .filter(Boolean)
       .join(" ");
@@ -1022,6 +1022,12 @@ export default {
     // caller rang from fills a NEW row only when it is a real number: Twilio
     // sends a withheld caller as a placeholder that must never be stored as a
     // callback number.
+    // Sim r6-two-trips-1: one save that carries two requests (every label
+    // twice: two pickups, two times) is one row per request. Part 0 is the save
+    // as the model sent it; each later part is a separate request. The calls
+    // queue per call (saveCustomerRequest's chain), so they run in order.
+    const parts = splitByRepeatedLabels(detailsFromArgs(args));
+    for (const [part, partDetails] of parts.entries()) {
     saveCustomerRequest({
       db,
       businessId,
@@ -1033,7 +1039,7 @@ export default {
         callbackNumber: args.callback_number || null,
         message: args.message || null,
         preferredTime: args.preferred_time || null,
-        details: detailsFromArgs(args),
+        details: partDetails,
       },
       fallbackNumber: isRealCallerNumber(party.phone) ? party.phone : null,
       // CA082a6db7: the model sent "message" on one save and "callback" on the
@@ -1046,8 +1052,8 @@ export default {
       takeOverBareRow:
         !isHealthcareTier(config) && parseNotesQuestions(capabilityConfig(config, "messages").notes).length >= 2,
       // Round 6 (design item 1): the AI's own claims, checked by saveCustomerRequest.
-      replacesName: typeof args.replaces_name === "string" ? args.replaces_name : null,
-      separateRequest: args.separate_request === true,
+      replacesName: part === 0 && typeof args.replaces_name === "string" ? args.replaces_name : null,
+      separateRequest: args.separate_request === true || part > 0,
     })
       .then((saved) => {
         if (!saved) return;
@@ -1083,7 +1089,7 @@ export default {
         // requires party.verified. The caller's acknowledgement goes once, at
         // the first save.
         // M3: the after-call message is never acknowledged to the caller: nothing new is said to them.
-        if (!saved.corrected && party.verified && effect.afterCall !== true) {
+        if (part === 0 && !saved.corrected && party.verified && effect.afterCall !== true) {
           notifications
             .sendCallerSms(config, party.phone, "message_received", {
               name_part: args.caller_name ? ` ${args.caller_name}` : "",
@@ -1100,5 +1106,6 @@ export default {
         }
       })
       .catch((err) => captureException(err, { callSid }));
+    }
   },
 };

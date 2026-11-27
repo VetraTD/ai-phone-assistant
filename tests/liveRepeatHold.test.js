@@ -430,3 +430,18 @@ describe("round 6: a markup-only tail", () => {
     expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
   });
 });
+
+describe("round 6 review 6: markup then real words that land after turnComplete", () => {
+  beforeEach(() => clearStats());
+  it("'{pause}' and then the say-back's words arriving late: played, not dropped", async () => {
+    const s = await boot({ callSid: "CA_r6_mk_late" });
+    await s.spokeThenSaved();
+    s.enqueue.mockClear();
+    await s.audio(800);
+    await s.assistantSays("{pause} ");
+    await s.turnEnds();
+    await s.assistantSays("I've got 12 High Street. And what time is your flight?");
+    expect(s.enqueue).toHaveBeenCalled();
+    expect(c().live_repeat_hold_dropped ?? 0).toBe(0);
+  });
+});

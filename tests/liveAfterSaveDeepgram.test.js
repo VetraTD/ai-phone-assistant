@@ -29,13 +29,15 @@ function fakeDeepgram({ fail = false } = {}) {
   dg.connect = async (opts) => {
     if (fail) throw new Error("bad key");
     dg.onFinal = opts.onFinal;
+    dg.onInterim = opts.onInterim;
     return { sendAudio() {}, close() {}, finalize: async () => {} };
   };
   dg.say = (text) => dg.onFinal?.(text, { confidence: 0.9 });
+  dg.interim = (text) => dg.onInterim?.(text, { confidence: 0.5 });
   return dg;
 }
 
-async function call({ dg = fakeDeepgram(), env = ON, callSid = "CA_asdg", heard = ["No, that's it."] } = {}) {
+async function call({ dg = fakeDeepgram(), env = ON, callSid = "CA_asdg", heard = ["No, that's it."], interimAfter = null } = {}) {
   const s = await bootLive({ config: CONFIG, callSid, env, shadowConnect: dg.connect });
   await s.feed(0);
   await s.callerSays("I'm Jon Smith, I need a taxi to Oxted station.");
@@ -47,6 +49,10 @@ async function call({ dg = fakeDeepgram(), env = ON, callSid = "CA_asdg", heard 
   await s.callerSays("No hace");
   await s.feed(400);
   for (const t of heard) dg.say(t);
+  if (interimAfter) {
+    await s.feed(50);
+    dg.interim(interimAfter);
+  }
   await s.feed(200);
   await s.assistantTurn("Lovely, goodbye.");
   s.ws.emit("close");
@@ -100,6 +106,12 @@ describe("round 6: the after-save note reads Deepgram's words", () => {
     await s.feed(300);
     s.ws.emit("close");
     await new Promise((r) => setTimeout(r, 150));
+    expect(c().after_save_note_dropped_dg_closing ?? 0).toBe(0);
+    expect(c().after_save_note_saved).toBe(1);
+  });
+
+  it("review 10: Deepgram was mid-utterance (an interim after its last final): today's note is written", async () => {
+    await call({ callSid: "CA_asdg_interim", interimAfter: "and two" });
     expect(c().after_save_note_dropped_dg_closing ?? 0).toBe(0);
     expect(c().after_save_note_saved).toBe(1);
   });

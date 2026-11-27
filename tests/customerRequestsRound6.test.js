@@ -13,7 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "../capabilities/messages.js";
-import { saveCustomerRequest, followsUpRequest } from "../lib/capabilities/customerRequests.js";
+import { saveCustomerRequest, followsUpRequest, splitByRepeatedLabels } from "../lib/capabilities/customerRequests.js";
 import { clearStats, getLatencyStats } from "../lib/voice/metrics.js";
 import { STEPS } from "../lib/callState.js";
 import { HAMMERSLEYS_NOTES } from "./fixtures/notesQuestionsFixtures.js";
@@ -372,5 +372,140 @@ describe("onEffect passes the claims and counts the outcome (no words)", () => {
     );
     await settle();
     expect(counters().customer_request_answer_replaced).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sim r6-two-trips-1 (2026-11-27): the caller gave both trips in one breath and
+// the model saved them in ONE call with every label twice (Pickup x2,
+// Destination x2, When x2). One record; a later save merges by label and could
+// replace the wrong trip's answer. A label given twice with different answers
+// in one save is the AI saying "two requests": one row per request.
+// ---------------------------------------------------------------------------
+describe("one save carrying two trips (repeated labels)", () => {
+  const COMBINED = [...OUT, ...BACK, ["Passengers", "2"]];
+
+  it("splitByRepeatedLabels: one request per occurrence; a label given once goes to each", () => {
+    expect(splitByRepeatedLabels(D(COMBINED)).map((p) => p.answers.map((a) => `${a.label}=${a.answer}`))).toEqual([
+      [...OUT, ["Passengers", "2"]].map(([l, a]) => `${l}=${a}`),
+      [...BACK, ["Passengers", "2"]].map(([l, a]) => `${l}=${a}`),
+    ]);
+  });
+
+  it("a label repeated with the same answer is not two requests", () => {
+    expect(splitByRepeatedLabels(D([["Pickup", "A"], ["pickup", "a."], ["When", "Sat"]]))).toHaveLength(1);
+  });
+
+  it("no repeated label: one part, the details as they are", () => {
+    const d = D(OUT);
+    expect(splitByRepeatedLabels(d)).toEqual([d]);
+    expect(splitByRepeatedLabels(null)).toEqual([null]);
+  });
+
+  it("with two rows of one caller, a save lands on the row it matches best, not just the newest", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("Ann Lee", OUT);
+    await save("Ann Lee", BACK, { separateRequest: true });
+    // Trip 1's time corrected, no flag: before, the newest row (trip 2) took it.
+    const res = await save("Ann Lee", [["Pickup", OUT[0][1]], ["Destination", "Gatwick North"], ["When", "Sunday 4 a.m."]]);
+    expect(res.how).toBe("matched");
+    expect(t.rows).toHaveLength(2);
+    expect(answersOf(t.rows[0]).When).toBe("Sunday 4 a.m.");
+    expect(answersOf(t.rows[1])).toEqual(Object.fromEntries(BACK));
+  });
+
+  it("onEffect: the combined save files two rows; later combined saves update each; a correction of trip 1 leaves trip 2", async () => {
+    const t = makeDb();
+    const logs = [];
+    const engine = {
+      STEPS,
+      setStep: () => {},
+      call: { callSid: "CA_r6b", businessId: t.businessId, callId: t.callId, callerNumber: "+12145550100", config: { businessName: "B" }, party: null },
+      deps: {
+        db: t.db,
+        notifications: { notifyCustomerRequest: vi.fn().mockResolvedValue(true), sendCallerSms: vi.fn().mockResolvedValue(undefined), MESSAGE_SLA_TEXT: "soon" },
+        log: { info: (e, d) => logs.push({ e, d }), error: () => {}, warn: () => {} },
+        captureException: () => {},
+      },
+    };
+    const settle = () => new Promise((r) => setTimeout(r, 40));
+    const effect = (details) => ({
+      capability: "messages",
+      type: "recorded",
+      data: { request_type: "message", caller_name: "Ann Lee", message: "Taxi booking request", details: pairs(details) },
+    });
+    messages.onEffect(effect(COMBINED), engine);
+    await settle();
+    expect(t.rows).toHaveLength(2);
+    expect(answersOf(t.rows[0]).When).toBe("Saturday 5 a.m.");
+    expect(answersOf(t.rows[1]).When).toBe("Monday 6 p.m.");
+    messages.onEffect(effect([...COMBINED, ["Luggage", "2 cases"]]), engine);
+    await settle();
+    expect(t.rows).toHaveLength(2);
+    expect(answersOf(t.rows[0]).Luggage).toBe("2 cases");
+    expect(answersOf(t.rows[1]).Luggage).toBe("2 cases");
+    const corrected = [["Pickup", OUT[0][1]], ["Destination", "Gatwick North"], ["When", "Saturday 4 a.m."], ...BACK];
+    messages.onEffect(effect(corrected), engine);
+    await settle();
+    expect(t.rows).toHaveLength(2);
+    expect(answersOf(t.rows[0]).When).toBe("Saturday 4 a.m.");
+    expect(answersOf(t.rows[1]).When).toBe("Monday 6 p.m.");
+    expect(answersOf(t.rows[1]).Pickup).toBe("Gatwick North");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Opus review (round 6) fixes.
+// ---------------------------------------------------------------------------
+describe("review fixes: the separate claim, the ignored flag, replaces_name", () => {
+  it("review 1: a resent flag on a CORRECTION of trip 2 (agrees on 2, conflicts on 1) is a follow-up, not a third row", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("Jane Doe", OUT);
+    await save("Jane Doe", BACK, { separateRequest: true });
+    const res = await save("Jane Doe", [["Pickup", "Gatwick North"], ["Destination", BACK[1][1]], ["When", "Monday 7 p.m."]], { separateRequest: true });
+    expect(res.how).toBe("separate_ignored");
+    expect(t.rows).toHaveLength(2);
+    expect(answersOf(t.rows[1]).When).toBe("Monday 7 p.m.");
+    expect(answersOf(t.rows[0])).toEqual(Object.fromEntries(OUT));
+  });
+
+  it("review 1: the same pickup at two times (agrees 1, conflicts 1) is still a separate request", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("Jane Doe", [["Pickup", "12 High Street"], ["When", "Sat 8 am"]]);
+    const res = await save("Jane Doe", [["Pickup", "12 High Street"], ["When", "Sat 4 pm"]], { separateRequest: true });
+    expect(res.how).toBe("separate");
+    expect(t.rows).toHaveLength(2);
+  });
+
+  it("review 2: an ignored flag lands on the newest row even when its reason is worded like trip 1's", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("Ann Lee", OUT);
+    await saveCustomerRequest({
+      db: t.db,
+      businessId: t.businessId,
+      callId: t.callId,
+      row: { requestType: "message", callerName: "Ann Lee", callbackNumber: null, message: "Return trip from Gatwick", preferredTime: null, details: D(BACK) },
+      matchTypes: ["message", "callback"],
+      takeOverBareRow: true,
+      separateRequest: true,
+    });
+    const res = await save("Ann Lee", [...BACK, ["Passengers", "2"]], { separateRequest: true });
+    expect(res.how).toBe("separate_ignored");
+    expect(answersOf(t.rows[0])).toEqual(Object.fromEntries(OUT));
+    expect(answersOf(t.rows[1]).Passengers).toBe("2");
+  });
+
+  it("review 7: replaces_name used for ANOTHER person's different trip is not honoured -- a visible second row", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("John Doe", OUT);
+    await save("Jane Doe", BACK, { replacesName: "John Doe" });
+    expect(t.rows).toHaveLength(2);
+    expect(t.rows[0].caller_name).toBe("John Doe");
+    expect(answersOf(t.rows[0])).toEqual(Object.fromEntries(OUT));
   });
 });

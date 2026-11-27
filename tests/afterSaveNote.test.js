@@ -177,3 +177,20 @@ describe("round 6: Deepgram heard only a closing", () => {
     expect(JSON.stringify(afterSaveNote(facts(undefined)))).toBe(JSON.stringify(afterSaveNote(facts())));
   });
 });
+
+describe("review 5: Deepgram's finals are judged together, not one by one", () => {
+  const closingRe = closingRegexFor({});
+  const ASK = "That's passed to the dispatcher, who will confirm. Is there anything else?";
+  const f = (texts) => ({
+    turnLog: [T(4, "Plaistow Street", "Where from?"), T(5, "No hace", ASK)],
+    savedThroughTurn: 4,
+    closingRe,
+    heardByDeepgram: { covered: true, texts },
+  });
+  it("'No.' + 'Gatwick.' (a correction split by endpointing): the line stays", () => {
+    expect(deepgramHeardOnlyClosing(f(["No.", "Gatwick."]))).toBe(false);
+  });
+  it("'No, that's it.' + 'Thanks, bye.': still only a closing", () => {
+    expect(deepgramHeardOnlyClosing(f(["No, that's it.", "Thanks, bye."]))).toBe(true);
+  });
+});

@@ -148,7 +148,7 @@ describe("where the parts are not asked", () => {
   it("notes with no numbered list: one short line does the job", async () => {
     const config = { capabilities: { messages: { notes: "Ask where from and where to.", answerParts: ["Pickup: house_number if street"] } } };
     const r = await save([["Pickup", "Plaistow Street"]], { config });
-    expect(next(r)).toContain("[not caller speech] Pickup still needs: house number. Ask for it once; if the caller does not know, go on.");
+    expect(next(r)).toContain("[not caller speech] Pickup still needs: house number. Ask for it in your next question, once; if the caller does not know, go on.");
   });
 
   it("the healthcare tier never runs it", async () => {
@@ -178,5 +178,32 @@ describe("with the other round-5/6 replies", () => {
     const r = await save([["Pickup", "Gatwick North"], ["When", "Mon 6 pm"]], { prev: first, args: { separate_request: true } });
     expect(next(r)).not.toContain("still needs");
     expect(r.stateEffects.capabilityState.messages.partsPending).toEqual([]);
+  });
+});
+
+describe("review + sim fixes", () => {
+  it("sim r6-street-1: the part ask leads the reply, before the next question", async () => {
+    const r = await save([["Pickup", "Plaistow Street"]]);
+    expect(next(r)).toMatch(/Pickup still needs: house number, postcode\. Ask for them in your next question, once; if the caller does not know, go on\./);
+    expect(next(r).indexOf("still needs: house number, postcode. Ask")).toBeLessThan(next(r).indexOf("questions with no saved answer yet"));
+  });
+
+  it("sim r6-street-1: already asked the next question -> the part ask comes first for after the answer", async () => {
+    const r = await save([["Pickup", "Plaistow Street"]], { inTurn: "Got it, Plaistow Street. Where are you going to?" });
+    expect(next(r).startsWith(ALREADY_ASKED_NOTE)).toBe(true);
+    expect(next(r)).toContain("When they answer, ask next for what Pickup still needs: house number, postcode (once; if they do not know, go on).");
+  });
+
+  it("review 3: the AI asks the SAME question word for word after the listing -> counted as the ask", async () => {
+    const ask = "Could I have the house number and postcode for the pickup, please?";
+    const said = `${GREETING} ${ask}`;
+    const first = await save([["Pickup", "Plaistow Street"]], { said });
+    const r = await save([["Pickup", "Plaistow Street"], ["Destination", "Dormansland"]], { prev: first, said: `${said} ${ask}` });
+    expect(next(r)).not.toContain("still needs");
+  });
+
+  it("review 8: a second matching label in the same save ('Pickup time') does not clear the owed parts", async () => {
+    const r = await save([["Pickup", "Plaistow Street"], ["Pickup time", "8 am"]]);
+    expect(next(r)).toContain("Pickup still needs: house number, postcode");
   });
 });

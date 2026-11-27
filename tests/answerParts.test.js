@@ -35,7 +35,15 @@ const ADDRESSES = [
   ["Plaistow Street, R H seven six A U", true, false, true],
   ["Plaistow Street, RH7", true, false, false],
   ["Flat 3, 12a High St, Lingfield", true, true, false],
-  ["Roselea, Newchapel Rd, Lingfield RH7 6BJ", true, false, true],
+  // Review 4: a first part with no street word and no digit names a place or a house: not asked.
+  ["Roselea, Newchapel Rd, Lingfield RH7 6BJ", false, false, true],
+  ["Red Lion, High Street, Lingfield", false, false, false],
+  ["Greyhound, Plaistow Street", false, false, false],
+  ["Tesco, London Road", false, false, false],
+  ["Rose Cottage, Church Lane", false, false, false],
+  // The trade-off, stated: a village written before the street is read as a named place.
+  ["Lingfield, Plaistow Street", false, false, false],
+  ["Plaistow Street, Lingfield", true, false, false],
   ["The Greyhound, Plaistow Street, Lingfield", false, false, false],
   ["Lingfield Station, Station Road", false, false, false],
   ["Station Road, Lingfield", true, false, false],
@@ -124,6 +132,10 @@ describe("the AI's own words name a part", () => {
     ["And the post code for that?", "postcode_uk", true],
     ["Which number on Plaistow Street?", "house_number", true],
     ["What number should we call you on?", "house_number", false],
+    // Review 3: phrasings the first patterns missed.
+    ["What number are you at?", "house_number", true],
+    ["What's the number of the property?", "house_number", true],
+    ["And what number is that on Plaistow Street?", "house_number", true],
     ["What number is the house?", "house_number", true],
     ["And the flat number?", "house_number", true],
     ["Got it, Plaistow Street. Where to?", "postcode_uk", false],
@@ -154,5 +166,18 @@ describe("render-tenant-prompt warns on an entry that does not parse", () => {
     const { warnings } = renderTenantPrompt(payload);
     expect(warnings.some((w) => w.includes("answerParts") && w.includes("Pickup postcode"))).toBe(true);
     expect(warnings.some((w) => w.includes('"Pickup: house_number"'))).toBe(false);
+  });
+});
+
+describe("review 3: textSince with a mark taken at the listing", () => {
+  it("no front trim since the mark: the exact text after it, even when the same words repeat", () => {
+    const at = "Hi. Could I have the house number and postcode?";
+    const mark = { anchor: at.slice(-20), head: at.slice(0, 20), len: at.length };
+    const now = `${at} Got it. Could I have the house number and postcode?`;
+    expect(textSince(now, mark)).toBe(" Got it. Could I have the house number and postcode?");
+  });
+  it("the front was trimmed (the cap): back to the anchor search", () => {
+    const mark = { anchor: "postcode?", head: "Hi. Could", len: 47 };
+    expect(textSince("house number and postcode? And where to?", mark)).toBe(" And where to?");
   });
 });
