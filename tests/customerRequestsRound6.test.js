@@ -499,6 +499,18 @@ describe("review fixes: the separate claim, the ignored flag, replaces_name", ()
     expect(answersOf(t.rows[1]).Passengers).toBe("2");
   });
 
+  it("review 2: an ignored flag stays on the newest row even when an OLDER row shares more answers (best-match must not win)", async () => {
+    const t = makeDb();
+    const save = saver(t);
+    await save("Ann Lee", [...OUT, ["Passengers", "2"], ["Luggage", "2 cases"]]);
+    await save("Ann Lee", BACK, { separateRequest: true });
+    // Trip 2 follow-up: agrees with trip 2 on Pickup; shares Passengers + Luggage with trip 1.
+    const res = await save("Ann Lee", [["Pickup", "Gatwick North"], ["Passengers", "2"], ["Luggage", "2 cases"], ["Flight", "EZY8002"]], { separateRequest: true });
+    expect(res.how).toBe("separate_ignored");
+    expect(answersOf(t.rows[1]).Flight).toBe("EZY8002");
+    expect(answersOf(t.rows[0]).Flight).toBeUndefined();
+  });
+
   it("review 7: replaces_name used for ANOTHER person's different trip is not honoured -- a visible second row", async () => {
     const t = makeDb();
     const save = saver(t);
