@@ -17871,3 +17871,37 @@ Spec `docs/superpowers/specs/2026-11-27-hammersleys-round6-design.md`; ledger
   them plays as before round 6.
 - Sims found the model saves two trips given in one breath in ONE save (labels twice, or "Return <label>"): code now
   splits it (one row per trip). Watch `customer_request_separate` on live calls for the plain two-save path.
+
+### Owner test calls, 2026-11-27 evening (US test line, 00168-sas, config v15) — round 6 NOT passed
+Scored against the round-6 call guide. Records: call 1 two (FAIL), call 2 two trips -> two records (PASS), call 3 one
+(PASS), call 4 one (PASS). Email clean: 0 of 4 (call 1 duplicate; calls 2 and 3 junk line; call 4 street misheard).
+Passed: postcode asked once on every street pickup and never for the pub; replaces_name used live on calls 3 and 4
+(name_replaced, one record); separate_request over-flagged twice on call 2 and correctly ignored; p50 1.52-1.75 s;
+tokens pooled over 4 calls 449402/35 = 12.8k/turn (call 2 alone 14.2k); AI English throughout.
+- **LVX201 · A name fix saved with a completed answer files a second record** `[cheap]` (call 1). agreement() in
+  lib/capabilities/customerRequests.js counts "Plaistow Street, Lingfield" -> "5 Plaistow Street, Lingfield, RH7 6AU"
+  as a conflict, so the replaces_name row is rejected (and the same save without replaces_name also inserts). Shown
+  offline by replay; which of the two happened is not observable (save args not logged). Fix: a new answer that
+  contains the stored answer's key counts as agree (also used by separateClaimHolds); plus count-only save
+  diagnostics (replaces_name given, how, agree/conflict counts).
+- **LVX202 · Junk line when Deepgram had not caught up at the hang-up** `[medium]` (call 3). Live heard "yep" as "Ja.";
+  Deepgram heard "yep" + "no that's it" and the text rule drops that (offline), but coverage was false -- most likely
+  caughtUp, on a 1 s voiced utterance at ~58 s with no final. The note is decided at 57.32 s, before stt_closed
+  finalizes (57.43). This is review 10's deferred minor, now seen live. Fix: let the shadow flush before the note
+  decision, inside the 2 s email window; log the coverage sub-flags as counts.
+- **LVX203 · "That's about it" is an answer, not a closing** `[cheap]` (call 2). isInformativeCallerTurn returns true
+  for "That's about it." / "No. That's about it." / "Nope, that's about all." after "anything else?": "about" is not in
+  CLOSER_WORDS and no closing rule has the phrase. It refused end_call (unsaved 1), the goodbye played with the exit
+  unarmed -> 8 s quiet exit (9.7 s silence; 20 s from "anything else?"), and wrote the junk line. Deepgram's words fail
+  the same rule, so the shadow drop cannot help. Fix: the phrase as a closer, prototyped on call-corpus first.
+- **LVX204 · Fast-opener street misheard, never read back** `[medium]` (call 4). "5 Plaistow Street" -> "5 Plus Street"
+  in the email (Live "Plus So Street", Deepgram "plus"). House number and postcode right; the street was never said
+  back, so the caller could not catch it. Options: read back the street with the postcode ask (config), or check the
+  street against the postcode (a lookup service; cost to price).
+- **LVX205 · Postcode read back with invented letters** `[cheap to watch]` (call 4). Heard "R76A", read back
+  "R H seven six B J"; the caller corrected to "6AU". One correction turn, caught by the read-back. Count first.
+- **LVX206 · No reply when the caller never pauses 1 s** `[watch]` (call 2a, 16 s). Five utterances over ~8.8 s with
+  gaps of 0.26-0.96 s; Live transcribed nothing and never replied; the caller hung up (owner probably restarted --
+  asked). Live needs a pause to end the turn.
+- Prod counters are process-only (/api/debug/latency needs DEBUG_ENDPOINTS, unset on prod), so the round-6 counters
+  cannot be read on live calls; logs (how=...) are the only live evidence.
