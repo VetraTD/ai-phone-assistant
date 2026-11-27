@@ -17898,8 +17898,10 @@ tokens pooled over 4 calls 449402/35 = 12.8k/turn (call 2 alone 14.2k); AI Engli
   in the email (Live "Plus So Street", Deepgram "plus"). House number and postcode right; the street was never said
   back, so the caller could not catch it. Options: read back the street with the postcode ask (config), or check the
   street against the postcode (a lookup service; cost to price).
-- **LVX205 · Postcode read back with invented letters** `[cheap to watch]` (call 4). Heard "R76A", read back
-  "R H seven six B J"; the caller corrected to "6AU". One correction turn, caught by the read-back. Count first.
+- **LVX205 · Postcode read back with the config example's letters** `[cheap, config]` (call 4). Heard "R76A", read back
+  "R H seven six B J"; the caller corrected to "6AU". "RH7 6BJ" is the format EXAMPLE in the v15 Pickup note ("A
+  postcode ends in digit + 2 letters (RH7 6BJ)") -- the AI filled the part it missed from the example. Config fix:
+  an example with no real letters to copy (or none). Generic lesson: example values in notes leak into answers.
 - **LVX206 · No reply when the caller never pauses 1 s** `[watch]` (call 2a, 16 s). Five utterances over ~8.8 s with
   gaps of 0.26-0.96 s; Live transcribed nothing and never replied; the caller hung up (owner probably restarted --
   asked). Live needs a pause to end the turn.
