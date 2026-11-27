@@ -41,6 +41,10 @@ const ADDRESSES = [
   ["Greyhound, Plaistow Street", false, false, false],
   ["Tesco, London Road", false, false, false],
   ["Rose Cottage, Church Lane", false, false, false],
+  // No comma, so only the "The <name>" and place-word rules can see them (gate r17: the
+  // first-part rule had made those two rules unwatched).
+  ["The Greyhound Plaistow Street Lingfield", false, false, false],
+  ["Lingfield Station on Station Road", false, false, false],
   // The trade-off, stated: a village written before the street is read as a named place.
   ["Lingfield, Plaistow Street", false, false, false],
   ["Plaistow Street, Lingfield", true, false, false],
