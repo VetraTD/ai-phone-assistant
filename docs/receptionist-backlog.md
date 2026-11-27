@@ -17856,3 +17856,18 @@ Spec `docs/superpowers/specs/2026-11-27-hammersleys-round6-design.md`; ledger
   wrong-name one stays and holds its slot. Visible to the business (R-visible holds), but a phantom booking costs a
   slot. Same shape as messages before round 6; the fix would be the same (the AI says it: a `replaces_name` on
   book_appointment, or the in-addition question for any booking at the same time on the same call).
+
+### Round 6 review — deferred minors and found-in-passing
+- **LVX200 (pre-existing, owner to decide):** `samePerson`'s same-first-name rule merges "James Doe" and "James Smith"
+  saves on one call (two people silently merged). Found by the round-6 Opus review probe; not touched this round.
+- Review 8 (fewer asks, not more): a read-back before the listing ("RH7, is that the postcode?") or a destination
+  "postcode?" closes the Pickup postcode; a separate-request reset discards trip 1's unasked parts; on the cascade two
+  saves before the model speaks close a part unasked.
+- Review 9: answerParts are asked outside the question scope (a lost-property call that saves "Pickup: ..."): gate on
+  questionsAreFor.
+- Review 10 rest: the after-save Deepgram snapshot is taken before the shadow's close flushes its last finals; a
+  Deepgram reconnect gap (connected() stays true) is bounded only by the caught-up and interim checks.
+- Declined to judge (review): markup split across fragments ("<no" + " speech detected>") with turnComplete between
+  them plays as before round 6.
+- Sims found the model saves two trips given in one breath in ONE save (labels twice, or "Return <label>"): code now
+  splits it (one row per trip). Watch `customer_request_separate` on live calls for the plain two-save path.
