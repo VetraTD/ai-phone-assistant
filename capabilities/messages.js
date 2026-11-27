@@ -199,6 +199,15 @@ function questionsAreFor(args, ctx) {
   return type === "new_enquiry" || (type === "existing_customer" && questionsForOf(ctx?.config) === "customers");
 }
 
+/**
+ * The open-questions list (LVX192 Task 5). `ask` is "ask them now in that order"
+ * for today's reply, or the after-the-answer form for a save made right after the
+ * model asked its next question (owner round-5 call 1).
+ */
+function openListText(listed, scope, ask) {
+  return `This business's questions with no saved answer yet: ${listed}. If they apply to this caller (${scope}, other callers only when the notes say so), ${ask}, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`;
+}
+
 function nextQuestionsNote(config) {
   return isHealthcareTier(config) ? NEXT_QUESTIONS_NOTE : scopedNote(NEXT_QUESTIONS_NOTE_STANDARD, config);
 }
@@ -686,6 +695,7 @@ export default {
     const questionLikeNotes = hasNotes && /\?|\bask\b/i.test(notes);
     let savedLabels = null;
     let listNote = null;
+    let listAfterAnswer = null;
     let openCount = 0;
     let skipped = false;
     if (standardTier) {
@@ -739,8 +749,13 @@ export default {
           const priorKeys = new Set((Array.isArray(prior) ? prior : []).map((l) => String(l).trim().toLowerCase()));
           const added = now.some((l) => !priorKeys.has(String(l).trim().toLowerCase()));
           const lead = added && confirmStyleOf(ctx?.config) === "each" ? CONFIRM_FIRST_NOTE : MODEL_NOTE_PREFIX;
+          const listed = open.map((q) => `${q.n}. ${q.label}`).join(", ");
+          const scope = returningToo ? "new and returning customers" : "new enquiries by default";
+          listAfterAnswer = open.length
+            ? `When they answer, save it. ${openListText(listed, scope, "ask them after that, in that order")}`
+            : null;
           listNote = open.length
-            ? `${lead}This business's questions with no saved answer yet: ${open.map((q) => `${q.n}. ${q.label}`).join(", ")}. If they apply to this caller (${returningToo ? "new and returning customers" : "new enquiries by default"}, other callers only when the notes say so), ask them now in that order, one at a time; if the caller already gave one, save it under the label shown instead of asking again; skip any they would rather not answer. If they say they are short of time, offer to leave the rest for the callback. Then save again with the same message and all the answers in details.`
+            ? `${lead}${openListText(listed, scope, "ask them now in that order")}`
             : `${lead}${(readBack || needsNumber ? ALL_QUESTIONS_ANSWERED_NO_ASK_NOTE : ALL_QUESTIONS_ANSWERED_NOTE).slice(MODEL_NOTE_PREFIX.length)}`;
         }
       }
@@ -773,6 +788,17 @@ export default {
       !quietSave &&
       questionsPart.some(Boolean);
     if (alreadyAsked) bumpCounter("tool_reply_already_asked_save");
+    // Owner round-5 call 1 (CA…9a442a): the bare "already asked" note dropped the
+    // open questions, so the model stopped saving and asking (no postcode, no
+    // passengers, a hand-off with only the name saved). What is still to ask stays,
+    // for after the caller's answer; with every question answered there is nothing to carry.
+    const afterAnswer = !alreadyAsked
+      ? null
+      : listNote !== null
+        ? listAfterAnswer
+        : questionsPart[0]
+          ? `When they answer: ${questionsPart[0].replace(/^\[not caller speech\]\s*/, "").replace("ask them now", "ask them")}`
+          : null;
     // Round 5 Task 5: say back what this save added that the caller has not
     // heard. Live + inbound + standard tier, a business that confirms each
     // answer, in its question flow; never when the turn already ended with a
@@ -806,7 +832,7 @@ export default {
     if (sayBack.length) bumpCounter("tool_reply_say_back");
     const next = (
       alreadyAsked
-        ? [ALREADY_ASKED_NOTE]
+        ? [ALREADY_ASKED_NOTE, afterAnswer]
         : deferReadBack && !skipped
           ? [needsNumber ? NO_NUMBER_NOTE : null, scopedNote(NEXT_QUESTIONS_NOTE_DEFERRED, ctx?.config)]
           : [sayBack.length ? sayBackNote(sayBack) : null, readBack, needsNumber ? NO_NUMBER_NOTE : null, ...questionsPart]

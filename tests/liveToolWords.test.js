@@ -83,7 +83,8 @@ describe("Task 1 through the Live engine: the save reply after a question alread
     const s = await turnWith("CA_tw_asked", ASKED);
     const [r] = await s.callTool("record_customer_request", SAVE);
     expect(r.response.success).toBe(true);
-    expect(r.response.next).toBe(ALREADY_ASKED_NOTE);
+    expect(r.response.next.startsWith(`${ALREADY_ASKED_NOTE} When they answer, save it.`)).toBe(true);
+    expect(r.response.next).not.toMatch(/ask them now/);
     expect(counters().tool_reply_already_asked_save).toBe(1);
   });
   it("a statement before the save: the questions list, as today", async () => {

@@ -55,9 +55,37 @@ describe("replyEndsWithQuestion", () => {
 describe("record_customer_request reply when the question was already asked this turn", () => {
   it("Live, the turn so far ends with a question: 'already asked, wait', no 'ask them now'", async () => {
     const r = await save({ ...LIVE, inTurnReplyText: ASKED });
-    expect(next(r)).toBe(ALREADY_ASKED_NOTE);
+    expect(next(r).startsWith(`${ALREADY_ASKED_NOTE} `)).toBe(true);
     expect(next(r)).not.toMatch(/ask them now/);
+    expect(next(r)).not.toContain("First confirm the answer you just saved");
     expect(counters().tool_reply_already_asked_save).toBe(1);
+  });
+  // Owner round-5 call 1 (CA…9a442a): the bare "already asked" note replaced the
+  // open-questions list, so the model saved nothing for three answers, never
+  // asked the village or postcode, skipped passengers and handed off with only
+  // the name saved. The list stays, for after the caller answers.
+  it("keeps the open-questions list and 'save again' for after the caller's answer (owner call 1)", async () => {
+    const r = await save({ ...LIVE, inTurnReplyText: ASKED });
+    expect(next(r)).toContain("This business's questions with no saved answer yet: 2. Destination, 3. When, 4. Passengers, 5. Luggage, 6. Payment.");
+    expect(next(r)).toContain("if the caller already gave one, save it under the label shown instead of asking again");
+    expect(next(r)).toContain("Then save again with the same message and all the answers in details.");
+    expect(next(r).indexOf("When they answer")).toBeGreaterThan(ALREADY_ASKED_NOTE.length - 1);
+  });
+  it("notes without a numbered list: the questions note stays too, for after the answer", async () => {
+    const plain = taxiCfg({ notes: "Be friendly. Ask where they are going and when." });
+    const r = await save({ ...LIVE, inTurnReplyText: ASKED }, {}, plain);
+    expect(next(r).startsWith(`${ALREADY_ASKED_NOTE} When they answer`)).toBe(true);
+    expect(next(r)).toContain("If this business's notes list questions, ask them");
+    expect(next(r)).toContain("Then save again with the same message and the answers in details.");
+    expect(next(r)).not.toMatch(/ask them now/);
+  });
+  it("every numbered question answered: the bare 'already asked, wait' (nothing left to carry)", async () => {
+    const all = [
+      ["Pickup", "12 High Street, Lingfield, RH7 6AU"], ["Destination", "Gatwick North"], ["When", "Sat 28 Nov 5 a.m."],
+      ["Passengers", "3"], ["Luggage", "2"], ["Payment", "card"],
+    ].map(([label, answer]) => ({ label, answer }));
+    const r = await save({ ...LIVE, inTurnReplyText: "Got it, card. Is there anything else I can help with?" }, { details: all });
+    expect(next(r)).toBe(ALREADY_ASKED_NOTE);
   });
   it("Live, the turn so far is a statement: today's reply byte for byte", async () => {
     const r = await save({ ...LIVE, inTurnReplyText: STATED });

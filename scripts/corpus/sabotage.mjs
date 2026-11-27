@@ -5045,6 +5045,14 @@ const SABOTAGES = [
     red: ["tests/alreadyAskedThisTurn.test.js", "tests/liveToolWords.test.js"],
   },
   {
+    name: "r5-call1-already-asked-keeps-list",
+    why: "Owner round-5 call 1 (CA…9a442a): the bare 'already asked' save reply dropped the open-questions list, so the model saved nothing for three answers, never asked the postcode, skipped passengers and handed off with only the name saved. tests/alreadyAskedThisTurn.test.js, tests/liveToolWords.test.js and tests/messagesSayBack.test.js read the list after the note.",
+    file: "capabilities/messages.js",
+    find: "        ? [ALREADY_ASKED_NOTE, afterAnswer]",
+    replace: "        ? [ALREADY_ASKED_NOTE] /* SABOTAGE */",
+    red: ["tests/alreadyAskedThisTurn.test.js", "tests/liveToolWords.test.js", "tests/messagesSayBack.test.js"],
+  },
+  {
     name: "r5-intent-reply-already-asked",
     why: "Round 5 Task 1: set_call_intent sends the intake path note ('ask ...') after the model already asked, so the question is asked twice. tests/alreadyAskedThisTurn.test.js reads the reply's next.",
     file: "services/tools.js",

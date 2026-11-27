@@ -66,7 +66,8 @@ describe("say back what the caller has not heard", () => {
     // Turn 2: "Got it, picking up from 7 Plaistow Street, Lingfield. Could you give the postcode?" + the opener save.
     const asked = "Got it, picking up from 7 Plaistow Street, Lingfield. Could you please provide the postcode for that address?";
     const first = await save(d([["Pickup", "7 Plaistow Street, Lingfield"], ["Destination", "Dormansland"], ["When", "Fri 27 Nov 8:30 a.m."]]), { inTurnReplyText: asked });
-    expect(next(first)).toBe(ALREADY_ASKED_NOTE);
+    expect(next(first).startsWith(`${ALREADY_ASKED_NOTE} When they answer`)).toBe(true);
+    expect(next(first)).not.toContain(SAY_BACK_LEAD);
     expect(first.stateEffects.capabilityState.messages.sayBackOwed).toEqual(["Pickup", "Destination", "When"]);
     // Turn 3: the postcode, a statement before the save.
     const second = await save(d([["Pickup", "7 Plaistow Street, Lingfield, RH7 6AU"], ["Destination", "Dormansland"], ["When", "Fri 27 Nov 8:30 a.m."]]), {
@@ -80,7 +81,8 @@ describe("say back what the caller has not heard", () => {
 
   it("the turn already ended with a question: no note (Task 1's note instead)", async () => {
     const r = await save(OPENER, { inTurnReplyText: "Lovely. Can I take your name?" });
-    expect(next(r)).toBe(ALREADY_ASKED_NOTE);
+    expect(next(r).startsWith(`${ALREADY_ASKED_NOTE} When they answer`)).toBe(true);
+    expect(next(r)).not.toContain(SAY_BACK_LEAD);
   });
 
   it("confirm style 'end', the healthcare tier and the cascade: no note", async () => {
